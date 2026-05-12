@@ -735,6 +735,7 @@ function renderPipeline(el) {
                     <span>${escape(comp?.Title || "—")}</span>
                     <span class="value">${formatCHF(d.Value)}</span>
                   </div>
+                  ${d.Licenses ? `<div class="meta" style="margin-top:4px;color:var(--text-faint);font-size:10px"><span>${d.Licenses} Lizenz${d.Licenses == 1 ? "" : "en"}</span></div>` : ""}
                 </div>`;
               }).join("")}
             </div>
@@ -843,7 +844,8 @@ function renderTasks(el) {
         <span class="title">${escape(t.Title||"")}</span>
         <div class="meta">
           ${due ? "Fällig " + due + " · " : ""}
-          ${related ? `Zu ${escape(related)}` : ""}
+          ${related ? `Zu ${escape(related)} · ` : ""}
+          ${t.Owner ? `<span style="color:var(--accent-2)">@${escape(t.Owner)}</span>` : ""}
           <button class="btn btn-sm" style="margin-left:8px" onclick="deleteActivity(${t.id})">×</button>
         </div>
       </div>`;
@@ -944,6 +946,7 @@ function openDeal(id) {
         </select>
       </dd>
       <dt>Wert</dt><dd style="color:var(--accent);font-family:var(--font-mono)">${formatCHF(d.Value)}</dd>
+      <dt>Lizenzen</dt><dd style="font-family:var(--font-mono)">${d.Licenses ? d.Licenses : "—"}</dd>
       <dt>Close</dt><dd>${d.ExpectedClose ? d.ExpectedClose.slice(0,10) : "—"}</dd>
       <dt>Owner</dt><dd>${escape(d.Owner||"—")}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(d.Notes||"—")}</dd>
@@ -962,11 +965,14 @@ function renderActivityList(acts) {
   if (!acts.length) return `<div class="empty" style="padding:12px">Keine Aktivitäten.</div>`;
   return acts.sort((a,b) => (b.id - a.id)).map(a => {
     const due = a.DueDate ? a.DueDate.slice(0,10) : null;
+    const metaParts = [];
+    if (due) metaParts.push(`Fällig ${due}`);
+    if (a.Owner) metaParts.push(`<span style="color:var(--accent-2)">@${escape(a.Owner)}</span>`);
     return `<div class="activity ${a.Done?"done":""}">
       ${a.Type==="Task" ? `<input type="checkbox" ${a.Done?"checked":""} onchange="toggleTask(${a.id}, this.checked)">` : ""}
       <span class="type-badge">${escape(a.Type)}</span>
       <span class="title">${escape(a.Title||"")}</span>
-      ${due ? `<div class="meta">Fällig ${due}</div>` : ""}
+      ${metaParts.length ? `<div class="meta">${metaParts.join(" · ")}</div>` : ""}
     </div>`;
   }).join("");
 }
@@ -1076,12 +1082,13 @@ function editDeal(id) {
     </div>
     <div class="field-row">
       <div class="field"><label>Stage</label><select id="f-stage">${STAGES.map(s=>`<option ${s===d.Stage?"selected":""}>${s}</option>`).join("")}</select></div>
-      <div class="field"><label>Wert (CHF)</label><input id="f-value" type="number" step="100" value="${d.Value||""}"></div>
+      <div class="field"><label>Anzahl Lizenzen</label><input id="f-licenses" type="number" step="1" min="0" value="${d.Licenses||""}"></div>
     </div>
     <div class="field-row">
+      <div class="field"><label>Umsatz (CHF)</label><input id="f-value" type="number" step="100" value="${d.Value||""}"></div>
       <div class="field"><label>Voraussichtl. Close</label><input id="f-close" type="date" value="${d.ExpectedClose?d.ExpectedClose.slice(0,10):""}"></div>
-      <div class="field"><label>Owner</label><input id="f-owner" value="${escape(d.Owner||account.username.split("@")[0])}"></div>
     </div>
+    <div class="field"><label>Owner</label><input id="f-owner" value="${escape(d.Owner||account.username.split("@")[0])}"></div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(d.Notes||"")}</textarea></div>
   `, [
     `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
@@ -1094,6 +1101,7 @@ async function saveDeal(id) {
   const data = {
     Title: val("f-title"), Stage: val("f-stage"),
     Value: val("f-value") ? parseFloat(val("f-value")) : null,
+    Licenses: val("f-licenses") ? parseInt(val("f-licenses")) : null,
     ExpectedClose: close ? close : null,
     Owner: val("f-owner"), Notes: val("f-notes"),
     CompanyId: compId ? parseInt(compId) : null,
@@ -1124,44 +1132,55 @@ async function changeStage(id, stage) {
   } catch (e) { toast(e.message, true); }
 }
 
+function updateRelatedDropdown() {
+  const typeSel = document.getElementById("f-related-type");
+  const idSel = document.getElementById("f-related-id");
+  if (!typeSel || !idSel) return;
+  const type = typeSel.value;
+  let items = [];
+  if (type === "Company") items = cache.companies;
+  else if (type === "Contact") items = cache.contacts;
+  else if (type === "Deal") items = cache.deals;
+  idSel.innerHTML = '<option value="">—</option>' +
+    items.sort((a,b) => (a.Title||"").localeCompare(b.Title||""))
+         .map(i => `<option value="${i.id}">${escape(i.Title||"")}</option>`).join("");
+}
+
 function newActivity(relatedTo, relatedId) {
+  // Build the related-entry dropdown options if pre-set
+  let relatedItems = [];
+  if (relatedTo === "Company") relatedItems = cache.companies;
+  else if (relatedTo === "Contact") relatedItems = cache.contacts;
+  else if (relatedTo === "Deal") relatedItems = cache.deals;
+
   showModal("Neue Aktivität", `
     <div class="field"><label>Titel *</label><input id="f-title"></div>
     <div class="field-row">
       <div class="field"><label>Typ</label><select id="f-type">${ACTIVITY_TYPES.map(t=>`<option ${t==="Note"?"selected":""}>${t}</option>`).join("")}</select></div>
       <div class="field"><label>Fällig (nur Task)</label><input id="f-due" type="date"></div>
     </div>
-    ${!relatedTo ? `
-      <div class="field-row">
-        <div class="field"><label>Verknüpft mit</label><select id="f-related-type">
-          <option value="">—</option>
-          <option value="Company">Firma</option>
-          <option value="Contact">Kontakt</option>
-          <option value="Deal">Deal</option>
-        </select></div>
-        <div class="field"><label>Eintrag</label><select id="f-related-id"><option value="">—</option></select></div>
+    <div class="field-row">
+      <div class="field"><label>Verknüpft mit</label>
+        <select id="f-related-type" onchange="updateRelatedDropdown()">
+          <option value="" ${!relatedTo?"selected":""}>—</option>
+          <option value="Company" ${relatedTo==="Company"?"selected":""}>Firma</option>
+          <option value="Contact" ${relatedTo==="Contact"?"selected":""}>Kontakt</option>
+          <option value="Deal" ${relatedTo==="Deal"?"selected":""}>Deal</option>
+        </select>
       </div>
-      <script>
-        document.getElementById("f-related-type").onchange = function() {
-          const sel = document.getElementById("f-related-id");
-          const items = window.cache[this.value.toLowerCase() + (this.value === "Company" ? "ies" : "s")] || [];
-          sel.innerHTML = '<option value="">—</option>' + items.map(i => '<option value="'+i.id+'">'+i.Title+'</option>').join("");
-        };
-      <\/script>
-    ` : `
-      <input type="hidden" id="f-related-type" value="${relatedTo}">
-      <input type="hidden" id="f-related-id" value="${relatedId}">
-    `}
+      <div class="field"><label>Eintrag</label>
+        <select id="f-related-id">
+          <option value="">—</option>
+          ${relatedItems.sort((a,b) => (a.Title||"").localeCompare(b.Title||""))
+            .map(i => `<option value="${i.id}" ${i.id==relatedId?"selected":""}>${escape(i.Title||"")}</option>`).join("")}
+        </select>
+      </div>
+    </div>
+    <div class="field"><label>Zuständig (intern)</label><input id="f-owner" value="${escape(account.username.split("@")[0])}"></div>
   `, [
     `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
     `<button class="btn btn-primary" onclick="saveActivity()">Speichern</button>`
   ]);
-  // expose cache to inline script
-  window.cache = cache;
-  // remap because list keys differ
-  window.cache.company = cache.companies;
-  window.cache.contact = cache.contacts;
-  window.cache.deal = cache.deals;
 }
 async function saveActivity() {
   const due = val("f-due");
@@ -1170,7 +1189,8 @@ async function saveActivity() {
   const data = {
     Title: val("f-title"), Type: val("f-type"),
     RelatedTo: rt || null, RelatedId: ri ? parseInt(ri) : null,
-    DueDate: due ? due : null, Done: false
+    DueDate: due ? due : null, Done: false,
+    Owner: val("f-owner") || null
   };
   if (!data.Title) return toast("Titel erforderlich", true);
   try {
