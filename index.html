@@ -466,6 +466,7 @@ const CONFIG = {
 
 const STAGES = ["Lead", "Qualified", "Proposal", "Negotiation", "Won", "Lost"];
 const ACTIVITY_TYPES = ["Note", "Call", "Email", "Meeting", "Task"];
+const INDUSTRIES = ["SaaS", "SaaS und BPO", "BPO Sonstiges"];
 
 /* ===========================================================
    MSAL Auth
@@ -1056,7 +1057,13 @@ function editCompany(id) {
   showModal(id ? "Firma bearbeiten" : "Neue Firma", `
     <div class="field"><label>Firmenname *</label><input id="f-title" value="${escape(c.Title||"")}"></div>
     <div class="field-row">
-      <div class="field"><label>Branche</label><input id="f-industry" value="${escape(c.Industry||"")}"></div>
+      <div class="field"><label>Branche</label>
+        <select id="f-industry">
+          <option value="">—</option>
+          ${INDUSTRIES.map(b => `<option value="${escape(b)}" ${c.Industry===b?"selected":""}>${escape(b)}</option>`).join("")}
+          ${c.Industry && !INDUSTRIES.includes(c.Industry) ? `<option value="${escape(c.Industry)}" selected>${escape(c.Industry)} (alt)</option>` : ""}
+        </select>
+      </div>
       <div class="field"><label>Website</label><input id="f-website" value="${escape(c.Website||"")}"></div>
     </div>
     <div class="field-row">
