@@ -657,7 +657,7 @@ function renderDashboard(el) {
   const totalWon = won.reduce((s,d) => s + (parseFloat(d.Value) || 0), 0);
   const today = new Date().toISOString().slice(0,10);
   const openTasks = cache.activities.filter(a =>
-    a.Type === "Task" && !a.Done
+    !a.Done && (a.Type === "Task" || a.DueDate)
   );
   const overdueTasks = openTasks.filter(a => a.DueDate && a.DueDate.slice(0,10) < today);
 
@@ -680,7 +680,7 @@ function renderDashboard(el) {
         <div class="stat-value">${formatCHF(totalWon)}</div>
       </div>
       <div class="stat">
-        <div class="stat-label">Tasks offen</div>
+        <div class="stat-label">Aufgaben offen</div>
         <div class="stat-value">${openTasks.length}${overdueTasks.length ? ` <span style="font-size:12px;color:var(--danger)">(${overdueTasks.length} überfällig)</span>` : ""}</div>
       </div>
     </div>
