@@ -701,10 +701,10 @@ function renderUpcomingTasks(tasks) {
     .map(t => {
       const due = t.DueDate ? t.DueDate.slice(0,10) : null;
       const overdue = due && due < today;
-      return `<div class="activity ${overdue ? "overdue" : ""}">
+      return `<div class="activity ${overdue ? "overdue" : ""}" onclick="editActivity(${t.id})" style="cursor:pointer">
         <span class="type-badge">${escape(t.Type)}</span>
         <span class="title">${escape(t.Title || "")}</span>
-        <div class="meta">${due ? "Fällig " + due : "Kein Datum"}</div>
+        <div class="meta">${due ? "Fällig " + due : "Kein Datum"}${t.Owner ? ` · <span style="color:var(--accent-2)">@${escape(t.Owner)}</span>` : ""}</div>
       </div>`;
     }).join("");
 }
@@ -838,15 +838,15 @@ function renderTasks(el) {
       const due = t.DueDate ? t.DueDate.slice(0,10) : null;
       const overdue = !t.Done && due && due < today;
       const related = lookupRelated(t);
-      return `<div class="activity ${t.Done ? "done":""} ${overdue?"overdue":""}">
-        ${t.Type === "Task" ? `<input type="checkbox" ${t.Done?"checked":""} onchange="toggleTask(${t.id}, this.checked)">` : ""}
+      return `<div class="activity ${t.Done ? "done":""} ${overdue?"overdue":""}" onclick="editActivity(${t.id})" style="cursor:pointer">
+        ${t.Type === "Task" ? `<input type="checkbox" ${t.Done?"checked":""} onclick="event.stopPropagation()" onchange="toggleTask(${t.id}, this.checked)">` : ""}
         <span class="type-badge">${escape(t.Type)}</span>
         <span class="title">${escape(t.Title||"")}</span>
         <div class="meta">
           ${due ? "Fällig " + due + " · " : ""}
           ${related ? `Zu ${escape(related)} · ` : ""}
           ${t.Owner ? `<span style="color:var(--accent-2)">@${escape(t.Owner)}</span>` : ""}
-          <button class="btn btn-sm" style="margin-left:8px" onclick="deleteActivity(${t.id})">×</button>
+          <button class="btn btn-sm" style="margin-left:8px" onclick="event.stopPropagation();deleteActivity(${t.id})">×</button>
         </div>
       </div>`;
     }).join("")
@@ -968,8 +968,8 @@ function renderActivityList(acts) {
     const metaParts = [];
     if (due) metaParts.push(`Fällig ${due}`);
     if (a.Owner) metaParts.push(`<span style="color:var(--accent-2)">@${escape(a.Owner)}</span>`);
-    return `<div class="activity ${a.Done?"done":""}">
-      ${a.Type==="Task" ? `<input type="checkbox" ${a.Done?"checked":""} onchange="toggleTask(${a.id}, this.checked)">` : ""}
+    return `<div class="activity ${a.Done?"done":""}" onclick="closeModal();editActivity(${a.id})" style="cursor:pointer">
+      ${a.Type==="Task" ? `<input type="checkbox" ${a.Done?"checked":""} onclick="event.stopPropagation()" onchange="toggleTask(${a.id}, this.checked)">` : ""}
       <span class="type-badge">${escape(a.Type)}</span>
       <span class="title">${escape(a.Title||"")}</span>
       ${metaParts.length ? `<div class="meta">${metaParts.join(" · ")}</div>` : ""}
@@ -1075,7 +1075,7 @@ function editDeal(id) {
     .sort((a,b) => (a.Title||"").localeCompare(b.Title||""))
     .map(co => `<option value="${co.id}" ${d.ContactId==co.id?"selected":""}>${escape(co.Title)}</option>`).join("");
   showModal(id ? "Deal bearbeiten" : "Neuer Deal", `
-    <div class="field"><label>Deal-Name *</label><input id="f-title" value="${escape(d.Title||"")}"></div>
+    <div class="field"><label>Deal-Name</label><input id="f-title" value="${escape(d.Title||"")}" placeholder="optional - sonst automatisch aus Firma"></div>
     <div class="field-row">
       <div class="field"><label>Firma</label><select id="f-company"><option value="">—</option>${companyOptions}</select></div>
       <div class="field"><label>Kontakt</label><select id="f-contact"><option value="">—</option>${contactOptions}</select></div>
@@ -1098,8 +1098,19 @@ function editDeal(id) {
 async function saveDeal(id) {
   const compId = val("f-company"), contId = val("f-contact");
   const close = val("f-close");
+  let title = val("f-title");
+  // Auto-Titel falls leer: Firmenname (+ Datum bei Bedarf)
+  if (!title) {
+    if (compId) {
+      const comp = cache.companies.find(c => c.id == parseInt(compId));
+      if (comp) title = comp.Title + " - " + new Date().toISOString().slice(0,10);
+    }
+    if (!title) {
+      return toast("Bitte Deal-Name oder Firma angeben", true);
+    }
+  }
   const data = {
-    Title: val("f-title"), Stage: val("f-stage"),
+    Title: title, Stage: val("f-stage"),
     Value: val("f-value") ? parseFloat(val("f-value")) : null,
     Licenses: val("f-licenses") ? parseInt(val("f-licenses")) : null,
     ExpectedClose: close ? close : null,
@@ -1107,7 +1118,6 @@ async function saveDeal(id) {
     CompanyId: compId ? parseInt(compId) : null,
     ContactId: contId ? parseInt(contId) : null
   };
-  if (!data.Title) return toast("Deal-Name erforderlich", true);
   try {
     if (id) await updateItem("Deals", id, data);
     else await createItem("Deals", data);
@@ -1147,17 +1157,36 @@ function updateRelatedDropdown() {
 }
 
 function newActivity(relatedTo, relatedId) {
-  // Build the related-entry dropdown options if pre-set
+  editActivity(null, relatedTo, relatedId);
+}
+
+function editActivity(id, prefRelatedTo, prefRelatedId) {
+  // Wenn id gesetzt, lade bestehende Aktivität — sonst neue
+  const a = id ? cache.activities.find(x => x.id == id) : {};
+  if (id && !a) return toast("Aktivität nicht gefunden", true);
+
+  const relatedTo = a.RelatedTo || prefRelatedTo || "";
+  const relatedId = a.RelatedId || prefRelatedId || "";
+
   let relatedItems = [];
   if (relatedTo === "Company") relatedItems = cache.companies;
   else if (relatedTo === "Contact") relatedItems = cache.contacts;
   else if (relatedTo === "Deal") relatedItems = cache.deals;
 
-  showModal("Neue Aktivität", `
-    <div class="field"><label>Titel *</label><input id="f-title"></div>
+  const due = a.DueDate ? a.DueDate.slice(0,10) : "";
+  const owner = a.Owner !== undefined ? a.Owner : account.username.split("@")[0];
+
+  const footer = [
+    id ? `<button class="btn btn-danger" onclick="deleteActivity(${id})">Löschen</button>` : "",
+    `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
+    `<button class="btn btn-primary" onclick="saveActivity(${id||"null"})">Speichern</button>`
+  ];
+
+  showModal(id ? "Aktivität bearbeiten" : "Neue Aktivität", `
+    <div class="field"><label>Titel *</label><input id="f-title" value="${escape(a.Title||"")}"></div>
     <div class="field-row">
-      <div class="field"><label>Typ</label><select id="f-type">${ACTIVITY_TYPES.map(t=>`<option ${t==="Note"?"selected":""}>${t}</option>`).join("")}</select></div>
-      <div class="field"><label>Fällig (nur Task)</label><input id="f-due" type="date"></div>
+      <div class="field"><label>Typ</label><select id="f-type">${ACTIVITY_TYPES.map(t=>`<option ${t===(a.Type||"Note")?"selected":""}>${t}</option>`).join("")}</select></div>
+      <div class="field"><label>Fällig (nur Task)</label><input id="f-due" type="date" value="${due}"></div>
     </div>
     <div class="field-row">
       <div class="field"><label>Verknüpft mit</label>
@@ -1176,27 +1205,34 @@ function newActivity(relatedTo, relatedId) {
         </select>
       </div>
     </div>
-    <div class="field"><label>Zuständig (intern)</label><input id="f-owner" value="${escape(account.username.split("@")[0])}"></div>
-  `, [
-    `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
-    `<button class="btn btn-primary" onclick="saveActivity()">Speichern</button>`
-  ]);
+    <div class="field"><label>Zuständig (intern)</label><input id="f-owner" value="${escape(owner)}"></div>
+    ${id && a.Type === "Task" ? `<div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-done" ${a.Done?"checked":""} style="width:auto;margin:0"> Erledigt</label></div>` : ""}
+  `, footer);
 }
-async function saveActivity() {
+
+async function saveActivity(id) {
   const due = val("f-due");
   const rt = val("f-related-type");
   const ri = val("f-related-id");
+  const doneCheckbox = document.getElementById("f-done");
   const data = {
     Title: val("f-title"), Type: val("f-type"),
     RelatedTo: rt || null, RelatedId: ri ? parseInt(ri) : null,
-    DueDate: due ? due : null, Done: false,
+    DueDate: due ? due : null,
     Owner: val("f-owner") || null
   };
+  // Bei neuen Aktivitäten: Done=false. Bei Edit: nur ändern wenn Checkbox da
+  if (id) {
+    if (doneCheckbox) data.Done = doneCheckbox.checked;
+  } else {
+    data.Done = false;
+  }
   if (!data.Title) return toast("Titel erforderlich", true);
   try {
-    await createItem("Activities", data);
+    if (id) await updateItem("Activities", id, data);
+    else await createItem("Activities", data);
     await reload("Activities");
-    closeModal(); render(); toast("Erstellt");
+    closeModal(); render(); toast(id ? "Gespeichert" : "Erstellt");
   } catch (e) { toast(e.message, true); }
 }
 async function toggleTask(id, done) {
