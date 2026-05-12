@@ -878,7 +878,7 @@ function renderTasks(el) {
       const overdue = !t.Done && due && due < today;
       const related = lookupRelated(t);
       return `<div class="activity ${t.Done ? "done":""} ${overdue?"overdue":""}" onclick="editActivity(${t.id})" style="cursor:pointer">
-        ${t.Type === "Task" ? `<input type="checkbox" ${t.Done?"checked":""} onclick="event.stopPropagation()" onchange="toggleTask(${t.id}, this.checked)">` : ""}
+        <input type="checkbox" ${t.Done?"checked":""} onclick="event.stopPropagation()" onchange="toggleTask(${t.id}, this.checked)">
         <span class="type-badge">${escape(t.Type)}</span>
         <span class="title">${escape(t.Title||"")}</span>
         <div class="meta">
@@ -1008,7 +1008,7 @@ function renderActivityList(acts) {
     if (due) metaParts.push(`Fällig ${due}`);
     if (a.Owner) metaParts.push(`<span style="color:var(--accent-2)">@${escape(ownerLabel(a.Owner))}</span>`);
     return `<div class="activity ${a.Done?"done":""}" onclick="closeModal();editActivity(${a.id})" style="cursor:pointer">
-      ${a.Type==="Task" ? `<input type="checkbox" ${a.Done?"checked":""} onclick="event.stopPropagation()" onchange="toggleTask(${a.id}, this.checked)">` : ""}
+      <input type="checkbox" ${a.Done?"checked":""} onclick="event.stopPropagation()" onchange="toggleTask(${a.id}, this.checked)">
       <span class="type-badge">${escape(a.Type)}</span>
       <span class="title">${escape(a.Title||"")}</span>
       ${metaParts.length ? `<div class="meta">${metaParts.join(" · ")}</div>` : ""}
@@ -1245,7 +1245,7 @@ function editActivity(id, prefRelatedTo, prefRelatedId) {
       </div>
     </div>
     <div class="field"><label>Zuständig (intern)</label><input id="f-owner" value="${escape(owner)}"></div>
-    ${id && a.Type === "Task" ? `<div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-done" ${a.Done?"checked":""} style="width:auto;margin:0"> Erledigt</label></div>` : ""}
+    ${id ? `<div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-done" ${a.Done?"checked":""} style="width:auto;margin:0"> Erledigt</label></div>` : ""}
   `, footer);
 }
 
