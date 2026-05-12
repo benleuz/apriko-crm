@@ -324,7 +324,20 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
     background: var(--bg-card); color: var(--accent-2); margin-right: 8px;
   }
   .activity.done .title { text-decoration: line-through; color: var(--text-faint); }
+  .activity.overdue {
+    background: rgba(255,107,107,0.08);
+    border-left: 3px solid var(--danger);
+    padding-left: 11px;
+  }
+  .activity.overdue .title { color: var(--danger); font-weight: 600; }
   .activity.overdue .meta { color: var(--danger); }
+  .activity.due-today {
+    background: rgba(244,201,93,0.08);
+    border-left: 3px solid var(--warn);
+    padding-left: 11px;
+  }
+  .activity.due-today .meta { color: var(--warn); }
+  .activity.due-soon .meta strong { color: var(--warn); }
   .activity input[type="checkbox"] { margin-right: 8px; vertical-align: middle; }
 
   /* Scope toggle (Meine/Alle) */
@@ -731,13 +744,26 @@ function renderUpcomingTasks(tasks) {
     .slice(0, 8)
     .map(t => {
       const due = t.DueDate ? t.DueDate.slice(0,10) : null;
-      const overdue = due && due < today;
-      return `<div class="activity ${overdue ? "overdue" : ""}" onclick="editActivity(${t.id})" style="cursor:pointer">
+      const status = dueStatus(due, today);
+      const dueLabel = due ? (
+        status === "overdue" ? `<strong>Überfällig: ${due}</strong>` :
+        status === "today" ? `<strong>Heute fällig</strong>` :
+        "Fällig " + due
+      ) : "Kein Datum";
+      return `<div class="activity ${status}" onclick="editActivity(${t.id})" style="cursor:pointer">
         <span class="type-badge">${escape(t.Type)}</span>
         <span class="title">${escape(t.Title || "")}</span>
-        <div class="meta">${due ? "Fällig " + due : "Kein Datum"}${t.Owner ? ` · <span style="color:var(--accent-2)">@${escape(ownerLabel(t.Owner))}</span>` : ""}</div>
+        <div class="meta">${dueLabel}${t.Owner ? ` · <span style="color:var(--accent-2)">@${escape(ownerLabel(t.Owner))}</span>` : ""}</div>
       </div>`;
     }).join("");
+}
+
+// Status für Fälligkeit
+function dueStatus(due, today) {
+  if (!due) return "";
+  if (due < today) return "overdue";
+  if (due === today) return "due-today";
+  return "";
 }
 
 /* ---------- Pipeline ---------- */
@@ -875,14 +901,19 @@ function renderTasks(el) {
   el.innerHTML = `<div class="panel"><div>${
     tasks.map(t => {
       const due = t.DueDate ? t.DueDate.slice(0,10) : null;
-      const overdue = !t.Done && due && due < today;
+      const status = !t.Done ? dueStatus(due, today) : "";
       const related = lookupRelated(t);
-      return `<div class="activity ${t.Done ? "done":""} ${overdue?"overdue":""}" onclick="editActivity(${t.id})" style="cursor:pointer">
+      const dueLabel = due ? (
+        status === "overdue" ? `<strong>Überfällig: ${due}</strong>` :
+        status === "today" ? `<strong>Heute fällig</strong>` :
+        "Fällig " + due
+      ) : null;
+      return `<div class="activity ${t.Done ? "done":""} ${status}" onclick="editActivity(${t.id})" style="cursor:pointer">
         <input type="checkbox" ${t.Done?"checked":""} onclick="event.stopPropagation()" onchange="toggleTask(${t.id}, this.checked)">
         <span class="type-badge">${escape(t.Type)}</span>
         <span class="title">${escape(t.Title||"")}</span>
         <div class="meta">
-          ${due ? "Fällig " + due + " · " : ""}
+          ${dueLabel ? dueLabel + " · " : ""}
           ${related ? `Zu ${escape(related)} · ` : ""}
           ${t.Owner ? `<span style="color:var(--accent-2)">@${escape(ownerLabel(t.Owner))}</span>` : ""}
           <button class="btn btn-sm" style="margin-left:8px" onclick="event.stopPropagation();deleteActivity(${t.id})">×</button>
