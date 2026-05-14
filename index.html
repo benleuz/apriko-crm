@@ -418,6 +418,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
     <nav>
       <button data-view="dashboard" class="active"><span class="ic">◇</span> Dashboard</button>
       <button data-view="pipeline"><span class="ic">▦</span> Pipeline</button>
+      <button data-view="customers"><span class="ic">★</span> Kunden</button>
       <button data-view="companies"><span class="ic">◳</span> Firmen</button>
       <button data-view="contacts"><span class="ic">◉</span> Kontakte</button>
       <button data-view="tasks"><span class="ic">✓</span> Aufgaben</button>
@@ -467,6 +468,9 @@ const CONFIG = {
 const STAGES = ["Lead", "Qualified", "Proposal", "Negotiation", "Won", "Lost"];
 const ACTIVITY_TYPES = ["Note", "Call", "Email", "Meeting", "Task"];
 const INDUSTRIES = ["SaaS", "SaaS und BPO", "BPO Sonstiges"];
+const SEGMENTS = ["SaaS", "SaaS und BPO", "BPO Sonstiges"];
+const CUSTOMER_STATUS = ["Aktiv", "Gekündigt", "Pausiert"];
+const RISK_LEVELS = ["Grün", "Gelb", "Rot"];
 
 /* ===========================================================
    MSAL Auth
@@ -485,7 +489,7 @@ let msalApp = null;
 let account = null;
 let siteId = null;
 let listIds = {};
-let cache = { companies: [], contacts: [], deals: [], activities: [] };
+let cache = { companies: [], contacts: [], deals: [], activities: [], customers: [], monthlyrevenue: [], budget: [] };
 let currentView = "dashboard";
 
 function showError(msg) {
@@ -569,11 +573,11 @@ async function bootstrap() {
   // Lists holen
   const lists = await graph(`/sites/${siteId}/lists?$select=id,name,displayName`);
   for (const l of lists.value) {
-    if (["Companies", "Contacts", "Deals", "Activities"].includes(l.displayName)) {
+    if (["Companies", "Contacts", "Deals", "Activities", "Customers", "MonthlyRevenue", "Budget"].includes(l.displayName)) {
       listIds[l.displayName] = l.id;
     }
   }
-  const required = ["Companies", "Contacts", "Deals", "Activities"];
+  const required = ["Companies", "Contacts", "Deals", "Activities", "Customers", "MonthlyRevenue", "Budget"];
   const missing = required.filter(r => !listIds[r]);
   if (missing.length) {
     throw new Error("Fehlende Listen auf SharePoint: " + missing.join(", ") + ". Siehe SETUP.md.");
@@ -623,6 +627,9 @@ async function startApp() {
     cache.contacts = await loadList("Contacts");
     cache.deals = await loadList("Deals");
     cache.activities = await loadList("Activities");
+    cache.customers = await loadList("Customers");
+    cache.monthlyrevenue = await loadList("MonthlyRevenue");
+    cache.budget = await loadList("Budget");
     bindNav();
     render();
   } catch (e) {
@@ -649,6 +656,7 @@ function bindNav() {
 function render() {
   const titles = {
     dashboard: "Dashboard", pipeline: "Pipeline",
+    customers: "Kunden",
     companies: "Firmen", contacts: "Kontakte", tasks: "Aufgaben"
   };
   document.getElementById("view-title").textContent = titles[currentView];
@@ -657,6 +665,7 @@ function render() {
 
   if (currentView === "dashboard") renderDashboard(content);
   else if (currentView === "pipeline") renderPipeline(content);
+  else if (currentView === "customers") renderCustomers(content);
   else if (currentView === "companies") renderCompanies(content);
   else if (currentView === "contacts") renderContacts(content);
   else if (currentView === "tasks") renderTasks(content);
@@ -804,6 +813,155 @@ function renderPipeline(el) {
   `;
 }
 
+/* ---------- Customers ---------- */
+function renderCustomers(el) {
+  document.getElementById("view-actions").innerHTML = `
+    <input class="search-input" placeholder="Suchen..." oninput="filterTable(this.value, 'cust-row')">
+    <button class="btn btn-primary" onclick="newCustomer()">+ Neuer Kunde</button>
+  `;
+  if (!cache.customers.length) {
+    el.innerHTML = `<div class="empty">Noch keine Kunden erfasst.<br><br>Tipp: Wenn du einen Deal auf "Won" setzt, wird die Firma automatisch als Kunde markiert. Hier legst du den Kundenvertrag mit Segment, ARR-Ziel etc. an.</div>`;
+    return;
+  }
+  el.innerHTML = `
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th>Kunde</th><th>Firma</th><th>Segment</th><th>Status</th><th>Risiko</th><th>Ziel-ARR</th><th>Owner</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${cache.customers
+          .sort((a,b) => (a.Title||"").localeCompare(b.Title||""))
+          .map(c => {
+            const comp = cache.companies.find(x => x.id == c.CompanyId);
+            const riskColor = c.Risk === "Rot" ? "var(--danger)" : c.Risk === "Gelb" ? "var(--warn)" : "var(--accent)";
+            return `<tr class="cust-row" data-search="${escape((c.Title||"") + " " + (comp?.Title||"") + " " + (c.Segment||""))}">
+              <td onclick="openCustomer(${c.id})"><strong>${escape(c.Title||"")}</strong></td>
+              <td onclick="openCustomer(${c.id})" class="dim">${escape(comp?.Title||"—")}</td>
+              <td onclick="openCustomer(${c.id})" class="dim">${escape(c.Segment||"")}</td>
+              <td onclick="openCustomer(${c.id})" class="dim">${escape(c.Status||"")}</td>
+              <td onclick="openCustomer(${c.id})"><span style="color:${riskColor}">●</span> <span class="dim">${escape(c.Risk||"")}</span></td>
+              <td onclick="openCustomer(${c.id})" class="dim" style="font-family:var(--font-mono)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</td>
+              <td onclick="openCustomer(${c.id})" class="dim">${escape(ownerLabel(c.Owner)||"—")}</td>
+              <td class="actions-cell">
+                <button class="btn btn-sm" onclick="event.stopPropagation();editCustomer(${c.id})">Edit</button>
+              </td>
+            </tr>`;
+          }).join("")}
+      </tbody>
+    </table></div>
+  `;
+}
+
+function openCustomer(id) {
+  const c = cache.customers.find(x => x.id == id);
+  if (!c) return;
+  const comp = cache.companies.find(x => x.id == c.CompanyId);
+  const riskColor = c.Risk === "Rot" ? "var(--danger)" : c.Risk === "Gelb" ? "var(--warn)" : "var(--accent)";
+  const revs = cache.monthlyrevenue.filter(r => r.CustomerId == id);
+
+  showModal(escape(c.Title || "Kunde"), `
+    <dl class="kv">
+      <dt>Firma</dt><dd>${comp ? `<a href="#" onclick="closeModal();openCompany(${comp.id});return false">${escape(comp.Title)}</a>` : "—"}</dd>
+      <dt>Segment</dt><dd>${escape(c.Segment||"—")}</dd>
+      <dt>Status</dt><dd>${escape(c.Status||"—")}</dd>
+      <dt>Risiko</dt><dd><span style="color:${riskColor}">●</span> ${escape(c.Risk||"—")}</dd>
+      <dt>Start</dt><dd>${c.StartDate ? c.StartDate.slice(0,10) : "—"}</dd>
+      <dt>Ende</dt><dd>${c.EndDate ? c.EndDate.slice(0,10) : "—"}</dd>
+      <dt>Owner</dt><dd>${escape(ownerLabel(c.Owner)||"—")}</dd>
+      <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
+      <dt>Commit</dt><dd style="font-family:var(--font-mono)">${c.PipelineCommit ? "CHF " + parseFloat(c.PipelineCommit).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
+      <dt>Best-Case</dt><dd style="font-family:var(--font-mono)">${c.PipelineBestCase ? "CHF " + parseFloat(c.PipelineBestCase).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
+      <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
+    </dl>
+
+    <h3 style="margin-top:20px;font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Monatsumsätze (${revs.length})</h3>
+    ${revs.length ? `<div class="empty" style="padding:8px;font-size:12px">Detail-Ansicht und Erfassung folgt im nächsten Update (Monthly-Revenue-Tab).</div>` : `<div class="empty" style="padding:12px">Noch keine Umsätze erfasst.</div>`}
+  `, [
+    `<button class="btn btn-danger" onclick="deleteCustomer(${id})">Löschen</button>`,
+    `<button class="btn" onclick="editCustomer(${id})">Bearbeiten</button>`
+  ]);
+}
+
+function newCustomer() { editCustomer(null); }
+function editCustomer(id) {
+  const c = id ? cache.customers.find(x => x.id == id) : {};
+  // Beim Anlegen: Vorauswahl der Firma falls vorhanden + Firmen, die schon als Kunde markiert sind, bevorzugen
+  const companyOptions = cache.companies
+    .sort((a,b) => (a.Title||"").localeCompare(b.Title||""))
+    .map(co => `<option value="${co.id}" ${c.CompanyId==co.id?"selected":""}>${escape(co.Title)}${co.IsCustomer ? " ★" : ""}</option>`).join("");
+
+  showModal(id ? "Kunde bearbeiten" : "Neuer Kunde", `
+    <div class="field"><label>Bezeichnung / Vertragsname *</label><input id="f-title" value="${escape(c.Title||"")}" placeholder="z.B. Müller AG - SaaS Premium"></div>
+    <div class="field"><label>Firma *</label><select id="f-company"><option value="">—</option>${companyOptions}</select></div>
+    <div class="field-row">
+      <div class="field"><label>Segment</label><select id="f-segment">${SEGMENTS.map(s => `<option ${s===(c.Segment||"SaaS")?"selected":""}>${s}</option>`).join("")}</select></div>
+      <div class="field"><label>Status</label><select id="f-status">${CUSTOMER_STATUS.map(s => `<option ${s===(c.Status||"Aktiv")?"selected":""}>${s}</option>`).join("")}</select></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Risiko</label><select id="f-risk">${RISK_LEVELS.map(s => `<option ${s===(c.Risk||"Grün")?"selected":""}>${s}</option>`).join("")}</select></div>
+      <div class="field"><label>Owner</label><input id="f-owner" value="${escape(c.Owner||myEmail())}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Start</label><input id="f-start" type="date" value="${c.StartDate?c.StartDate.slice(0,10):""}"></div>
+      <div class="field"><label>Ende</label><input id="f-end" type="date" value="${c.EndDate?c.EndDate.slice(0,10):""}"></div>
+    </div>
+    <div class="field"><label>Ziel-ARR SaaS (CHF)</label><input id="f-targetarr" type="number" step="1000" min="0" value="${c.TargetARR||""}"></div>
+    <div class="field-row">
+      <div class="field"><label>Pipeline Commit (CHF)</label><input id="f-commit" type="number" step="1000" min="0" value="${c.PipelineCommit||""}"></div>
+      <div class="field"><label>Pipeline Best-Case (CHF)</label><input id="f-bestcase" type="number" step="1000" min="0" value="${c.PipelineBestCase||""}"></div>
+    </div>
+    <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
+  `, [
+    `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
+    `<button class="btn btn-primary" onclick="saveCustomer(${id||"null"})">Speichern</button>`
+  ]);
+}
+
+async function saveCustomer(id) {
+  const compId = val("f-company");
+  const start = val("f-start");
+  const end = val("f-end");
+  const data = {
+    Title: val("f-title"),
+    CompanyId: compId ? parseInt(compId) : null,
+    Segment: val("f-segment"),
+    Status: val("f-status"),
+    Risk: val("f-risk"),
+    StartDate: start || null,
+    EndDate: end || null,
+    Owner: val("f-owner") || null,
+    TargetARR: val("f-targetarr") ? parseFloat(val("f-targetarr")) : null,
+    PipelineCommit: val("f-commit") ? parseFloat(val("f-commit")) : null,
+    PipelineBestCase: val("f-bestcase") ? parseFloat(val("f-bestcase")) : null,
+    Notes: val("f-notes")
+  };
+  if (!data.Title) return toast("Vertragsname erforderlich", true);
+  if (!data.CompanyId) return toast("Firma erforderlich", true);
+  try {
+    if (id) await updateItem("Customers", id, data);
+    else {
+      await createItem("Customers", data);
+      // Beim Anlegen auch sicherstellen, dass die Firma als Kunde markiert ist
+      const comp = cache.companies.find(c => c.id == data.CompanyId);
+      if (comp && !comp.IsCustomer) {
+        await updateItem("Companies", comp.id, { IsCustomer: true });
+        await reload("Companies");
+      }
+    }
+    await reload("Customers");
+    closeModal(); render(); toast("Gespeichert");
+  } catch (e) { toast(e.message, true); }
+}
+
+async function deleteCustomer(id) {
+  if (!confirm("Kunde wirklich löschen? Die zugehörigen Monatsumsätze bleiben erhalten, sind aber nicht mehr zugeordnet.")) return;
+  try {
+    await deleteItem("Customers", id);
+    await reload("Customers");
+    closeModal(); render(); toast("Gelöscht");
+  } catch (e) { toast(e.message, true); }
+}
+
 /* ---------- Companies ---------- */
 function renderCompanies(el) {
   document.getElementById("view-actions").innerHTML = `
@@ -826,7 +984,7 @@ function renderCompanies(el) {
             const contacts = cache.contacts.filter(x => x.CompanyId == c.id).length;
             const deals = cache.deals.filter(x => x.CompanyId == c.id).length;
             return `<tr class="comp-row" data-search="${escape((c.Title||"") + " " + (c.Industry||"") + " " + (c.City||""))}">
-              <td onclick="openCompany(${c.id})"><strong>${escape(c.Title||"")}</strong></td>
+              <td onclick="openCompany(${c.id})"><strong>${c.IsCustomer ? `<span style="color:var(--accent)">★</span> ` : ""}${escape(c.Title||"")}</strong></td>
               <td onclick="openCompany(${c.id})" class="dim">${escape(c.Industry||"")}</td>
               <td onclick="openCompany(${c.id})" class="dim">${escape(c.City||"")}</td>
               <td onclick="openCompany(${c.id})" class="dim">${contacts}</td>
@@ -947,6 +1105,7 @@ function openCompany(id) {
   if (!c) return;
   const contacts = cache.contacts.filter(x => x.CompanyId == id);
   const deals = cache.deals.filter(x => x.CompanyId == id);
+  const customers = cache.customers.filter(x => x.CompanyId == id);
   const acts = cache.activities.filter(a =>
     (a.RelatedTo === "Company" && a.RelatedId == id) ||
     (a.RelatedTo === "Contact" && contacts.some(co => co.id == a.RelatedId)) ||
@@ -958,8 +1117,23 @@ function openCompany(id) {
       <dt>Branche</dt><dd>${escape(c.Industry||"—")}</dd>
       <dt>Website</dt><dd>${c.Website ? `<a href="${escape(c.Website)}" target="_blank">${escape(c.Website)}</a>` : "—"}</dd>
       <dt>Ort</dt><dd>${escape(c.City||"")}${c.Country ? ", " + escape(c.Country) : ""}</dd>
+      <dt>Status</dt><dd>${c.IsCustomer ? `<span style="color:var(--accent)">★ Kunde</span>` : `<span class="dim">Kein Kunde</span>`}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
     </dl>
+
+    ${customers.length ? `
+      <h3 style="margin-top:20px;font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Kundenverträge (${customers.length})</h3>
+      ${customers.map(cu => {
+        const riskColor = cu.Risk === "Rot" ? "var(--danger)" : cu.Risk === "Gelb" ? "var(--warn)" : "var(--accent)";
+        return `<div class="activity" onclick="closeModal();openCustomer(${cu.id})" style="cursor:pointer">
+          <strong>${escape(cu.Title)}</strong>
+          <div class="meta">${escape(cu.Segment||"")} · ${escape(cu.Status||"")} · <span style="color:${riskColor}">●</span> ${escape(cu.Risk||"")}</div>
+        </div>`;
+      }).join("")}
+    ` : (c.IsCustomer ? `
+      <h3 style="margin-top:20px;font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Kundenverträge</h3>
+      <div class="empty" style="padding:12px">Als Kunde markiert, aber kein Vertrag erfasst. <button class="btn btn-sm" onclick="closeModal();editCustomerForCompany(${id})">+ Vertrag anlegen</button></div>
+    ` : "")}
 
     <h3 style="margin-top:20px;font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Kontakte (${contacts.length})</h3>
     ${contacts.length ? contacts.map(co => `<div class="activity"><strong>${escape(co.Title)}</strong> ${co.Role?`<span class="dim" style="color:var(--text-dim)"> · ${escape(co.Role)}</span>`:""}<div class="meta">${escape(co.Email||"")} ${co.Phone?" · "+escape(co.Phone):""}</div></div>`).join("") : `<div class="empty" style="padding:12px">Keine Kontakte.</div>`}
@@ -974,6 +1148,15 @@ function openCompany(id) {
     `<button class="btn btn-danger" onclick="deleteCompany(${id})">Löschen</button>`,
     `<button class="btn" onclick="editCompany(${id})">Bearbeiten</button>`
   ]);
+}
+
+function editCustomerForCompany(companyId) {
+  editCustomer(null);
+  // Vorausgewählte Firma setzen
+  setTimeout(() => {
+    const sel = document.getElementById("f-company");
+    if (sel) sel.value = companyId;
+  }, 50);
 }
 
 function openContact(id) {
@@ -1071,6 +1254,7 @@ function editCompany(id) {
       <div class="field"><label>Land</label><input id="f-country" value="${escape(c.Country||"CH")}"></div>
     </div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
+    <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-iscustomer" ${c.IsCustomer?"checked":""} style="width:auto;margin:0"> Ist Kunde (zahlt monatlich)</label></div>
   `, [
     `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
     `<button class="btn btn-primary" onclick="saveCompany(${id||"null"})">Speichern</button>`
@@ -1079,7 +1263,8 @@ function editCompany(id) {
 async function saveCompany(id) {
   const data = {
     Title: val("f-title"), Industry: val("f-industry"), Website: val("f-website"),
-    City: val("f-city"), Country: val("f-country"), Notes: val("f-notes")
+    City: val("f-city"), Country: val("f-country"), Notes: val("f-notes"),
+    IsCustomer: document.getElementById("f-iscustomer")?.checked || false
   };
   if (!data.Title) return toast("Firmenname erforderlich", true);
   try {
@@ -1214,6 +1399,20 @@ async function changeStage(id, stage) {
   try {
     await updateItem("Deals", id, { Stage: stage });
     await reload("Deals");
+    // Auto: Wenn Won → Firma als Kunde markieren (wenn nicht schon)
+    if (stage === "Won") {
+      const deal = cache.deals.find(d => d.id == id);
+      if (deal && deal.CompanyId) {
+        const comp = cache.companies.find(c => c.id == deal.CompanyId);
+        if (comp && !comp.IsCustomer) {
+          if (confirm(`Deal gewonnen! Soll "${comp.Title}" automatisch als Kunde markiert werden?`)) {
+            await updateItem("Companies", comp.id, { IsCustomer: true });
+            await reload("Companies");
+            toast(`${comp.Title} ist jetzt Kunde`);
+          }
+        }
+      }
+    }
     toast("Stage aktualisiert");
     closeModal(); render();
   } catch (e) { toast(e.message, true); }
