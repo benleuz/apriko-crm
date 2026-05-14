@@ -897,6 +897,21 @@ function fmtCHFShort(v) {
 }
 
 function renderRevenue(el) {
+  // Page-Title dynamisch erweitern
+  let titleEl = document.getElementById("view-title");
+  if (filters.revenueMode === "customer") {
+    const cust = cache.customers.find(c => c.id == filters.revenueCustomerId);
+    if (cust) {
+      titleEl.innerHTML = `Umsätze <span style="color:var(--text-dim);font-weight:400">·</span> <span style="color:var(--accent)">${escape(cust.Title)}</span>`;
+    } else {
+      titleEl.textContent = "Umsätze";
+    }
+  } else {
+    // Monatsabschluss: zeige den Monatsnamen prominent
+    const m = MONTH_NAMES[filters.revenueMonth - 1];
+    titleEl.innerHTML = `Umsätze <span style="color:var(--text-dim);font-weight:400">·</span> <span style="color:var(--accent)">${m} ${filters.revenueYear}</span>`;
+  }
+
   document.getElementById("view-actions").innerHTML = `
     <div class="scope-toggle">
       <button class="${filters.revenueMode === "month" ? "active" : ""}" onclick="setRevMode('month')">Monatsabschluss</button>
