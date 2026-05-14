@@ -355,6 +355,41 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
   }
   .scope-toggle button:hover:not(.active) { background: var(--bg-card); color: var(--text); }
 
+  /* Revenue editing */
+  .rev-input {
+    width: 100%; min-width: 70px; padding: 4px 6px;
+    background: transparent; border: 1px solid transparent;
+    color: var(--text); font-family: var(--font-mono); font-size: 12px;
+    text-align: right; border-radius: 3px;
+  }
+  .rev-input:hover { border-color: var(--border); }
+  .rev-input:focus {
+    outline: none; border-color: var(--accent);
+    background: var(--bg-card);
+  }
+  .rev-input.saving { border-color: var(--warn); }
+  .rev-input.saved { border-color: var(--accent); background: rgba(184,233,134,0.06); }
+  .rev-input.error { border-color: var(--danger); }
+  .rev-cell { position: relative; padding: 4px 6px; }
+  .rev-cell .saved-flash {
+    position: absolute; right: 4px; top: 4px;
+    color: var(--accent); font-size: 10px; opacity: 0;
+    pointer-events: none; transition: opacity 0.2s;
+  }
+  .rev-cell.flash .saved-flash { opacity: 1; }
+  .rev-invoiced-toggle {
+    cursor: pointer; padding: 2px 8px; border-radius: 3px;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .rev-invoiced-toggle.yes {
+    background: rgba(184,233,134,0.15); color: var(--accent);
+  }
+  .rev-invoiced-toggle.no {
+    background: var(--bg-card); color: var(--text-faint); border: 1px dashed var(--border);
+  }
+  .rev-invoiced-toggle:hover { opacity: 0.8; }
+
   /* Stats */
   .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px; }
   .stat {
@@ -419,6 +454,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button data-view="dashboard" class="active"><span class="ic">◇</span> Dashboard</button>
       <button data-view="pipeline"><span class="ic">▦</span> Pipeline</button>
       <button data-view="customers"><span class="ic">★</span> Kunden</button>
+      <button data-view="revenue"><span class="ic">⌗</span> Umsätze</button>
       <button data-view="companies"><span class="ic">◳</span> Firmen</button>
       <button data-view="contacts"><span class="ic">◉</span> Kontakte</button>
       <button data-view="tasks"><span class="ic">✓</span> Aufgaben</button>
@@ -468,7 +504,33 @@ const CONFIG = {
 const STAGES = ["Lead", "Qualified", "Proposal", "Negotiation", "Won", "Lost"];
 const ACTIVITY_TYPES = ["Note", "Call", "Email", "Meeting", "Task"];
 const INDUSTRIES = ["SaaS", "SaaS und BPO", "BPO Sonstiges"];
-const SEGMENTS = ["SaaS", "SaaS und BPO", "BPO Sonstiges"];
+const SEGMENTS = ["Nur SaaS", "SaaS und BPO", "Nur BPO", "BPO inkl. SaaS"];
+
+// Welche Felder pro Segment relevant sind
+function segmentNeedsLicenses(segment) {
+  return segment === "Nur SaaS" || segment === "SaaS und BPO" || segment === "BPO inkl. SaaS";
+}
+function segmentNeedsExternal(segment) {
+  return segment === "SaaS und BPO" || segment === "Nur BPO" || segment === "BPO inkl. SaaS";
+}
+function segmentChargesSaaS(segment) {
+  // Bei "BPO inkl. SaaS" wird SaaS NICHT separat verrechnet (im BPO-% drin)
+  return segment === "Nur SaaS" || segment === "SaaS und BPO";
+}
+
+// Berechnung: gibt {saas, bpo, total} zurück für einen Monatseintrag
+function calcRevenue(rec, customer) {
+  const seg = customer?.Segment || "Nur SaaS";
+  const pricePerLic = parseFloat(customer?.PricePerLicense) || 0;
+  const bpoRate = parseFloat(customer?.BPORate) || 0;
+  const lic = parseInt(rec?.Licenses) || 0;
+  const ext = parseFloat(rec?.ExternalRevenue) || 0;
+
+  let saas = 0, bpo = 0;
+  if (segmentChargesSaaS(seg)) saas = lic * pricePerLic;
+  if (segmentNeedsExternal(seg)) bpo = ext * bpoRate / 100;
+  return { saas, bpo, total: saas + bpo };
+}
 const CUSTOMER_STATUS = ["Aktiv", "Gekündigt", "Pausiert"];
 const RISK_LEVELS = ["Grün", "Gelb", "Rot"];
 
@@ -656,7 +718,7 @@ function bindNav() {
 function render() {
   const titles = {
     dashboard: "Dashboard", pipeline: "Pipeline",
-    customers: "Kunden",
+    customers: "Kunden", revenue: "Umsätze",
     companies: "Firmen", contacts: "Kontakte", tasks: "Aufgaben"
   };
   document.getElementById("view-title").textContent = titles[currentView];
@@ -666,6 +728,7 @@ function render() {
   if (currentView === "dashboard") renderDashboard(content);
   else if (currentView === "pipeline") renderPipeline(content);
   else if (currentView === "customers") renderCustomers(content);
+  else if (currentView === "revenue") renderRevenue(content);
   else if (currentView === "companies") renderCompanies(content);
   else if (currentView === "contacts") renderContacts(content);
   else if (currentView === "tasks") renderTasks(content);
@@ -813,6 +876,357 @@ function renderPipeline(el) {
   `;
 }
 
+/* ---------- Revenue (Monatsumsätze) ---------- */
+const MONTH_NAMES = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+
+function findRev(customerId, year, month) {
+  return cache.monthlyrevenue.find(r =>
+    r.CustomerId == customerId && r.Year == year && r.Month == month);
+}
+
+function fmtCHF2(v) {
+  const n = parseFloat(v);
+  if (!n && n !== 0) return "";
+  return n.toLocaleString("de-CH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function fmtCHFShort(v) {
+  const n = parseFloat(v) || 0;
+  if (n === 0) return "—";
+  return n.toLocaleString("de-CH", { maximumFractionDigits: 0 });
+}
+
+function renderRevenue(el) {
+  document.getElementById("view-actions").innerHTML = `
+    <div class="scope-toggle">
+      <button class="${filters.revenueMode === "month" ? "active" : ""}" onclick="setRevMode('month')">Monatsabschluss</button>
+      <button class="${filters.revenueMode === "customer" ? "active" : ""}" onclick="setRevMode('customer')">Pro Kunde</button>
+    </div>
+  `;
+
+  if (!cache.customers.length) {
+    el.innerHTML = `<div class="empty">Noch keine Kunden erfasst.<br><br>Geh zuerst zum Kunden-Tab und lege mindestens einen Kunden an.</div>`;
+    return;
+  }
+
+  if (filters.revenueMode === "month") {
+    renderRevenueByMonth(el);
+  } else {
+    renderRevenueByCustomer(el);
+  }
+}
+
+function setRevMode(mode) {
+  filters.revenueMode = mode;
+  render();
+}
+
+/* === Modus: Monatsabschluss === */
+function renderRevenueByMonth(el) {
+  const year = filters.revenueYear;
+  const month = filters.revenueMonth;
+  const activeCust = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv")
+    .sort((a,b) => (a.Title||"").localeCompare(b.Title||""));
+
+  // Summen für diesen Monat
+  let sumSaaS = 0, sumBPO = 0, sumLic = 0, sumExt = 0, doneCount = 0;
+  activeCust.forEach(c => {
+    const r = findRev(c.id, year, month);
+    const calc = calcRevenue(r, c);
+    sumSaaS += calc.saas;
+    sumBPO += calc.bpo;
+    sumLic += parseInt(r?.Licenses) || 0;
+    sumExt += parseFloat(r?.ExternalRevenue) || 0;
+    if (r?.Invoiced) doneCount++;
+  });
+
+  const yearOptions = [year-1, year, year+1].map(y => `<option ${y===year?"selected":""}>${y}</option>`).join("");
+  const monthOptions = MONTH_NAMES.map((m,i) => `<option value="${i+1}" ${i+1===month?"selected":""}>${m}</option>`).join("");
+
+  el.innerHTML = `
+    <div style="display:flex; gap:12px; margin-bottom:16px; align-items:center; flex-wrap:wrap;">
+      <label style="color:var(--text-dim);font-size:12px">Monat:</label>
+      <select onchange="filters.revenueMonth=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${monthOptions}</select>
+      <select onchange="filters.revenueYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${yearOptions}</select>
+      <div style="margin-left:auto; display:flex; gap:20px; font-size:12px; flex-wrap:wrap;">
+        <div><span style="color:var(--text-dim)">SaaS:</span> <span style="font-family:var(--font-mono);color:var(--accent)">CHF ${fmtCHFShort(sumSaaS)}</span></div>
+        <div><span style="color:var(--text-dim)">BPO:</span> <span style="font-family:var(--font-mono);color:var(--accent-2)">CHF ${fmtCHFShort(sumBPO)}</span></div>
+        <div><span style="color:var(--text-dim)">Total:</span> <span style="font-family:var(--font-mono);font-weight:600">CHF ${fmtCHFShort(sumSaaS+sumBPO)}</span></div>
+        <div><span style="color:var(--text-dim)">Aussen:</span> <span style="font-family:var(--font-mono)">CHF ${fmtCHFShort(sumExt)}</span></div>
+        <div><span style="color:var(--text-dim)">Fakt:</span> <span style="font-family:var(--font-mono)">${doneCount}/${activeCust.length}</span></div>
+      </div>
+    </div>
+
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th>Kunde</th>
+        <th style="text-align:right">Lizenzen</th>
+        <th style="text-align:right">Aussenumsatz</th>
+        <th style="text-align:right" class="dim">SaaS</th>
+        <th style="text-align:right" class="dim">BPO</th>
+        <th style="text-align:right" class="dim">Total</th>
+        <th>Notiz</th>
+        <th style="text-align:center">Faktur.</th>
+      </tr></thead>
+      <tbody>
+        ${activeCust.map(c => {
+          const r = findRev(c.id, year, month) || {};
+          const calc = calcRevenue(r, c);
+          const needLic = segmentNeedsLicenses(c.Segment);
+          const needExt = segmentNeedsExternal(c.Segment);
+          const chargesSaaS = segmentChargesSaaS(c.Segment);
+          return `<tr data-cust="${c.id}">
+            <td>
+              <strong>${escape(c.Title||"")}</strong>
+              <div style="color:var(--text-dim);font-size:11px;margin-top:2px">
+                ${escape(c.Segment||"")}
+                ${c.PricePerLicense ? ` · ${parseFloat(c.PricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/Liz` : ""}
+                ${c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}
+              </div>
+            </td>
+            <td class="rev-cell" style="text-align:right">
+              ${needLic ? `<input class="rev-input" type="number" step="1" min="0" value="${r.Licenses||""}" onblur="saveRev(${c.id}, ${year}, ${month}, 'Licenses', this.value, this)" data-orig="${r.Licenses||""}">
+              <span class="saved-flash">✓</span>` : `<span style="color:var(--text-faint)">—</span>`}
+            </td>
+            <td class="rev-cell" style="text-align:right">
+              ${needExt ? `<input class="rev-input" type="number" step="100" min="0" value="${r.ExternalRevenue||""}" onblur="saveRev(${c.id}, ${year}, ${month}, 'ExternalRevenue', this.value, this)" data-orig="${r.ExternalRevenue||""}">
+              <span class="saved-flash">✓</span>` : `<span style="color:var(--text-faint)">—</span>`}
+            </td>
+            <td style="text-align:right;font-family:var(--font-mono);color:${chargesSaaS && calc.saas ? "var(--accent)" : "var(--text-faint)"};font-size:12px">
+              ${chargesSaaS && calc.saas ? fmtCHFShort(calc.saas) : "—"}
+            </td>
+            <td style="text-align:right;font-family:var(--font-mono);color:${calc.bpo ? "var(--accent-2)" : "var(--text-faint)"};font-size:12px">
+              ${calc.bpo ? fmtCHFShort(calc.bpo) : "—"}
+            </td>
+            <td style="text-align:right;font-family:var(--font-mono);font-weight:600;font-size:12px">
+              ${calc.total ? fmtCHFShort(calc.total) : "—"}
+            </td>
+            <td class="rev-cell">
+              <input class="rev-input" type="text" style="text-align:left" value="${escape(r.Notes||"")}" placeholder="—" onblur="saveRev(${c.id}, ${year}, ${month}, 'Notes', this.value, this)" data-orig="${escape(r.Notes||"")}">
+              <span class="saved-flash">✓</span>
+            </td>
+            <td style="text-align:center">
+              <span class="rev-invoiced-toggle ${r.Invoiced?"yes":"no"}" onclick="toggleInvoiced(${c.id}, ${year}, ${month})">
+                ${r.Invoiced ? "✓ Ja" : "○ Nein"}
+              </span>
+            </td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table></div>
+
+    <div style="margin-top:12px;color:var(--text-faint);font-size:11px">
+      Tipp: Zelle anklicken, Wert eintippen, Tab oder Klick daneben speichert. SaaS/BPO/Total werden automatisch berechnet.
+    </div>
+  `;
+}
+
+/* === Modus: Pro Kunde === */
+function renderRevenueByCustomer(el) {
+  const year = filters.revenueYear;
+  let custId = filters.revenueCustomerId;
+  if (!custId && cache.customers.length) custId = cache.customers[0].id;
+
+  const activeCust = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv")
+    .sort((a,b) => (a.Title||"").localeCompare(b.Title||""));
+  const cust = cache.customers.find(c => c.id == custId);
+
+  const custOptions = activeCust.map(c => `<option value="${c.id}" ${c.id==custId?"selected":""}>${escape(c.Title||"")}</option>`).join("");
+  const yearOptions = [year-1, year, year+1].map(y => `<option ${y===year?"selected":""}>${y}</option>`).join("");
+
+  if (!cust) {
+    el.innerHTML = `<div class="empty">Kein Kunde ausgewählt.</div>`;
+    return;
+  }
+
+  const needLic = segmentNeedsLicenses(cust.Segment);
+  const needExt = segmentNeedsExternal(cust.Segment);
+  const chargesSaaS = segmentChargesSaaS(cust.Segment);
+
+  // Jahressummen
+  let yearSaaS = 0, yearBPO = 0, yearTotal = 0, yearExt = 0;
+  for (let m = 1; m <= 12; m++) {
+    const r = findRev(custId, year, m);
+    const calc = calcRevenue(r, cust);
+    yearSaaS += calc.saas;
+    yearBPO += calc.bpo;
+    yearTotal += calc.total;
+    yearExt += parseFloat(r?.ExternalRevenue) || 0;
+  }
+
+  el.innerHTML = `
+    <div style="display:flex; gap:12px; margin-bottom:8px; align-items:center; flex-wrap:wrap;">
+      <select onchange="filters.revenueCustomerId=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit;min-width:240px">${custOptions}</select>
+      <select onchange="filters.revenueYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${yearOptions}</select>
+      <div style="margin-left:auto; display:flex; gap:20px; font-size:12px; flex-wrap:wrap;">
+        <div><span style="color:var(--text-dim)">SaaS ${year}:</span> <span style="font-family:var(--font-mono);color:var(--accent)">CHF ${fmtCHFShort(yearSaaS)}</span></div>
+        <div><span style="color:var(--text-dim)">BPO ${year}:</span> <span style="font-family:var(--font-mono);color:var(--accent-2)">CHF ${fmtCHFShort(yearBPO)}</span></div>
+        <div><span style="color:var(--text-dim)">Total:</span> <span style="font-family:var(--font-mono);font-weight:600">CHF ${fmtCHFShort(yearTotal)}</span></div>
+      </div>
+    </div>
+
+    <div style="color:var(--text-dim);font-size:11px;margin-bottom:14px">
+      <strong style="color:var(--text)">${escape(cust.Segment||"")}</strong>
+      ${cust.PricePerLicense ? ` · ${parseFloat(cust.PricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/Lizenz` : ""}
+      ${cust.BPORate ? ` · ${parseFloat(cust.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}% auf Aussenumsatz` : ""}
+      ${(!cust.PricePerLicense && needLic) || (!cust.BPORate && needExt) ? `<span style="color:var(--warn);margin-left:8px">⚠ Preismodell unvollständig — bitte beim Kunden ergänzen</span>` : ""}
+    </div>
+
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th>Monat</th>
+        <th style="text-align:right">Lizenzen</th>
+        <th style="text-align:right">Aussenumsatz</th>
+        <th style="text-align:right" class="dim">SaaS</th>
+        <th style="text-align:right" class="dim">BPO</th>
+        <th style="text-align:right" class="dim">Total</th>
+        <th>Notiz</th>
+        <th style="text-align:center">Faktur.</th>
+      </tr></thead>
+      <tbody>
+        ${MONTH_NAMES.map((mname, i) => {
+          const m = i + 1;
+          const r = findRev(custId, year, m) || {};
+          const calc = calcRevenue(r, cust);
+          return `<tr>
+            <td><strong>${mname} ${year}</strong></td>
+            <td class="rev-cell" style="text-align:right">
+              ${needLic ? `<input class="rev-input" type="number" step="1" min="0" value="${r.Licenses||""}" onblur="saveRev(${custId}, ${year}, ${m}, 'Licenses', this.value, this)" data-orig="${r.Licenses||""}">
+              <span class="saved-flash">✓</span>` : `<span style="color:var(--text-faint)">—</span>`}
+            </td>
+            <td class="rev-cell" style="text-align:right">
+              ${needExt ? `<input class="rev-input" type="number" step="100" min="0" value="${r.ExternalRevenue||""}" onblur="saveRev(${custId}, ${year}, ${m}, 'ExternalRevenue', this.value, this)" data-orig="${r.ExternalRevenue||""}">
+              <span class="saved-flash">✓</span>` : `<span style="color:var(--text-faint)">—</span>`}
+            </td>
+            <td style="text-align:right;font-family:var(--font-mono);color:${chargesSaaS && calc.saas ? "var(--accent)" : "var(--text-faint)"};font-size:12px">
+              ${chargesSaaS && calc.saas ? fmtCHFShort(calc.saas) : "—"}
+            </td>
+            <td style="text-align:right;font-family:var(--font-mono);color:${calc.bpo ? "var(--accent-2)" : "var(--text-faint)"};font-size:12px">
+              ${calc.bpo ? fmtCHFShort(calc.bpo) : "—"}
+            </td>
+            <td style="text-align:right;font-family:var(--font-mono);font-weight:600;font-size:12px">
+              ${calc.total ? fmtCHFShort(calc.total) : "—"}
+            </td>
+            <td class="rev-cell">
+              <input class="rev-input" type="text" style="text-align:left" value="${escape(r.Notes||"")}" placeholder="—" onblur="saveRev(${custId}, ${year}, ${m}, 'Notes', this.value, this)" data-orig="${escape(r.Notes||"")}">
+              <span class="saved-flash">✓</span>
+            </td>
+            <td style="text-align:center">
+              <span class="rev-invoiced-toggle ${r.Invoiced?"yes":"no"}" onclick="toggleInvoiced(${custId}, ${year}, ${m})">
+                ${r.Invoiced ? "✓ Ja" : "○ Nein"}
+              </span>
+            </td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table></div>
+  `;
+}
+
+/* === Save-Logik === */
+async function saveRev(customerId, year, month, field, value, inputEl) {
+  // Skip wenn Wert unverändert
+  const orig = inputEl?.dataset.orig || "";
+  const newVal = (value || "").toString();
+  if (orig === newVal) return;
+
+  // Numerische Felder konvertieren
+  let payload;
+  if (field === "Licenses") {
+    payload = newVal ? parseInt(newVal) : null;
+  } else if (field === "SaaSRevenue" || field === "BPORevenue" || field === "ExternalRevenue") {
+    payload = newVal ? parseFloat(newVal) : null;
+  } else {
+    payload = newVal || null;
+  }
+
+  // UI: saving
+  if (inputEl) {
+    inputEl.classList.remove("saved", "error");
+    inputEl.classList.add("saving");
+  }
+
+  try {
+    const cust = cache.customers.find(c => c.id == customerId);
+    const existing = findRev(customerId, year, month);
+
+    // Berechne die abgeleiteten Werte basierend auf dem neuen Wert
+    const projectedRec = { ...(existing || {}), [field]: payload };
+    const calc = calcRevenue(projectedRec, cust);
+    const derived = { SaaSRevenue: calc.saas, BPORevenue: calc.bpo };
+
+    if (existing) {
+      // Update das geänderte Feld + die abgeleiteten Werte (wenn Input-Felder betroffen sind)
+      const updateData = { [field]: payload };
+      if (field === "Licenses" || field === "ExternalRevenue") {
+        updateData.SaaSRevenue = derived.SaaSRevenue;
+        updateData.BPORevenue = derived.BPORevenue;
+      }
+      await updateItem("MonthlyRevenue", existing.id, updateData);
+    } else {
+      // Neue Zeile anlegen
+      const title = `${cust?.Title || "Customer"} - ${year}-${String(month).padStart(2,"0")}`;
+      const newRecord = {
+        Title: title, CustomerId: customerId, Year: year, Month: month,
+        Licenses: 0, ExternalRevenue: 0,
+        SaaSRevenue: derived.SaaSRevenue, BPORevenue: derived.BPORevenue,
+        Invoiced: false,
+        [field]: payload
+      };
+      await createItem("MonthlyRevenue", newRecord);
+    }
+    await reload("MonthlyRevenue");
+
+    // UI: saved
+    if (inputEl) {
+      inputEl.classList.remove("saving");
+      inputEl.classList.add("saved");
+      inputEl.dataset.orig = newVal;
+      const cell = inputEl.closest(".rev-cell");
+      if (cell) {
+        cell.classList.add("flash");
+        setTimeout(() => cell.classList.remove("flash"), 600);
+      }
+      setTimeout(() => inputEl.classList.remove("saved"), 1200);
+    }
+    // Bei Licenses oder ExternalRevenue: ganzes Re-Render, damit berechnete Zellen aktualisieren
+    if (field === "Licenses" || field === "ExternalRevenue") {
+      render();
+    }
+  } catch (e) {
+    if (inputEl) {
+      inputEl.classList.remove("saving");
+      inputEl.classList.add("error");
+    }
+    toast(e.message, true);
+  }
+}
+
+async function toggleInvoiced(customerId, year, month) {
+  const existing = findRev(customerId, year, month);
+  const newValue = !existing?.Invoiced;
+  try {
+    if (existing) {
+      await updateItem("MonthlyRevenue", existing.id, {
+        Invoiced: newValue,
+        InvoicedDate: newValue ? new Date().toISOString().slice(0,10) : null
+      });
+    } else {
+      const cust = cache.customers.find(c => c.id == customerId);
+      const title = `${cust?.Title || "Customer"} - ${year}-${String(month).padStart(2,"0")}`;
+      await createItem("MonthlyRevenue", {
+        Title: title, CustomerId: customerId, Year: year, Month: month,
+        Licenses: 0, SaaSRevenue: 0, BPORevenue: 0,
+        Invoiced: newValue,
+        InvoicedDate: newValue ? new Date().toISOString().slice(0,10) : null
+      });
+    }
+    await reload("MonthlyRevenue");
+    render();
+    toast(newValue ? "Als fakturiert markiert" : "Fakturiert zurückgesetzt");
+  } catch (e) { toast(e.message, true); }
+}
+
 /* ---------- Customers ---------- */
 function renderCustomers(el) {
   document.getElementById("view-actions").innerHTML = `
@@ -852,6 +1266,40 @@ function renderCustomers(el) {
   `;
 }
 
+function renderCustomerRevPreview(customerId) {
+  const cust = cache.customers.find(c => c.id == customerId);
+  const revs = cache.monthlyrevenue
+    .filter(r => r.CustomerId == customerId)
+    .sort((a,b) => (b.Year - a.Year) * 100 + (b.Month - a.Month))
+    .slice(0, 6);
+  if (!revs.length) return `<div class="empty" style="padding:12px">Noch keine Umsätze erfasst.</div>`;
+  return `<div class="table-wrap"><table>
+    <thead><tr>
+      <th>Monat</th>
+      <th style="text-align:right">Lizenzen</th>
+      <th style="text-align:right">Aussen</th>
+      <th style="text-align:right">SaaS</th>
+      <th style="text-align:right">BPO</th>
+      <th style="text-align:right">Total</th>
+      <th style="text-align:center">Faktur.</th>
+    </tr></thead>
+    <tbody>
+      ${revs.map(r => {
+        const calc = calcRevenue(r, cust);
+        return `<tr>
+          <td>${MONTH_NAMES[r.Month-1]} ${r.Year}</td>
+          <td style="text-align:right;font-family:var(--font-mono)">${r.Licenses || 0}</td>
+          <td style="text-align:right;font-family:var(--font-mono);color:var(--text-dim)">${fmtCHFShort(r.ExternalRevenue)}</td>
+          <td style="text-align:right;font-family:var(--font-mono);color:var(--accent)">${fmtCHFShort(calc.saas)}</td>
+          <td style="text-align:right;font-family:var(--font-mono);color:var(--accent-2)">${fmtCHFShort(calc.bpo)}</td>
+          <td style="text-align:right;font-family:var(--font-mono);font-weight:600">${fmtCHFShort(calc.total)}</td>
+          <td style="text-align:center">${r.Invoiced ? `<span style="color:var(--accent)">✓</span>` : `<span style="color:var(--text-faint)">○</span>`}</td>
+        </tr>`;
+      }).join("")}
+    </tbody>
+  </table></div>`;
+}
+
 function openCustomer(id) {
   const c = cache.customers.find(x => x.id == id);
   if (!c) return;
@@ -868,14 +1316,17 @@ function openCustomer(id) {
       <dt>Start</dt><dd>${c.StartDate ? c.StartDate.slice(0,10) : "—"}</dd>
       <dt>Ende</dt><dd>${c.EndDate ? c.EndDate.slice(0,10) : "—"}</dd>
       <dt>Owner</dt><dd>${escape(ownerLabel(c.Owner)||"—")}</dd>
+      <dt>Preis/Lizenz</dt><dd style="font-family:var(--font-mono)">${c.PricePerLicense ? "CHF " + parseFloat(c.PricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—"}</dd>
+      <dt>BPO-Satz</dt><dd style="font-family:var(--font-mono)">${c.BPORate ? parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2}) + " %" : "—"}</dd>
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Commit</dt><dd style="font-family:var(--font-mono)">${c.PipelineCommit ? "CHF " + parseFloat(c.PipelineCommit).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Best-Case</dt><dd style="font-family:var(--font-mono)">${c.PipelineBestCase ? "CHF " + parseFloat(c.PipelineBestCase).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
     </dl>
 
-    <h3 style="margin-top:20px;font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Monatsumsätze (${revs.length})</h3>
-    ${revs.length ? `<div class="empty" style="padding:8px;font-size:12px">Detail-Ansicht und Erfassung folgt im nächsten Update (Monthly-Revenue-Tab).</div>` : `<div class="empty" style="padding:12px">Noch keine Umsätze erfasst.</div>`}
+    <h3 style="margin-top:20px;font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Letzte Monatsumsätze</h3>
+    ${renderCustomerRevPreview(id)}
+    <div style="margin-top:8px"><button class="btn btn-sm" onclick="closeModal();filters.revenueMode='customer';filters.revenueCustomerId=${id};currentView='revenue';document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));document.querySelector('nav button[data-view=revenue]').classList.add('active');render()">In Umsätze-Tab öffnen</button></div>
   `, [
     `<button class="btn btn-danger" onclick="deleteCustomer(${id})">Löschen</button>`,
     `<button class="btn" onclick="editCustomer(${id})">Bearbeiten</button>`
@@ -905,6 +1356,12 @@ function editCustomer(id) {
       <div class="field"><label>Start</label><input id="f-start" type="date" value="${c.StartDate?c.StartDate.slice(0,10):""}"></div>
       <div class="field"><label>Ende</label><input id="f-end" type="date" value="${c.EndDate?c.EndDate.slice(0,10):""}"></div>
     </div>
+    <h4 style="margin:18px 0 8px;font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Preismodell</h4>
+    <div class="field-row">
+      <div class="field"><label>Preis pro Lizenz (CHF/Monat)</label><input id="f-pricelic" type="number" step="0.01" min="0" value="${c.PricePerLicense||""}" placeholder="z.B. 340"></div>
+      <div class="field"><label>BPO-Satz (% auf Aussenumsatz)</label><input id="f-bporate" type="number" step="0.01" min="0" max="100" value="${c.BPORate||""}" placeholder="z.B. 1.2"></div>
+    </div>
+    <h4 style="margin:18px 0 8px;font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Planung</h4>
     <div class="field"><label>Ziel-ARR SaaS (CHF)</label><input id="f-targetarr" type="number" step="1000" min="0" value="${c.TargetARR||""}"></div>
     <div class="field-row">
       <div class="field"><label>Pipeline Commit (CHF)</label><input id="f-commit" type="number" step="1000" min="0" value="${c.PipelineCommit||""}"></div>
@@ -930,6 +1387,8 @@ async function saveCustomer(id) {
     StartDate: start || null,
     EndDate: end || null,
     Owner: val("f-owner") || null,
+    PricePerLicense: val("f-pricelic") ? parseFloat(val("f-pricelic")) : null,
+    BPORate: val("f-bporate") ? parseFloat(val("f-bporate")) : null,
     TargetARR: val("f-targetarr") ? parseFloat(val("f-targetarr")) : null,
     PipelineCommit: val("f-commit") ? parseFloat(val("f-commit")) : null,
     PipelineBestCase: val("f-bestcase") ? parseFloat(val("f-bestcase")) : null,
@@ -1558,7 +2017,14 @@ function isMine(owner) {
 }
 
 // Filter-State (in-memory, pro Session)
-const filters = { tasksScope: "mine", dashboardTasksScope: "mine" };
+const filters = {
+  tasksScope: "mine",
+  dashboardTasksScope: "mine",
+  revenueMode: "month",       // "month" oder "customer"
+  revenueYear: new Date().getFullYear(),
+  revenueMonth: new Date().getMonth() + 1,
+  revenueCustomerId: null
+};
 
 function escape(s) {
   if (s === null || s === undefined) return "";
