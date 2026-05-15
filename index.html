@@ -1424,8 +1424,6 @@ function openCustomer(id) {
       <dt>Preis/Lizenz</dt><dd style="font-family:var(--font-mono)">${c.PricePerLicense ? "CHF " + parseFloat(c.PricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—"}</dd>
       <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}</dd>
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
-      <dt>Commit</dt><dd style="font-family:var(--font-mono)">${c.PipelineCommit ? "CHF " + parseFloat(c.PipelineCommit).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
-      <dt>Best-Case</dt><dd style="font-family:var(--font-mono)">${c.PipelineBestCase ? "CHF " + parseFloat(c.PipelineBestCase).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
     </dl>
 
@@ -1447,10 +1445,10 @@ function editCustomer(id) {
     .map(co => `<option value="${co.id}" ${c.CompanyId==co.id?"selected":""}>${escape(co.Title)}${co.IsCustomer ? " ★" : ""}</option>`).join("");
 
   showModal(id ? "Kunde bearbeiten" : "Neuer Kunde", `
-    <div class="field"><label>Bezeichnung / Vertragsname *</label><input id="f-title" value="${escape(c.Title||"")}" placeholder="z.B. Müller AG - SaaS Premium"></div>
-    <div class="field"><label>Firma *</label><select id="f-company"><option value="">—</option>${companyOptions}</select></div>
+    <input type="hidden" id="f-title" value="${escape(c.Title||"")}">
+    <div class="field"><label>Firma *</label><select id="f-company" onchange="updateCustomerTitle()"><option value="">—</option>${companyOptions}</select></div>
     <div class="field-row">
-      <div class="field"><label>Segment</label><select id="f-segment">${SEGMENTS.map(s => `<option ${s===(c.Segment||"SaaS")?"selected":""}>${s}</option>`).join("")}</select></div>
+      <div class="field"><label>Segment</label><select id="f-segment" onchange="updateCustomerTitle()">${SEGMENTS.map(s => `<option ${s===(c.Segment||"Nur SaaS")?"selected":""}>${s}</option>`).join("")}</select></div>
       <div class="field"><label>Status</label><select id="f-status">${CUSTOMER_STATUS.map(s => `<option ${s===(c.Status||"Aktiv")?"selected":""}>${s}</option>`).join("")}</select></div>
     </div>
     <div class="field-row">
@@ -1477,12 +1475,7 @@ function editCustomer(id) {
       <label>Stundensatz (CHF/h)</label>
       <input id="f-hourlyrate" type="number" step="0.01" min="0" value="${c.HourlyRate||""}" placeholder="z.B. 180">
     </div>
-    <h4 style="margin:18px 0 8px;font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Planung</h4>
     <div class="field"><label>Ziel-ARR SaaS (CHF)</label><input id="f-targetarr" type="number" step="1000" min="0" value="${c.TargetARR||""}"></div>
-    <div class="field-row">
-      <div class="field"><label>Pipeline Commit (CHF)</label><input id="f-commit" type="number" step="1000" min="0" value="${c.PipelineCommit||""}"></div>
-      <div class="field"><label>Pipeline Best-Case (CHF)</label><input id="f-bestcase" type="number" step="1000" min="0" value="${c.PipelineBestCase||""}"></div>
-    </div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
   `, [
     `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
@@ -1490,12 +1483,34 @@ function editCustomer(id) {
   ]);
 }
 
+function updateCustomerTitle() {
+  const compSel = document.getElementById("f-company");
+  const segSel = document.getElementById("f-segment");
+  const titleInput = document.getElementById("f-title");
+  if (!compSel || !segSel || !titleInput) return;
+  const compId = compSel.value;
+  if (!compId) {
+    titleInput.value = "";
+    return;
+  }
+  const comp = cache.companies.find(c => c.id == parseInt(compId));
+  if (!comp) return;
+  const seg = segSel.value || "SaaS";
+  titleInput.value = `${comp.Title} - ${seg}`;
+}
+
 async function saveCustomer(id) {
   const compId = val("f-company");
   const start = val("f-start");
   const end = val("f-end");
+  let title = val("f-title");
+  // Fallback: Auto-Generierung falls Hidden-Feld leer geblieben ist
+  if (!title && compId) {
+    const comp = cache.companies.find(c => c.id == parseInt(compId));
+    if (comp) title = `${comp.Title} - ${val("f-segment") || "SaaS"}`;
+  }
   const data = {
-    Title: val("f-title"),
+    Title: title,
     CompanyId: compId ? parseInt(compId) : null,
     Segment: val("f-segment"),
     Status: val("f-status"),
@@ -1508,12 +1523,10 @@ async function saveCustomer(id) {
     BPORate: val("f-bporate") ? parseFloat(val("f-bporate")) : null,
     HourlyRate: val("f-hourlyrate") ? parseFloat(val("f-hourlyrate")) : null,
     TargetARR: val("f-targetarr") ? parseFloat(val("f-targetarr")) : null,
-    PipelineCommit: val("f-commit") ? parseFloat(val("f-commit")) : null,
-    PipelineBestCase: val("f-bestcase") ? parseFloat(val("f-bestcase")) : null,
     Notes: val("f-notes")
   };
-  if (!data.Title) return toast("Vertragsname erforderlich", true);
   if (!data.CompanyId) return toast("Firma erforderlich", true);
+  if (!data.Title) return toast("Konnte Vertragsname nicht generieren — bitte Firma wählen", true);
   try {
     if (id) await updateItem("Customers", id, data);
     else {
@@ -1910,13 +1923,17 @@ function editDeal(id) {
   const companyOptions = cache.companies
     .sort((a,b) => (a.Title||"").localeCompare(b.Title||""))
     .map(co => `<option value="${co.id}" ${d.CompanyId==co.id?"selected":""}>${escape(co.Title)}</option>`).join("");
-  const contactOptions = cache.contacts
+  // Initial: Kontakte nur von der ausgewählten Firma (falls eine ist), sonst alle
+  const initialContacts = d.CompanyId
+    ? cache.contacts.filter(co => co.CompanyId == d.CompanyId)
+    : cache.contacts;
+  const contactOptions = initialContacts
     .sort((a,b) => (a.Title||"").localeCompare(b.Title||""))
     .map(co => `<option value="${co.id}" ${d.ContactId==co.id?"selected":""}>${escape(co.Title)}</option>`).join("");
   showModal(id ? "Deal bearbeiten" : "Neuer Deal", `
     <div class="field"><label>Deal-Name</label><input id="f-title" value="${escape(d.Title||"")}" placeholder="optional - sonst automatisch aus Firma"></div>
     <div class="field-row">
-      <div class="field"><label>Firma</label><select id="f-company"><option value="">—</option>${companyOptions}</select></div>
+      <div class="field"><label>Firma</label><select id="f-company" onchange="filterDealContacts()"><option value="">—</option>${companyOptions}</select></div>
       <div class="field"><label>Kontakt</label><select id="f-contact"><option value="">—</option>${contactOptions}</select></div>
     </div>
     <div class="field-row">
@@ -1933,6 +1950,25 @@ function editDeal(id) {
     `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
     `<button class="btn btn-primary" onclick="saveDeal(${id||"null"})">Speichern</button>`
   ]);
+}
+
+function filterDealContacts() {
+  const compSel = document.getElementById("f-company");
+  const contactSel = document.getElementById("f-contact");
+  if (!compSel || !contactSel) return;
+  const currentVal = contactSel.value;
+  const compId = compSel.value;
+  const filtered = compId
+    ? cache.contacts.filter(co => co.CompanyId == compId)
+    : cache.contacts;
+  const sorted = filtered.sort((a,b) => (a.Title||"").localeCompare(b.Title||""));
+  contactSel.innerHTML = `<option value="">—</option>` + sorted.map(co =>
+    `<option value="${co.id}" ${co.id==currentVal?"selected":""}>${escape(co.Title)}</option>`
+  ).join("");
+  // Wenn der aktuelle Kontakt nicht mehr passt (neue Firma) → leeren
+  if (currentVal && !filtered.some(co => co.id == currentVal)) {
+    contactSel.value = "";
+  }
 }
 async function saveDeal(id) {
   const compId = val("f-company"), contId = val("f-contact");
