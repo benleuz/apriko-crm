@@ -503,14 +503,15 @@ const CONFIG = {
 
 const STAGES = ["Lead", "Qualified", "Proposal", "Negotiation", "Won", "Lost"];
 const ACTIVITY_TYPES = ["Note", "Call", "Email", "Meeting", "Task"];
-const INDUSTRIES = ["SaaS", "SaaS und BPO", "BPO Sonstiges"];
+const INDUSTRIES = ["Nur SaaS", "SaaS und BPO", "Nur BPO", "BPO inkl. SaaS"];
 const SEGMENTS = ["Nur SaaS", "SaaS und BPO", "Nur BPO", "BPO inkl. SaaS"];
+const BPO_MODELS = ["Prozentual", "Stundensatz"];
 
 // Welche Felder pro Segment relevant sind
 function segmentNeedsLicenses(segment) {
   return segment === "Nur SaaS" || segment === "SaaS und BPO" || segment === "BPO inkl. SaaS";
 }
-function segmentNeedsExternal(segment) {
+function segmentNeedsBPO(segment) {
   return segment === "SaaS und BPO" || segment === "Nur BPO" || segment === "BPO inkl. SaaS";
 }
 function segmentChargesSaaS(segment) {
@@ -518,17 +519,35 @@ function segmentChargesSaaS(segment) {
   return segment === "Nur SaaS" || segment === "SaaS und BPO";
 }
 
+// Was wird vom BPO-Modell als Input gebraucht?
+function needsExternal(customer) {
+  return segmentNeedsBPO(customer?.Segment) && (customer?.BPOModel || "Prozentual") === "Prozentual";
+}
+function needsHours(customer) {
+  return segmentNeedsBPO(customer?.Segment) && customer?.BPOModel === "Stundensatz";
+}
+
 // Berechnung: gibt {saas, bpo, total} zurück für einen Monatseintrag
 function calcRevenue(rec, customer) {
   const seg = customer?.Segment || "Nur SaaS";
   const pricePerLic = parseFloat(customer?.PricePerLicense) || 0;
-  const bpoRate = parseFloat(customer?.BPORate) || 0;
   const lic = parseInt(rec?.Licenses) || 0;
-  const ext = parseFloat(rec?.ExternalRevenue) || 0;
 
   let saas = 0, bpo = 0;
   if (segmentChargesSaaS(seg)) saas = lic * pricePerLic;
-  if (segmentNeedsExternal(seg)) bpo = ext * bpoRate / 100;
+
+  if (segmentNeedsBPO(seg)) {
+    const model = customer?.BPOModel || "Prozentual";
+    if (model === "Stundensatz") {
+      const rate = parseFloat(customer?.HourlyRate) || 0;
+      const hours = parseFloat(rec?.Hours) || 0;
+      bpo = hours * rate;
+    } else {
+      const bpoRate = parseFloat(customer?.BPORate) || 0;
+      const ext = parseFloat(rec?.ExternalRevenue) || 0;
+      bpo = ext * bpoRate / 100;
+    }
+  }
   return { saas, bpo, total: saas + bpo };
 }
 const CUSTOMER_STATUS = ["Aktiv", "Gekündigt", "Pausiert"];
@@ -944,7 +963,9 @@ function renderRevenueByMonth(el) {
     .sort((a,b) => (a.Title||"").localeCompare(b.Title||""));
 
   // Summen für diesen Monat
-  let sumSaaS = 0, sumBPO = 0, sumLic = 0, sumExt = 0, doneCount = 0;
+  let sumSaaS = 0, sumBPO = 0, sumLic = 0, sumExt = 0, sumHrs = 0;
+  let saasInvCount = 0, saasNeedCount = 0;
+  let bpoInvCount = 0, bpoNeedCount = 0;
   activeCust.forEach(c => {
     const r = findRev(c.id, year, month);
     const calc = calcRevenue(r, c);
@@ -952,7 +973,15 @@ function renderRevenueByMonth(el) {
     sumBPO += calc.bpo;
     sumLic += parseInt(r?.Licenses) || 0;
     sumExt += parseFloat(r?.ExternalRevenue) || 0;
-    if (r?.Invoiced) doneCount++;
+    sumHrs += parseFloat(r?.Hours) || 0;
+    if (segmentChargesSaaS(c.Segment) && calc.saas > 0) {
+      saasNeedCount++;
+      if (r?.InvoicedSaaS) saasInvCount++;
+    }
+    if (segmentNeedsBPO(c.Segment) && calc.bpo > 0) {
+      bpoNeedCount++;
+      if (r?.InvoicedBPO) bpoInvCount++;
+    }
   });
 
   const yearOptions = [year-1, year, year+1].map(y => `<option ${y===year?"selected":""}>${y}</option>`).join("");
@@ -964,11 +993,9 @@ function renderRevenueByMonth(el) {
       <select onchange="filters.revenueMonth=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${monthOptions}</select>
       <select onchange="filters.revenueYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${yearOptions}</select>
       <div style="margin-left:auto; display:flex; gap:20px; font-size:12px; flex-wrap:wrap;">
-        <div><span style="color:var(--text-dim)">SaaS:</span> <span style="font-family:var(--font-mono);color:var(--accent)">CHF ${fmtCHFShort(sumSaaS)}</span></div>
-        <div><span style="color:var(--text-dim)">BPO:</span> <span style="font-family:var(--font-mono);color:var(--accent-2)">CHF ${fmtCHFShort(sumBPO)}</span></div>
+        <div><span style="color:var(--text-dim)">SaaS:</span> <span style="font-family:var(--font-mono);color:var(--accent)">CHF ${fmtCHFShort(sumSaaS)}</span> <span style="color:var(--text-faint)">· fakt. ${saasInvCount}/${saasNeedCount}</span></div>
+        <div><span style="color:var(--text-dim)">BPO:</span> <span style="font-family:var(--font-mono);color:var(--accent-2)">CHF ${fmtCHFShort(sumBPO)}</span> <span style="color:var(--text-faint)">· fakt. ${bpoInvCount}/${bpoNeedCount}</span></div>
         <div><span style="color:var(--text-dim)">Total:</span> <span style="font-family:var(--font-mono);font-weight:600">CHF ${fmtCHFShort(sumSaaS+sumBPO)}</span></div>
-        <div><span style="color:var(--text-dim)">Aussen:</span> <span style="font-family:var(--font-mono)">CHF ${fmtCHFShort(sumExt)}</span></div>
-        <div><span style="color:var(--text-dim)">Fakt:</span> <span style="font-family:var(--font-mono)">${doneCount}/${activeCust.length}</span></div>
       </div>
     </div>
 
@@ -976,37 +1003,54 @@ function renderRevenueByMonth(el) {
       <thead><tr>
         <th>Kunde</th>
         <th style="text-align:right">Lizenzen</th>
-        <th style="text-align:right">Aussenumsatz</th>
+        <th style="text-align:right">BPO-Input</th>
         <th style="text-align:right" class="dim">SaaS</th>
         <th style="text-align:right" class="dim">BPO</th>
         <th style="text-align:right" class="dim">Total</th>
         <th>Notiz</th>
-        <th style="text-align:center">Faktur.</th>
+        <th style="text-align:center">Fakt. SaaS</th>
+        <th style="text-align:center">Fakt. BPO</th>
       </tr></thead>
       <tbody>
         ${activeCust.map(c => {
           const r = findRev(c.id, year, month) || {};
           const calc = calcRevenue(r, c);
           const needLic = segmentNeedsLicenses(c.Segment);
-          const needExt = segmentNeedsExternal(c.Segment);
+          const useExt = needsExternal(c);
+          const useHrs = needsHours(c);
           const chargesSaaS = segmentChargesSaaS(c.Segment);
+          const hasBPO = segmentNeedsBPO(c.Segment);
+
+          // BPO-Input-Cell: entweder Aussenumsatz, Stunden oder gar nichts
+          let bpoInputCell;
+          if (useExt) {
+            bpoInputCell = `<input class="rev-input" type="number" step="100" min="0" value="${r.ExternalRevenue||""}" onblur="saveRev(${c.id}, ${year}, ${month}, 'ExternalRevenue', this.value, this)" data-orig="${r.ExternalRevenue||""}" title="Aussenumsatz in CHF">
+              <span class="saved-flash">✓</span>`;
+          } else if (useHrs) {
+            bpoInputCell = `<input class="rev-input" type="number" step="0.25" min="0" value="${r.Hours||""}" onblur="saveRev(${c.id}, ${year}, ${month}, 'Hours', this.value, this)" data-orig="${r.Hours||""}" title="Stunden">
+              <span class="saved-flash">✓</span>`;
+          } else {
+            bpoInputCell = `<span style="color:var(--text-faint)">—</span>`;
+          }
+
+          // Sub-Info pro Kunde
+          const subParts = [escape(c.Segment||"")];
+          if (c.PricePerLicense) subParts.push(`${parseFloat(c.PricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/Liz`);
+          if (useHrs && c.HourlyRate) subParts.push(`${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h`);
+          else if (useExt && c.BPORate) subParts.push(`${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%`);
+
           return `<tr data-cust="${c.id}">
             <td>
               <strong>${escape(c.Title||"")}</strong>
               <div style="color:var(--text-dim);font-size:11px;margin-top:2px">
-                ${escape(c.Segment||"")}
-                ${c.PricePerLicense ? ` · ${parseFloat(c.PricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/Liz` : ""}
-                ${c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}
+                ${subParts.join(" · ")}
               </div>
             </td>
             <td class="rev-cell" style="text-align:right">
               ${needLic ? `<input class="rev-input" type="number" step="1" min="0" value="${r.Licenses||""}" onblur="saveRev(${c.id}, ${year}, ${month}, 'Licenses', this.value, this)" data-orig="${r.Licenses||""}">
               <span class="saved-flash">✓</span>` : `<span style="color:var(--text-faint)">—</span>`}
             </td>
-            <td class="rev-cell" style="text-align:right">
-              ${needExt ? `<input class="rev-input" type="number" step="100" min="0" value="${r.ExternalRevenue||""}" onblur="saveRev(${c.id}, ${year}, ${month}, 'ExternalRevenue', this.value, this)" data-orig="${r.ExternalRevenue||""}">
-              <span class="saved-flash">✓</span>` : `<span style="color:var(--text-faint)">—</span>`}
-            </td>
+            <td class="rev-cell" style="text-align:right">${bpoInputCell}</td>
             <td style="text-align:right;font-family:var(--font-mono);color:${chargesSaaS && calc.saas ? "var(--accent)" : "var(--text-faint)"};font-size:12px">
               ${chargesSaaS && calc.saas ? fmtCHFShort(calc.saas) : "—"}
             </td>
@@ -1021,9 +1065,14 @@ function renderRevenueByMonth(el) {
               <span class="saved-flash">✓</span>
             </td>
             <td style="text-align:center">
-              <span class="rev-invoiced-toggle ${r.Invoiced?"yes":"no"}" onclick="toggleInvoiced(${c.id}, ${year}, ${month})">
-                ${r.Invoiced ? "✓ Ja" : "○ Nein"}
-              </span>
+              ${chargesSaaS ? `<span class="rev-invoiced-toggle ${r.InvoicedSaaS?"yes":"no"}" onclick="toggleInvoiced(${c.id}, ${year}, ${month}, 'SaaS')">
+                ${r.InvoicedSaaS ? "✓ Ja" : "○ Nein"}
+              </span>` : `<span style="color:var(--text-faint)">—</span>`}
+            </td>
+            <td style="text-align:center">
+              ${hasBPO ? `<span class="rev-invoiced-toggle ${r.InvoicedBPO?"yes":"no"}" onclick="toggleInvoiced(${c.id}, ${year}, ${month}, 'BPO')">
+                ${r.InvoicedBPO ? "✓ Ja" : "○ Nein"}
+              </span>` : `<span style="color:var(--text-faint)">—</span>`}
             </td>
           </tr>`;
         }).join("")}
@@ -1031,7 +1080,7 @@ function renderRevenueByMonth(el) {
     </table></div>
 
     <div style="margin-top:12px;color:var(--text-faint);font-size:11px">
-      Tipp: Zelle anklicken, Wert eintippen, Tab oder Klick daneben speichert. SaaS/BPO/Total werden automatisch berechnet.
+      Tipp: Zelle anklicken, Wert eintippen, Tab oder Klick daneben speichert. BPO-Input ist je nach Modell: Aussenumsatz (Prozentual) oder Stunden (Stundensatz). SaaS und BPO werden getrennt fakturiert.
     </div>
   `;
 }
@@ -1055,19 +1104,31 @@ function renderRevenueByCustomer(el) {
   }
 
   const needLic = segmentNeedsLicenses(cust.Segment);
-  const needExt = segmentNeedsExternal(cust.Segment);
+  const useExt = needsExternal(cust);
+  const useHrs = needsHours(cust);
   const chargesSaaS = segmentChargesSaaS(cust.Segment);
+  const hasBPO = segmentNeedsBPO(cust.Segment);
 
   // Jahressummen
-  let yearSaaS = 0, yearBPO = 0, yearTotal = 0, yearExt = 0;
+  let yearSaaS = 0, yearBPO = 0, yearTotal = 0;
   for (let m = 1; m <= 12; m++) {
     const r = findRev(custId, year, m);
     const calc = calcRevenue(r, cust);
     yearSaaS += calc.saas;
     yearBPO += calc.bpo;
     yearTotal += calc.total;
-    yearExt += parseFloat(r?.ExternalRevenue) || 0;
   }
+
+  // Sub-Info
+  const subParts = [`<strong style="color:var(--text)">${escape(cust.Segment||"")}</strong>`];
+  if (cust.PricePerLicense) subParts.push(`${parseFloat(cust.PricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/Lizenz`);
+  if (useHrs && cust.HourlyRate) subParts.push(`${parseFloat(cust.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})} CHF/h`);
+  else if (useExt && cust.BPORate) subParts.push(`${parseFloat(cust.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}% auf Aussenumsatz`);
+
+  const incomplete = (needLic && !cust.PricePerLicense) || (useExt && !cust.BPORate) || (useHrs && !cust.HourlyRate);
+
+  // BPO-Spalten-Header je nach Modell
+  const bpoColHeader = useExt ? "Aussenumsatz" : (useHrs ? "Stunden" : "BPO-Input");
 
   el.innerHTML = `
     <div style="display:flex; gap:12px; margin-bottom:8px; align-items:center; flex-wrap:wrap;">
@@ -1081,38 +1142,46 @@ function renderRevenueByCustomer(el) {
     </div>
 
     <div style="color:var(--text-dim);font-size:11px;margin-bottom:14px">
-      <strong style="color:var(--text)">${escape(cust.Segment||"")}</strong>
-      ${cust.PricePerLicense ? ` · ${parseFloat(cust.PricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/Lizenz` : ""}
-      ${cust.BPORate ? ` · ${parseFloat(cust.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}% auf Aussenumsatz` : ""}
-      ${(!cust.PricePerLicense && needLic) || (!cust.BPORate && needExt) ? `<span style="color:var(--warn);margin-left:8px">⚠ Preismodell unvollständig — bitte beim Kunden ergänzen</span>` : ""}
+      ${subParts.join(" · ")}
+      ${incomplete ? `<span style="color:var(--warn);margin-left:8px">⚠ Preismodell unvollständig — bitte beim Kunden ergänzen</span>` : ""}
     </div>
 
     <div class="table-wrap"><table>
       <thead><tr>
         <th>Monat</th>
         <th style="text-align:right">Lizenzen</th>
-        <th style="text-align:right">Aussenumsatz</th>
+        <th style="text-align:right">${bpoColHeader}</th>
         <th style="text-align:right" class="dim">SaaS</th>
         <th style="text-align:right" class="dim">BPO</th>
         <th style="text-align:right" class="dim">Total</th>
         <th>Notiz</th>
-        <th style="text-align:center">Faktur.</th>
+        <th style="text-align:center">Fakt. SaaS</th>
+        <th style="text-align:center">Fakt. BPO</th>
       </tr></thead>
       <tbody>
         ${MONTH_NAMES.map((mname, i) => {
           const m = i + 1;
           const r = findRev(custId, year, m) || {};
           const calc = calcRevenue(r, cust);
+
+          let bpoInputCell;
+          if (useExt) {
+            bpoInputCell = `<input class="rev-input" type="number" step="100" min="0" value="${r.ExternalRevenue||""}" onblur="saveRev(${custId}, ${year}, ${m}, 'ExternalRevenue', this.value, this)" data-orig="${r.ExternalRevenue||""}">
+              <span class="saved-flash">✓</span>`;
+          } else if (useHrs) {
+            bpoInputCell = `<input class="rev-input" type="number" step="0.25" min="0" value="${r.Hours||""}" onblur="saveRev(${custId}, ${year}, ${m}, 'Hours', this.value, this)" data-orig="${r.Hours||""}">
+              <span class="saved-flash">✓</span>`;
+          } else {
+            bpoInputCell = `<span style="color:var(--text-faint)">—</span>`;
+          }
+
           return `<tr>
             <td><strong>${mname} ${year}</strong></td>
             <td class="rev-cell" style="text-align:right">
               ${needLic ? `<input class="rev-input" type="number" step="1" min="0" value="${r.Licenses||""}" onblur="saveRev(${custId}, ${year}, ${m}, 'Licenses', this.value, this)" data-orig="${r.Licenses||""}">
               <span class="saved-flash">✓</span>` : `<span style="color:var(--text-faint)">—</span>`}
             </td>
-            <td class="rev-cell" style="text-align:right">
-              ${needExt ? `<input class="rev-input" type="number" step="100" min="0" value="${r.ExternalRevenue||""}" onblur="saveRev(${custId}, ${year}, ${m}, 'ExternalRevenue', this.value, this)" data-orig="${r.ExternalRevenue||""}">
-              <span class="saved-flash">✓</span>` : `<span style="color:var(--text-faint)">—</span>`}
-            </td>
+            <td class="rev-cell" style="text-align:right">${bpoInputCell}</td>
             <td style="text-align:right;font-family:var(--font-mono);color:${chargesSaaS && calc.saas ? "var(--accent)" : "var(--text-faint)"};font-size:12px">
               ${chargesSaaS && calc.saas ? fmtCHFShort(calc.saas) : "—"}
             </td>
@@ -1127,9 +1196,14 @@ function renderRevenueByCustomer(el) {
               <span class="saved-flash">✓</span>
             </td>
             <td style="text-align:center">
-              <span class="rev-invoiced-toggle ${r.Invoiced?"yes":"no"}" onclick="toggleInvoiced(${custId}, ${year}, ${m})">
-                ${r.Invoiced ? "✓ Ja" : "○ Nein"}
-              </span>
+              ${chargesSaaS ? `<span class="rev-invoiced-toggle ${r.InvoicedSaaS?"yes":"no"}" onclick="toggleInvoiced(${custId}, ${year}, ${m}, 'SaaS')">
+                ${r.InvoicedSaaS ? "✓ Ja" : "○ Nein"}
+              </span>` : `<span style="color:var(--text-faint)">—</span>`}
+            </td>
+            <td style="text-align:center">
+              ${hasBPO ? `<span class="rev-invoiced-toggle ${r.InvoicedBPO?"yes":"no"}" onclick="toggleInvoiced(${custId}, ${year}, ${m}, 'BPO')">
+                ${r.InvoicedBPO ? "✓ Ja" : "○ Nein"}
+              </span>` : `<span style="color:var(--text-faint)">—</span>`}
             </td>
           </tr>`;
         }).join("")}
@@ -1149,6 +1223,8 @@ async function saveRev(customerId, year, month, field, value, inputEl) {
   let payload;
   if (field === "Licenses") {
     payload = newVal ? parseInt(newVal) : null;
+  } else if (field === "Hours") {
+    payload = newVal ? parseFloat(newVal) : null;
   } else if (field === "SaaSRevenue" || field === "BPORevenue" || field === "ExternalRevenue") {
     payload = newVal ? parseFloat(newVal) : null;
   } else {
@@ -1168,14 +1244,15 @@ async function saveRev(customerId, year, month, field, value, inputEl) {
     // Berechne die abgeleiteten Werte basierend auf dem neuen Wert
     const projectedRec = { ...(existing || {}), [field]: payload };
     const calc = calcRevenue(projectedRec, cust);
-    const derived = { SaaSRevenue: calc.saas, BPORevenue: calc.bpo };
+
+    // Welche Input-Felder beeinflussen die Berechnung?
+    const calcFields = ["Licenses", "ExternalRevenue", "Hours"];
 
     if (existing) {
-      // Update das geänderte Feld + die abgeleiteten Werte (wenn Input-Felder betroffen sind)
       const updateData = { [field]: payload };
-      if (field === "Licenses" || field === "ExternalRevenue") {
-        updateData.SaaSRevenue = derived.SaaSRevenue;
-        updateData.BPORevenue = derived.BPORevenue;
+      if (calcFields.includes(field)) {
+        updateData.SaaSRevenue = calc.saas;
+        updateData.BPORevenue = calc.bpo;
       }
       await updateItem("MonthlyRevenue", existing.id, updateData);
     } else {
@@ -1183,9 +1260,9 @@ async function saveRev(customerId, year, month, field, value, inputEl) {
       const title = `${cust?.Title || "Customer"} - ${year}-${String(month).padStart(2,"0")}`;
       const newRecord = {
         Title: title, CustomerId: customerId, Year: year, Month: month,
-        Licenses: 0, ExternalRevenue: 0,
-        SaaSRevenue: derived.SaaSRevenue, BPORevenue: derived.BPORevenue,
-        Invoiced: false,
+        Licenses: 0, ExternalRevenue: 0, Hours: 0,
+        SaaSRevenue: calc.saas, BPORevenue: calc.bpo,
+        InvoicedSaaS: false, InvoicedBPO: false,
         [field]: payload
       };
       await createItem("MonthlyRevenue", newRecord);
@@ -1204,8 +1281,8 @@ async function saveRev(customerId, year, month, field, value, inputEl) {
       }
       setTimeout(() => inputEl.classList.remove("saved"), 1200);
     }
-    // Bei Licenses oder ExternalRevenue: ganzes Re-Render, damit berechnete Zellen aktualisieren
-    if (field === "Licenses" || field === "ExternalRevenue") {
+    // Bei Input-Feldern: ganzes Re-Render, damit berechnete Zellen aktualisieren
+    if (calcFields.includes(field)) {
       render();
     }
   } catch (e) {
@@ -1217,28 +1294,35 @@ async function saveRev(customerId, year, month, field, value, inputEl) {
   }
 }
 
-async function toggleInvoiced(customerId, year, month) {
+async function toggleInvoiced(customerId, year, month, type) {
+  // type ist "SaaS" oder "BPO"
+  const fieldFlag = "Invoiced" + type;       // InvoicedSaaS oder InvoicedBPO
+  const fieldDate = "Invoiced" + type + "Date";  // InvoicedSaaSDate oder InvoicedBPODate
+
   const existing = findRev(customerId, year, month);
-  const newValue = !existing?.Invoiced;
+  const newValue = !existing?.[fieldFlag];
+  const today = new Date().toISOString().slice(0,10);
+
   try {
     if (existing) {
       await updateItem("MonthlyRevenue", existing.id, {
-        Invoiced: newValue,
-        InvoicedDate: newValue ? new Date().toISOString().slice(0,10) : null
+        [fieldFlag]: newValue,
+        [fieldDate]: newValue ? today : null
       });
     } else {
       const cust = cache.customers.find(c => c.id == customerId);
       const title = `${cust?.Title || "Customer"} - ${year}-${String(month).padStart(2,"0")}`;
       await createItem("MonthlyRevenue", {
         Title: title, CustomerId: customerId, Year: year, Month: month,
-        Licenses: 0, SaaSRevenue: 0, BPORevenue: 0,
-        Invoiced: newValue,
-        InvoicedDate: newValue ? new Date().toISOString().slice(0,10) : null
+        Licenses: 0, ExternalRevenue: 0, Hours: 0,
+        InvoicedSaaS: false, InvoicedBPO: false,
+        [fieldFlag]: newValue,
+        [fieldDate]: newValue ? today : null
       });
     }
     await reload("MonthlyRevenue");
     render();
-    toast(newValue ? "Als fakturiert markiert" : "Fakturiert zurückgesetzt");
+    toast(newValue ? `${type} als fakturiert markiert` : `${type}-Faktura zurückgesetzt`);
   } catch (e) { toast(e.message, true); }
 }
 
@@ -1283,32 +1367,38 @@ function renderCustomers(el) {
 
 function renderCustomerRevPreview(customerId) {
   const cust = cache.customers.find(c => c.id == customerId);
+  const useHrs = needsHours(cust);
   const revs = cache.monthlyrevenue
     .filter(r => r.CustomerId == customerId)
     .sort((a,b) => (b.Year - a.Year) * 100 + (b.Month - a.Month))
     .slice(0, 6);
   if (!revs.length) return `<div class="empty" style="padding:12px">Noch keine Umsätze erfasst.</div>`;
+  const bpoColHeader = useHrs ? "Stunden" : "Aussen";
   return `<div class="table-wrap"><table>
     <thead><tr>
       <th>Monat</th>
-      <th style="text-align:right">Lizenzen</th>
-      <th style="text-align:right">Aussen</th>
+      <th style="text-align:right">Liz.</th>
+      <th style="text-align:right">${bpoColHeader}</th>
       <th style="text-align:right">SaaS</th>
       <th style="text-align:right">BPO</th>
       <th style="text-align:right">Total</th>
-      <th style="text-align:center">Faktur.</th>
+      <th style="text-align:center">Fakt.</th>
     </tr></thead>
     <tbody>
       ${revs.map(r => {
         const calc = calcRevenue(r, cust);
+        const bpoInput = useHrs ? (r.Hours ? parseFloat(r.Hours).toLocaleString("de-CH",{maximumFractionDigits:2}) + "h" : "—") : fmtCHFShort(r.ExternalRevenue);
         return `<tr>
           <td>${MONTH_NAMES[r.Month-1]} ${r.Year}</td>
           <td style="text-align:right;font-family:var(--font-mono)">${r.Licenses || 0}</td>
-          <td style="text-align:right;font-family:var(--font-mono);color:var(--text-dim)">${fmtCHFShort(r.ExternalRevenue)}</td>
+          <td style="text-align:right;font-family:var(--font-mono);color:var(--text-dim)">${bpoInput}</td>
           <td style="text-align:right;font-family:var(--font-mono);color:var(--accent)">${fmtCHFShort(calc.saas)}</td>
           <td style="text-align:right;font-family:var(--font-mono);color:var(--accent-2)">${fmtCHFShort(calc.bpo)}</td>
           <td style="text-align:right;font-family:var(--font-mono);font-weight:600">${fmtCHFShort(calc.total)}</td>
-          <td style="text-align:center">${r.Invoiced ? `<span style="color:var(--accent)">✓</span>` : `<span style="color:var(--text-faint)">○</span>`}</td>
+          <td style="text-align:center;font-size:11px">
+            <span style="color:${r.InvoicedSaaS?"var(--accent)":"var(--text-faint)"}" title="SaaS">${r.InvoicedSaaS?"S":"·"}</span>
+            <span style="color:${r.InvoicedBPO?"var(--accent-2)":"var(--text-faint)"}" title="BPO">${r.InvoicedBPO?"B":"·"}</span>
+          </td>
         </tr>`;
       }).join("")}
     </tbody>
@@ -1332,7 +1422,7 @@ function openCustomer(id) {
       <dt>Ende</dt><dd>${c.EndDate ? c.EndDate.slice(0,10) : "—"}</dd>
       <dt>Owner</dt><dd>${escape(ownerLabel(c.Owner)||"—")}</dd>
       <dt>Preis/Lizenz</dt><dd style="font-family:var(--font-mono)">${c.PricePerLicense ? "CHF " + parseFloat(c.PricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—"}</dd>
-      <dt>BPO-Satz</dt><dd style="font-family:var(--font-mono)">${c.BPORate ? parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2}) + " %" : "—"}</dd>
+      <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}</dd>
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Commit</dt><dd style="font-family:var(--font-mono)">${c.PipelineCommit ? "CHF " + parseFloat(c.PipelineCommit).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Best-Case</dt><dd style="font-family:var(--font-mono)">${c.PipelineBestCase ? "CHF " + parseFloat(c.PipelineBestCase).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
@@ -1372,9 +1462,20 @@ function editCustomer(id) {
       <div class="field"><label>Ende</label><input id="f-end" type="date" value="${c.EndDate?c.EndDate.slice(0,10):""}"></div>
     </div>
     <h4 style="margin:18px 0 8px;font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Preismodell</h4>
-    <div class="field-row">
-      <div class="field"><label>Preis pro Lizenz (CHF/Monat)</label><input id="f-pricelic" type="number" step="0.01" min="0" value="${c.PricePerLicense||""}" placeholder="z.B. 340"></div>
-      <div class="field"><label>BPO-Satz (% auf Aussenumsatz)</label><input id="f-bporate" type="number" step="0.01" min="0" max="100" value="${c.BPORate||""}" placeholder="z.B. 1.2"></div>
+    <div class="field"><label>Preis pro Lizenz (CHF/Monat)</label><input id="f-pricelic" type="number" step="0.01" min="0" value="${c.PricePerLicense||""}" placeholder="z.B. 340"></div>
+    <div class="field"><label>BPO-Modell</label>
+      <select id="f-bpomodel" onchange="document.getElementById('bpo-percent-row').style.display=this.value==='Prozentual'?'block':'none';document.getElementById('bpo-hourly-row').style.display=this.value==='Stundensatz'?'block':'none'">
+        <option value="" ${!c.BPOModel?"selected":""}>—</option>
+        ${BPO_MODELS.map(m => `<option value="${m}" ${c.BPOModel===m?"selected":""}>${m}</option>`).join("")}
+      </select>
+    </div>
+    <div id="bpo-percent-row" class="field" style="display:${c.BPOModel==='Prozentual'?'block':'none'}">
+      <label>BPO-Satz (% auf Aussenumsatz)</label>
+      <input id="f-bporate" type="number" step="0.01" min="0" max="100" value="${c.BPORate||""}" placeholder="z.B. 1.2">
+    </div>
+    <div id="bpo-hourly-row" class="field" style="display:${c.BPOModel==='Stundensatz'?'block':'none'}">
+      <label>Stundensatz (CHF/h)</label>
+      <input id="f-hourlyrate" type="number" step="0.01" min="0" value="${c.HourlyRate||""}" placeholder="z.B. 180">
     </div>
     <h4 style="margin:18px 0 8px;font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Planung</h4>
     <div class="field"><label>Ziel-ARR SaaS (CHF)</label><input id="f-targetarr" type="number" step="1000" min="0" value="${c.TargetARR||""}"></div>
@@ -1403,7 +1504,9 @@ async function saveCustomer(id) {
     EndDate: end || null,
     Owner: val("f-owner") || null,
     PricePerLicense: val("f-pricelic") ? parseFloat(val("f-pricelic")) : null,
+    BPOModel: val("f-bpomodel") || null,
     BPORate: val("f-bporate") ? parseFloat(val("f-bporate")) : null,
+    HourlyRate: val("f-hourlyrate") ? parseFloat(val("f-hourlyrate")) : null,
     TargetARR: val("f-targetarr") ? parseFloat(val("f-targetarr")) : null,
     PipelineCommit: val("f-commit") ? parseFloat(val("f-commit")) : null,
     PipelineBestCase: val("f-bestcase") ? parseFloat(val("f-bestcase")) : null,
