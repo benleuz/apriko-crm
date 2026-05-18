@@ -514,8 +514,12 @@ function segmentNeedsLicenses(segment) {
 function segmentNeedsBPO(segment) {
   return segment === "SaaS und BPO" || segment === "Nur BPO" || segment === "BPO inkl. SaaS";
 }
+// Wird der SaaS-Betrag überhaupt ausgewiesen (Spalte sichtbar)?
+function segmentShowsSaaS(segment) {
+  return segment === "Nur SaaS" || segment === "SaaS und BPO" || segment === "BPO inkl. SaaS";
+}
+// Wird SaaS SEPARAT fakturiert? (Bei "BPO inkl. SaaS" NICHT, weil im BPO drin)
 function segmentChargesSaaS(segment) {
-  // Bei "BPO inkl. SaaS" wird SaaS NICHT separat verrechnet (im BPO-% drin)
   return segment === "Nur SaaS" || segment === "SaaS und BPO";
 }
 
@@ -532,23 +536,46 @@ function calcRevenue(rec, customer) {
   const seg = customer?.Segment || "Nur SaaS";
   const pricePerLic = parseFloat(customer?.PricePerLicense) || 0;
   const lic = parseInt(rec?.Licenses) || 0;
+  const saasComponent = lic * pricePerLic;
 
-  let saas = 0, bpo = 0;
-  if (segmentChargesSaaS(seg)) saas = lic * pricePerLic;
-
+  // Brutto-BPO berechnen
+  let grossBPO = 0;
   if (segmentNeedsBPO(seg)) {
     const model = customer?.BPOModel || "Prozentual";
     if (model === "Stundensatz") {
       const rate = parseFloat(customer?.HourlyRate) || 0;
       const hours = parseFloat(rec?.Hours) || 0;
-      bpo = hours * rate;
+      grossBPO = hours * rate;
     } else {
       const bpoRate = parseFloat(customer?.BPORate) || 0;
       const ext = parseFloat(rec?.ExternalRevenue) || 0;
-      bpo = ext * bpoRate / 100;
+      grossBPO = ext * bpoRate / 100;
     }
   }
-  return { saas, bpo, total: saas + bpo };
+
+  let saas = 0, bpo = 0, total = 0;
+
+  if (seg === "Nur SaaS") {
+    saas = saasComponent;
+    bpo = 0;
+    total = saas;
+  } else if (seg === "SaaS und BPO") {
+    // SaaS und BPO werden ADDIERT (zwei getrennte Einnahmequellen)
+    saas = saasComponent;
+    bpo = grossBPO;
+    total = saas + bpo;
+  } else if (seg === "Nur BPO") {
+    saas = 0;
+    bpo = grossBPO;
+    total = grossBPO;
+  } else if (seg === "BPO inkl. SaaS") {
+    // SaaS ist im BPO-Betrag enthalten → aus dem Brutto-BPO herausrechnen
+    saas = saasComponent;
+    bpo = grossBPO - saasComponent;   // Rest nach Abzug der Lizenzkosten
+    total = grossBPO;                 // Gesamtbetrag bleibt der BPO-Umsatz
+  }
+
+  return { saas, bpo, total };
 }
 const CUSTOMER_STATUS = ["Aktiv", "Gekündigt", "Pausiert"];
 const RISK_LEVELS = ["Grün", "Gelb", "Rot"];
@@ -1018,6 +1045,7 @@ function renderRevenueByMonth(el) {
           const needLic = segmentNeedsLicenses(c.Segment);
           const useExt = needsExternal(c);
           const useHrs = needsHours(c);
+          const showsSaaS = segmentShowsSaaS(c.Segment);
           const chargesSaaS = segmentChargesSaaS(c.Segment);
           const hasBPO = segmentNeedsBPO(c.Segment);
 
@@ -1051,8 +1079,8 @@ function renderRevenueByMonth(el) {
               <span class="saved-flash">✓</span>` : `<span style="color:var(--text-faint)">—</span>`}
             </td>
             <td class="rev-cell" style="text-align:right">${bpoInputCell}</td>
-            <td style="text-align:right;font-family:var(--font-mono);color:${chargesSaaS && calc.saas ? "var(--accent)" : "var(--text-faint)"};font-size:12px">
-              ${chargesSaaS && calc.saas ? fmtCHFShort(calc.saas) : "—"}
+            <td style="text-align:right;font-family:var(--font-mono);color:${showsSaaS && calc.saas ? "var(--accent)" : "var(--text-faint)"};font-size:12px">
+              ${showsSaaS && calc.saas ? fmtCHFShort(calc.saas) : "—"}
             </td>
             <td style="text-align:right;font-family:var(--font-mono);color:${calc.bpo ? "var(--accent-2)" : "var(--text-faint)"};font-size:12px">
               ${calc.bpo ? fmtCHFShort(calc.bpo) : "—"}
@@ -1107,6 +1135,7 @@ function renderRevenueByCustomer(el) {
   const useExt = needsExternal(cust);
   const useHrs = needsHours(cust);
   const chargesSaaS = segmentChargesSaaS(cust.Segment);
+  const showsSaaS = segmentShowsSaaS(cust.Segment);
   const hasBPO = segmentNeedsBPO(cust.Segment);
 
   // Jahressummen
@@ -1182,8 +1211,8 @@ function renderRevenueByCustomer(el) {
               <span class="saved-flash">✓</span>` : `<span style="color:var(--text-faint)">—</span>`}
             </td>
             <td class="rev-cell" style="text-align:right">${bpoInputCell}</td>
-            <td style="text-align:right;font-family:var(--font-mono);color:${chargesSaaS && calc.saas ? "var(--accent)" : "var(--text-faint)"};font-size:12px">
-              ${chargesSaaS && calc.saas ? fmtCHFShort(calc.saas) : "—"}
+            <td style="text-align:right;font-family:var(--font-mono);color:${showsSaaS && calc.saas ? "var(--accent)" : "var(--text-faint)"};font-size:12px">
+              ${showsSaaS && calc.saas ? fmtCHFShort(calc.saas) : "—"}
             </td>
             <td style="text-align:right;font-family:var(--font-mono);color:${calc.bpo ? "var(--accent-2)" : "var(--text-faint)"};font-size:12px">
               ${calc.bpo ? fmtCHFShort(calc.bpo) : "—"}
