@@ -531,26 +531,61 @@ function needsHours(customer) {
   return segmentNeedsBPO(customer?.Segment) && customer?.BPOModel === "Stundensatz";
 }
 
-// Berechnung: gibt {saas, bpo, total} zurück für einen Monatseintrag
-function calcRevenue(rec, customer) {
+// Brutto-BPO eines einzelnen Monats (ohne YTD-Logik)
+function grossBPOofMonth(rec, customer) {
+  if (!segmentNeedsBPO(customer?.Segment)) return 0;
+  const model = customer?.BPOModel || "Prozentual";
+  if (model === "Stundensatz") {
+    const rate = parseFloat(customer?.HourlyRate) || 0;
+    const hours = parseFloat(rec?.Hours) || 0;
+    return hours * rate;
+  }
+  const bpoRate = parseFloat(customer?.BPORate) || 0;
+  const ext = parseFloat(rec?.ExternalRevenue) || 0;
+  return ext * bpoRate / 100;
+}
+
+// Berechnung: gibt {saas, bpo, total, ytd} zurück für einen Monatseintrag
+// year/month sind für die YTD-Berechnung nötig (wenn Kunde BPOYtd = true)
+function calcRevenue(rec, customer, year, month) {
   const seg = customer?.Segment || "Nur SaaS";
   const pricePerLic = parseFloat(customer?.PricePerLicense) || 0;
   const lic = parseInt(rec?.Licenses) || 0;
   const saasComponent = lic * pricePerLic;
 
-  // Brutto-BPO berechnen
-  let grossBPO = 0;
-  if (segmentNeedsBPO(seg)) {
+  // BPO berechnen — mit oder ohne YTD-Kumulation
+  let bpoGross = grossBPOofMonth(rec, customer);
+  let ytdInfo = null;
+
+  if (customer?.BPOYtd && segmentNeedsBPO(seg) && year && month) {
+    // YTD-kumulativ: Summiere Brutto-BPO aller Monate des Jahres bis und mit diesem Monat
     const model = customer?.BPOModel || "Prozentual";
-    if (model === "Stundensatz") {
-      const rate = parseFloat(customer?.HourlyRate) || 0;
-      const hours = parseFloat(rec?.Hours) || 0;
-      grossBPO = hours * rate;
-    } else {
-      const bpoRate = parseFloat(customer?.BPORate) || 0;
-      const ext = parseFloat(rec?.ExternalRevenue) || 0;
-      grossBPO = ext * bpoRate / 100;
+    const bpoRate = parseFloat(customer?.BPORate) || 0;
+    const hourlyRate = parseFloat(customer?.HourlyRate) || 0;
+
+    let ytdBase = 0;       // kumulierter Aussenumsatz oder Stunden
+    let prevBilled = 0;    // Summe der BPO-Beträge der Vormonate (diesen Monat ausgeschlossen)
+    for (let m = 1; m <= month; m++) {
+      const mr = (typeof findRev === "function") ? findRev(customer.id, year, m) : null;
+      const mGross = grossBPOofMonth(mr, customer);
+      if (m < month) {
+        // Was wurde in Vormonat m als BPO fakturiert (auch YTD-Differenz)?
+        // Rekursiv: BPO von Vormonat m = (YTD-Honorar bis m) - (Summe bis m-1)
+        prevBilled += mGross; // mGross ist hier schon der Monatsanteil am Brutto
+      }
+      ytdBase += mGross;
     }
+    // ytdBase ist die Summe aller monatlichen Brutto-BPO bis inkl. diesem Monat
+    // Das ist äquivalent zu: YTD-Aussenumsatz × Satz (weil Satz linear ist)
+    const ytdHonorar = ytdBase;
+    const billedBeforeThisMonth = prevBilled;
+    bpoGross = ytdHonorar - billedBeforeThisMonth;
+
+    ytdInfo = {
+      ytdHonorar: ytdHonorar,
+      prevBilled: billedBeforeThisMonth,
+      thisMonth: bpoGross
+    };
   }
 
   let saas = 0, bpo = 0, total = 0;
@@ -560,22 +595,20 @@ function calcRevenue(rec, customer) {
     bpo = 0;
     total = saas;
   } else if (seg === "SaaS und BPO") {
-    // SaaS und BPO werden ADDIERT (zwei getrennte Einnahmequellen)
     saas = saasComponent;
-    bpo = grossBPO;
+    bpo = bpoGross;
     total = saas + bpo;
   } else if (seg === "Nur BPO") {
     saas = 0;
-    bpo = grossBPO;
-    total = grossBPO;
+    bpo = bpoGross;
+    total = bpoGross;
   } else if (seg === "BPO inkl. SaaS") {
-    // SaaS ist im BPO-Betrag enthalten → aus dem Brutto-BPO herausrechnen
     saas = saasComponent;
-    bpo = grossBPO - saasComponent;   // Rest nach Abzug der Lizenzkosten
-    total = grossBPO;                 // Gesamtbetrag bleibt der BPO-Umsatz
+    bpo = bpoGross - saasComponent;
+    total = bpoGross;
   }
 
-  return { saas, bpo, total };
+  return { saas, bpo, total, ytd: ytdInfo };
 }
 const CUSTOMER_STATUS = ["Aktiv", "Gekündigt", "Pausiert"];
 const RISK_LEVELS = ["Grün", "Gelb", "Rot"];
@@ -995,7 +1028,7 @@ function renderRevenueByMonth(el) {
   let bpoInvCount = 0, bpoNeedCount = 0;
   activeCust.forEach(c => {
     const r = findRev(c.id, year, month);
-    const calc = calcRevenue(r, c);
+    const calc = calcRevenue(r, c, year, month);
     sumSaaS += calc.saas;
     sumBPO += calc.bpo;
     sumLic += parseInt(r?.Licenses) || 0;
@@ -1041,7 +1074,7 @@ function renderRevenueByMonth(el) {
       <tbody>
         ${activeCust.map(c => {
           const r = findRev(c.id, year, month) || {};
-          const calc = calcRevenue(r, c);
+          const calc = calcRevenue(r, c, year, month);
           const needLic = segmentNeedsLicenses(c.Segment);
           const useExt = needsExternal(c);
           const useHrs = needsHours(c);
@@ -1142,7 +1175,7 @@ function renderRevenueByCustomer(el) {
   let yearSaaS = 0, yearBPO = 0, yearTotal = 0;
   for (let m = 1; m <= 12; m++) {
     const r = findRev(custId, year, m);
-    const calc = calcRevenue(r, cust);
+    const calc = calcRevenue(r, cust, year, m);
     yearSaaS += calc.saas;
     yearBPO += calc.bpo;
     yearTotal += calc.total;
@@ -1191,7 +1224,7 @@ function renderRevenueByCustomer(el) {
         ${MONTH_NAMES.map((mname, i) => {
           const m = i + 1;
           const r = findRev(custId, year, m) || {};
-          const calc = calcRevenue(r, cust);
+          const calc = calcRevenue(r, cust, year, m);
 
           let bpoInputCell;
           if (useExt) {
@@ -1214,8 +1247,8 @@ function renderRevenueByCustomer(el) {
             <td style="text-align:right;font-family:var(--font-mono);color:${showsSaaS && calc.saas ? "var(--accent)" : "var(--text-faint)"};font-size:12px">
               ${showsSaaS && calc.saas ? fmtCHFShort(calc.saas) : "—"}
             </td>
-            <td style="text-align:right;font-family:var(--font-mono);color:${calc.bpo ? "var(--accent-2)" : "var(--text-faint)"};font-size:12px">
-              ${calc.bpo ? fmtCHFShort(calc.bpo) : "—"}
+            <td style="text-align:right;font-family:var(--font-mono);color:${calc.bpo ? "var(--accent-2)" : "var(--text-faint)"};font-size:12px" ${calc.ytd ? `title="YTD-Honorar: CHF ${fmtCHFShort(calc.ytd.ytdHonorar)} − bereits fakturiert (Vormonate): CHF ${fmtCHFShort(calc.ytd.prevBilled)} = diesen Monat: CHF ${fmtCHFShort(calc.ytd.thisMonth)}"` : ""}>
+              ${calc.bpo ? fmtCHFShort(calc.bpo) : "—"}${calc.ytd ? ` <span style="color:var(--accent-3);font-size:9px">YTD</span>` : ""}
             </td>
             <td style="text-align:right;font-family:var(--font-mono);font-weight:600;font-size:12px">
               ${calc.total ? fmtCHFShort(calc.total) : "—"}
@@ -1272,7 +1305,7 @@ async function saveRev(customerId, year, month, field, value, inputEl) {
 
     // Berechne die abgeleiteten Werte basierend auf dem neuen Wert
     const projectedRec = { ...(existing || {}), [field]: payload };
-    const calc = calcRevenue(projectedRec, cust);
+    const calc = calcRevenue(projectedRec, cust, year, month);
 
     // Welche Input-Felder beeinflussen die Berechnung?
     const calcFields = ["Licenses", "ExternalRevenue", "Hours"];
@@ -1415,7 +1448,7 @@ function renderCustomerRevPreview(customerId) {
     </tr></thead>
     <tbody>
       ${revs.map(r => {
-        const calc = calcRevenue(r, cust);
+        const calc = calcRevenue(r, cust, r.Year, r.Month);
         const bpoInput = useHrs ? (r.Hours ? parseFloat(r.Hours).toLocaleString("de-CH",{maximumFractionDigits:2}) + "h" : "—") : fmtCHFShort(r.ExternalRevenue);
         return `<tr>
           <td>${MONTH_NAMES[r.Month-1]} ${r.Year}</td>
@@ -1451,7 +1484,7 @@ function openCustomer(id) {
       <dt>Ende</dt><dd>${c.EndDate ? c.EndDate.slice(0,10) : "—"}</dd>
       <dt>Owner</dt><dd>${escape(ownerLabel(c.Owner)||"—")}</dd>
       <dt>Preis/Lizenz</dt><dd style="font-family:var(--font-mono)">${c.PricePerLicense ? "CHF " + parseFloat(c.PricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—"}</dd>
-      <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}</dd>
+      <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}${c.BPOYtd ? ` · <span style="color:var(--accent-3)">YTD-kumulativ</span>` : ""}</dd>
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
     </dl>
@@ -1504,6 +1537,7 @@ function editCustomer(id) {
       <label>Stundensatz (CHF/h)</label>
       <input id="f-hourlyrate" type="number" step="0.01" min="0" value="${c.HourlyRate||""}" placeholder="z.B. 180">
     </div>
+    <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-bpoytd" ${c.BPOYtd?"checked":""} style="width:auto;margin:0"> BPO-Abrechnung YTD-kumulativ (Jahresbasis, Vormonate werden automatisch abgezogen)</label></div>
     <div class="field"><label>Ziel-ARR SaaS (CHF)</label><input id="f-targetarr" type="number" step="1000" min="0" value="${c.TargetARR||""}"></div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
   `, [
@@ -1551,6 +1585,7 @@ async function saveCustomer(id) {
     BPOModel: val("f-bpomodel") || null,
     BPORate: val("f-bporate") ? parseFloat(val("f-bporate")) : null,
     HourlyRate: val("f-hourlyrate") ? parseFloat(val("f-hourlyrate")) : null,
+    BPOYtd: document.getElementById("f-bpoytd")?.checked || false,
     TargetARR: val("f-targetarr") ? parseFloat(val("f-targetarr")) : null,
     Notes: val("f-notes")
   };
