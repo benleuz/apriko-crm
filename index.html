@@ -1173,12 +1173,44 @@ function renderRevenueByCustomer(el) {
 
   // Jahressummen
   let yearSaaS = 0, yearBPO = 0, yearTotal = 0;
-  for (let m = 1; m <= 12; m++) {
-    const r = findRev(custId, year, m);
-    const calc = calcRevenue(r, cust, year, m);
-    yearSaaS += calc.saas;
-    yearBPO += calc.bpo;
-    yearTotal += calc.total;
+  if (cust.BPOYtd && segmentNeedsBPO(cust.Segment)) {
+    // YTD-Kunde: BPO-Jahressumme = YTD-Honorar des letzten Monats mit Daten
+    // (NICHT aufsummieren, sonst Doppelzählung der kumulativen Werte)
+    let lastBPOGross = 0;
+    let lastMonthWithData = 0;
+    for (let m = 1; m <= 12; m++) {
+      const r = findRev(custId, year, m);
+      const calc = calcRevenue(r, cust, year, m);
+      // SaaS-Komponente normal aufsummieren (das ist nicht kumulativ in der Logik)
+      yearSaaS += calc.saas;
+      // BPO: merken wir uns das letzte vorhandene YTD-Brutto
+      if (calc.ytd && calc.ytd.ytdHonorar > 0) {
+        lastBPOGross = calc.ytd.ytdHonorar;
+        lastMonthWithData = m;
+      }
+    }
+    // BPO-Jahresanzeige = YTD-Honorar bis zum letzten erfassten Monat
+    // Bei "BPO inkl. SaaS" muss SaaS davon abgezogen werden, damit der Total-Wert stimmt
+    if (cust.Segment === "BPO inkl. SaaS") {
+      yearBPO = lastBPOGross - yearSaaS;
+      yearTotal = lastBPOGross;
+    } else if (cust.Segment === "SaaS und BPO") {
+      yearBPO = lastBPOGross;
+      yearTotal = yearSaaS + yearBPO;
+    } else {
+      // Nur BPO
+      yearBPO = lastBPOGross;
+      yearTotal = yearBPO;
+    }
+  } else {
+    // Standard (kein YTD): normal aufsummieren
+    for (let m = 1; m <= 12; m++) {
+      const r = findRev(custId, year, m);
+      const calc = calcRevenue(r, cust, year, m);
+      yearSaaS += calc.saas;
+      yearBPO += calc.bpo;
+      yearTotal += calc.total;
+    }
   }
 
   // Sub-Info
