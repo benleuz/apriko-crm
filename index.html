@@ -902,9 +902,11 @@ function renderUpcomingTasks(tasks) {
         status === "today" ? `<strong>Heute fällig</strong>` :
         "Fällig " + due
       ) : "Kein Datum";
+      const related = lookupRelated(t);
       return `<div class="activity ${status}" onclick="editActivity(${t.id})" style="cursor:pointer">
         <span class="type-badge">${escape(t.Type)}</span>
         <span class="title">${escape(t.Title || "")}</span>
+        ${related ? `<div style="color:var(--text);font-size:12px;margin-top:2px">${escape(related)}</div>` : ""}
         <div class="meta">${dueLabel}${t.Owner ? ` · <span style="color:var(--accent-2)">@${escape(ownerLabel(t.Owner))}</span>` : ""}</div>
       </div>`;
     }).join("");
