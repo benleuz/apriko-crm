@@ -558,33 +558,34 @@ function calcRevenue(rec, customer, year, month) {
   let ytdInfo = null;
 
   if (customer?.BPOYtd && segmentNeedsBPO(seg) && year && month) {
-    // YTD-kumulativ: Summiere Brutto-BPO aller Monate des Jahres bis und mit diesem Monat
-    const model = customer?.BPOModel || "Prozentual";
-    const bpoRate = parseFloat(customer?.BPORate) || 0;
-    const hourlyRate = parseFloat(customer?.HourlyRate) || 0;
+    // YTD-Logik: Der eingegebene Aussenumsatz/Stunden ist BEREITS der kumulierte
+    // Jahresstand (nicht der Monatswert). Das YTD-Honorar dieses Monats ist
+    // direkt Aussenumsatz × Satz. Die Zeile zeigt aber die DIFFERENZ zum letzten
+    // erfassten Vormonat (= was auf der Rechnung effektiv fakturiert wird).
 
-    let ytdBase = 0;       // kumulierter Aussenumsatz oder Stunden
-    let prevBilled = 0;    // Summe der BPO-Beträge der Vormonate (diesen Monat ausgeschlossen)
-    for (let m = 1; m <= month; m++) {
+    const ytdHonorar = grossBPOofMonth(rec, customer); // Aussenumsatz(YTD) × Satz
+
+    // Letzten Vormonat mit erfasstem Wert finden (für den Differenzbetrag)
+    let prevYtdHonorar = 0;
+    for (let m = month - 1; m >= 1; m--) {
       const mr = (typeof findRev === "function") ? findRev(customer.id, year, m) : null;
-      const mGross = grossBPOofMonth(mr, customer);
-      if (m < month) {
-        // Was wurde in Vormonat m als BPO fakturiert (auch YTD-Differenz)?
-        // Rekursiv: BPO von Vormonat m = (YTD-Honorar bis m) - (Summe bis m-1)
-        prevBilled += mGross; // mGross ist hier schon der Monatsanteil am Brutto
+      const hasData = mr && (
+        (parseFloat(mr.ExternalRevenue) || 0) > 0 ||
+        (parseFloat(mr.Hours) || 0) > 0
+      );
+      if (hasData) {
+        prevYtdHonorar = grossBPOofMonth(mr, customer);
+        break;
       }
-      ytdBase += mGross;
     }
-    // ytdBase ist die Summe aller monatlichen Brutto-BPO bis inkl. diesem Monat
-    // Das ist äquivalent zu: YTD-Aussenumsatz × Satz (weil Satz linear ist)
-    const ytdHonorar = ytdBase;
-    const billedBeforeThisMonth = prevBilled;
-    bpoGross = ytdHonorar - billedBeforeThisMonth;
+
+    const diff = ytdHonorar - prevYtdHonorar;
+    bpoGross = diff;
 
     ytdInfo = {
-      ytdHonorar: ytdHonorar,
-      prevBilled: billedBeforeThisMonth,
-      thisMonth: bpoGross
+      ytdHonorar: ytdHonorar,        // aktueller YTD-Stand (= "unser Umsatz")
+      prevBilled: prevYtdHonorar,    // YTD-Stand des Vormonats
+      thisMonth: diff                // Differenz = Rechnungsbetrag dieses Monats
     };
   }
 
