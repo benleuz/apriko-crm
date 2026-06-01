@@ -1029,6 +1029,8 @@ function renderRevenueByMonth(el) {
   let sumSaaS = 0, sumBPO = 0, sumLic = 0, sumExt = 0, sumHrs = 0;
   let saasInvCount = 0, saasNeedCount = 0;
   let bpoInvCount = 0, bpoNeedCount = 0;
+  let saasOnlyCust = 0;  // Kunden mit NUR SaaS-Umsatz (kein BPO)
+  let bpoCust = 0;       // Kunden mit BPO-Umsatz (egal ob auch SaaS)
   activeCust.forEach(c => {
     const r = findRev(c.id, year, month);
     const calc = calcRevenue(r, c, year, month);
@@ -1037,6 +1039,13 @@ function renderRevenueByMonth(el) {
     sumLic += parseInt(r?.Licenses) || 0;
     sumExt += parseFloat(r?.ExternalRevenue) || 0;
     sumHrs += parseFloat(r?.Hours) || 0;
+
+    // Exklusive Klassifikation: hat der Kunde BPO oder nur SaaS?
+    const hasBPOrev = calc.bpo > 0;
+    const hasSaaSrev = calc.saas > 0;
+    if (hasBPOrev) bpoCust++;
+    else if (hasSaaSrev) saasOnlyCust++;
+
     if (segmentChargesSaaS(c.Segment) && calc.saas > 0) {
       saasNeedCount++;
       if (r?.InvoicedSaaS) saasInvCount++;
@@ -1046,6 +1055,7 @@ function renderRevenueByMonth(el) {
       if (r?.InvoicedBPO) bpoInvCount++;
     }
   });
+  const totalCust = saasOnlyCust + bpoCust;
 
   const yearOptions = [year-1, year, year+1].map(y => `<option ${y===year?"selected":""}>${y}</option>`).join("");
   const monthOptions = MONTH_NAMES.map((m,i) => `<option value="${i+1}" ${i+1===month?"selected":""}>${m}</option>`).join("");
@@ -1056,6 +1066,10 @@ function renderRevenueByMonth(el) {
       <select onchange="filters.revenueMonth=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${monthOptions}</select>
       <select onchange="filters.revenueYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${yearOptions}</select>
       <div style="margin-left:auto; display:flex; gap:20px; font-size:12px; flex-wrap:wrap;">
+        <div><span style="color:var(--text-dim)">SaaS-Kunden:</span> <span style="font-family:var(--font-mono);color:var(--accent)">${saasOnlyCust}</span></div>
+        <div><span style="color:var(--text-dim)">BPO-Kunden:</span> <span style="font-family:var(--font-mono);color:var(--accent-2)">${bpoCust}</span></div>
+        <div><span style="color:var(--text-dim)">Total Kunden:</span> <span style="font-family:var(--font-mono);font-weight:600">${totalCust}</span></div>
+        <div><span style="color:var(--text-dim)">Lizenzen:</span> <span style="font-family:var(--font-mono)">${sumLic.toLocaleString("de-CH")}</span></div>
         <div><span style="color:var(--text-dim)">SaaS:</span> <span style="font-family:var(--font-mono);color:var(--accent)">CHF ${fmtCHFShort(sumSaaS)}</span> <span style="color:var(--text-faint)">· fakt. ${saasInvCount}/${saasNeedCount}</span></div>
         <div><span style="color:var(--text-dim)">BPO:</span> <span style="font-family:var(--font-mono);color:var(--accent-2)">CHF ${fmtCHFShort(sumBPO)}</span> <span style="color:var(--text-faint)">· fakt. ${bpoInvCount}/${bpoNeedCount}</span></div>
         <div><span style="color:var(--text-dim)">Total:</span> <span style="font-family:var(--font-mono);font-weight:600">CHF ${fmtCHFShort(sumSaaS+sumBPO)}</span></div>
