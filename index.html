@@ -1511,12 +1511,16 @@ function renderCustomers(el) {
     const isActive = filters.customerSegments.includes(s);
     return `<button class="seg-filter-btn ${isActive?"active":""}" onclick="toggleSegmentFilter('${escape(s)}')">${escape(s)}</button>`;
   }).join("");
-  const hasFilter = filters.customerSegments.length > 0;
+  const hasSegFilter = filters.customerSegments.length > 0;
 
   document.getElementById("view-actions").innerHTML = `
     <div class="seg-filter-group">
       ${segFilterHtml}
-      ${hasFilter ? `<button class="seg-filter-btn clear" onclick="clearSegmentFilter()" title="Filter zurücksetzen">✕ Alle</button>` : ""}
+      ${hasSegFilter ? `<button class="seg-filter-btn clear" onclick="clearSegmentFilter()" title="Segment-Filter zurücksetzen">✕</button>` : ""}
+      <span style="color:var(--text-faint);font-size:11px;margin:0 4px">|</span>
+      <button class="seg-filter-btn ${filters.customerActiveOnly?"active":""}" onclick="toggleActiveOnly()" title="Gekündigte/Pausierte ausblenden">
+        ${filters.customerActiveOnly ? "● Nur Aktive" : "○ Alle Status"}
+      </button>
     </div>
     <input class="search-input" placeholder="Suchen..." oninput="filterTable(this.value, 'cust-row')">
     <button class="btn btn-primary" onclick="newCustomer()">+ Neuer Kunde</button>
@@ -1526,14 +1530,22 @@ function renderCustomers(el) {
     return;
   }
 
-  // Kunden nach Segment filtern (wenn Filter aktiv)
-  const filtered = hasFilter
-    ? cache.customers.filter(c => filters.customerSegments.includes(c.Segment))
-    : cache.customers;
+  // Kunden nach Segment + Status filtern
+  let filtered = cache.customers;
+  if (hasSegFilter) {
+    filtered = filtered.filter(c => filters.customerSegments.includes(c.Segment));
+  }
+  if (filters.customerActiveOnly) {
+    filtered = filtered.filter(c => (c.Status || "Aktiv") === "Aktiv");
+  }
 
-  const filterInfo = hasFilter
+  // Info-Zeile wenn Filter aktiv
+  const filterParts = [];
+  if (hasSegFilter) filterParts.push("Segment: " + filters.customerSegments.map(s => escape(s)).join(", "));
+  if (filters.customerActiveOnly) filterParts.push("nur Aktive");
+  const filterInfo = (hasSegFilter || filters.customerActiveOnly)
     ? `<div style="margin-bottom:12px;color:var(--text-dim);font-size:12px">
-         Zeige ${filtered.length} von ${cache.customers.length} Kunden · Filter: ${filters.customerSegments.map(s => escape(s)).join(", ")}
+         Zeige ${filtered.length} von ${cache.customers.length} Kunden · ${filterParts.join(" · ")}
        </div>`
     : "";
 
@@ -1575,6 +1587,10 @@ function toggleSegmentFilter(segment) {
 }
 function clearSegmentFilter() {
   filters.customerSegments = [];
+  render();
+}
+function toggleActiveOnly() {
+  filters.customerActiveOnly = !filters.customerActiveOnly;
   render();
 }
 
@@ -2487,7 +2503,8 @@ const filters = {
   revenueYear: new Date().getFullYear(),
   revenueMonth: new Date().getMonth() + 1,
   revenueCustomerId: null,
-  customerSegments: []        // Array von Segment-Strings; leer = alle anzeigen
+  customerSegments: [],       // Array von Segment-Strings; leer = alle Segmente
+  customerActiveOnly: true    // true = nur Aktive zeigen, false = auch Gekündigt/Pausiert
 };
 
 function escape(s) {
