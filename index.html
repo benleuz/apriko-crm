@@ -350,6 +350,33 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
     padding: 3px 10px; font-size: 11px; cursor: pointer;
     font-family: inherit; text-transform: uppercase; letter-spacing: 0.04em;
   }
+
+  /* Segment filter buttons (in customer list) */
+  .seg-filter-group {
+    display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap;
+  }
+  .seg-filter-btn {
+    background: transparent; color: var(--text-dim);
+    border: 1px solid var(--border);
+    padding: 4px 10px; font-size: 11px; cursor: pointer;
+    font-family: inherit; border-radius: 3px;
+    transition: all 0.15s;
+  }
+  .seg-filter-btn:hover {
+    background: var(--bg-card); color: var(--text);
+    border-color: var(--text-dim);
+  }
+  .seg-filter-btn.active {
+    background: var(--accent); color: #0e1614;
+    border-color: var(--accent); font-weight: 600;
+  }
+  .seg-filter-btn.clear {
+    color: var(--danger); border-color: var(--border);
+    margin-left: 4px;
+  }
+  .seg-filter-btn.clear:hover {
+    background: rgba(255,107,107,0.08); border-color: var(--danger);
+  }
   .scope-toggle button.active {
     background: var(--accent); color: #0e1614; font-weight: 600;
   }
@@ -547,9 +574,39 @@ function grossBPOofMonth(rec, customer) {
 
 // Berechnung: gibt {saas, bpo, total, ytd} zurück für einen Monatseintrag
 // year/month sind für die YTD-Berechnung nötig (wenn Kunde BPOYtd = true)
+// Liefert den gültigen Preis pro Lizenz für einen bestimmten Monat,
+// basierend auf PriceHistory (falls vorhanden) oder PricePerLicense als Fallback.
+// History-Format: JSON-String mit Array [{validFrom:"YYYY-MM", pricePerLicense:Number}, ...]
+function getPriceForMonth(customer, year, month) {
+  const fallback = parseFloat(customer?.PricePerLicense) || 0;
+  if (!customer?.PriceHistory) return fallback;
+  let history;
+  try {
+    history = JSON.parse(customer.PriceHistory);
+    if (!Array.isArray(history) || history.length === 0) return fallback;
+  } catch (e) {
+    return fallback;
+  }
+  // Sortiere absteigend nach validFrom und finde die erste Periode, die ≤ year-month ist
+  const targetKey = `${year}-${String(month).padStart(2,"0")}`;
+  const sorted = history
+    .filter(h => h.validFrom && h.pricePerLicense !== undefined && h.pricePerLicense !== null)
+    .sort((a,b) => b.validFrom.localeCompare(a.validFrom));
+  for (const h of sorted) {
+    if (h.validFrom <= targetKey) {
+      return parseFloat(h.pricePerLicense) || 0;
+    }
+  }
+  // Kein Eintrag passt → fallback auf PricePerLicense
+  return fallback;
+}
+
 function calcRevenue(rec, customer, year, month) {
   const seg = customer?.Segment || "Nur SaaS";
-  const pricePerLic = parseFloat(customer?.PricePerLicense) || 0;
+  // Preis hängt vom Monat ab (Historie wenn vorhanden, sonst aktueller Preis)
+  const pricePerLic = year && month
+    ? getPriceForMonth(customer, year, month)
+    : (parseFloat(customer?.PricePerLicense) || 0);
   const lic = parseInt(rec?.Licenses) || 0;
   const saasComponent = lic * pricePerLic;
 
@@ -1232,7 +1289,17 @@ function renderRevenueByCustomer(el) {
 
   // Sub-Info
   const subParts = [`<strong style="color:var(--text)">${escape(cust.Segment||"")}</strong>`];
-  if (cust.PricePerLicense) subParts.push(`${parseFloat(cust.PricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/Lizenz`);
+  if (cust.PricePerLicense) {
+    let priceLabel = `${parseFloat(cust.PricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/Lizenz`;
+    // Wenn Preis-Historie existiert, das markieren
+    try {
+      const hist = cust.PriceHistory ? JSON.parse(cust.PriceHistory) : [];
+      if (Array.isArray(hist) && hist.length > 0) {
+        priceLabel += ` <span style="color:var(--accent-3);font-size:10px">⏱ ${hist.length} Preisperiode${hist.length>1?"n":""}</span>`;
+      }
+    } catch(e){}
+    subParts.push(priceLabel);
+  }
   if (useHrs && cust.HourlyRate) subParts.push(`${parseFloat(cust.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})} CHF/h`);
   else if (useExt && cust.BPORate) subParts.push(`${parseFloat(cust.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}% auf Aussenumsatz`);
 
@@ -1439,7 +1506,18 @@ async function toggleInvoiced(customerId, year, month, type) {
 
 /* ---------- Customers ---------- */
 function renderCustomers(el) {
+  // Segment-Filter-Buttons (Multi-Select)
+  const segFilterHtml = SEGMENTS.map(s => {
+    const isActive = filters.customerSegments.includes(s);
+    return `<button class="seg-filter-btn ${isActive?"active":""}" onclick="toggleSegmentFilter('${escape(s)}')">${escape(s)}</button>`;
+  }).join("");
+  const hasFilter = filters.customerSegments.length > 0;
+
   document.getElementById("view-actions").innerHTML = `
+    <div class="seg-filter-group">
+      ${segFilterHtml}
+      ${hasFilter ? `<button class="seg-filter-btn clear" onclick="clearSegmentFilter()" title="Filter zurücksetzen">✕ Alle</button>` : ""}
+    </div>
     <input class="search-input" placeholder="Suchen..." oninput="filterTable(this.value, 'cust-row')">
     <button class="btn btn-primary" onclick="newCustomer()">+ Neuer Kunde</button>
   `;
@@ -1447,13 +1525,26 @@ function renderCustomers(el) {
     el.innerHTML = `<div class="empty">Noch keine Kunden erfasst.<br><br>Tipp: Wenn du einen Deal auf "Won" setzt, wird die Firma automatisch als Kunde markiert. Hier legst du den Kundenvertrag mit Segment, ARR-Ziel etc. an.</div>`;
     return;
   }
+
+  // Kunden nach Segment filtern (wenn Filter aktiv)
+  const filtered = hasFilter
+    ? cache.customers.filter(c => filters.customerSegments.includes(c.Segment))
+    : cache.customers;
+
+  const filterInfo = hasFilter
+    ? `<div style="margin-bottom:12px;color:var(--text-dim);font-size:12px">
+         Zeige ${filtered.length} von ${cache.customers.length} Kunden · Filter: ${filters.customerSegments.map(s => escape(s)).join(", ")}
+       </div>`
+    : "";
+
   el.innerHTML = `
+    ${filterInfo}
     <div class="table-wrap"><table>
       <thead><tr>
         <th>Kunde</th><th>Firma</th><th>Segment</th><th>Status</th><th>Risiko</th><th>Ziel-ARR</th><th>Owner</th><th></th>
       </tr></thead>
       <tbody>
-        ${cache.customers
+        ${filtered
           .sort((a,b) => (a.Title||"").localeCompare(b.Title||""))
           .map(c => {
             const comp = cache.companies.find(x => x.id == c.CompanyId);
@@ -1474,6 +1565,17 @@ function renderCustomers(el) {
       </tbody>
     </table></div>
   `;
+}
+
+function toggleSegmentFilter(segment) {
+  const idx = filters.customerSegments.indexOf(segment);
+  if (idx >= 0) filters.customerSegments.splice(idx, 1);
+  else filters.customerSegments.push(segment);
+  render();
+}
+function clearSegmentFilter() {
+  filters.customerSegments = [];
+  render();
 }
 
 function renderCustomerRevPreview(customerId) {
@@ -1532,7 +1634,16 @@ function openCustomer(id) {
       <dt>Start</dt><dd>${c.StartDate ? c.StartDate.slice(0,10) : "—"}</dd>
       <dt>Ende</dt><dd>${c.EndDate ? c.EndDate.slice(0,10) : "—"}</dd>
       <dt>Owner</dt><dd>${escape(ownerLabel(c.Owner)||"—")}</dd>
-      <dt>Preis/Lizenz</dt><dd style="font-family:var(--font-mono)">${c.PricePerLicense ? "CHF " + parseFloat(c.PricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—"}</dd>
+      <dt>Preis/Lizenz</dt><dd style="font-family:var(--font-mono)">${c.PricePerLicense ? "CHF " + parseFloat(c.PricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—"}${(() => {
+        try {
+          const hist = c.PriceHistory ? JSON.parse(c.PriceHistory) : [];
+          if (Array.isArray(hist) && hist.length > 0) {
+            const lines = hist.slice().sort((a,b)=>(a.validFrom||"").localeCompare(b.validFrom||"")).map(h => `ab ${h.validFrom}: ${parseFloat(h.pricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}`).join(" · ");
+            return ` <span style="color:var(--text-dim);font-size:11px">(Historie: ${lines})</span>`;
+          }
+        } catch(e){}
+        return "";
+      })()}</dd>
       <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}${c.BPOYtd ? ` · <span style="color:var(--accent-3)">YTD-kumulativ</span>` : ""}</dd>
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
@@ -1572,6 +1683,21 @@ function editCustomer(id) {
     </div>
     <h4 style="margin:18px 0 8px;font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Preismodell</h4>
     <div class="field"><label>Preis pro Lizenz (CHF/Monat)</label><input id="f-pricelic" type="number" step="0.01" min="0" value="${c.PricePerLicense||""}" placeholder="z.B. 340"></div>
+    <input type="hidden" id="f-pricehistory" value='${escape(c.PriceHistory||"")}'>
+    <div class="field">
+      <button type="button" class="btn btn-sm" onclick="togglePriceHistory()" style="font-size:11px;padding:4px 10px">
+        <span id="ph-toggle-label">▶ Preis-Historie</span>
+        <span id="ph-count" style="margin-left:6px;color:var(--text-dim)"></span>
+      </button>
+      <div id="ph-container" style="display:none;margin-top:8px;padding:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px">
+        <div style="color:var(--text-dim);font-size:11px;margin-bottom:8px">
+          Optional. Bei Vertragsänderung mitten im Jahr: hier den neuen Preis ab welchem Monat eintragen.
+          Vor dem ersten Eintrag gilt der oben definierte Preis.
+        </div>
+        <div id="ph-list"></div>
+        <button type="button" class="btn btn-sm" onclick="addPriceHistoryRow()" style="font-size:11px;padding:4px 10px;margin-top:6px">+ Periode hinzufügen</button>
+      </div>
+    </div>
     <div class="field"><label>BPO-Modell</label>
       <select id="f-bpomodel" onchange="document.getElementById('bpo-percent-row').style.display=this.value==='Prozentual'?'block':'none';document.getElementById('bpo-hourly-row').style.display=this.value==='Stundensatz'?'block':'none'">
         <option value="" ${!c.BPOModel?"selected":""}>—</option>
@@ -1593,6 +1719,8 @@ function editCustomer(id) {
     `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
     `<button class="btn btn-primary" onclick="saveCustomer(${id||"null"})">Speichern</button>`
   ]);
+  // Counter initialisieren (zeigt z.B. "(2 Perioden)" wenn Historie vorhanden)
+  updatePriceHistoryUI();
 }
 
 function updateCustomerTitle() {
@@ -1609,6 +1737,73 @@ function updateCustomerTitle() {
   if (!comp) return;
   const seg = segSel.value || "SaaS";
   titleInput.value = `${comp.Title} - ${seg}`;
+}
+
+// === Preis-Historie Verwaltung ===
+function getPriceHistory() {
+  const raw = document.getElementById("f-pricehistory")?.value || "";
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+function setPriceHistory(arr) {
+  // Sortiere aufsteigend nach validFrom für saubere Darstellung
+  const sorted = arr.slice().sort((a,b) => (a.validFrom||"").localeCompare(b.validFrom||""));
+  document.getElementById("f-pricehistory").value = JSON.stringify(sorted);
+  updatePriceHistoryUI();
+}
+function updatePriceHistoryUI() {
+  const list = document.getElementById("ph-list");
+  const countEl = document.getElementById("ph-count");
+  if (!list) return;
+  const arr = getPriceHistory();
+  countEl.textContent = arr.length > 0 ? `(${arr.length} Periode${arr.length>1?"n":""})` : "";
+  if (!arr.length) {
+    list.innerHTML = `<div style="color:var(--text-faint);font-size:11px;font-style:italic">Keine Perioden definiert — es gilt der oben angegebene Preis.</div>`;
+    return;
+  }
+  list.innerHTML = arr.map((h, i) => `
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+      <input type="month" value="${escape(h.validFrom||"")}" onchange="updatePriceHistoryItem(${i}, 'validFrom', this.value)" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:3px;font-size:11px">
+      <input type="number" step="0.01" min="0" value="${h.pricePerLicense||""}" placeholder="Preis/Lizenz" onchange="updatePriceHistoryItem(${i}, 'pricePerLicense', this.value)" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:3px;font-size:11px;width:120px;font-family:var(--font-mono)">
+      <span style="color:var(--text-dim);font-size:11px">CHF/Lizenz</span>
+      <button type="button" onclick="removePriceHistoryRow(${i})" style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:2px 8px;border-radius:3px;font-size:11px;cursor:pointer;margin-left:auto" title="Periode löschen">✕</button>
+    </div>
+  `).join("");
+}
+function addPriceHistoryRow() {
+  const arr = getPriceHistory();
+  // Default: aktueller Monat
+  const now = new Date();
+  const ym = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+  arr.push({ validFrom: ym, pricePerLicense: 0 });
+  setPriceHistory(arr);
+}
+function removePriceHistoryRow(idx) {
+  const arr = getPriceHistory();
+  arr.splice(idx, 1);
+  setPriceHistory(arr);
+}
+function updatePriceHistoryItem(idx, field, value) {
+  const arr = getPriceHistory();
+  if (!arr[idx]) return;
+  if (field === "pricePerLicense") {
+    arr[idx][field] = value ? parseFloat(value) : 0;
+  } else {
+    arr[idx][field] = value;
+  }
+  setPriceHistory(arr);
+}
+function togglePriceHistory() {
+  const container = document.getElementById("ph-container");
+  const label = document.getElementById("ph-toggle-label");
+  if (!container) return;
+  const isOpen = container.style.display !== "none";
+  container.style.display = isOpen ? "none" : "block";
+  label.textContent = isOpen ? "▶ Preis-Historie" : "▼ Preis-Historie";
+  if (!isOpen) updatePriceHistoryUI();
 }
 
 async function saveCustomer(id) {
@@ -1631,6 +1826,7 @@ async function saveCustomer(id) {
     EndDate: end || null,
     Owner: val("f-owner") || null,
     PricePerLicense: val("f-pricelic") ? parseFloat(val("f-pricelic")) : null,
+    PriceHistory: val("f-pricehistory") || null,
     BPOModel: val("f-bpomodel") || null,
     BPORate: val("f-bporate") ? parseFloat(val("f-bporate")) : null,
     HourlyRate: val("f-hourlyrate") ? parseFloat(val("f-hourlyrate")) : null,
@@ -2290,7 +2486,8 @@ const filters = {
   revenueMode: "month",       // "month" oder "customer"
   revenueYear: new Date().getFullYear(),
   revenueMonth: new Date().getMonth() + 1,
-  revenueCustomerId: null
+  revenueCustomerId: null,
+  customerSegments: []        // Array von Segment-Strings; leer = alle anzeigen
 };
 
 function escape(s) {
