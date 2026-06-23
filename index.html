@@ -1888,7 +1888,13 @@ async function deleteCustomer(id) {
 
 /* ---------- Companies ---------- */
 function renderCompanies(el) {
+  const f = filters.companyKundeFilter;
   document.getElementById("view-actions").innerHTML = `
+    <div class="seg-filter-group">
+      <button class="seg-filter-btn ${f==='all'?'active':''}" onclick="setCompanyFilter('all')">Alle</button>
+      <button class="seg-filter-btn ${f==='customer'?'active':''}" onclick="setCompanyFilter('customer')">★ Kunden</button>
+      <button class="seg-filter-btn ${f==='lead'?'active':''}" onclick="setCompanyFilter('lead')">Leads</button>
+    </div>
     <input class="search-input" placeholder="Suchen..." oninput="filterTable(this.value, 'comp-row')">
     <button class="btn btn-primary" onclick="newCompany()">+ Neue Firma</button>
   `;
@@ -1896,31 +1902,92 @@ function renderCompanies(el) {
     el.innerHTML = `<div class="empty">Noch keine Firmen erfasst.</div>`;
     return;
   }
+
+  // Filter anwenden
+  let filtered = cache.companies;
+  if (f === "customer") filtered = filtered.filter(c => c.IsCustomer);
+  else if (f === "lead") filtered = filtered.filter(c => !c.IsCustomer);
+
+  // Sortierung
+  const sortDir = filters.companySortDir === "desc" ? -1 : 1;
+  filtered = filtered.slice().sort((a,b) => {
+    if (filters.companySort === "winprob") {
+      const av = parseFloat(a.WinProbability) || 0;
+      const bv = parseFloat(b.WinProbability) || 0;
+      return (av - bv) * sortDir;
+    }
+    return (a.Title||"").localeCompare(b.Title||"") * sortDir;
+  });
+
+  // Info-Zeile
+  const filterLabel = f === "customer" ? "nur Kunden" : f === "lead" ? "nur Leads" : null;
+  const filterInfo = filterLabel
+    ? `<div style="margin-bottom:12px;color:var(--text-dim);font-size:12px">
+         Zeige ${filtered.length} von ${cache.companies.length} Firmen · ${filterLabel}
+       </div>`
+    : "";
+
+  // Sort-Indikator
+  const sortArrow = (col) => filters.companySort === col
+    ? (filters.companySortDir === "asc" ? " ▲" : " ▼")
+    : "";
+
   el.innerHTML = `
+    ${filterInfo}
     <div class="table-wrap"><table>
       <thead><tr>
-        <th>Firma</th><th>Branche</th><th>Ort</th><th>Kontakte</th><th>Deals</th><th></th>
+        <th style="cursor:pointer" onclick="toggleCompanySort('title')">Firma${sortArrow("title")}</th>
+        <th>Branche</th>
+        <th>Ort</th>
+        <th style="cursor:pointer" onclick="toggleCompanySort('winprob')" title="Klick zum Sortieren">Win %${sortArrow("winprob")}</th>
+        <th>Kontakte</th>
+        <th>Deals</th>
+        <th></th>
       </tr></thead>
       <tbody>
-        ${cache.companies
-          .sort((a,b) => (a.Title||"").localeCompare(b.Title||""))
-          .map(c => {
-            const contacts = cache.contacts.filter(x => x.CompanyId == c.id).length;
-            const deals = cache.deals.filter(x => x.CompanyId == c.id).length;
-            return `<tr class="comp-row" data-search="${escape((c.Title||"") + " " + (c.Industry||"") + " " + (c.City||""))}">
-              <td onclick="openCompany(${c.id})"><strong>${c.IsCustomer ? `<span style="color:var(--accent)">★</span> ` : ""}${escape(c.Title||"")}</strong></td>
-              <td onclick="openCompany(${c.id})" class="dim">${escape(c.Industry||"")}</td>
-              <td onclick="openCompany(${c.id})" class="dim">${escape(c.City||"")}</td>
-              <td onclick="openCompany(${c.id})" class="dim">${contacts}</td>
-              <td onclick="openCompany(${c.id})" class="dim">${deals}</td>
-              <td class="actions-cell">
-                <button class="btn btn-sm" onclick="event.stopPropagation();editCompany(${c.id})">Edit</button>
-              </td>
-            </tr>`;
-          }).join("")}
+        ${filtered.map(c => {
+          const contacts = cache.contacts.filter(x => x.CompanyId == c.id).length;
+          const deals = cache.deals.filter(x => x.CompanyId == c.id).length;
+          const win = parseFloat(c.WinProbability);
+          const winLabel = !c.IsCustomer && !isNaN(win) ? winPctBadge(win) : (c.IsCustomer ? `<span style="color:var(--text-faint);font-size:11px">—</span>` : `<span style="color:var(--text-faint);font-size:11px">—</span>`);
+          return `<tr class="comp-row" data-search="${escape((c.Title||"") + " " + (c.Industry||"") + " " + (c.City||""))}">
+            <td onclick="openCompany(${c.id})"><strong>${c.IsCustomer ? `<span style="color:var(--accent)">★</span> ` : ""}${escape(c.Title||"")}</strong></td>
+            <td onclick="openCompany(${c.id})" class="dim">${escape(c.Industry||"")}</td>
+            <td onclick="openCompany(${c.id})" class="dim">${escape(c.City||"")}</td>
+            <td onclick="openCompany(${c.id})">${winLabel}</td>
+            <td onclick="openCompany(${c.id})" class="dim">${contacts}</td>
+            <td onclick="openCompany(${c.id})" class="dim">${deals}</td>
+            <td class="actions-cell">
+              <button class="btn btn-sm" onclick="event.stopPropagation();editCompany(${c.id})">Edit</button>
+            </td>
+          </tr>`;
+        }).join("")}
       </tbody>
     </table></div>
   `;
+}
+
+function setCompanyFilter(v) {
+  filters.companyKundeFilter = v;
+  render();
+}
+function toggleCompanySort(col) {
+  if (filters.companySort === col) {
+    filters.companySortDir = filters.companySortDir === "asc" ? "desc" : "asc";
+  } else {
+    filters.companySort = col;
+    filters.companySortDir = col === "winprob" ? "desc" : "asc";  // Win% default absteigend
+  }
+  render();
+}
+
+// Farbiges Badge für Win-Wahrscheinlichkeit
+function winPctBadge(pct) {
+  let color = "var(--text-dim)";
+  if (pct >= 70) color = "var(--accent)";
+  else if (pct >= 40) color = "var(--warn)";
+  else if (pct > 0) color = "var(--danger)";
+  return `<span style="font-family:var(--font-mono);color:${color};font-weight:600">${pct.toLocaleString("de-CH",{maximumFractionDigits:0})}%</span>`;
 }
 
 /* ---------- Contacts ---------- */
@@ -2041,7 +2108,7 @@ function openCompany(id) {
       <dt>Branche</dt><dd>${escape(c.Industry||"—")}</dd>
       <dt>Website</dt><dd>${c.Website ? `<a href="${escape(c.Website)}" target="_blank">${escape(c.Website)}</a>` : "—"}</dd>
       <dt>Ort</dt><dd>${escape(c.City||"")}${c.Country ? ", " + escape(c.Country) : ""}</dd>
-      <dt>Status</dt><dd>${c.IsCustomer ? `<span style="color:var(--accent)">★ Kunde</span>` : `<span class="dim">Kein Kunde</span>`}</dd>
+      <dt>Status</dt><dd>${c.IsCustomer ? `<span style="color:var(--accent)">★ Kunde</span>` : `<span class="dim">Lead</span>${c.WinProbability != null ? ` · Win-Wahrscheinlichkeit: ${winPctBadge(parseFloat(c.WinProbability))}` : ""}`}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
     </dl>
 
@@ -2178,17 +2245,25 @@ function editCompany(id) {
       <div class="field"><label>Land</label><input id="f-country" value="${escape(c.Country||"CH")}"></div>
     </div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
-    <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-iscustomer" ${c.IsCustomer?"checked":""} style="width:auto;margin:0"> Ist Kunde (zahlt monatlich)</label></div>
+    <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-iscustomer" ${c.IsCustomer?"checked":""} style="width:auto;margin:0" onchange="document.getElementById('f-winprob-row').style.display=this.checked?'none':'block'"> Ist Kunde (zahlt monatlich)</label></div>
+    <div id="f-winprob-row" class="field" style="display:${c.IsCustomer?'none':'block'}">
+      <label>Win-Wahrscheinlichkeit (%)</label>
+      <input id="f-winprob" type="number" step="5" min="0" max="100" value="${c.WinProbability!=null?c.WinProbability:""}" placeholder="z.B. 60 für 60%">
+    </div>
   `, [
     `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
     `<button class="btn btn-primary" onclick="saveCompany(${id||"null"})">Speichern</button>`
   ]);
 }
 async function saveCompany(id) {
+  const isCust = document.getElementById("f-iscustomer")?.checked || false;
+  const winRaw = val("f-winprob");
   const data = {
     Title: val("f-title"), Industry: val("f-industry"), Website: val("f-website"),
     City: val("f-city"), Country: val("f-country"), Notes: val("f-notes"),
-    IsCustomer: document.getElementById("f-iscustomer")?.checked || false
+    IsCustomer: isCust,
+    // Bei Kunden Win% nicht relevant — auf null setzen, sonst eingetragener Wert
+    WinProbability: (!isCust && winRaw !== "") ? Math.max(0, Math.min(100, parseInt(winRaw))) : null
   };
   if (!data.Title) return toast("Firmenname erforderlich", true);
   try {
@@ -2513,7 +2588,10 @@ const filters = {
   revenueMonth: new Date().getMonth() + 1,
   revenueCustomerId: null,
   customerSegments: [],       // Array von Segment-Strings; leer = alle Segmente
-  customerActiveOnly: true    // true = nur Aktive zeigen, false = auch Gekündigt/Pausiert
+  customerActiveOnly: true,   // true = nur Aktive zeigen
+  companyKundeFilter: "all",  // "all", "customer", "lead"
+  companySort: "title",       // "title" oder "winprob"
+  companySortDir: "asc"       // "asc" oder "desc"
 };
 
 function escape(s) {
