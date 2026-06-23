@@ -1662,7 +1662,7 @@ function openCustomer(id) {
       })()}</dd>
       <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}${c.BPOYtd ? ` · <span style="color:var(--accent-3)">YTD-kumulativ</span>` : ""}</dd>
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
-      <dt>Link</dt><dd>${c.Link ? `<a href="${escape(c.Link)}" target="_blank" rel="noopener" style="color:var(--accent-2)">${escape(c.Link)} ↗</a>` : "—"}</dd>
+      <dt>Link</dt><dd>${linkUrl(c.Link) ? `<a href="${escape(linkUrl(c.Link))}" target="_blank" rel="noopener" style="color:var(--accent-2)">${escape(linkUrl(c.Link))} ↗</a>` : "—"}</dd>
       <dt>Mindesthonorar</dt><dd style="white-space:pre-wrap">${escape(c.MinFee||"—")}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
     </dl>
@@ -1732,7 +1732,7 @@ function editCustomer(id) {
     </div>
     <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-bpoytd" ${c.BPOYtd?"checked":""} style="width:auto;margin:0"> BPO-Abrechnung YTD-kumulativ (Jahresbasis, Vormonate werden automatisch abgezogen)</label></div>
     <div class="field"><label>Ziel-ARR SaaS (CHF)</label><input id="f-targetarr" type="number" step="1000" min="0" value="${c.TargetARR||""}"></div>
-    <div class="field"><label>Link</label><input id="f-link" type="text" value="${escape(c.Link||"")}" placeholder="z.B. helva.apriko.app"></div>
+    <div class="field"><label>Link</label><input id="f-link" type="text" value="${escape(linkUrl(c.Link))}" placeholder="z.B. helva.apriko.app"></div>
     <div class="field"><label>Mindesthonorar</label><textarea id="f-minfee" rows="3" placeholder="z.B. CHF 1'500/Monat, gültig ab Q3 2026">${escape(c.MinFee||"")}</textarea></div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
   `, [
@@ -1852,7 +1852,10 @@ async function saveCustomer(id) {
     HourlyRate: val("f-hourlyrate") ? parseFloat(val("f-hourlyrate")) : null,
     BPOYtd: document.getElementById("f-bpoytd")?.checked || false,
     TargetARR: val("f-targetarr") ? parseFloat(val("f-targetarr")) : null,
-    Link: normalizeUrl(val("f-link")),
+    Link: (() => {
+      const u = normalizeUrl(val("f-link"));
+      return u ? { Url: u, Description: u } : null;
+    })(),
     MinFee: val("f-minfee") || null,
     Notes: val("f-notes")
   };
@@ -2526,6 +2529,15 @@ function normalizeUrl(s) {
   if (/^https?:\/\//i.test(v)) return v;
   if (/^[a-z0-9]+:/i.test(v)) return v;  // anderes Schema (mailto:, tel:, etc.)
   return "https://" + v;
+}
+
+// SharePoint-Hyperlink-Spalten geben {Url, Description}-Objekte zurück.
+// Diese Funktion extrahiert die URL als String — egal ob Objekt oder schon String.
+function linkUrl(linkField) {
+  if (!linkField) return "";
+  if (typeof linkField === "string") return linkField;
+  if (typeof linkField === "object") return linkField.Url || linkField.url || "";
+  return "";
 }
 function formatCHF(v) {
   const n = parseFloat(v);
