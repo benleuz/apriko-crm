@@ -1916,6 +1916,11 @@ function renderCompanies(el) {
       const bv = parseFloat(b.WinProbability) || 0;
       return (av - bv) * sortDir;
     }
+    if (filters.companySort === "extrev") {
+      const av = parseFloat(a.ExternalRevenue) || 0;
+      const bv = parseFloat(b.ExternalRevenue) || 0;
+      return (av - bv) * sortDir;
+    }
     return (a.Title||"").localeCompare(b.Title||"") * sortDir;
   });
 
@@ -1939,6 +1944,7 @@ function renderCompanies(el) {
         <th style="cursor:pointer" onclick="toggleCompanySort('title')">Firma${sortArrow("title")}</th>
         <th>Branche</th>
         <th>Ort</th>
+        <th style="cursor:pointer;text-align:right" onclick="toggleCompanySort('extrev')" title="Klick zum Sortieren">Aussenumsatz${sortArrow("extrev")}</th>
         <th style="cursor:pointer" onclick="toggleCompanySort('winprob')" title="Klick zum Sortieren">Win %${sortArrow("winprob")}</th>
         <th>Kontakte</th>
         <th>Deals</th>
@@ -1950,10 +1956,15 @@ function renderCompanies(el) {
           const deals = cache.deals.filter(x => x.CompanyId == c.id).length;
           const win = parseFloat(c.WinProbability);
           const winLabel = !c.IsCustomer && !isNaN(win) ? winPctBadge(win) : (c.IsCustomer ? `<span style="color:var(--text-faint);font-size:11px">—</span>` : `<span style="color:var(--text-faint);font-size:11px">—</span>`);
+          const extRev = parseFloat(c.ExternalRevenue);
+          const extRevLabel = !isNaN(extRev) && extRev > 0
+            ? `<span style="font-family:var(--font-mono)">${extRev.toLocaleString("de-CH",{maximumFractionDigits:0})}</span>`
+            : `<span style="color:var(--text-faint);font-size:11px">—</span>`;
           return `<tr class="comp-row" data-search="${escape((c.Title||"") + " " + (c.Industry||"") + " " + (c.City||""))}">
             <td onclick="openCompany(${c.id})"><strong>${c.IsCustomer ? `<span style="color:var(--accent)">★</span> ` : ""}${escape(c.Title||"")}</strong></td>
             <td onclick="openCompany(${c.id})" class="dim">${escape(c.Industry||"")}</td>
             <td onclick="openCompany(${c.id})" class="dim">${escape(c.City||"")}</td>
+            <td onclick="openCompany(${c.id})" style="text-align:right">${extRevLabel}</td>
             <td onclick="openCompany(${c.id})">${winLabel}</td>
             <td onclick="openCompany(${c.id})" class="dim">${contacts}</td>
             <td onclick="openCompany(${c.id})" class="dim">${deals}</td>
@@ -1976,7 +1987,8 @@ function toggleCompanySort(col) {
     filters.companySortDir = filters.companySortDir === "asc" ? "desc" : "asc";
   } else {
     filters.companySort = col;
-    filters.companySortDir = col === "winprob" ? "desc" : "asc";  // Win% default absteigend
+    // Numerische Spalten default absteigend (grösster Wert oben)
+    filters.companySortDir = (col === "winprob" || col === "extrev") ? "desc" : "asc";
   }
   render();
 }
@@ -2109,6 +2121,7 @@ function openCompany(id) {
       <dt>Website</dt><dd>${c.Website ? `<a href="${escape(c.Website)}" target="_blank">${escape(c.Website)}</a>` : "—"}</dd>
       <dt>Ort</dt><dd>${escape(c.City||"")}${c.Country ? ", " + escape(c.Country) : ""}</dd>
       <dt>Status</dt><dd>${c.IsCustomer ? `<span style="color:var(--accent)">★ Kunde</span>` : `<span class="dim">Lead</span>${c.WinProbability != null ? ` · Win-Wahrscheinlichkeit: ${winPctBadge(parseFloat(c.WinProbability))}` : ""}`}</dd>
+      <dt>Aussenumsatz</dt><dd style="font-family:var(--font-mono)">${c.ExternalRevenue ? "CHF " + parseFloat(c.ExternalRevenue).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
     </dl>
 
@@ -2244,6 +2257,7 @@ function editCompany(id) {
       <div class="field"><label>Ort</label><input id="f-city" value="${escape(c.City||"")}"></div>
       <div class="field"><label>Land</label><input id="f-country" value="${escape(c.Country||"CH")}"></div>
     </div>
+    <div class="field"><label>Aussenumsatz (CHF/Jahr)</label><input id="f-extrev" type="number" step="10000" min="0" value="${c.ExternalRevenue||""}" placeholder="z.B. 10000000"></div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
     <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-iscustomer" ${c.IsCustomer?"checked":""} style="width:auto;margin:0" onchange="document.getElementById('f-winprob-row').style.display=this.checked?'none':'block'"> Ist Kunde (zahlt monatlich)</label></div>
     <div id="f-winprob-row" class="field" style="display:${c.IsCustomer?'none':'block'}">
@@ -2263,7 +2277,8 @@ async function saveCompany(id) {
     City: val("f-city"), Country: val("f-country"), Notes: val("f-notes"),
     IsCustomer: isCust,
     // Bei Kunden Win% nicht relevant — auf null setzen, sonst eingetragener Wert
-    WinProbability: (!isCust && winRaw !== "") ? Math.max(0, Math.min(100, parseInt(winRaw))) : null
+    WinProbability: (!isCust && winRaw !== "") ? Math.max(0, Math.min(100, parseInt(winRaw))) : null,
+    ExternalRevenue: val("f-extrev") ? parseFloat(val("f-extrev")) : null
   };
   if (!data.Title) return toast("Firmenname erforderlich", true);
   try {
