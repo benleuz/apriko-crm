@@ -1591,6 +1591,104 @@ function computeCustomerStats(cust, range) {
 
 /* --- Chart-Helper (pure SVG) --- */
 
+// Berechnet die ARR-Entwicklung pro Monat rückwärts vom Referenzmonat (typisch: Bis-Datum des Filters)
+// ARR = Summe aller Kunden (Lizenzen × Preis in dem Monat × 12)
+// Zeigt die letzten n Monate (default 18)
+function computeArrHistory(refYear, refMonth, monthsBack) {
+  const months = [];
+  const start = refYear * 12 + (refMonth - 1);
+  for (let i = monthsBack - 1; i >= 0; i--) {
+    const key = start - i;
+    const y = Math.floor(key / 12);
+    const m = (key % 12) + 1;
+    let arr = 0;
+    cache.customers.forEach(c => {
+      const rec = findRev(c.id, y, m);
+      if (!rec) return;
+      const lic = parseInt(rec.Licenses) || 0;
+      if (lic <= 0) return;
+      // Preis für diesen Monat (mit History-Berücksichtigung)
+      const price = (typeof getPriceForMonth === "function")
+        ? getPriceForMonth(c, y, m)
+        : (parseFloat(c.PricePerLicense) || 0);
+      arr += lic * price * 12;
+    });
+    months.push({
+      year: y,
+      month: m,
+      label: `${MONTH_NAMES[m-1]} ${String(y).slice(2)}`,
+      value: arr
+    });
+  }
+  return months;
+}
+
+// SVG-Line-Chart mit Punkten für Zeitreihen
+function svgLineChart(data, width, height, opts = {}) {
+  // data: [{label, value}]
+  if (!data.length) return `<div style="color:var(--text-faint);padding:20px;text-align:center">Keine Daten.</div>`;
+  const color = opts.color || "var(--accent)";
+  const pad = { top: 20, right: 12, bottom: 34, left: 70 };
+  const w = width - pad.left - pad.right;
+  const h = height - pad.top - pad.bottom;
+  const values = data.map(d => d.value || 0);
+  const max = Math.max(1, ...values);
+  const min = Math.min(0, ...values);
+  const range = max - min || 1;
+
+  const xStep = data.length > 1 ? w / (data.length - 1) : 0;
+  const yScale = (v) => h - ((v - min) / range) * h;
+
+  // Gridlines + Y-Beschriftung
+  const yTicks = 4;
+  const gridLines = [];
+  const yLabels = [];
+  for (let i = 0; i <= yTicks; i++) {
+    const v = min + range * i / yTicks;
+    const y = yScale(v);
+    gridLines.push(`<line x1="0" y1="${y}" x2="${w}" y2="${y}" stroke="var(--border)" stroke-dasharray="2,3" opacity="0.5"/>`);
+    yLabels.push(`<text x="-6" y="${y + 3}" text-anchor="end" fill="var(--text-dim)" font-family="var(--font-mono)" font-size="9">${fmtCHFShort(v)}</text>`);
+  }
+
+  // Pfad (Linie)
+  const points = data.map((d, i) => [i * xStep, yScale(d.value || 0)]);
+  const linePath = "M " + points.map(p => `${p[0]},${p[1]}`).join(" L ");
+
+  // Fläche darunter (semi-transparent)
+  const areaPath = linePath + ` L ${points[points.length-1][0]},${h} L ${points[0][0]},${h} Z`;
+
+  // X-Beschriftungen (nur jeden n-ten Monat wenn's zu voll wird)
+  const labelStep = data.length > 12 ? Math.ceil(data.length / 8) : 1;
+  const xLabels = data.map((d, i) => {
+    if (i % labelStep !== 0 && i !== data.length - 1) return "";
+    return `<text x="${i * xStep}" y="${h + 15}" text-anchor="middle" fill="var(--text-dim)" font-family="var(--font-mono)" font-size="9">${escape(d.label)}</text>`;
+  }).join("");
+
+  // Punkte mit Tooltip
+  const dots = data.map((d, i) => `
+    <circle cx="${i * xStep}" cy="${yScale(d.value || 0)}" r="3.5" fill="${color}" stroke="var(--bg)" stroke-width="1.5">
+      <title>${escape(d.label)}: CHF ${fmtCHFShort(d.value || 0)}</title>
+    </circle>
+  `).join("");
+
+  return `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" style="display:block">
+    <defs>
+      <linearGradient id="lineGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${color}" stop-opacity="0.25"/>
+        <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <g transform="translate(${pad.left},${pad.top})">
+      ${gridLines.join("")}
+      ${yLabels.join("")}
+      <path d="${areaPath}" fill="url(#lineGrad)"/>
+      <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2"/>
+      ${dots}
+      ${xLabels}
+    </g>
+  </svg>`;
+}
+
 // SVG-Bar-Chart: gestapelte Balken (SaaS unten, BPO oben) pro Monat
 function svgStackedBars(data, width, height, opts = {}) {
   // data: [{label, saas, bpo}]
@@ -1850,9 +1948,12 @@ function renderStats(el) {
   const lastMonthTotal = monthTotals[monthTotals.length - 1] || { total: 0, saas: 0, bpo: 0 };
   const arr = (lastMonthTotal.total || 0) * 12;
 
-  // === Top 10 Kunden nach Umsatz im Zeitraum ===
+  // === Top 10 Kunden nach Umsatz im Zeitraum (optional nach Segment gefiltert) ===
+  const top10Filter = filters.statsTop10Segments;
+  const hasTop10Filter = top10Filter.length > 0;
   const top10 = custData
     .slice()
+    .filter(cd => !hasTop10Filter || top10Filter.includes(cd.customer.Segment))
     .sort((a,b) => b.stats.sumTotal - a.stats.sumTotal)
     .slice(0, 10)
     .map(cd => ({
@@ -1902,6 +2003,9 @@ function renderStats(el) {
     bpo: monthTotals[i].bpo
   }));
 
+  // === ARR-Entwicklung: letzte 18 Monate rückwärts vom Bis-Datum ===
+  const arrHistory = computeArrHistory(filters.statsToYear, filters.statsToMonth, 18);
+
   // Rendern
   const isWide = monthCols.length > 6;
   const monthColWidth = isWide ? "min-width:70px" : "min-width:80px";
@@ -1922,10 +2026,39 @@ function renderStats(el) {
       ${svgStackedBars(chartData, 800, 240)}
     </div>
 
+    <!-- ARR-Entwicklung Chart -->
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:16px;margin-bottom:16px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;gap:12px;flex-wrap:wrap">
+        <div style="color:var(--text-dim);font-size:11px;text-transform:uppercase;letter-spacing:0.05em">ARR-Entwicklung (SaaS-Lizenzen × 12)</div>
+        <div style="display:flex;gap:16px;font-size:11px;color:var(--text-dim)">
+          <div>Aktuell (${arrHistory[arrHistory.length-1]?.label || "—"}): <span style="font-family:var(--font-mono);color:var(--accent);font-weight:600">CHF ${fmtCHFShort(arrHistory[arrHistory.length-1]?.value || 0)}</span></div>
+          ${arrHistory.length >= 13 ? (() => {
+            const cur = arrHistory[arrHistory.length-1].value;
+            const yoy = arrHistory[arrHistory.length-13].value;
+            const d = pctDelta(cur, yoy);
+            if (d === null) return "";
+            const arrow = d >= 0 ? "▲" : "▼";
+            const color = d >= 0 ? "var(--accent)" : "var(--danger)";
+            return `<div>YoY: <span style="color:${color};font-weight:600">${arrow} ${Math.abs(d).toFixed(1)}%</span></div>`;
+          })() : ""}
+        </div>
+      </div>
+      ${svgLineChart(arrHistory, 800, 220, { color: "var(--accent)" })}
+    </div>
+
     <!-- Row: Top 10 + Segment Mix -->
     <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px;">
       <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:16px">
-        <div style="color:var(--text-dim);font-size:11px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px">Top ${top10.length} Kunden im Zeitraum</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px;flex-wrap:wrap">
+          <div style="color:var(--text-dim);font-size:11px;text-transform:uppercase;letter-spacing:0.05em">Top ${top10.length} Kunden im Zeitraum</div>
+          <div class="seg-filter-group" style="gap:3px">
+            ${SEGMENTS.map(s => {
+              const isActive = top10Filter.includes(s);
+              return `<button class="seg-filter-btn ${isActive?'active':''}" style="padding:2px 8px;font-size:10px" onclick="toggleTop10Segment('${escape(s)}')">${escape(s)}</button>`;
+            }).join("")}
+            ${hasTop10Filter ? `<button class="seg-filter-btn clear" style="padding:2px 6px;font-size:10px" onclick="clearTop10SegmentFilter()">✕</button>` : ""}
+          </div>
+        </div>
         ${svgHorizontalBars(top10, 560, 260, "var(--accent)")}
       </div>
       <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:16px">
@@ -1998,6 +2131,17 @@ function renderStats(el) {
       Hinweis: Bei YTD-Kunden zeigen die Monatsspalten den effektiv in dem Monat fakturierten Differenzbetrag. Die BPO-Jahressumme entspricht dem letzten YTD-Stand des Zeitraums (kein Doppelzählen).
     </div>
   `;
+}
+
+function toggleTop10Segment(segment) {
+  const idx = filters.statsTop10Segments.indexOf(segment);
+  if (idx >= 0) filters.statsTop10Segments.splice(idx, 1);
+  else filters.statsTop10Segments.push(segment);
+  render();
+}
+function clearTop10SegmentFilter() {
+  filters.statsTop10Segments = [];
+  render();
 }
 
 // Exportiert die aktuelle Statistik-Tabelle als CSV (Excel-kompatibel, Schweizer Format)
@@ -3217,7 +3361,8 @@ const filters = {
   statsFromYear: new Date().getFullYear(),
   statsFromMonth: 1,
   statsToYear: new Date().getFullYear(),
-  statsToMonth: new Date().getMonth() + 1
+  statsToMonth: new Date().getMonth() + 1,
+  statsTop10Segments: []  // leere Array = alle Segmente
 };
 
 function escape(s) {
