@@ -1523,37 +1523,40 @@ function forEachStatsMonth(callback) {
 }
 
 // Berechnet Kunde × Zeitraum-Summen (unter Berücksichtigung von YTD-Logik)
-function computeCustomerStats(cust) {
-  const monthly = [];       // { year, month, saas, bpo, total }
+// Iteriert über einen beliebigen Zeitraum (fromY,fromM,toY,toM); default: filters.stats*
+function forEachMonthInRange(fromY, fromM, toY, toM, callback) {
+  const start = fromY * 12 + (fromM - 1);
+  const end = toY * 12 + (toM - 1);
+  if (start > end) return;
+  for (let i = start; i <= end; i++) {
+    callback(Math.floor(i / 12), (i % 12) + 1);
+  }
+}
+
+// Berechnet Kunde × Zeitraum-Summen (unter Berücksichtigung von YTD-Logik)
+// Wenn range=null → aktueller Statistik-Zeitraum (filters.stats*)
+function computeCustomerStats(cust, range) {
+  const r0 = range || {
+    fromY: filters.statsFromYear, fromM: filters.statsFromMonth,
+    toY: filters.statsToYear, toM: filters.statsToMonth
+  };
+  const iter = (cb) => forEachMonthInRange(r0.fromY, r0.fromM, r0.toY, r0.toM, cb);
+
+  const monthly = [];
   let sumSaaS = 0, sumBPO = 0;
 
-  // Bei YTD-Kunden: BPO ist NICHT die Summe der Differenzen, sondern
-  // die letzte YTD-Position im gewählten Zeitraum minus die Position VOR dem Zeitraum
   if (cust.BPOYtd && segmentNeedsBPO(cust.Segment)) {
-    // Zuerst pro Monat den Differenzbetrag darstellen wie in Pro-Kunde-View
-    // Aber für die Gesamtsumme brauchen wir die YTD-Positionen an Zeitraumsgrenzen
-
-    let lastYtdInRange = 0;  // YTD-Stand am Ende des Zeitraums
-    let firstMonthWithDataYear = null;
-    forEachStatsMonth((y, m) => {
+    iter((y, m) => {
       const r = findRev(cust.id, y, m);
       const calc = calcRevenue(r, cust, y, m);
       const showBPO = calc.ytd ? calc.ytd.thisMonth : calc.bpo;
       monthly.push({ year: y, month: m, saas: calc.saas, bpo: showBPO, total: calc.saas + showBPO });
       sumSaaS += calc.saas;
-      if (calc.ytd && calc.ytd.ytdHonorar > 0) {
-        lastYtdInRange = calc.ytd.ytdHonorar;
-        if (firstMonthWithDataYear === null) firstMonthWithDataYear = y;
-      }
     });
 
-    // BPO-Summe: für alle Jahre im Zeitraum den letzten YTD-Stand jenes Jahres nehmen,
-    // MINUS den YTD-Stand am Anfang des Zeitraums (falls der Startmonat > 1)
-    // Vereinfachte robuste Berechnung: iteriere alle Jahre im Zeitraum
     const yearsCovered = new Set(monthly.map(x => x.year));
     let bpoSum = 0;
     yearsCovered.forEach(y => {
-      // Für dieses Jahr: letzter erfasster Monat im Zeitraum
       const monthsThisYear = monthly.filter(x => x.year === y).map(x => x.month);
       let lastYtd = 0;
       for (const m of monthsThisYear) {
@@ -1561,11 +1564,9 @@ function computeCustomerStats(cust) {
         const calc = calcRevenue(r, cust, y, m);
         if (calc.ytd && calc.ytd.ytdHonorar > 0) lastYtd = calc.ytd.ytdHonorar;
       }
-      // Falls Zeitraum nicht mit Januar dieses Jahres beginnt: YTD-Stand vor Zeitraum abziehen
       const startMonthInYear = Math.min(...monthsThisYear);
       let priorYtd = 0;
       if (startMonthInYear > 1) {
-        // Suche den letzten YTD-Stand VOR startMonthInYear (in derselben Jahres-YTD-Serie)
         for (let m = startMonthInYear - 1; m >= 1; m--) {
           const r = findRev(cust.id, y, m);
           const calc = calcRevenue(r, cust, y, m);
@@ -1576,8 +1577,7 @@ function computeCustomerStats(cust) {
     });
     sumBPO = bpoSum;
   } else {
-    // Nicht-YTD-Kunde: einfach aufsummieren
-    forEachStatsMonth((y, m) => {
+    iter((y, m) => {
       const r = findRev(cust.id, y, m);
       const calc = calcRevenue(r, cust, y, m);
       monthly.push({ year: y, month: m, saas: calc.saas, bpo: calc.bpo, total: calc.total });
@@ -1587,6 +1587,179 @@ function computeCustomerStats(cust) {
   }
 
   return { monthly, sumSaaS, sumBPO, sumTotal: sumSaaS + sumBPO };
+}
+
+/* --- Chart-Helper (pure SVG) --- */
+
+// SVG-Bar-Chart: gestapelte Balken (SaaS unten, BPO oben) pro Monat
+function svgStackedBars(data, width, height, opts = {}) {
+  // data: [{label, saas, bpo}]
+  if (!data.length) return `<div style="color:var(--text-faint);padding:20px;text-align:center">Keine Daten.</div>`;
+  const pad = { top: 20, right: 12, bottom: 32, left: 60 };
+  const w = width - pad.left - pad.right;
+  const h = height - pad.top - pad.bottom;
+  const max = Math.max(1, ...data.map(d => (d.saas || 0) + (d.bpo || 0)));
+  const bw = w / data.length;
+  const barW = Math.max(4, bw * 0.7);
+  const xOff = (bw - barW) / 2;
+
+  // Y-Achse: 4 Gridlines
+  const yTicks = 4;
+  const yScale = (v) => h - (v / max) * h;
+  const gridLines = [];
+  const yLabels = [];
+  for (let i = 0; i <= yTicks; i++) {
+    const v = max * i / yTicks;
+    const y = yScale(v);
+    gridLines.push(`<line x1="0" y1="${y}" x2="${w}" y2="${y}" stroke="var(--border)" stroke-dasharray="2,3" opacity="0.5"/>`);
+    yLabels.push(`<text x="-6" y="${y + 3}" text-anchor="end" fill="var(--text-dim)" font-family="var(--font-mono)" font-size="9">${fmtCHFShort(v)}</text>`);
+  }
+
+  const bars = data.map((d, i) => {
+    const x = i * bw + xOff;
+    const saasH = (d.saas / max) * h;
+    const bpoH = (d.bpo / max) * h;
+    const saasY = h - saasH;
+    const bpoY = saasY - bpoH;
+    return `
+      <g>
+        ${d.saas > 0 ? `<rect x="${x}" y="${saasY}" width="${barW}" height="${saasH}" fill="var(--accent)" opacity="0.85"><title>${escape(d.label)}\nSaaS: CHF ${fmtCHFShort(d.saas)}</title></rect>` : ""}
+        ${d.bpo > 0 ? `<rect x="${x}" y="${bpoY}" width="${barW}" height="${bpoH}" fill="var(--accent-2)" opacity="0.85"><title>${escape(d.label)}\nBPO: CHF ${fmtCHFShort(d.bpo)}</title></rect>` : ""}
+        <text x="${x + barW/2}" y="${h + 15}" text-anchor="middle" fill="var(--text-dim)" font-family="var(--font-mono)" font-size="9">${escape(d.label)}</text>
+      </g>
+    `;
+  }).join("");
+
+  // Legende
+  const legend = `
+    <g transform="translate(${w - 130}, ${-8})">
+      <rect x="0" y="0" width="10" height="10" fill="var(--accent)" opacity="0.85"/>
+      <text x="14" y="9" fill="var(--text-dim)" font-size="10">SaaS</text>
+      <rect x="55" y="0" width="10" height="10" fill="var(--accent-2)" opacity="0.85"/>
+      <text x="69" y="9" fill="var(--text-dim)" font-size="10">BPO</text>
+    </g>
+  `;
+
+  return `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" style="display:block">
+    <g transform="translate(${pad.left},${pad.top})">
+      ${gridLines.join("")}
+      ${yLabels.join("")}
+      ${bars}
+      ${legend}
+    </g>
+  </svg>`;
+}
+
+// Horizontaler Balken-Chart für Top-Kunden
+function svgHorizontalBars(data, width, height, color = "var(--accent)") {
+  // data: [{label, value, sub}]
+  if (!data.length) return `<div style="color:var(--text-faint);padding:20px;text-align:center">Keine Daten.</div>`;
+  const rowH = 26;
+  const actualH = data.length * rowH + 10;
+  const labelW = 180;
+  const valueW = 90;
+  const barMaxW = width - labelW - valueW - 12;
+  const max = Math.max(1, ...data.map(d => Math.abs(d.value)));
+
+  const rows = data.map((d, i) => {
+    const y = i * rowH + 5;
+    const barW = Math.max(1, (Math.abs(d.value) / max) * barMaxW);
+    const isNeg = d.value < 0;
+    const barColor = isNeg ? "var(--danger)" : color;
+    return `
+      <g transform="translate(0, ${y})">
+        <text x="0" y="15" fill="var(--text)" font-size="12" font-weight="600">${escape(d.label)}</text>
+        ${d.sub ? `<text x="0" y="24" fill="var(--text-faint)" font-size="9">${escape(d.sub)}</text>` : ""}
+        <rect x="${labelW}" y="4" width="${barW}" height="16" fill="${barColor}" opacity="0.75" rx="2"/>
+        <text x="${width - 4}" y="15" text-anchor="end" fill="var(--text)" font-family="var(--font-mono)" font-size="11" font-weight="600">${isNeg ? "−" : ""}CHF ${fmtCHFShort(Math.abs(d.value))}</text>
+      </g>
+    `;
+  }).join("");
+
+  return `<svg viewBox="0 0 ${width} ${actualH}" width="100%" height="${actualH}" style="display:block">${rows}</svg>`;
+}
+
+// Donut-Chart für Segment-Mix
+function svgDonut(data, size = 180) {
+  // data: [{label, value, color}]
+  const total = data.reduce((s, d) => s + d.value, 0);
+  if (total <= 0) return `<div style="color:var(--text-faint);padding:20px;text-align:center">Keine Daten.</div>`;
+  const cx = size / 2, cy = size / 2;
+  const rOuter = size / 2 - 4;
+  const rInner = rOuter * 0.62;
+
+  let a0 = -Math.PI / 2;
+  const paths = data.map(d => {
+    if (d.value <= 0) return "";
+    const angle = (d.value / total) * Math.PI * 2;
+    const a1 = a0 + angle;
+    const large = angle > Math.PI ? 1 : 0;
+    const x0 = cx + rOuter * Math.cos(a0);
+    const y0 = cy + rOuter * Math.sin(a0);
+    const x1 = cx + rOuter * Math.cos(a1);
+    const y1 = cy + rOuter * Math.sin(a1);
+    const xi0 = cx + rInner * Math.cos(a1);
+    const yi0 = cy + rInner * Math.sin(a1);
+    const xi1 = cx + rInner * Math.cos(a0);
+    const yi1 = cy + rInner * Math.sin(a0);
+    const d_ = `M ${x0} ${y0} A ${rOuter} ${rOuter} 0 ${large} 1 ${x1} ${y1} L ${xi0} ${yi0} A ${rInner} ${rInner} 0 ${large} 0 ${xi1} ${yi1} Z`;
+    a0 = a1;
+    const pct = (d.value / total * 100).toFixed(0);
+    return `<path d="${d_}" fill="${d.color}" opacity="0.85"><title>${escape(d.label)}: CHF ${fmtCHFShort(d.value)} (${pct}%)</title></path>`;
+  }).join("");
+
+  return `
+    <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">
+      <svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">${paths}
+        <text x="${cx}" y="${cy - 4}" text-anchor="middle" fill="var(--text-dim)" font-size="10">Total</text>
+        <text x="${cx}" y="${cy + 12}" text-anchor="middle" fill="var(--text)" font-size="12" font-family="var(--font-mono)" font-weight="600">CHF ${fmtCHFShort(total)}</text>
+      </svg>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:12px">
+        ${data.filter(d => d.value > 0).map(d => `
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="width:10px;height:10px;background:${d.color};display:inline-block;border-radius:2px"></span>
+            <span style="color:var(--text-dim);min-width:120px">${escape(d.label)}</span>
+            <span style="font-family:var(--font-mono);color:var(--text)">${fmtCHFShort(d.value)}</span>
+            <span style="color:var(--text-faint);font-size:10px">${(d.value/total*100).toFixed(0)}%</span>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+/* --- Stat-Kachel für Executive Summary --- */
+function statTile(label, value, delta) {
+  // delta: {value, pct, positive} oder null
+  let deltaHtml = "";
+  if (delta && delta.pct !== null && !isNaN(delta.pct)) {
+    const color = delta.positive ? "var(--accent)" : "var(--danger)";
+    const arrow = delta.positive ? "▲" : "▼";
+    deltaHtml = `<div style="margin-top:4px;font-size:11px;color:${color}">${arrow} ${Math.abs(delta.pct).toFixed(1)}% <span style="color:var(--text-faint)">ggü. Vorjahr</span></div>`;
+  } else if (delta && delta.text) {
+    deltaHtml = `<div style="margin-top:4px;font-size:11px;color:var(--text-faint)">${escape(delta.text)}</div>`;
+  }
+  return `
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:14px 16px;min-width:150px;flex:1">
+      <div style="color:var(--text-dim);font-size:11px;text-transform:uppercase;letter-spacing:0.05em">${escape(label)}</div>
+      <div style="font-family:var(--font-mono);font-size:20px;color:var(--text);margin-top:6px">${value}</div>
+      ${deltaHtml}
+    </div>
+  `;
+}
+
+// Berechnet den Vorjahres-Zeitraum
+function getPriorYearRange() {
+  return {
+    fromY: filters.statsFromYear - 1, fromM: filters.statsFromMonth,
+    toY: filters.statsToYear - 1, toM: filters.statsToMonth
+  };
+}
+
+// Prozentuale Veränderung
+function pctDelta(current, prior) {
+  if (!prior || prior === 0) return null;
+  return ((current - prior) / prior) * 100;
 }
 
 function renderStats(el) {
@@ -1600,7 +1773,7 @@ function renderStats(el) {
     return years.map(y => `<option value="${y}" ${y===selected?"selected":""}>${y}</option>`).join("");
   };
 
-  // Header mit Zeitraum-Auswahl
+  // Header mit Zeitraum-Auswahl und Export-Button
   document.getElementById("view-actions").innerHTML = `
     <div style="display:inline-flex;gap:8px;align-items:center;font-size:12px;color:var(--text-dim)">
       <span>Von:</span>
@@ -1610,6 +1783,7 @@ function renderStats(el) {
       <select onchange="filters.statsToMonth=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:3px;font-family:inherit;font-size:12px">${monthOptions(filters.statsToMonth)}</select>
       <select onchange="filters.statsToYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:3px;font-family:inherit;font-size:12px">${yearOptions(filters.statsToYear)}</select>
     </div>
+    <button class="btn btn-sm" onclick="exportStatsToExcel()" style="margin-left:12px" title="Als Excel-kompatible CSV exportieren">📥 Excel Export</button>
   `;
 
   // Validierung Zeitraum
@@ -1645,29 +1819,138 @@ function renderStats(el) {
   custData.forEach(cd => { gSaaS += cd.stats.sumSaaS; gBPO += cd.stats.sumBPO; });
 
   // Grand Total pro Monat (Summe über alle Kunden)
-  // Für YTD-Kunden ist "monat.bpo" die Differenz — das aufzuaddieren wäre nicht ganz sauber
-  // im Sinne der Jahressumme, aber pro EINZELNEM Monat ist "was in dem Monat fakturiert wird" korrekt.
-  // Daher hier: Monatsspalten zeigen "was in dem Monat fakturiert wird", das ist der Cash-Flow-Blick.
   const monthTotals = monthCols.map(mc => {
     let total = 0;
+    let saas = 0, bpo = 0;
     custData.forEach(cd => {
       const row = cd.stats.monthly.find(r => r.year === mc.y && r.month === mc.m);
-      if (row) total += row.total;
+      if (row) { total += row.total; saas += row.saas; bpo += row.bpo; }
     });
-    return total;
+    return { total, saas, bpo };
   });
+
+  // === Vorjahresvergleich (Executive Summary) ===
+  const priorRange = getPriorYearRange();
+  let priorSaaS = 0, priorBPO = 0;
+  const priorCustCount = new Set();
+  cache.customers.forEach(c => {
+    const s = computeCustomerStats(c, priorRange);
+    priorSaaS += s.sumSaaS;
+    priorBPO += s.sumBPO;
+    if (s.sumTotal > 0) priorCustCount.add(c.id);
+  });
+
+  const deltaSaaS = pctDelta(gSaaS, priorSaaS);
+  const deltaBPO = pctDelta(gBPO, priorBPO);
+  const deltaTotal = pctDelta(gSaaS + gBPO, priorSaaS + priorBPO);
+  const deltaCust = pctDelta(custData.length, priorCustCount.size);
+
+  // === ARR-Berechnung: Umsatz des letzten Monats × 12 ===
+  const lastMonthCol = monthCols[monthCols.length - 1];
+  const lastMonthTotal = monthTotals[monthTotals.length - 1] || { total: 0, saas: 0, bpo: 0 };
+  const arr = (lastMonthTotal.total || 0) * 12;
+
+  // === Top 10 Kunden nach Umsatz im Zeitraum ===
+  const top10 = custData
+    .slice()
+    .sort((a,b) => b.stats.sumTotal - a.stats.sumTotal)
+    .slice(0, 10)
+    .map(cd => ({
+      label: cd.customer.Title,
+      value: cd.stats.sumTotal,
+      sub: cd.customer.Segment
+    }));
+
+  // === Top-Wachstum und Top-Verluste (Änderung Zeitraum vs. Vorjahr) ===
+  const changes = [];
+  cache.customers.forEach(c => {
+    const cur = computeCustomerStats(c);
+    const pri = computeCustomerStats(c, priorRange);
+    const diff = cur.sumTotal - pri.sumTotal;
+    if (Math.abs(diff) < 1) return;  // ignoriere marginales
+    changes.push({
+      label: c.Title,
+      value: diff,
+      sub: `${fmtCHFShort(pri.sumTotal)} → ${fmtCHFShort(cur.sumTotal)}`
+    });
+  });
+  const topGrowth = changes.filter(x => x.value > 0).sort((a,b) => b.value - a.value).slice(0, 5);
+  const topLosses = changes.filter(x => x.value < 0).sort((a,b) => a.value - b.value).slice(0, 5);
+
+  // === Segment-Mix im Zeitraum ===
+  const segMix = {};
+  SEGMENTS.forEach(s => segMix[s] = 0);
+  custData.forEach(cd => {
+    if (segMix[cd.customer.Segment] !== undefined) {
+      segMix[cd.customer.Segment] += cd.stats.sumTotal;
+    }
+  });
+  const segColors = {
+    "Nur SaaS": "var(--accent)",
+    "SaaS und BPO": "var(--accent-2)",
+    "Nur BPO": "#4ac4d4",
+    "BPO inkl. SaaS": "#b8e986"
+  };
+  const donutData = SEGMENTS.map(s => ({
+    label: s, value: segMix[s], color: segColors[s] || "var(--text-dim)"
+  }));
+
+  // === Umsatz-Verlauf Bar Chart ===
+  const chartData = monthCols.map((mc, i) => ({
+    label: mc.label,
+    saas: monthTotals[i].saas,
+    bpo: monthTotals[i].bpo
+  }));
 
   // Rendern
   const isWide = monthCols.length > 6;
   const monthColWidth = isWide ? "min-width:70px" : "min-width:80px";
 
   el.innerHTML = `
+    <!-- Executive Summary -->
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px">
+      ${statTile("SaaS-Umsatz", `CHF ${fmtCHFShort(gSaaS)}`, deltaSaaS !== null ? { pct: deltaSaaS, positive: deltaSaaS >= 0 } : { text: "Kein Vorjahres-Vergleich" })}
+      ${statTile("BPO-Umsatz", `CHF ${fmtCHFShort(gBPO)}`, deltaBPO !== null ? { pct: deltaBPO, positive: deltaBPO >= 0 } : { text: "Kein Vorjahres-Vergleich" })}
+      ${statTile("Total-Umsatz", `CHF ${fmtCHFShort(gSaaS + gBPO)}`, deltaTotal !== null ? { pct: deltaTotal, positive: deltaTotal >= 0 } : { text: "Kein Vorjahres-Vergleich" })}
+      ${statTile("Aktive Kunden", `${custData.length}`, deltaCust !== null ? { pct: deltaCust, positive: deltaCust >= 0 } : { text: "Kein Vorjahres-Vergleich" })}
+      ${statTile("ARR (Hochrechnung)", `CHF ${fmtCHFShort(arr)}`, { text: `Basis: ${lastMonthCol ? lastMonthCol.label : "—"} × 12` })}
+    </div>
+
+    <!-- Umsatz-Verlauf Chart -->
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:16px;margin-bottom:16px">
+      <div style="color:var(--text-dim);font-size:11px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Umsatz-Verlauf</div>
+      ${svgStackedBars(chartData, 800, 240)}
+    </div>
+
+    <!-- Row: Top 10 + Segment Mix -->
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px;">
+      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:16px">
+        <div style="color:var(--text-dim);font-size:11px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px">Top ${top10.length} Kunden im Zeitraum</div>
+        ${svgHorizontalBars(top10, 560, 260, "var(--accent)")}
+      </div>
+      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:16px">
+        <div style="color:var(--text-dim);font-size:11px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px">Segment-Mix</div>
+        ${svgDonut(donutData, 160)}
+      </div>
+    </div>
+
+    <!-- Row: Top-Wachstum + Top-Verluste -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
+      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:16px">
+        <div style="color:var(--text-dim);font-size:11px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px">▲ Top-Wachstum (vs. Vorjahr)</div>
+        ${topGrowth.length ? svgHorizontalBars(topGrowth, 500, 260, "var(--accent)") : `<div style="color:var(--text-faint);padding:20px;text-align:center">Keine Zuwächse im Zeitraum.</div>`}
+      </div>
+      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:16px">
+        <div style="color:var(--text-dim);font-size:11px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px">▼ Top-Verluste (vs. Vorjahr)</div>
+        ${topLosses.length ? svgHorizontalBars(topLosses, 500, 260, "var(--danger)") : `<div style="color:var(--text-faint);padding:20px;text-align:center">Keine Verluste im Zeitraum.</div>`}
+      </div>
+    </div>
+
+    <!-- Bestehende Umsatz-Matrix Tabelle -->
     <div style="margin-bottom:16px;display:flex;gap:20px;flex-wrap:wrap;font-size:12px;align-items:center">
+      <div style="color:var(--text-dim);font-size:11px;text-transform:uppercase;letter-spacing:0.05em">Detailtabelle</div>
       <div><span style="color:var(--text-dim)">Zeitraum:</span> <strong>${MONTH_NAMES[filters.statsFromMonth-1]} ${filters.statsFromYear} bis ${MONTH_NAMES[filters.statsToMonth-1]} ${filters.statsToYear}</strong></div>
-      <div><span style="color:var(--text-dim)">Kunden mit Umsatz:</span> <strong style="font-family:var(--font-mono)">${custData.length}</strong></div>
-      <div style="margin-left:auto"><span style="color:var(--text-dim)">SaaS:</span> <span style="font-family:var(--font-mono);color:var(--accent)">CHF ${fmtCHFShort(gSaaS)}</span></div>
-      <div><span style="color:var(--text-dim)">BPO:</span> <span style="font-family:var(--font-mono);color:var(--accent-2)">CHF ${fmtCHFShort(gBPO)}</span></div>
-      <div><span style="color:var(--text-dim)">Total:</span> <span style="font-family:var(--font-mono);font-weight:600">CHF ${fmtCHFShort(gSaaS+gBPO)}</span></div>
+      <div><span style="color:var(--text-dim)">Kunden:</span> <strong style="font-family:var(--font-mono)">${custData.length}</strong></div>
     </div>
 
     <div class="table-wrap" style="overflow-x:auto"><table style="min-width:100%">
@@ -1703,7 +1986,7 @@ function renderStats(el) {
         }).join("")}
         <tr style="border-top:2px solid var(--border);background:var(--bg-card)">
           <td style="position:sticky;left:0;background:var(--bg-card);z-index:1;font-weight:700">Total</td>
-          ${monthTotals.map(t => `<td style="text-align:right;font-family:var(--font-mono);font-size:11px;font-weight:600">${t ? fmtCHFShort(t) : "—"}</td>`).join("")}
+          ${monthTotals.map(t => `<td style="text-align:right;font-family:var(--font-mono);font-size:11px;font-weight:600">${t.total ? fmtCHFShort(t.total) : "—"}</td>`).join("")}
           <td style="text-align:right;font-family:var(--font-mono);font-size:12px;font-weight:700;color:var(--accent);border-left:1px solid var(--border)">${gSaaS ? fmtCHFShort(gSaaS) : "—"}</td>
           <td style="text-align:right;font-family:var(--font-mono);font-size:12px;font-weight:700;color:var(--accent-2)">${gBPO ? fmtCHFShort(gBPO) : "—"}</td>
           <td style="text-align:right;font-family:var(--font-mono);font-size:12px;font-weight:700">${(gSaaS+gBPO) ? fmtCHFShort(gSaaS+gBPO) : "—"}</td>
@@ -1715,6 +1998,116 @@ function renderStats(el) {
       Hinweis: Bei YTD-Kunden zeigen die Monatsspalten den effektiv in dem Monat fakturierten Differenzbetrag. Die BPO-Jahressumme entspricht dem letzten YTD-Stand des Zeitraums (kein Doppelzählen).
     </div>
   `;
+}
+
+// Exportiert die aktuelle Statistik-Tabelle als CSV (Excel-kompatibel, Schweizer Format)
+function exportStatsToExcel() {
+  const startKey = filters.statsFromYear * 12 + (filters.statsFromMonth - 1);
+  const endKey = filters.statsToYear * 12 + (filters.statsToMonth - 1);
+  if (startKey > endKey) {
+    toast("Ungültiger Zeitraum", true);
+    return;
+  }
+
+  // Monate im Zeitraum sammeln
+  const monthCols = [];
+  forEachStatsMonth((y, m) => monthCols.push({ y, m, label: `${MONTH_NAMES[m-1]} ${y}` }));
+
+  // Kundendaten wie in renderStats
+  const custData = [];
+  cache.customers.forEach(c => {
+    const stats = computeCustomerStats(c);
+    if (stats.sumTotal > 0) custData.push({ customer: c, stats });
+  });
+  custData.sort((a,b) => (a.customer.Title||"").localeCompare(b.customer.Title||""));
+
+  if (!custData.length) {
+    toast("Keine Daten im Zeitraum zum Exportieren", true);
+    return;
+  }
+
+  // CSV-Zellen escapen (Semikolon-getrennt, deutsches Zahlenformat mit Komma)
+  const esc = (v) => {
+    if (v === null || v === undefined) return "";
+    const s = String(v);
+    if (s.includes(";") || s.includes("\"") || s.includes("\n")) {
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+  };
+  const num = (n) => {
+    if (!n && n !== 0) return "";
+    // Deutsches/Schweizer Excel: Komma als Dezimaltrennzeichen
+    return String(n).replace(".", ",");
+  };
+
+  // Header-Zeile
+  const headers = ["Kunde", "Segment", "YTD"];
+  monthCols.forEach(mc => headers.push(mc.label));
+  headers.push("SaaS-Summe", "BPO-Summe", "Total");
+
+  const rows = [headers.map(esc).join(";")];
+
+  // Datenzeilen
+  custData.forEach(cd => {
+    const c = cd.customer;
+    const s = cd.stats;
+    const monthlyByKey = {};
+    s.monthly.forEach(r => monthlyByKey[`${r.year}-${r.month}`] = r);
+
+    const row = [
+      esc(c.Title || ""),
+      esc(c.Segment || ""),
+      esc(c.BPOYtd ? "Ja" : "Nein")
+    ];
+    monthCols.forEach(mc => {
+      const r = monthlyByKey[`${mc.y}-${mc.m}`];
+      row.push(num(r ? Math.round(r.total * 100) / 100 : 0));
+    });
+    row.push(num(Math.round(s.sumSaaS * 100) / 100));
+    row.push(num(Math.round(s.sumBPO * 100) / 100));
+    row.push(num(Math.round(s.sumTotal * 100) / 100));
+
+    rows.push(row.join(";"));
+  });
+
+  // Grand Total
+  let gSaaS = 0, gBPO = 0;
+  custData.forEach(cd => { gSaaS += cd.stats.sumSaaS; gBPO += cd.stats.sumBPO; });
+  const monthTotals = monthCols.map(mc => {
+    let total = 0;
+    custData.forEach(cd => {
+      const row = cd.stats.monthly.find(r => r.year === mc.y && r.month === mc.m);
+      if (row) total += row.total;
+    });
+    return total;
+  });
+  const totalRow = ["Total", "", ""];
+  monthTotals.forEach(t => totalRow.push(num(Math.round(t * 100) / 100)));
+  totalRow.push(num(Math.round(gSaaS * 100) / 100));
+  totalRow.push(num(Math.round(gBPO * 100) / 100));
+  totalRow.push(num(Math.round((gSaaS + gBPO) * 100) / 100));
+  rows.push(totalRow.map(esc).join(";"));
+
+  // BOM für UTF-8-Erkennung in Excel + CSV-Content
+  const csvContent = "\uFEFF" + rows.join("\r\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+
+  const fromLabel = `${filters.statsFromYear}-${String(filters.statsFromMonth).padStart(2,"0")}`;
+  const toLabel = `${filters.statsToYear}-${String(filters.statsToMonth).padStart(2,"0")}`;
+  const filename = `Umsatzstatistik_${fromLabel}_bis_${toLabel}.csv`;
+
+  // Download triggern
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+
+  toast(`Exportiert: ${filename}`);
 }
 
 /* ---------- Customers ---------- */
