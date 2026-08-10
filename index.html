@@ -482,6 +482,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button data-view="pipeline"><span class="ic">▦</span> Pipeline</button>
       <button data-view="customers"><span class="ic">★</span> Kunden</button>
       <button data-view="revenue"><span class="ic">⌗</span> Umsätze</button>
+      <button data-view="stats"><span class="ic">∑</span> Statistiken</button>
       <button data-view="companies"><span class="ic">◳</span> Firmen</button>
       <button data-view="contacts"><span class="ic">◉</span> Kontakte</button>
       <button data-view="tasks"><span class="ic">✓</span> Aufgaben</button>
@@ -855,7 +856,7 @@ function bindNav() {
 function render() {
   const titles = {
     dashboard: "Dashboard", pipeline: "Pipeline",
-    customers: "Kunden", revenue: "Umsätze",
+    customers: "Kunden", revenue: "Umsätze", stats: "Statistiken",
     companies: "Firmen", contacts: "Kontakte", tasks: "Aufgaben"
   };
   document.getElementById("view-title").textContent = titles[currentView];
@@ -866,6 +867,7 @@ function render() {
   else if (currentView === "pipeline") renderPipeline(content);
   else if (currentView === "customers") renderCustomers(content);
   else if (currentView === "revenue") renderRevenue(content);
+  else if (currentView === "stats") renderStats(content);
   else if (currentView === "companies") renderCompanies(content);
   else if (currentView === "contacts") renderContacts(content);
   else if (currentView === "tasks") renderTasks(content);
@@ -1502,6 +1504,217 @@ async function toggleInvoiced(customerId, year, month, type) {
     render();
     toast(newValue ? `${type} als fakturiert markiert` : `${type}-Faktura zurückgesetzt`);
   } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- Statistiken (Umsatzliste über Zeitraum) ---------- */
+
+// Iteriert über die Monate im Zeitraum, callback bekommt (year, month)
+function forEachStatsMonth(callback) {
+  const fromY = filters.statsFromYear;
+  const fromM = filters.statsFromMonth;
+  const toY = filters.statsToYear;
+  const toM = filters.statsToMonth;
+  const start = fromY * 12 + (fromM - 1);
+  const end = toY * 12 + (toM - 1);
+  if (start > end) return;
+  for (let i = start; i <= end; i++) {
+    callback(Math.floor(i / 12), (i % 12) + 1);
+  }
+}
+
+// Berechnet Kunde × Zeitraum-Summen (unter Berücksichtigung von YTD-Logik)
+function computeCustomerStats(cust) {
+  const monthly = [];       // { year, month, saas, bpo, total }
+  let sumSaaS = 0, sumBPO = 0;
+
+  // Bei YTD-Kunden: BPO ist NICHT die Summe der Differenzen, sondern
+  // die letzte YTD-Position im gewählten Zeitraum minus die Position VOR dem Zeitraum
+  if (cust.BPOYtd && segmentNeedsBPO(cust.Segment)) {
+    // Zuerst pro Monat den Differenzbetrag darstellen wie in Pro-Kunde-View
+    // Aber für die Gesamtsumme brauchen wir die YTD-Positionen an Zeitraumsgrenzen
+
+    let lastYtdInRange = 0;  // YTD-Stand am Ende des Zeitraums
+    let firstMonthWithDataYear = null;
+    forEachStatsMonth((y, m) => {
+      const r = findRev(cust.id, y, m);
+      const calc = calcRevenue(r, cust, y, m);
+      const showBPO = calc.ytd ? calc.ytd.thisMonth : calc.bpo;
+      monthly.push({ year: y, month: m, saas: calc.saas, bpo: showBPO, total: calc.saas + showBPO });
+      sumSaaS += calc.saas;
+      if (calc.ytd && calc.ytd.ytdHonorar > 0) {
+        lastYtdInRange = calc.ytd.ytdHonorar;
+        if (firstMonthWithDataYear === null) firstMonthWithDataYear = y;
+      }
+    });
+
+    // BPO-Summe: für alle Jahre im Zeitraum den letzten YTD-Stand jenes Jahres nehmen,
+    // MINUS den YTD-Stand am Anfang des Zeitraums (falls der Startmonat > 1)
+    // Vereinfachte robuste Berechnung: iteriere alle Jahre im Zeitraum
+    const yearsCovered = new Set(monthly.map(x => x.year));
+    let bpoSum = 0;
+    yearsCovered.forEach(y => {
+      // Für dieses Jahr: letzter erfasster Monat im Zeitraum
+      const monthsThisYear = monthly.filter(x => x.year === y).map(x => x.month);
+      let lastYtd = 0;
+      for (const m of monthsThisYear) {
+        const r = findRev(cust.id, y, m);
+        const calc = calcRevenue(r, cust, y, m);
+        if (calc.ytd && calc.ytd.ytdHonorar > 0) lastYtd = calc.ytd.ytdHonorar;
+      }
+      // Falls Zeitraum nicht mit Januar dieses Jahres beginnt: YTD-Stand vor Zeitraum abziehen
+      const startMonthInYear = Math.min(...monthsThisYear);
+      let priorYtd = 0;
+      if (startMonthInYear > 1) {
+        // Suche den letzten YTD-Stand VOR startMonthInYear (in derselben Jahres-YTD-Serie)
+        for (let m = startMonthInYear - 1; m >= 1; m--) {
+          const r = findRev(cust.id, y, m);
+          const calc = calcRevenue(r, cust, y, m);
+          if (calc.ytd && calc.ytd.ytdHonorar > 0) { priorYtd = calc.ytd.ytdHonorar; break; }
+        }
+      }
+      bpoSum += Math.max(0, lastYtd - priorYtd);
+    });
+    sumBPO = bpoSum;
+  } else {
+    // Nicht-YTD-Kunde: einfach aufsummieren
+    forEachStatsMonth((y, m) => {
+      const r = findRev(cust.id, y, m);
+      const calc = calcRevenue(r, cust, y, m);
+      monthly.push({ year: y, month: m, saas: calc.saas, bpo: calc.bpo, total: calc.total });
+      sumSaaS += calc.saas;
+      sumBPO += calc.bpo;
+    });
+  }
+
+  return { monthly, sumSaaS, sumBPO, sumTotal: sumSaaS + sumBPO };
+}
+
+function renderStats(el) {
+  // Monat-Selectors oben
+  const monthOptions = (selected) => MONTH_NAMES.map((m,i) =>
+    `<option value="${i+1}" ${i+1===selected?"selected":""}>${m}</option>`).join("");
+  const yearOptions = (selected) => {
+    const curYear = new Date().getFullYear();
+    const years = [];
+    for (let y = curYear - 3; y <= curYear + 1; y++) years.push(y);
+    return years.map(y => `<option value="${y}" ${y===selected?"selected":""}>${y}</option>`).join("");
+  };
+
+  // Header mit Zeitraum-Auswahl
+  document.getElementById("view-actions").innerHTML = `
+    <div style="display:inline-flex;gap:8px;align-items:center;font-size:12px;color:var(--text-dim)">
+      <span>Von:</span>
+      <select onchange="filters.statsFromMonth=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:3px;font-family:inherit;font-size:12px">${monthOptions(filters.statsFromMonth)}</select>
+      <select onchange="filters.statsFromYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:3px;font-family:inherit;font-size:12px">${yearOptions(filters.statsFromYear)}</select>
+      <span>Bis:</span>
+      <select onchange="filters.statsToMonth=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:3px;font-family:inherit;font-size:12px">${monthOptions(filters.statsToMonth)}</select>
+      <select onchange="filters.statsToYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:3px;font-family:inherit;font-size:12px">${yearOptions(filters.statsToYear)}</select>
+    </div>
+  `;
+
+  // Validierung Zeitraum
+  const startKey = filters.statsFromYear * 12 + (filters.statsFromMonth - 1);
+  const endKey = filters.statsToYear * 12 + (filters.statsToMonth - 1);
+  if (startKey > endKey) {
+    el.innerHTML = `<div class="empty">Ungültiger Zeitraum: "Von" liegt nach "Bis". Bitte anpassen.</div>`;
+    return;
+  }
+
+  // Alle Monate im Zeitraum als Header sammeln
+  const monthCols = [];
+  forEachStatsMonth((y, m) => monthCols.push({ y, m, label: `${MONTH_NAMES[m-1]} ${String(y).slice(2)}` }));
+
+  // Kunden filtern: nur solche mit Umsatzdaten im Zeitraum (sonst wird's leer/riesig)
+  const custData = [];
+  cache.customers.forEach(c => {
+    const stats = computeCustomerStats(c);
+    // Nur zeigen wenn irgendwas > 0
+    if (stats.sumTotal > 0) {
+      custData.push({ customer: c, stats });
+    }
+  });
+  custData.sort((a,b) => (a.customer.Title||"").localeCompare(b.customer.Title||""));
+
+  if (!custData.length) {
+    el.innerHTML = `<div class="empty">Keine Umsätze im gewählten Zeitraum erfasst.</div>`;
+    return;
+  }
+
+  // Grand Totals
+  let gSaaS = 0, gBPO = 0;
+  custData.forEach(cd => { gSaaS += cd.stats.sumSaaS; gBPO += cd.stats.sumBPO; });
+
+  // Grand Total pro Monat (Summe über alle Kunden)
+  // Für YTD-Kunden ist "monat.bpo" die Differenz — das aufzuaddieren wäre nicht ganz sauber
+  // im Sinne der Jahressumme, aber pro EINZELNEM Monat ist "was in dem Monat fakturiert wird" korrekt.
+  // Daher hier: Monatsspalten zeigen "was in dem Monat fakturiert wird", das ist der Cash-Flow-Blick.
+  const monthTotals = monthCols.map(mc => {
+    let total = 0;
+    custData.forEach(cd => {
+      const row = cd.stats.monthly.find(r => r.year === mc.y && r.month === mc.m);
+      if (row) total += row.total;
+    });
+    return total;
+  });
+
+  // Rendern
+  const isWide = monthCols.length > 6;
+  const monthColWidth = isWide ? "min-width:70px" : "min-width:80px";
+
+  el.innerHTML = `
+    <div style="margin-bottom:16px;display:flex;gap:20px;flex-wrap:wrap;font-size:12px;align-items:center">
+      <div><span style="color:var(--text-dim)">Zeitraum:</span> <strong>${MONTH_NAMES[filters.statsFromMonth-1]} ${filters.statsFromYear} bis ${MONTH_NAMES[filters.statsToMonth-1]} ${filters.statsToYear}</strong></div>
+      <div><span style="color:var(--text-dim)">Kunden mit Umsatz:</span> <strong style="font-family:var(--font-mono)">${custData.length}</strong></div>
+      <div style="margin-left:auto"><span style="color:var(--text-dim)">SaaS:</span> <span style="font-family:var(--font-mono);color:var(--accent)">CHF ${fmtCHFShort(gSaaS)}</span></div>
+      <div><span style="color:var(--text-dim)">BPO:</span> <span style="font-family:var(--font-mono);color:var(--accent-2)">CHF ${fmtCHFShort(gBPO)}</span></div>
+      <div><span style="color:var(--text-dim)">Total:</span> <span style="font-family:var(--font-mono);font-weight:600">CHF ${fmtCHFShort(gSaaS+gBPO)}</span></div>
+    </div>
+
+    <div class="table-wrap" style="overflow-x:auto"><table style="min-width:100%">
+      <thead>
+        <tr>
+          <th style="position:sticky;left:0;background:var(--bg);z-index:2;min-width:200px">Kunde</th>
+          ${monthCols.map(mc => `<th style="text-align:right;${monthColWidth}">${mc.label}</th>`).join("")}
+          <th style="text-align:right;min-width:90px;border-left:1px solid var(--border)">SaaS</th>
+          <th style="text-align:right;min-width:90px">BPO</th>
+          <th style="text-align:right;min-width:100px">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${custData.map(cd => {
+          const c = cd.customer;
+          const s = cd.stats;
+          const monthlyByKey = {};
+          s.monthly.forEach(r => monthlyByKey[`${r.year}-${r.month}`] = r);
+          return `<tr>
+            <td style="position:sticky;left:0;background:var(--bg);z-index:1">
+              <strong>${escape(c.Title||"")}</strong>
+              <div style="color:var(--text-dim);font-size:10px">${escape(c.Segment||"")}${c.BPOYtd ? " · YTD" : ""}</div>
+            </td>
+            ${monthCols.map(mc => {
+              const r = monthlyByKey[`${mc.y}-${mc.m}`];
+              const v = r ? r.total : 0;
+              return `<td style="text-align:right;font-family:var(--font-mono);font-size:11px;color:${v>0?"var(--text)":"var(--text-faint)"}">${v ? fmtCHFShort(v) : "—"}</td>`;
+            }).join("")}
+            <td style="text-align:right;font-family:var(--font-mono);font-size:12px;color:var(--accent);border-left:1px solid var(--border)">${s.sumSaaS ? fmtCHFShort(s.sumSaaS) : "—"}</td>
+            <td style="text-align:right;font-family:var(--font-mono);font-size:12px;color:var(--accent-2)">${s.sumBPO ? fmtCHFShort(s.sumBPO) : "—"}</td>
+            <td style="text-align:right;font-family:var(--font-mono);font-size:12px;font-weight:600">${s.sumTotal ? fmtCHFShort(s.sumTotal) : "—"}</td>
+          </tr>`;
+        }).join("")}
+        <tr style="border-top:2px solid var(--border);background:var(--bg-card)">
+          <td style="position:sticky;left:0;background:var(--bg-card);z-index:1;font-weight:700">Total</td>
+          ${monthTotals.map(t => `<td style="text-align:right;font-family:var(--font-mono);font-size:11px;font-weight:600">${t ? fmtCHFShort(t) : "—"}</td>`).join("")}
+          <td style="text-align:right;font-family:var(--font-mono);font-size:12px;font-weight:700;color:var(--accent);border-left:1px solid var(--border)">${gSaaS ? fmtCHFShort(gSaaS) : "—"}</td>
+          <td style="text-align:right;font-family:var(--font-mono);font-size:12px;font-weight:700;color:var(--accent-2)">${gBPO ? fmtCHFShort(gBPO) : "—"}</td>
+          <td style="text-align:right;font-family:var(--font-mono);font-size:12px;font-weight:700">${(gSaaS+gBPO) ? fmtCHFShort(gSaaS+gBPO) : "—"}</td>
+        </tr>
+      </tbody>
+    </table></div>
+
+    <div style="margin-top:12px;color:var(--text-faint);font-size:11px">
+      Hinweis: Bei YTD-Kunden zeigen die Monatsspalten den effektiv in dem Monat fakturierten Differenzbetrag. Die BPO-Jahressumme entspricht dem letzten YTD-Stand des Zeitraums (kein Doppelzählen).
+    </div>
+  `;
 }
 
 /* ---------- Customers ---------- */
@@ -2606,7 +2819,12 @@ const filters = {
   customerActiveOnly: true,   // true = nur Aktive zeigen
   companyKundeFilter: "all",  // "all", "customer", "lead"
   companySort: "title",       // "title" oder "winprob"
-  companySortDir: "asc"       // "asc" oder "desc"
+  companySortDir: "asc",      // "asc" oder "desc"
+  // Statistik-Ansicht: Zeitraum als Year-Month
+  statsFromYear: new Date().getFullYear(),
+  statsFromMonth: 1,
+  statsToYear: new Date().getFullYear(),
+  statsToMonth: new Date().getMonth() + 1
 };
 
 function escape(s) {
