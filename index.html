@@ -1508,13 +1508,19 @@ async function toggleInvoiced(customerId, year, month, type) {
 
 /* ---------- Statistiken (Umsatzliste über Zeitraum) ---------- */
 
+// Frühester Monat, für den die App überhaupt Umsatzdaten hat (vor 2026-01: kein CRM existent)
+const DATA_START_YEAR = 2026;
+const DATA_START_MONTH = 1;
+const DATA_START_KEY = DATA_START_YEAR * 12 + (DATA_START_MONTH - 1);
+
 // Iteriert über die Monate im Zeitraum, callback bekommt (year, month)
+// Monate vor DATA_START (Jan 2026) werden übersprungen — vorher gab es keine Daten
 function forEachStatsMonth(callback) {
   const fromY = filters.statsFromYear;
   const fromM = filters.statsFromMonth;
   const toY = filters.statsToYear;
   const toM = filters.statsToMonth;
-  const start = fromY * 12 + (fromM - 1);
+  const start = Math.max(fromY * 12 + (fromM - 1), DATA_START_KEY);
   const end = toY * 12 + (toM - 1);
   if (start > end) return;
   for (let i = start; i <= end; i++) {
@@ -1524,8 +1530,9 @@ function forEachStatsMonth(callback) {
 
 // Berechnet Kunde × Zeitraum-Summen (unter Berücksichtigung von YTD-Logik)
 // Iteriert über einen beliebigen Zeitraum (fromY,fromM,toY,toM); default: filters.stats*
+// Monate vor DATA_START (Jan 2026) werden übersprungen — vorher gab es keine Daten
 function forEachMonthInRange(fromY, fromM, toY, toM, callback) {
-  const start = fromY * 12 + (fromM - 1);
+  const start = Math.max(fromY * 12 + (fromM - 1), DATA_START_KEY);
   const end = toY * 12 + (toM - 1);
   if (start > end) return;
   for (let i = start; i <= end; i++) {
@@ -1593,12 +1600,15 @@ function computeCustomerStats(cust, range) {
 
 // Berechnet die ARR-Entwicklung pro Monat rückwärts vom Referenzmonat (typisch: Bis-Datum des Filters)
 // ARR = Summe aller Kunden (Lizenzen × Preis in dem Monat × 12)
-// Zeigt die letzten n Monate (default 18)
+// Zeigt maximal n Monate, aber nicht weiter zurück als DATA_START (Jan 2026)
 function computeArrHistory(refYear, refMonth, monthsBack) {
   const months = [];
-  const start = refYear * 12 + (refMonth - 1);
-  for (let i = monthsBack - 1; i >= 0; i--) {
-    const key = start - i;
+  const refKey = refYear * 12 + (refMonth - 1);
+  // Effektiver Startpunkt: max(refKey - monthsBack + 1, DATA_START_KEY)
+  const effectiveStartKey = Math.max(refKey - monthsBack + 1, DATA_START_KEY);
+  if (effectiveStartKey > refKey) return [];
+
+  for (let key = effectiveStartKey; key <= refKey; key++) {
     const y = Math.floor(key / 12);
     const m = (key % 12) + 1;
     let arr = 0;
@@ -1607,7 +1617,6 @@ function computeArrHistory(refYear, refMonth, monthsBack) {
       if (!rec) return;
       const lic = parseInt(rec.Licenses) || 0;
       if (lic <= 0) return;
-      // Preis für diesen Monat (mit History-Berücksichtigung)
       const price = (typeof getPriceForMonth === "function")
         ? getPriceForMonth(c, y, m)
         : (parseFloat(c.PricePerLicense) || 0);
@@ -1943,10 +1952,11 @@ function renderStats(el) {
   const deltaTotal = pctDelta(gSaaS + gBPO, priorSaaS + priorBPO);
   const deltaCust = pctDelta(custData.length, priorCustCount.size);
 
-  // === ARR-Berechnung: Umsatz des letzten Monats × 12 ===
+  // === ARR-Berechnung: nur SaaS-Lizenzen × 12, konsistent mit ARR-Chart ===
   const lastMonthCol = monthCols[monthCols.length - 1];
-  const lastMonthTotal = monthTotals[monthTotals.length - 1] || { total: 0, saas: 0, bpo: 0 };
-  const arr = (lastMonthTotal.total || 0) * 12;
+  // Wir nehmen den letzten ARR-Wert aus arrHistory (unten weiter berechnet).
+  // Damit sind Kachel und Chart identisch. Ausserdem berücksichtigt es die Preis-Historie.
+  // arrHistory wird direkt nach chartData berechnet — dort nutzen wir denselben Wert.
 
   // === Top 10 Kunden nach Umsatz im Zeitraum (optional nach Segment gefiltert) ===
   const top10Filter = filters.statsTop10Segments;
@@ -2005,6 +2015,8 @@ function renderStats(el) {
 
   // === ARR-Entwicklung: letzte 18 Monate rückwärts vom Bis-Datum ===
   const arrHistory = computeArrHistory(filters.statsToYear, filters.statsToMonth, 18);
+  // ARR-Wert für die Kachel = letzter Wert in arrHistory (konsistent zum Chart)
+  const arr = arrHistory.length > 0 ? arrHistory[arrHistory.length - 1].value : 0;
 
   // Rendern
   const isWide = monthCols.length > 6;
@@ -2017,7 +2029,7 @@ function renderStats(el) {
       ${statTile("BPO-Umsatz", `CHF ${fmtCHFShort(gBPO)}`, deltaBPO !== null ? { pct: deltaBPO, positive: deltaBPO >= 0 } : { text: "Kein Vorjahres-Vergleich" })}
       ${statTile("Total-Umsatz", `CHF ${fmtCHFShort(gSaaS + gBPO)}`, deltaTotal !== null ? { pct: deltaTotal, positive: deltaTotal >= 0 } : { text: "Kein Vorjahres-Vergleich" })}
       ${statTile("Aktive Kunden", `${custData.length}`, deltaCust !== null ? { pct: deltaCust, positive: deltaCust >= 0 } : { text: "Kein Vorjahres-Vergleich" })}
-      ${statTile("ARR (Hochrechnung)", `CHF ${fmtCHFShort(arr)}`, { text: `Basis: ${lastMonthCol ? lastMonthCol.label : "—"} × 12` })}
+      ${statTile("ARR SaaS (Hochrechnung)", `CHF ${fmtCHFShort(arr)}`, { text: `Nur Lizenzen · Basis: ${lastMonthCol ? lastMonthCol.label : "—"} × 12` })}
     </div>
 
     <!-- Umsatz-Verlauf Chart -->
@@ -2044,6 +2056,7 @@ function renderStats(el) {
         </div>
       </div>
       ${svgLineChart(arrHistory, 800, 220, { color: "var(--accent)" })}
+      <div style="margin-top:8px;color:var(--text-faint);font-size:10px">Datenerfassung ab ${MONTH_NAMES[DATA_START_MONTH-1]} ${DATA_START_YEAR}. Frühere Monate werden nicht angezeigt.</div>
     </div>
 
     <!-- Row: Top 10 + Segment Mix -->
