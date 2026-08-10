@@ -1958,19 +1958,26 @@ function renderStats(el) {
   // Damit sind Kachel und Chart identisch. Ausserdem berücksichtigt es die Preis-Historie.
   // arrHistory wird direkt nach chartData berechnet — dort nutzen wir denselben Wert.
 
-  // === Top 10 Kunden nach Umsatz im Zeitraum (optional nach Segment gefiltert) ===
-  const top10Filter = filters.statsTop10Segments;
-  const hasTop10Filter = top10Filter.length > 0;
+  // === Top 10 Kunden nach Umsatzart (SaaS-Anteil, BPO-Anteil, oder Total) ===
+  const top10Type = filters.statsTop10Type || "total";
+  const getVal = (s) => {
+    if (top10Type === "saas") return s.sumSaaS;
+    if (top10Type === "bpo") return s.sumBPO;
+    return s.sumTotal;
+  };
   const top10 = custData
     .slice()
-    .filter(cd => !hasTop10Filter || top10Filter.includes(cd.customer.Segment))
-    .sort((a,b) => b.stats.sumTotal - a.stats.sumTotal)
+    .filter(cd => getVal(cd.stats) > 0)
+    .sort((a,b) => getVal(b.stats) - getVal(a.stats))
     .slice(0, 10)
     .map(cd => ({
       label: cd.customer.Title,
-      value: cd.stats.sumTotal,
+      value: getVal(cd.stats),
       sub: cd.customer.Segment
     }));
+  const top10Label = top10Type === "saas" ? "SaaS-Umsatz"
+                   : top10Type === "bpo" ? "BPO-Umsatz"
+                   : "Umsatz";
 
   // === Top-Wachstum und Top-Verluste (Änderung Zeitraum vs. Vorjahr) ===
   const changes = [];
@@ -2063,16 +2070,14 @@ function renderStats(el) {
     <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px;">
       <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:16px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px;flex-wrap:wrap">
-          <div style="color:var(--text-dim);font-size:11px;text-transform:uppercase;letter-spacing:0.05em">Top ${top10.length} Kunden im Zeitraum</div>
+          <div style="color:var(--text-dim);font-size:11px;text-transform:uppercase;letter-spacing:0.05em">Top ${top10.length} Kunden nach ${top10Label}</div>
           <div class="seg-filter-group" style="gap:3px">
-            ${SEGMENTS.map(s => {
-              const isActive = top10Filter.includes(s);
-              return `<button class="seg-filter-btn ${isActive?'active':''}" style="padding:2px 8px;font-size:10px" onclick="toggleTop10Segment('${escape(s)}')">${escape(s)}</button>`;
-            }).join("")}
-            ${hasTop10Filter ? `<button class="seg-filter-btn clear" style="padding:2px 6px;font-size:10px" onclick="clearTop10SegmentFilter()">✕</button>` : ""}
+            <button class="seg-filter-btn ${top10Type==='total'?'active':''}" style="padding:3px 10px;font-size:11px" onclick="setTop10Type('total')">Total</button>
+            <button class="seg-filter-btn ${top10Type==='saas'?'active':''}" style="padding:3px 10px;font-size:11px" onclick="setTop10Type('saas')">SaaS-Umsatz</button>
+            <button class="seg-filter-btn ${top10Type==='bpo'?'active':''}" style="padding:3px 10px;font-size:11px" onclick="setTop10Type('bpo')">BPO-Umsatz</button>
           </div>
         </div>
-        ${svgHorizontalBars(top10, 560, 260, "var(--accent)")}
+        ${svgHorizontalBars(top10, 560, 260, top10Type==='bpo' ? "var(--accent-2)" : "var(--accent)")}
       </div>
       <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:16px">
         <div style="color:var(--text-dim);font-size:11px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px">Segment-Mix</div>
@@ -2146,14 +2151,8 @@ function renderStats(el) {
   `;
 }
 
-function toggleTop10Segment(segment) {
-  const idx = filters.statsTop10Segments.indexOf(segment);
-  if (idx >= 0) filters.statsTop10Segments.splice(idx, 1);
-  else filters.statsTop10Segments.push(segment);
-  render();
-}
-function clearTop10SegmentFilter() {
-  filters.statsTop10Segments = [];
+function setTop10Type(type) {
+  filters.statsTop10Type = type;
   render();
 }
 
@@ -3375,7 +3374,7 @@ const filters = {
   statsFromMonth: 1,
   statsToYear: new Date().getFullYear(),
   statsToMonth: new Date().getMonth() + 1,
-  statsTop10Segments: []  // leere Array = alle Segmente
+  statsTop10Type: "total"  // "total", "saas", "bpo"
 };
 
 function escape(s) {
