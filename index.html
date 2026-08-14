@@ -483,6 +483,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button data-view="customers"><span class="ic">★</span> Kunden</button>
       <button data-view="revenue"><span class="ic">⌗</span> Umsätze</button>
       <button data-view="stats"><span class="ic">∑</span> Statistiken</button>
+      <button data-view="bpocheck"><span class="ic">☑</span> BPO Checkliste</button>
       <button data-view="companies"><span class="ic">◳</span> Firmen</button>
       <button data-view="contacts"><span class="ic">◉</span> Kontakte</button>
       <button data-view="tasks"><span class="ic">✓</span> Aufgaben</button>
@@ -857,6 +858,7 @@ function render() {
   const titles = {
     dashboard: "Dashboard", pipeline: "Pipeline",
     customers: "Kunden", revenue: "Umsätze", stats: "Statistiken",
+    bpocheck: "BPO Checkliste",
     companies: "Firmen", contacts: "Kontakte", tasks: "Aufgaben"
   };
   document.getElementById("view-title").textContent = titles[currentView];
@@ -868,6 +870,7 @@ function render() {
   else if (currentView === "customers") renderCustomers(content);
   else if (currentView === "revenue") renderRevenue(content);
   else if (currentView === "stats") renderStats(content);
+  else if (currentView === "bpocheck") renderBpoCheck(content);
   else if (currentView === "companies") renderCompanies(content);
   else if (currentView === "contacts") renderContacts(content);
   else if (currentView === "tasks") renderTasks(content);
@@ -2266,6 +2269,456 @@ function exportStatsToExcel() {
   toast(`Exportiert: ${filename}`);
 }
 
+/* ---------- BPO Checkliste (Demo-Version, ohne Persist) ---------- */
+
+// Schweizer PLZ zu Kanton — grobe Mapping-Tabelle nach PLZ-Bereichen
+// (95% richtig; einzelne Enklaven können abweichen, aber für die Demo OK)
+function plzToKanton(plz) {
+  const p = parseInt(String(plz).replace(/\D/g,''), 10);
+  if (isNaN(p) || p < 1000 || p > 9999) return null;
+  // Basierend auf offiziellen PLZ-Ranges der Schweiz
+  if (p >= 1000 && p <= 1299) return "VD";
+  if (p >= 1200 && p <= 1299) return "GE";
+  if (p >= 1300 && p <= 1399) return "VD";
+  if (p >= 1400 && p <= 1439) return "VD";
+  if (p >= 1440 && p <= 1449) return "FR";
+  if (p >= 1450 && p <= 1595) return "VD";
+  if (p >= 1595 && p <= 1599) return "FR";
+  if (p >= 1600 && p <= 1699) return "FR"; // gemischt VD/FR, meist FR
+  if (p >= 1700 && p <= 1799) return "FR";
+  if (p >= 1800 && p <= 1899) return "VD";
+  if (p >= 1900 && p <= 1999) return "VS";
+  if (p >= 2000 && p <= 2099) return "NE";
+  if (p >= 2100 && p <= 2199) return "NE";
+  if (p >= 2200 && p <= 2299) return "NE";
+  if (p >= 2300 && p <= 2399) return "NE";
+  if (p >= 2400 && p <= 2499) return "NE";
+  if (p >= 2500 && p <= 2599) return "BE"; // Biel
+  if (p >= 2600 && p <= 2699) return "BE";
+  if (p >= 2700 && p <= 2799) return "BE";
+  if (p >= 2800 && p <= 2899) return "JU";
+  if (p >= 2900 && p <= 2999) return "JU";
+  if (p >= 3000 && p <= 3999) return "BE";
+  if (p >= 4000 && p <= 4099) return "BS";
+  if (p >= 4100 && p <= 4199) return "BL";
+  if (p >= 4200 && p <= 4299) return "BL";
+  if (p >= 4300 && p <= 4399) return "AG";
+  if (p >= 4400 && p <= 4499) return "BL";
+  if (p >= 4500 && p <= 4599) return "SO";
+  if (p >= 4600 && p <= 4699) return "SO";
+  if (p >= 4700 && p <= 4799) return "SO";
+  if (p >= 4800 && p <= 4899) return "AG";
+  if (p >= 4900 && p <= 4999) return "SO";
+  if (p >= 5000 && p <= 5999) return "AG";
+  if (p >= 6000 && p <= 6099) return "LU";
+  if (p >= 6100 && p <= 6199) return "LU";
+  if (p >= 6200 && p <= 6299) return "LU";
+  if (p >= 6300 && p <= 6399) return "ZG";
+  if (p >= 6400 && p <= 6499) return "SZ";
+  if (p >= 6500 && p <= 6599) return "TI";
+  if (p >= 6600 && p <= 6899) return "TI";
+  if (p >= 6900 && p <= 6999) return "TI";
+  if (p >= 7000 && p <= 7599) return "GR";
+  if (p >= 7600 && p <= 7699) return "GR";
+  if (p >= 8000 && p <= 8099) return "ZH";
+  if (p >= 8100 && p <= 8299) return "ZH";
+  if (p >= 8300 && p <= 8499) return "ZH";
+  if (p >= 8500 && p <= 8599) return "TG";
+  if (p >= 8600 && p <= 8699) return "ZH";
+  if (p >= 8700 && p <= 8799) return "SZ";
+  if (p >= 8800 && p <= 8899) return "ZH";
+  if (p >= 8900 && p <= 8999) return "ZH";
+  if (p >= 9000 && p <= 9099) return "SG";
+  if (p >= 9100 && p <= 9199) return "AR";
+  if (p >= 9200 && p <= 9399) return "SG";
+  if (p >= 9400 && p <= 9499) return "SG";
+  if (p >= 9500 && p <= 9599) return "TG";
+  if (p >= 9600 && p <= 9699) return "SG";
+  if (p >= 9700 && p <= 9799) return "SG";
+  if (p >= 9800 && p <= 9899) return "GR";
+  if (p >= 9900 && p <= 9999) return "SG"; // Buchs, Sennwald etc.
+  return null;
+}
+
+// CSV-Parser: unterstützt Semikolon (Standard bei Schweizer Exports)
+function parseCsvRows(text) {
+  // BOM entfernen
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  const lines = text.split(/\r?\n/).filter(l => l.length > 0);
+  if (!lines.length) return { headers: [], rows: [] };
+  // Trennzeichen erkennen: Semikolon bevorzugt (mehr Vorkommen in erster Zeile)
+  const firstLine = lines[0];
+  const sepCandidates = [";", ",", "\t"];
+  let sep = ";";
+  let maxCount = 0;
+  for (const s of sepCandidates) {
+    const c = (firstLine.match(new RegExp("\\" + s, "g")) || []).length;
+    if (c > maxCount) { maxCount = c; sep = s; }
+  }
+
+  const parseLine = (line) => {
+    // Simpler CSV-Parser mit Anführungszeichen-Support
+    const out = [];
+    let cur = "";
+    let inQuote = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (inQuote) {
+        if (c === '"' && line[i+1] === '"') { cur += '"'; i++; }
+        else if (c === '"') inQuote = false;
+        else cur += c;
+      } else {
+        if (c === '"') inQuote = true;
+        else if (c === sep) { out.push(cur); cur = ""; }
+        else cur += c;
+      }
+    }
+    out.push(cur);
+    return out.map(s => s.trim());
+  };
+
+  const headers = parseLine(lines[0]);
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cells = parseLine(lines[i]);
+    const obj = {};
+    headers.forEach((h, j) => obj[h] = cells[j] || "");
+    rows.push(obj);
+  }
+  return { headers, rows };
+}
+
+// Datum-Parser für dd.MM.yyyy oder yyyy-MM-dd
+function parseSwissDate(s) {
+  if (!s) return null;
+  const t = s.trim();
+  const m1 = t.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (m1) return new Date(parseInt(m1[3]), parseInt(m1[2])-1, parseInt(m1[1]));
+  const m2 = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m2) return new Date(parseInt(m2[1]), parseInt(m2[2])-1, parseInt(m2[3]));
+  return null;
+}
+
+// Prozentwert aus String parsen: "0.40%" -> 0.40
+function parsePct(s) {
+  if (!s) return 0;
+  const cleaned = String(s).replace(/[%\s]/g, '').replace(',', '.');
+  const v = parseFloat(cleaned);
+  return isNaN(v) ? 0 : v;
+}
+
+// Hauptlogik: aus CSV-Rows die Task-Liste + Warnungen generieren
+function deriveBpoTasks(rows, headers) {
+  const tasks = [];
+  const warnings = [];
+  let taskId = 1;
+
+  // Helper: existiert eine Spalte?
+  const hasCol = (name) => headers.includes(name);
+
+  // 1. Standard-Tasks (immer)
+  const standardTasks = [
+    { title: "AHV/IV/EO abrechnen", cat: "Standard" },
+    { title: "ALV abrechnen", cat: "Standard" },
+    { title: "SUVA-Meldung", cat: "Standard" },
+    { title: "KTG (Krankentaggeld)", cat: "Standard" },
+    { title: "BVG-Meldung", cat: "Standard" },
+    { title: "FAK (Familienausgleichskasse)", cat: "Standard" },
+    { title: "Vollzugsbeiträge einreichen", cat: "Standard" }
+  ];
+  standardTasks.forEach(t => tasks.push({
+    id: taskId++, category: t.cat, title: t.title, sub: "", checked: false, doneAt: null, doneBy: null
+  }));
+
+  // 2. FAR-Tasks pro GAV mit FAR AG > 0%
+  const gavFar = {};
+  rows.forEach(r => {
+    const gav = (r['GAV'] || '').trim();
+    if (!gav) return;
+    const far = parsePct(r['FAR AG'] || '');
+    if (!(gav in gavFar) || far > gavFar[gav]) gavFar[gav] = far;
+  });
+  Object.entries(gavFar).forEach(([gav, far]) => {
+    if (far > 0) {
+      tasks.push({
+        id: taskId++, category: "FAR",
+        title: `FAR-Abrechnung: ${gav}`,
+        sub: `${far.toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}% AG-Anteil`,
+        checked: false, doneAt: null, doneBy: null
+      });
+    }
+  });
+
+  // 3. Quellensteuer-Tasks pro Kanton
+  // Nur Mitarbeiter mit QST-Code (nicht "Nicht steuerpflichtig")
+  const kantonCount = {};
+  const unknownPlz = [];
+  rows.forEach(r => {
+    const qsCode = (r['Quellensteuercode'] || '').trim();
+    if (!qsCode || qsCode.toLowerCase().includes('nicht steuerpflichtig')) return;
+    const plz = (r['Mitarbeiter PLZ'] || '').trim();
+    if (!plz) {
+      unknownPlz.push(r['Mitarbeiter-Nummer'] || r['Mitarbeiter'] || '?');
+      return;
+    }
+    const kt = plzToKanton(plz);
+    if (!kt) {
+      unknownPlz.push(`PLZ ${plz}`);
+      return;
+    }
+    kantonCount[kt] = (kantonCount[kt] || 0) + 1;
+  });
+  Object.entries(kantonCount).sort().forEach(([kt, n]) => {
+    tasks.push({
+      id: taskId++, category: "Quellensteuer",
+      title: `Quellensteuer einreichen: Kanton ${kt}`,
+      sub: `${n} Mitarbeiter${n > 1 ? "" : ""}`,
+      checked: false, doneAt: null, doneBy: null
+    });
+  });
+
+  // 4. Warnungen
+  // Fehlende AHV-Nummern
+  const missingAhv = rows.filter(r => !((r['Sozialversicherungsnummer']||'').trim()));
+  if (missingAhv.length > 0) {
+    warnings.push({
+      level: "warn",
+      text: `${missingAhv.length} Mitarbeiter ohne Sozialversicherungsnummer erfasst`
+    });
+  }
+
+  // QST-pflichtig ohne PLZ (Kanton nicht ableitbar)
+  if (unknownPlz.length > 0) {
+    warnings.push({
+      level: "warn",
+      text: `${unknownPlz.length} quellensteuerpflichtige Mitarbeiter ohne verwertbare PLZ — Kanton nicht ableitbar`
+    });
+  }
+
+  // Aufenthaltsbewilligungen laufen in nächsten 60 Tagen ab
+  const today = new Date();
+  const in60 = new Date(today.getTime() + 60*24*3600*1000);
+  const expiring = rows.filter(r => {
+    const bis = parseSwissDate(r['Aufenthaltsbewilligung Gültig bis']);
+    if (!bis) return false;
+    return bis >= today && bis <= in60;
+  });
+  if (expiring.length > 0) {
+    warnings.push({
+      level: "warn",
+      text: `${expiring.length} Aufenthaltsbewilligungen laufen in den nächsten 60 Tagen ab`
+    });
+  }
+
+  // Info: GAV-Übersicht
+  const gavStats = {};
+  rows.forEach(r => {
+    const g = (r['GAV']||'').trim();
+    if (!g) return;
+    gavStats[g] = (gavStats[g] || 0) + 1;
+  });
+
+  return {
+    tasks,
+    warnings,
+    meta: {
+      rowCount: rows.length,
+      gavCount: Object.keys(gavStats).length,
+      gavStats,
+      kantonCount,
+      farGavs: Object.entries(gavFar).filter(([g,v]) => v>0).length,
+      missingAhvCount: missingAhv.length,
+      expiringPermits: expiring.length
+    }
+  };
+}
+
+function renderBpoCheck(el) {
+  const activeCust = cache.customers
+    .filter(c => (c.Status || "Aktiv") === "Aktiv" && segmentNeedsBPO(c.Segment))
+    .sort((a,b) => (a.Title||"").localeCompare(b.Title||""));
+
+  let custId = filters.bpoCheckCustomerId;
+  if (!custId && activeCust.length) custId = activeCust[0].id;
+  const cust = activeCust.find(c => c.id == custId);
+
+  const monthOptions = MONTH_NAMES.map((m,i) =>
+    `<option value="${i+1}" ${i+1===filters.bpoCheckMonth?"selected":""}>${m}</option>`).join("");
+  const curYear = new Date().getFullYear();
+  const yearOptions = [curYear-1, curYear, curYear+1].map(y =>
+    `<option ${y===filters.bpoCheckYear?"selected":""}>${y}</option>`).join("");
+  const custOptions = activeCust.map(c =>
+    `<option value="${c.id}" ${c.id==custId?"selected":""}>${escape(c.Title||"")}</option>`).join("");
+
+  document.getElementById("view-actions").innerHTML = `
+    <div style="display:inline-flex;gap:8px;align-items:center;font-size:12px;color:var(--text-dim);flex-wrap:wrap">
+      <select onchange="filters.bpoCheckCustomerId=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:3px;font-family:inherit;font-size:12px;min-width:200px">${custOptions}</select>
+      <select onchange="filters.bpoCheckMonth=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:3px;font-family:inherit;font-size:12px">${monthOptions}</select>
+      <select onchange="filters.bpoCheckYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:3px;font-family:inherit;font-size:12px">${yearOptions}</select>
+    </div>
+    <input type="file" id="bpocheck-file" accept=".csv,.txt" style="display:none" onchange="uploadBpoCheckCsv(this)">
+    <button class="btn btn-primary btn-sm" onclick="document.getElementById('bpocheck-file').click()" style="margin-left:12px">📥 Einsatzliste hochladen (CSV)</button>
+    ${bpoCheckState.parsedTasks.length > 0 ? `<button class="btn btn-sm" onclick="resetBpoCheck()" style="margin-left:6px">✕ Zurücksetzen</button>` : ""}
+  `;
+
+  if (!activeCust.length) {
+    el.innerHTML = `<div class="empty">Keine aktiven BPO-Kunden vorhanden.</div>`;
+    return;
+  }
+
+  const hasData = bpoCheckState.parsedTasks.length > 0;
+
+  // Info-Banner oben (Demo-Hinweis)
+  const demoBanner = `
+    <div style="background:rgba(184,233,134,0.08);border:1px solid var(--accent);border-radius:6px;padding:10px 14px;margin-bottom:16px;color:var(--text);font-size:12px">
+      <strong>💡 Demo-Version:</strong> Diese Ansicht ist ein Vorschlag zum Feedback-Sammeln. Häkchen und Uploads werden derzeit NICHT gespeichert — nach dem Wechseln des Tabs oder Neu-Laden ist alles wieder weg.
+    </div>
+  `;
+
+  if (!hasData) {
+    el.innerHTML = `${demoBanner}
+      <div style="background:var(--bg-card);border:1px dashed var(--border);border-radius:6px;padding:40px;text-align:center;color:var(--text-dim)">
+        <div style="font-size:14px;margin-bottom:8px">Keine Einsatzliste hochgeladen</div>
+        <div style="font-size:12px">Wähle oben den Kunden und Monat, dann lade eine Einsatzliste (CSV) hoch.<br>Die App generiert automatisch die Task-Liste basierend auf den Einsätzen.</div>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:16px">
+          Erwartete Datei: CSV mit Semikolon-Trennung, Spalten wie GAV, FAR AG, Quellensteuercode, Mitarbeiter PLZ, Sozialversicherungsnummer, Aufenthaltsbewilligung Gültig bis
+        </div>
+      </div>`;
+    return;
+  }
+
+  // Fortschritt berechnen
+  const done = bpoCheckState.parsedTasks.filter(t => t.checked).length;
+  const total = bpoCheckState.parsedTasks.length;
+  const pct = total > 0 ? Math.round(done / total * 100) : 0;
+
+  // Warnungen
+  const warningsHtml = bpoCheckState.warnings.length > 0
+    ? `<div style="margin-bottom:16px">
+        ${bpoCheckState.warnings.map(w => `
+          <div style="background:rgba(255,181,71,0.08);border-left:3px solid var(--warn);padding:8px 12px;margin-bottom:6px;border-radius:3px;font-size:12px">
+            <span style="color:var(--warn);font-weight:600">⚠</span>
+            <span style="color:var(--text);margin-left:6px">${escape(w.text)}</span>
+          </div>
+        `).join("")}
+      </div>`
+    : "";
+
+  // Meta-Zeile
+  const meta = bpoCheckState.meta;
+  const metaHtml = `
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:12px 16px;margin-bottom:16px;display:flex;gap:24px;flex-wrap:wrap;font-size:12px">
+      <div><span style="color:var(--text-dim)">Datei:</span> <span style="font-family:var(--font-mono)">${escape(meta.fileName || "—")}</span></div>
+      <div><span style="color:var(--text-dim)">Einsätze:</span> <strong style="font-family:var(--font-mono)">${meta.rowCount}</strong></div>
+      <div><span style="color:var(--text-dim)">GAVs:</span> <strong>${meta.gavCount}</strong> ${meta.farGavs>0?`(davon ${meta.farGavs} mit FAR)`:""}</div>
+      <div><span style="color:var(--text-dim)">QST-Kantone:</span> <strong>${Object.keys(meta.kantonCount).length}</strong></div>
+      <div style="margin-left:auto"><span style="color:var(--text-dim)">Fortschritt:</span> <strong style="font-family:var(--font-mono);color:${pct===100?"var(--accent)":"var(--text)"}">${done}/${total} (${pct}%)</strong></div>
+    </div>
+  `;
+
+  // Progress-Bar
+  const progressBar = `
+    <div style="height:6px;background:var(--bg-card);border-radius:3px;margin-bottom:20px;overflow:hidden">
+      <div style="height:100%;width:${pct}%;background:var(--accent);transition:width 0.2s"></div>
+    </div>
+  `;
+
+  // Tasks nach Kategorie gruppieren
+  const grouped = {};
+  bpoCheckState.parsedTasks.forEach(t => {
+    if (!grouped[t.category]) grouped[t.category] = [];
+    grouped[t.category].push(t);
+  });
+  const catOrder = ["Standard", "FAR", "Quellensteuer"];
+  const catLabels = {
+    "Standard": "Standard-Tasks",
+    "FAR": "FAR (aus Einsatzliste)",
+    "Quellensteuer": "Quellensteuer pro Kanton"
+  };
+
+  const categoriesHtml = catOrder.filter(c => grouped[c] && grouped[c].length > 0).map(cat => {
+    const items = grouped[cat];
+    return `
+      <div style="margin-bottom:20px">
+        <div style="color:var(--text-dim);font-size:11px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border)">
+          ${catLabels[cat] || cat} <span style="color:var(--text-faint);text-transform:none">· ${items.filter(t=>t.checked).length}/${items.length}</span>
+        </div>
+        ${items.map(t => `
+          <div class="bpo-task ${t.checked?"done":""}" onclick="toggleBpoTask(${t.id})" style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;margin-bottom:4px;cursor:pointer;transition:opacity 0.15s">
+            <span style="width:20px;height:20px;border:1.5px solid ${t.checked?'var(--accent)':'var(--border)'};background:${t.checked?'var(--accent)':'transparent'};border-radius:3px;display:flex;align-items:center;justify-content:center;color:#0e1614;font-weight:700;font-size:12px;flex-shrink:0">${t.checked?"✓":""}</span>
+            <div style="flex:1;min-width:0">
+              <div style="color:${t.checked?'var(--text-faint)':'var(--text)'};text-decoration:${t.checked?'line-through':'none'};font-weight:${t.checked?'400':'500'}">${escape(t.title)}</div>
+              ${t.sub ? `<div style="color:var(--text-dim);font-size:11px;margin-top:2px">${escape(t.sub)}</div>` : ""}
+            </div>
+            ${t.checked && t.doneBy ? `<div style="color:var(--text-faint);font-size:10px">${escape(t.doneBy)} · ${escape(t.doneAt||"")}</div>` : ""}
+          </div>
+        `).join("")}
+      </div>
+    `;
+  }).join("");
+
+  el.innerHTML = `
+    ${demoBanner}
+    <div style="color:var(--text-dim);font-size:13px;margin-bottom:16px">
+      <strong style="color:var(--text)">${escape(cust?.Title||"—")}</strong> · ${MONTH_NAMES[filters.bpoCheckMonth-1]} ${filters.bpoCheckYear}
+    </div>
+    ${warningsHtml}
+    ${metaHtml}
+    ${progressBar}
+    ${categoriesHtml}
+    ${pct === 100 ? `
+      <div style="margin-top:24px;padding:16px;background:rgba(184,233,134,0.08);border:1px solid var(--accent);border-radius:6px;text-align:center">
+        <div style="color:var(--accent);font-size:14px;font-weight:600">✓ Alle Tasks erledigt</div>
+        <div style="color:var(--text-dim);font-size:11px;margin-top:4px">In der finalen Version käme hier ein "Monat abschliessen"-Button.</div>
+      </div>
+    ` : ""}
+  `;
+}
+
+async function uploadBpoCheckCsv(input) {
+  const file = input.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const parsed = parseCsvRows(text);
+    if (!parsed.rows.length) {
+      toast("CSV ist leer oder konnte nicht gelesen werden", true);
+      return;
+    }
+    const result = deriveBpoTasks(parsed.rows, parsed.headers);
+    bpoCheckState.parsedTasks = result.tasks;
+    bpoCheckState.warnings = result.warnings;
+    bpoCheckState.meta = { ...result.meta, fileName: file.name };
+    render();
+    toast(`${result.tasks.length} Tasks aus ${parsed.rows.length} Einsätzen generiert`);
+  } catch (e) {
+    toast("Fehler beim Verarbeiten der CSV: " + e.message, true);
+  }
+  input.value = "";  // Damit dieselbe Datei nochmal hochgeladen werden kann
+}
+
+function toggleBpoTask(id) {
+  const t = bpoCheckState.parsedTasks.find(x => x.id === id);
+  if (!t) return;
+  t.checked = !t.checked;
+  if (t.checked) {
+    t.doneAt = new Date().toISOString().slice(0,10);
+    t.doneBy = myEmail() ? myEmail().split("@")[0] : "you";
+  } else {
+    t.doneAt = null;
+    t.doneBy = null;
+  }
+  render();
+}
+
+function resetBpoCheck() {
+  if (!confirm("Aktuelle Checkliste zurücksetzen? (Alle Häkchen gehen verloren)")) return;
+  bpoCheckState.parsedTasks = [];
+  bpoCheckState.warnings = [];
+  bpoCheckState.meta = null;
+  render();
+}
+
 /* ---------- Customers ---------- */
 function renderCustomers(el) {
   // Segment-Filter-Buttons (Multi-Select)
@@ -3374,7 +3827,18 @@ const filters = {
   statsFromMonth: 1,
   statsToYear: new Date().getFullYear(),
   statsToMonth: new Date().getMonth() + 1,
-  statsTop10Type: "total"  // "total", "saas", "bpo"
+  statsTop10Type: "total",  // "total", "saas", "bpo"
+  // BPO Checkliste (Demo, kein Persist)
+  bpoCheckCustomerId: null,
+  bpoCheckYear: new Date().getFullYear(),
+  bpoCheckMonth: new Date().getMonth() + 1
+};
+
+// Volatile Demo-State für BPO-Checkliste (nur im Browser, kein Persist)
+const bpoCheckState = {
+  parsedTasks: [],   // Array von {id, category, title, sub, checked, doneAt, doneBy}
+  warnings: [],      // Array von {level, text}
+  meta: null         // { fileName, rowCount, gavs, ... }
 };
 
 function escape(s) {
