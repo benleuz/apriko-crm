@@ -615,6 +615,37 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
   .rp-hint{font-size:13px;color:var(--rp-grey);margin-top:12px}
   @media(prefers-reduced-motion:reduce){.rp-drop,.rp-btn{transition:none}}
 
+  /* Thumbnails der hochgeladenen Bilder in Karte 1 */
+  .rp-thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin:12px 0}
+  .rp-thumb{position:relative;background:var(--rp-bg);border:1px solid var(--rp-line);border-radius:5px;
+    aspect-ratio:3/4;overflow:hidden;cursor:zoom-in;transition:border-color 0.15s}
+  .rp-thumb:hover{border-color:var(--rp-lime-dark)}
+  .rp-thumb img{width:100%;height:100%;object-fit:cover}
+  .rp-thumb-pdf{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:linear-gradient(135deg,#F3F4F6,#E5E7EB);color:var(--rp-grey);font-size:32px}
+  .rp-thumb-pdf span{font-size:10px;margin-top:4px;color:var(--rp-dark);font-weight:600}
+  .rp-thumb-label{position:absolute;bottom:0;left:0;right:0;background:rgba(31,41,55,0.85);color:#fff;
+    font-size:10px;padding:3px 6px;text-align:center;text-overflow:ellipsis;overflow:hidden;white-space:nowrap}
+
+  /* OCR-Konfiguration */
+  .rp-ocr-config{background:var(--rp-bg);border:1px solid var(--rp-line);border-radius:5px;padding:12px;margin:12px 0}
+  .rp-ocr-row{display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .rp-ocr-toggle{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--rp-dark);cursor:pointer;user-select:none}
+  .rp-ocr-toggle input{accent-color:var(--rp-lime-dark);cursor:pointer;width:16px;height:16px;margin:0}
+  .rp-ocr-hint{font-size:11px;color:var(--rp-grey);margin-top:6px;line-height:1.5}
+  .rp-btn-link{background:none;border:none;color:var(--rp-lime-dark);cursor:pointer;font-size:12px;
+    text-decoration:underline;padding:0;font-family:inherit}
+  .rp-btn-link:hover{color:var(--rp-dark)}
+
+  /* Loading-Overlay während des OCR-Aufrufs */
+  .rp-loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,0.85);z-index:100;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px}
+  .rp-loading-spinner{width:40px;height:40px;border:3px solid #E5E7EB;border-top-color:var(--rp-lime-dark);
+    border-radius:50%;animation:rp-spin 0.8s linear infinite}
+  @keyframes rp-spin{to{transform:rotate(360deg)}}
+  .rp-loading-text{color:var(--rp-dark);font-size:14px;font-weight:500}
+  .rp-loading-sub{color:var(--rp-grey);font-size:12px}
+
   /* Splitscreen für Prüf-Ansicht: Tabelle links, Beleg rechts */
   .rp-split-check{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;align-items:start;margin-top:8px}
   @media(max-width:1100px){ .rp-split-check{grid-template-columns:1fr} }
@@ -716,6 +747,24 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
           </div>
           <input type="file" id="rpPicker" multiple accept="image/*,.pdf" hidden>
           <ul class="rp-files" id="rpFiles"></ul>
+
+          <!-- Thumbnails der hochgeladenen Bilder -->
+          <div class="rp-thumbs" id="rpThumbs" hidden></div>
+
+          <!-- OCR-Modus + API-Key -->
+          <div class="rp-ocr-config" id="rpOcrConfig" hidden>
+            <div class="rp-ocr-row">
+              <label class="rp-ocr-toggle">
+                <input type="checkbox" id="rpUseClaude">
+                <span>Mit Claude Vision auslesen (echte OCR)</span>
+              </label>
+              <button type="button" class="rp-btn-link" id="rpKeyBtn" style="display:none">API-Key ändern</button>
+            </div>
+            <div class="rp-ocr-hint" id="rpOcrHint">
+              Ohne Anhaken werden Demo-Werte eingefügt. Mit Anhaken wird das Bild an die Anthropic Claude API gesendet und ausgelesen.
+            </div>
+          </div>
+
           <div class="rp-actions">
             <button class="rp-btn" id="rpScan" disabled>Rapporte auslesen</button>
             <button class="rp-btn rp-btn-ghost" id="rpDemo">Beispiel laden</button>
@@ -4633,18 +4682,54 @@ init();
 (function(){
 'use strict';
 
+/* GAV-Referenzwerte für Kanton Zürich, Stand 2026.
+   Zusammengestellt aus LMV Bauhauptgewerbe 2026-2028 und GAV Personalverleih.
+   ACHTUNG: Prototyp — Werte müssen vor Produktivgang mit tempdata-API oder
+   den offiziellen SBV/PBK/swissstaffing-Quellen abgeglichen werden. */
 var GAV = {
-  bau:{ name:'LMV Bauhauptgewerbe 2026–2031', modell:'Jahresarbeitszeit 2112 h',
-    sollTag:9.00, sollHerkunft:'Arbeitszeitkalender PBK ZH 2026, August',
-    zuschlagAb:50, zuschlagSatz:25, konto:'−20 bis +120 h',
-    zulage:4.00, zulageAb:5.5, mittag:16.00,
-    quelle:'tempdata-API · 8003 / Bauhauptgewerbe · Stand 01.04.2026' },
-  pvl:{ name:'GAV Personalverleih (Standard)', modell:'42 h Woche',
-    sollTag:null, sollHerkunft:'42 h Wochenarbeitszeit',
-    normal:42, ueberstundenBis:45, tagesGrenze:9.5, zuschlagSatz:25,
-    konto:'Überstunden 1:1 kompensierbar', zulage:0, zulageAb:null, mittag:0,
-    quelle:'tempdata-API · kein vorrangiger Branchen-GAV · Stand 01.01.2026' }
+  bau: {
+    name: 'LMV Bauhauptgewerbe',
+    modell: 'Jahresarbeitszeit 2112 h (PBK Zürich)',
+    // Kalendersollzeit August 2026 laut PBK Zürich-Kalender: 9.0 h pro Tag
+    sollTag: 9.00,
+    sollHerkunft: 'Arbeitszeitkalender PBK Zürich 2026 · August 9.0 h/Tag',
+    // Zuschlag ab 48h/Woche (Art. 24 LMV): 25%
+    zuschlagAb: 48,
+    zuschlagSatz: 25,
+    konto: 'Konto −20 bis +120 h; Auszahlung mit 25% Zuschlag',
+    // Baustellenzulage: Verpflegungsentschädigung ab 5.5h Baustellen-Präsenz
+    zulage: 20.00,          // CHF/Tag (Richtwert ZH)
+    zulageAb: 5.5,           // Stunden Baustelle
+    mittag: 16.00,           // CHF Mittagsentschädigung
+    // Für PLZ-Filter: gilt in allen Deutschschweizer Kantonen mit PBK-Anhang
+    kantone: ['ZH','BE','LU','UR','SZ','OW','NW','GL','ZG','SO','BS','BL','SH','AR','AI','SG','GR','AG','TG'],
+    quelle: 'LMV Bauhauptgewerbe 2026-2028 · Anhang 8 Zürich'
+  },
+  pvl: {
+    name: 'GAV Personalverleih',
+    modell: 'Wochenarbeitszeit 42 h',
+    sollTag: null,           // Wochenmodell, kein Tagessoll
+    sollHerkunft: '42 h/Woche = 8.4 h/Tag bei 5 Arbeitstagen',
+    normal: 42,              // Normalarbeitszeit/Woche
+    ueberstundenBis: 45,     // Bis 45h: Überstunden (kompensierbar 1:1 oder Auszahlung ohne Zuschlag)
+    tagesGrenze: 9.5,        // Ab >9.5h/Tag: Überzeit mit Zuschlag
+    zuschlagSatz: 25,        // % Überzeitzuschlag
+    konto: 'Überstunden 1:1 kompensierbar; ab 45 h/Wo oder 9.5 h/Tag Überzeit mit 25%',
+    zulage: 0,               // Keine standardmässige Baustellenzulage
+    zulageAb: null,
+    mittag: 0,
+    kantone: null,            // Gilt schweizweit
+    quelle: 'GAV Personalverleih 2024-2027 (swissstaffing/Unia/Syna/KV Schweiz)'
+  }
 };
+
+/* Ableiten aus PLZ, ob der Bau-GAV für diesen Kanton greift.
+   Wenn nicht (z.B. Tessin), fällt der Betrieb auf den GAV Personalverleih zurück. */
+function bauGavGiltFuerPlz(plz) {
+  var kt = (typeof plzToKanton === 'function') ? plzToKanton(plz) : null;
+  if (!kt) return true;  // unbekannter Kanton → nicht ausschliessen
+  return GAV.bau.kantone.indexOf(kt) >= 0;
+}
 
 var ERKANNT = [
   {datum:'17.08.2026',tag:'Mo',kst:'1312', kstFlag:null,  ist:10.00,istFlag:null, beleg:'IMG_1398'},
@@ -4680,6 +4765,25 @@ window.initRapport = function(){
   picker.addEventListener('change',function(e){ addFiles(e.target.files); });
 
   $('rpScan').addEventListener('click',scan);
+
+  // Beim Toggle der Vision-Option den Scan-Button-Text anpassen und ggf. Key anfragen
+  $('rpUseClaude').addEventListener('change', function(){
+    var b = $('rpScan');
+    if(this.checked){
+      // Key vorab holen, damit der User's schon jetzt merkt falls keiner da ist
+      if(!localStorage.getItem('apriko-anthropic-key')){
+        var k = getAnthropicKey();
+        if(!k){ this.checked = false; return; }
+      }
+      b.textContent = 'Mit Claude Vision auslesen';
+    } else {
+      b.textContent = 'Rapporte auslesen';
+    }
+  });
+
+  // API-Key ändern/löschen
+  $('rpKeyBtn').addEventListener('click', clearAnthropicKey);
+
   $('rpDemo').addEventListener('click',function(){
     // Demo-Beleg als inline SVG (simuliert handschriftlichen Rapport)
     var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 700" font-family="Comic Sans MS, cursive">'+
@@ -4716,6 +4820,12 @@ window.initRapport = function(){
       '<text x="30" y="560" font-size="14" fill="#374151">Vorarbeiter: ___________________________</text>'+
       '</svg>';
     var url = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+    // Original ERKANNT-Hinweise wieder einsetzen (Claude-OCR könnte HINWEISE überschrieben haben)
+    HINWEISE = [
+      {typ:'low',feld:'Mittwoch, Kostenstelle',text:'Letzte Ziffer nicht eindeutig — 1311 oder 1312. Gegen das Original prüfen.'},
+      {typ:'mid',feld:'Donnerstag, Stunden',text:'Auf dem Beleg durchgestrichen und überschrieben. Übernommen wurde 3.50 statt ursprünglich 10.00.'},
+      {typ:'low',feld:'Donnerstag, Grund',text:'Halbtag mit 3.50 h. Ob geplant oder Absenz, geht aus dem Beleg nicht hervor — bei Absenz gelten andere Entschädigungsregeln.'}
+    ];
     files = [{
       name: 'IMG_1398.jpeg',  // Name matched mit ERKANNT[].beleg = 'IMG_1398'
       size: '1842 KB',
@@ -4723,6 +4833,10 @@ window.initRapport = function(){
       type: 'image'
     }];
     renderFiles();
+    renderThumbs();
+    // Bei Demo: Vision-Toggle deaktivieren (SVG lässt sich schlecht per Vision lesen und ergibt Kosten)
+    $('rpUseClaude').checked = false;
+    updateOcrConfigVisibility();
     scan();
   });
   $('rpLoad').addEventListener('click',loadGav);
@@ -4747,10 +4861,13 @@ function addFiles(list){
       name: f.name,
       size: (f.size/1024).toFixed(0)+' KB',
       url: url,
-      type: isPdf ? 'pdf' : 'image'
+      type: isPdf ? 'pdf' : 'image',
+      blob: f  // Original-File-Referenz für OCR-Upload
     });
   }
   renderFiles();
+  renderThumbs();
+  updateOcrConfigVisibility();
 }
 function renderFiles(){
   $('rpFiles').innerHTML = files.map(function(f){
@@ -4758,13 +4875,287 @@ function renderFiles(){
            '</span><span class="rp-sz">'+esc(f.size)+'</span></li>'; }).join('');
   $('rpScan').disabled = files.length===0;
 }
+
+/* Rendert Thumbnails aller hochgeladenen Dateien in Karte 1.
+   Bilder als Bild-Thumbnail, PDFs als Icon-Kachel. Klick öffnet Lightbox. */
+function renderThumbs(){
+  var el = $('rpThumbs');
+  if(!files.length){
+    el.hidden = true;
+    el.innerHTML = '';
+    return;
+  }
+  el.hidden = false;
+  el.innerHTML = files.map(function(f, i){
+    var content;
+    if(f.type === 'pdf'){
+      content = '<div class="rp-thumb-pdf">📄<span>PDF</span></div>';
+    } else {
+      content = '<img src="'+f.url+'" alt="'+esc(f.name)+'">';
+    }
+    var short = f.name.length > 20 ? f.name.substring(0, 17) + '…' : f.name;
+    return '<div class="rp-thumb" data-idx="'+i+'" title="Klick zum Vergrössern">'+
+      content +
+      '<div class="rp-thumb-label">'+esc(short)+'</div></div>';
+  }).join('');
+  // Klick auf Thumb öffnet Lightbox (nur für Bilder)
+  Array.prototype.forEach.call(el.querySelectorAll('.rp-thumb'), function(div){
+    div.addEventListener('click', function(){
+      var f = files[+div.dataset.idx];
+      if(f.type === 'image') window.__rpLightbox(f.url);
+    });
+  });
+}
+
+/* Zeigt/versteckt das OCR-Konfig-Panel je nach Kontext */
+function updateOcrConfigVisibility(){
+  var cfg = $('rpOcrConfig');
+  if(files.length === 0){
+    cfg.hidden = true;
+    return;
+  }
+  cfg.hidden = false;
+  // Wenn ein Bild vorhanden ist: Claude Vision anbieten
+  var hasImage = files.some(function(f){ return f.type === 'image'; });
+  var keyBtn = $('rpKeyBtn');
+  var savedKey = localStorage.getItem('apriko-anthropic-key');
+  if(savedKey){
+    keyBtn.style.display = 'inline';
+  } else {
+    keyBtn.style.display = 'none';
+  }
+  if(!hasImage){
+    // PDFs kann Claude nicht direkt lesen (bräuchte Rasterung) → toggle disablen
+    $('rpUseClaude').disabled = true;
+    $('rpOcrHint').textContent = 'Für PDFs ist die Live-OCR im Prototyp deaktiviert — bitte die PDF-Seite als Foto/Screenshot hochladen, oder Demo-Modus nutzen.';
+  } else {
+    $('rpUseClaude').disabled = false;
+    $('rpOcrHint').textContent = savedKey
+      ? 'API-Key ist hinterlegt. Anhaken, um das Bild an die Anthropic API zu senden.'
+      : 'Ohne Anhaken werden Demo-Werte eingefügt. Beim Anhaken wirst du nach einem Anthropic-API-Key gefragt (wird lokal im Browser gespeichert).';
+  }
+}
+
 function scan(){
-  var b=$('rpScan'); b.disabled=true; b.textContent='Wird ausgelesen …';
-  setTimeout(function(){
-    zeilen = ERKANNT.map(function(r){ return Object.assign({},r); });
-    b.textContent='Erneut auslesen'; b.disabled=false;
-    unlock($('rpS2')); $('rpS2').scrollIntoView({behavior:'smooth',block:'start'});
-  },900);
+  var b=$('rpScan');
+  var useClaude = $('rpUseClaude').checked;
+
+  if(useClaude){
+    // Echte OCR via Claude Vision
+    scanWithClaude();
+  } else {
+    // Demo-Modus: statische Werte
+    b.disabled=true; b.textContent='Wird ausgelesen …';
+    setTimeout(function(){
+      zeilen = ERKANNT.map(function(r){ return Object.assign({},r); });
+      b.textContent='Erneut auslesen'; b.disabled=false;
+      unlock($('rpS2')); $('rpS2').scrollIntoView({behavior:'smooth',block:'start'});
+    },900);
+  }
+}
+
+/* API-Key managen: beim ersten Klick fragen, danach in localStorage */
+function getAnthropicKey(){
+  var key = localStorage.getItem('apriko-anthropic-key');
+  if(!key){
+    key = prompt(
+      'Anthropic API-Key eingeben (wird lokal im Browser gespeichert):\n\n' +
+      'Beginnt mit "sk-ant-…". Nur für Prototyp — in Produktion würde das über ein Backend laufen.'
+    );
+    if(!key || !key.trim()) return null;
+    key = key.trim();
+    if(!/^sk-ant-/.test(key)){
+      if(!confirm('Der Key sieht nicht wie ein Anthropic-Key aus (erwartet: sk-ant-…). Trotzdem verwenden?')) return null;
+    }
+    localStorage.setItem('apriko-anthropic-key', key);
+    updateOcrConfigVisibility();
+  }
+  return key;
+}
+
+function clearAnthropicKey(){
+  if(confirm('API-Key aus dem Browser löschen?')){
+    localStorage.removeItem('apriko-anthropic-key');
+    updateOcrConfigVisibility();
+  }
+}
+
+/* Loading-Overlay anzeigen/ausblenden */
+function showLoading(text, sub){
+  var el = document.getElementById('rpLoadingOverlay');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'rpLoadingOverlay';
+    el.className = 'rp-loading-overlay';
+    el.innerHTML = '<div class="rp-loading-spinner"></div>'+
+      '<div class="rp-loading-text" id="rpLoadingText"></div>'+
+      '<div class="rp-loading-sub" id="rpLoadingSub"></div>';
+    document.body.appendChild(el);
+  }
+  document.getElementById('rpLoadingText').textContent = text || 'Wird verarbeitet…';
+  document.getElementById('rpLoadingSub').textContent = sub || '';
+  el.style.display = 'flex';
+}
+function hideLoading(){
+  var el = document.getElementById('rpLoadingOverlay');
+  if(el) el.style.display = 'none';
+}
+
+/* File → Base64 (nur der Data-Teil, ohne data:...;base64,-Prefix) */
+function fileToBase64(file){
+  return new Promise(function(resolve, reject){
+    var reader = new FileReader();
+    reader.onload = function(){
+      var res = reader.result;
+      var comma = res.indexOf(',');
+      resolve({ data: res.substring(comma + 1), mediaType: file.type || 'image/jpeg' });
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+/* OCR via Anthropic Claude Vision API.
+   Nimmt das erste Bild aus files[], sendet an die API mit strukturiertem Prompt,
+   parst das JSON-Ergebnis, füllt zeilen[] und ERKANNT[]. */
+async function scanWithClaude(){
+  var b = $('rpScan');
+  var key = getAnthropicKey();
+  if(!key){
+    alert('Ohne API-Key kann Claude Vision nicht verwendet werden.');
+    return;
+  }
+
+  // Erstes Bild suchen
+  var imageFile = files.find(function(f){ return f.type === 'image'; });
+  if(!imageFile){
+    alert('Kein Bild vorhanden.');
+    return;
+  }
+
+  b.disabled = true;
+  b.textContent = 'Claude liest…';
+  showLoading('Claude liest den Rapport…', 'Das kann 10-30 Sekunden dauern');
+
+  try {
+    var b64 = await fileToBase64(imageFile.blob);
+
+    var prompt =
+      'Du bist ein OCR-Extraktor für Arbeitsrapporte aus der Schweizer Personalverleih-Branche. ' +
+      'Extrahiere aus diesem handschriftlichen oder gedruckten Arbeitsrapport-Beleg alle Tageszeilen. ' +
+      'Jede Zeile enthält: Datum (Format dd.mm.yyyy), Wochentag (Mo/Di/Mi/Do/Fr/Sa/So), Kostenstelle (Zahl oder Text, z.B. "1312" oder "KISPI"), Ist-Stunden (Dezimalzahl, z.B. 9.50).\n\n' +
+      'Antworte AUSSCHLIESSLICH mit einem gültigen JSON-Array in diesem Format, ohne Erklärungen, ohne Markdown-Code-Fences:\n' +
+      '[{"datum":"17.08.2026","tag":"Mo","kst":"1312","ist":10.0,"kstFlag":null,"istFlag":null,"beleg":"' + imageFile.name.replace(/\.[^.]+$/,'') + '"}]\n\n' +
+      'Regeln für die Flags:\n' +
+      '- kstFlag: "low" wenn Kostenstelle schwer lesbar / mehrdeutig ist, sonst null\n' +
+      '- istFlag: "mid" wenn Stundenzahl korrigiert/durchgestrichen wurde, "low" wenn schlecht lesbar, sonst null\n\n' +
+      'Wenn du dir bei einem Wert unsicher bist, wähle den wahrscheinlichsten Wert und setze das entsprechende Flag. ' +
+      'Ist-Stunden immer als Dezimalzahl (10.0 nicht "10:00"). Fehlende Kostenstelle → leerer String "". Nur das JSON, sonst nichts.';
+
+    var response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 2000,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: b64.mediaType,
+                data: b64.data
+              }
+            },
+            { type: 'text', text: prompt }
+          ]
+        }]
+      })
+    });
+
+    if(!response.ok){
+      var errTxt = await response.text();
+      // 401 → Key ist falsch → löschen, damit neu gefragt wird
+      if(response.status === 401){
+        localStorage.removeItem('apriko-anthropic-key');
+        updateOcrConfigVisibility();
+        throw new Error('API-Key ungültig (401). Wurde gelöscht — bitte neu eingeben.');
+      }
+      throw new Error('Claude API ' + response.status + ': ' + errTxt.substring(0, 300));
+    }
+
+    var data = await response.json();
+    var text = (data.content && data.content[0] && data.content[0].text) || '';
+
+    // Fences oder Whitespace um das JSON entfernen
+    text = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+
+    var parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch(e){
+      // Falls Claude doch was drumherum geschrieben hat: erstes [ bis letztes ] extrahieren
+      var start = text.indexOf('[');
+      var end = text.lastIndexOf(']');
+      if(start >= 0 && end > start){
+        parsed = JSON.parse(text.substring(start, end + 1));
+      } else {
+        throw new Error('Antwort war kein JSON:\n\n' + text.substring(0, 400));
+      }
+    }
+
+    if(!Array.isArray(parsed) || parsed.length === 0){
+      throw new Error('Keine Zeilen im Rapport erkannt.');
+    }
+
+    // Normalisieren
+    zeilen = parsed.map(function(r){
+      return {
+        datum: String(r.datum || ''),
+        tag: String(r.tag || ''),
+        kst: String(r.kst || ''),
+        kstFlag: r.kstFlag || null,
+        ist: typeof r.ist === 'number' ? r.ist : parseFloat(String(r.ist).replace(',','.')) || 0,
+        istFlag: r.istFlag || null,
+        beleg: r.beleg || imageFile.name.replace(/\.[^.]+$/,'')
+      };
+    });
+
+    // Wenn Claude Werte mit Flags gemarkt hat, HINWEISE dynamisch generieren
+    HINWEISE = [];
+    zeilen.forEach(function(r){
+      if(r.kstFlag){
+        HINWEISE.push({typ: r.kstFlag, feld: r.datum + ' Kostenstelle',
+          text: 'Von Claude als unsicher markiert — bitte gegen Beleg prüfen.'});
+      }
+      if(r.istFlag){
+        HINWEISE.push({typ: r.istFlag, feld: r.datum + ' Stunden',
+          text: r.istFlag === 'mid'
+            ? 'Auf dem Beleg korrigiert/überschrieben — bitte gegen Beleg prüfen.'
+            : 'Von Claude als schwer lesbar markiert — bitte gegen Beleg prüfen.'});
+      }
+    });
+
+    hideLoading();
+    b.textContent = 'Erneut auslesen';
+    b.disabled = false;
+    unlock($('rpS2'));
+    $('rpS2').scrollIntoView({behavior:'smooth',block:'start'});
+
+  } catch(e){
+    hideLoading();
+    b.textContent = 'Rapporte auslesen';
+    b.disabled = false;
+    alert('OCR fehlgeschlagen:\n\n' + e.message + '\n\nTipp: Ohne Anhaken der Vision-Option kannst du mit Demo-Werten weitertesten.');
+    console.error('scanWithClaude error:', e);
+  }
 }
 
 /* Aktuell angezeigter Beleg-Name (Filename ohne Extension zum Matchen mit r.beleg) */
@@ -4847,20 +5238,34 @@ function loadGav(){
   var b=$('rpLoad'); b.disabled=true; b.textContent='Wird abgefragt …';
   setTimeout(function(){
     gav = GAV[$('rpBranche').value];
+    var plz = String($('rpPlz').value || '').trim();
+    var kanton = (typeof plzToKanton === 'function') ? plzToKanton(plz) : null;
+
+    // Sanity-Check: Bau-GAV ausserhalb der PBK-Kantone?
+    var warning = '';
+    if($('rpBranche').value === 'bau' && kanton && !bauGavGiltFuerPlz(plz)){
+      warning = 'PLZ ' + plz + ' liegt in Kanton ' + kanton +
+        '. Der LMV Bauhauptgewerbe gilt dort nicht — Personalverleih-GAV wäre subsidiär anzuwenden.';
+    }
+
     var rows = [
-      ['GAV',gav.name],['Arbeitszeitmodell',gav.modell],
+      ['GAV', gav.name],
+      ['Kanton (aus PLZ)', kanton ? kanton + (plz ? ' — ' + plz : '') : '(unbekannt)'],
+      ['Arbeitszeitmodell', gav.modell],
       ['Sollzeit', gav.sollTag ? nf(gav.sollTag)+' h pro Tag' : nf(gav.normal)+' h pro Woche'],
-      ['Zuschlag', gav.zuschlagAb ? gav.zuschlagSatz+'% ab '+gav.zuschlagAb+' h pro Woche'
+      ['Zuschlag', gav.sollTag
+        ? gav.zuschlagSatz+'% ab '+gav.zuschlagAb+' h pro Woche'
         : gav.zuschlagSatz+'% ab '+gav.ueberstundenBis+' h Woche oder '+gav.tagesGrenze+' h Tag'],
-      ['Stundenkonto',gav.konto],
-      ['Baustellenzulage', gav.zulage ? 'CHF '+nf(gav.zulage)+' ab '+gav.zulageAb+' h' : 'keine'],
-      ['Mittagessen', gav.mittag ? 'CHF '+nf(gav.mittag)+' bedingt' : 'keine'],
-      ['Sollzeit-Herkunft',gav.sollHerkunft]
+      ['Stundenkonto', gav.konto],
+      ['Baustellenzulage', gav.zulage ? 'CHF '+nf(gav.zulage)+'/Tag ab '+gav.zulageAb+' h Präsenz' : 'keine'],
+      ['Mittagsentschädigung', gav.mittag ? 'CHF '+nf(gav.mittag)+'/Tag bedingt' : 'keine'],
+      ['Sollzeit-Herkunft', gav.sollHerkunft]
     ];
     $('rpFacts').hidden=false; $('rpSrc').hidden=false;
     $('rpFacts').innerHTML = rows.map(function(r){
       return '<div class="rp-fact"><dt>'+esc(r[0])+'</dt><dd>'+esc(r[1])+'</dd></div>'; }).join('');
-    $('rpSrc').innerHTML = 'Quelle: <code>'+esc(gav.quelle)+'</code>';
+    $('rpSrc').innerHTML = 'Quelle: <code>'+esc(gav.quelle)+'</code>' +
+      (warning ? '<div style="margin-top:8px;padding:8px 12px;background:#FEF3C7;border-left:3px solid #F59E0B;border-radius:3px;color:#78350F;font-size:12px"><b>Hinweis:</b> '+esc(warning)+'</div>' : '');
     b.textContent='Eckwerte neu laden'; b.disabled=false;
     renderTable();
     // Ersten Beleg automatisch anzeigen
