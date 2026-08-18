@@ -787,6 +787,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
             <div><label for="rpBranche">Branche</label>
               <select id="rpBranche">
                 <option value="bau" selected>Bauhauptgewerbe</option>
+                <option value="elektro">Elektrogewerbe (LGAV)</option>
                 <option value="pvl">Kein vorrangiger GAV</option>
               </select></div>
           </div>
@@ -4720,6 +4721,21 @@ var GAV = {
     mittag: 0,
     kantone: null,            // Gilt schweizweit
     quelle: 'GAV Personalverleih 2024-2027 (swissstaffing/Unia/Syna/KV Schweiz)'
+  },
+  elektro: {
+    name: 'LGAV Elektro- und Telekommunikations-Installationsbranche',
+    modell: 'Wochenarbeitszeit 40 h (Jahressoll 2088 h)',
+    sollTag: 8.00,           // 40h / 5 Tage = 8.0h
+    sollHerkunft: 'Art. 15 LGAV · 40 h/Woche · Kanton BS ohne kantonalen Anhang',
+    zuschlagAb: 45,          // Überzeit ab 45h/Woche
+    zuschlagSatz: 25,        // 25% Zuschlag (Art. 16)
+    konto: 'Gleitzeit ±40 h möglich; Überzeit >45 h/Wo mit 25% Zuschlag',
+    zulage: 0,               // Keine Baustellenzulage im Elektro-GAV
+    zulageAb: null,
+    mittag: 20.00,           // CHF Mittagsentschädigung wenn auswärts (Art. 22 LGAV, Richtwert)
+    // LGAV Elektro gilt schweizweit; explizit auch Basel-Stadt
+    kantone: ['ZH','BE','LU','UR','SZ','OW','NW','GL','ZG','FR','SO','BS','BL','SH','AR','AI','SG','GR','AG','TG','TI','VD','VS','NE','GE','JU'],
+    quelle: 'LGAV EIT.swiss / Unia 2024-2027 · schweizweit gültig'
   }
 };
 
@@ -4915,8 +4931,8 @@ function updateOcrConfigVisibility(){
     return;
   }
   cfg.hidden = false;
-  // Wenn ein Bild vorhanden ist: Claude Vision anbieten
-  var hasImage = files.some(function(f){ return f.type === 'image'; });
+  // Bilder UND PDFs sind für Claude Vision brauchbar (Anthropic API kann beides direkt)
+  var supported = files.some(function(f){ return f.type === 'image' || f.type === 'pdf'; });
   var keyBtn = $('rpKeyBtn');
   var savedKey = localStorage.getItem('apriko-anthropic-key');
   if(savedKey){
@@ -4924,14 +4940,13 @@ function updateOcrConfigVisibility(){
   } else {
     keyBtn.style.display = 'none';
   }
-  if(!hasImage){
-    // PDFs kann Claude nicht direkt lesen (bräuchte Rasterung) → toggle disablen
+  if(!supported){
     $('rpUseClaude').disabled = true;
-    $('rpOcrHint').textContent = 'Für PDFs ist die Live-OCR im Prototyp deaktiviert — bitte die PDF-Seite als Foto/Screenshot hochladen, oder Demo-Modus nutzen.';
+    $('rpOcrHint').textContent = 'Keine unterstützten Dateien vorhanden.';
   } else {
     $('rpUseClaude').disabled = false;
     $('rpOcrHint').textContent = savedKey
-      ? 'API-Key ist hinterlegt. Anhaken, um das Bild an die Anthropic API zu senden.'
+      ? 'API-Key ist hinterlegt. Anhaken, um die Datei an die Anthropic API zu senden. Bilder und PDFs werden direkt verarbeitet.'
       : 'Ohne Anhaken werden Demo-Werte eingefügt. Beim Anhaken wirst du nach einem Anthropic-API-Key gefragt (wird lokal im Browser gespeichert).';
   }
 }
@@ -5016,8 +5031,8 @@ function fileToBase64(file){
 }
 
 /* OCR via Anthropic Claude Vision API.
-   Nimmt das erste Bild aus files[], sendet an die API mit strukturiertem Prompt,
-   parst das JSON-Ergebnis, füllt zeilen[] und ERKANNT[]. */
+   Nimmt das erste Bild oder PDF aus files[], sendet an die API mit strukturiertem Prompt,
+   parst das JSON-Ergebnis, füllt zeilen[] und HINWEISE[]. */
 async function scanWithClaude(){
   var b = $('rpScan');
   var key = getAnthropicKey();
@@ -5026,31 +5041,77 @@ async function scanWithClaude(){
     return;
   }
 
-  // Erstes Bild suchen
-  var imageFile = files.find(function(f){ return f.type === 'image'; });
-  if(!imageFile){
-    alert('Kein Bild vorhanden.');
+  // Erste unterstützte Datei suchen (Bild ODER PDF)
+  var docFile = files.find(function(f){ return f.type === 'image' || f.type === 'pdf'; });
+  if(!docFile){
+    alert('Keine unterstützte Datei vorhanden (Bild oder PDF erforderlich).');
     return;
   }
+  var isPdf = docFile.type === 'pdf';
 
   b.disabled = true;
   b.textContent = 'Claude liest…';
-  showLoading('Claude liest den Rapport…', 'Das kann 10-30 Sekunden dauern');
+  showLoading(
+    isPdf ? 'Claude liest das PDF…' : 'Claude liest den Rapport…',
+    'Das kann 10-30 Sekunden dauern'
+  );
 
   try {
-    var b64 = await fileToBase64(imageFile.blob);
+    var b64 = await fileToBase64(docFile.blob);
 
+    var belegKurz = docFile.name.replace(/\.[^.]+$/,'');
     var prompt =
-      'Du bist ein OCR-Extraktor für Arbeitsrapporte aus der Schweizer Personalverleih-Branche. ' +
-      'Extrahiere aus diesem handschriftlichen oder gedruckten Arbeitsrapport-Beleg alle Tageszeilen. ' +
-      'Jede Zeile enthält: Datum (Format dd.mm.yyyy), Wochentag (Mo/Di/Mi/Do/Fr/Sa/So), Kostenstelle (Zahl oder Text, z.B. "1312" oder "KISPI"), Ist-Stunden (Dezimalzahl, z.B. 9.50).\n\n' +
-      'Antworte AUSSCHLIESSLICH mit einem gültigen JSON-Array in diesem Format, ohne Erklärungen, ohne Markdown-Code-Fences:\n' +
-      '[{"datum":"17.08.2026","tag":"Mo","kst":"1312","ist":10.0,"kstFlag":null,"istFlag":null,"beleg":"' + imageFile.name.replace(/\.[^.]+$/,'') + '"}]\n\n' +
-      'Regeln für die Flags:\n' +
-      '- kstFlag: "low" wenn Kostenstelle schwer lesbar / mehrdeutig ist, sonst null\n' +
-      '- istFlag: "mid" wenn Stundenzahl korrigiert/durchgestrichen wurde, "low" wenn schlecht lesbar, sonst null\n\n' +
-      'Wenn du dir bei einem Wert unsicher bist, wähle den wahrscheinlichsten Wert und setze das entsprechende Flag. ' +
-      'Ist-Stunden immer als Dezimalzahl (10.0 nicht "10:00"). Fehlende Kostenstelle → leerer String "". Nur das JSON, sonst nichts.';
+      'Du bist ein OCR-Extraktor für Schweizer Arbeitsrapporte und Monatsrapporte aus der Personalverleih- und Baubranche. ' +
+      'Extrahiere aus diesem Beleg (Foto, Scan oder digitales PDF):\n' +
+      '1. Den Namen des Mitarbeiters (Vorname und Nachname, getrennt)\n' +
+      '2. Die Firma / den Auftraggeber / Kunden\n' +
+      '3. Alle Tageszeilen mit Arbeitsstunden\n\n' +
+      'RAPPORT-FORMATE die du erkennen musst:\n' +
+      'A) WOCHEN-RAPPORT (handschriftlich, ~5-7 Zeilen): Ein Tag pro Zeile mit Datum, Kostenstelle, Stunden\n' +
+      'B) MONATS-RAPPORT (tabellarisch, digital erzeugt): Eine Tabelle mit Leistungsarten als Zeilen und Tagen 1-31 als SPALTEN. Jede Zelle enthält die Stunden für diesen Tag/diese Leistung. Der Rapport-Header nennt den Zeitraum (z.B. "01.07.2026 bis 31.07.2026"). Personalnummer + Name stehen typischerweise als eigene Zeile (z.B. "4575 Mathot Anthony").\n\n' +
+      'Bei Monats-Rapporten: erzeuge EINE Zeile pro TAG mit gebuchten Stunden (Zellen mit >0 Stunden). Wenn mehrere Leistungsarten am gleichen Tag stehen, jeweils eigene Zeilen. Als "kst" die Leistungsart-Nummer (z.B. "1205").\n\n' +
+      'Antworte AUSSCHLIESSLICH mit einem gültigen JSON-Objekt in genau diesem Format, ohne Erklärungen, ohne Markdown-Code-Fences:\n' +
+      '{\n' +
+      '  "mitarbeiter": {"vorname": "Anthony", "nachname": "Mathot"},\n' +
+      '  "firma": "Ernst Selmoni AG",\n' +
+      '  "zeilen": [\n' +
+      '    {"datum":"01.07.2026","tag":"Mi","kst":"1205","ist":8.0,"kstFlag":null,"istFlag":null,"beleg":"' + belegKurz + '"}\n' +
+      '  ]\n' +
+      '}\n\n' +
+      'Regeln:\n' +
+      '- Datum immer als dd.mm.yyyy. Bei Monatsrapporten das Jahr aus dem Zeitraum-Header übernehmen.\n' +
+      '- Wochentag zweistellig: Mo/Di/Mi/Do/Fr/Sa/So.\n' +
+      '- Ist-Stunden immer als Dezimalzahl (8.0 nicht "8:00"). Nur Tage mit >0 Stunden aufnehmen.\n' +
+      '- kst: Kostenstelle oder Leistungsart-Nummer als String (z.B. "1205", "1312", "KISPI"). Leer wenn nicht vorhanden.\n' +
+      '- kstFlag: "low" wenn schwer lesbar/mehrdeutig, sonst null.\n' +
+      '- istFlag: "mid" wenn korrigiert/durchgestrichen, "low" wenn schlecht lesbar, sonst null.\n' +
+      '- Bei digital erzeugten PDFs (Monatsrapport, klar strukturierte Tabelle): kstFlag und istFlag NULL, da alles gut lesbar.\n' +
+      '- Bei handschriftlichen Fotos: die Flags aktiv nutzen wo unsicher.\n' +
+      '- Fehlender Vorname/Nachname/Firma: leerer String "" (kein Ratewert).\n' +
+      '- Firma-Namen sauber mit Rechtsform (AG, GmbH). Bei "Selmoni Gruppe" die formelle Firma "Ernst Selmoni AG" wählen wenn sie im Rapport steht.\n\n' +
+      'Nur das JSON, sonst nichts.';
+
+    // Content-Block: PDF als "document", Bild als "image"
+    var mediaBlock;
+    if(isPdf){
+      mediaBlock = {
+        type: 'document',
+        source: {
+          type: 'base64',
+          media_type: 'application/pdf',
+          data: b64.data
+        }
+      };
+    } else {
+      mediaBlock = {
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: b64.mediaType,
+          data: b64.data
+        }
+      };
+    }
 
     var response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -5062,20 +5123,10 @@ async function scanWithClaude(){
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5-20250929',
-        max_tokens: 2000,
+        max_tokens: 4000,  // Mehr Tokens für lange Monatsrapporte
         messages: [{
           role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: b64.mediaType,
-                data: b64.data
-              }
-            },
-            { type: 'text', text: prompt }
-          ]
+          content: [ mediaBlock, { type: 'text', text: prompt } ]
         }]
       })
     });
@@ -5101,9 +5152,9 @@ async function scanWithClaude(){
     try {
       parsed = JSON.parse(text);
     } catch(e){
-      // Falls Claude doch was drumherum geschrieben hat: erstes [ bis letztes ] extrahieren
-      var start = text.indexOf('[');
-      var end = text.lastIndexOf(']');
+      // Falls Claude doch was drumherum geschrieben hat: erstes { bis letztes } extrahieren
+      var start = text.indexOf('{');
+      var end = text.lastIndexOf('}');
       if(start >= 0 && end > start){
         parsed = JSON.parse(text.substring(start, end + 1));
       } else {
@@ -5111,12 +5162,24 @@ async function scanWithClaude(){
       }
     }
 
-    if(!Array.isArray(parsed) || parsed.length === 0){
+    // Backwards-compat: falls Claude doch nur ein Array liefert
+    var rawZeilen, mitarbeiter, firma;
+    if(Array.isArray(parsed)){
+      rawZeilen = parsed;
+      mitarbeiter = null;
+      firma = '';
+    } else {
+      rawZeilen = parsed.zeilen || [];
+      mitarbeiter = parsed.mitarbeiter || null;
+      firma = parsed.firma || '';
+    }
+
+    if(!Array.isArray(rawZeilen) || rawZeilen.length === 0){
       throw new Error('Keine Zeilen im Rapport erkannt.');
     }
 
     // Normalisieren
-    zeilen = parsed.map(function(r){
+    zeilen = rawZeilen.map(function(r){
       return {
         datum: String(r.datum || ''),
         tag: String(r.tag || ''),
@@ -5124,9 +5187,19 @@ async function scanWithClaude(){
         kstFlag: r.kstFlag || null,
         ist: typeof r.ist === 'number' ? r.ist : parseFloat(String(r.ist).replace(',','.')) || 0,
         istFlag: r.istFlag || null,
-        beleg: r.beleg || imageFile.name.replace(/\.[^.]+$/,'')
+        beleg: r.beleg || belegKurz
       };
     });
+
+    // Karte 2 Felder auto-befüllen wenn Claude was gefunden hat
+    if(mitarbeiter){
+      var maStr = [mitarbeiter.vorname, mitarbeiter.nachname]
+        .map(function(s){ return String(s || '').trim(); })
+        .filter(Boolean)
+        .join(' ');
+      if(maStr) $('rpMa').value = maStr;
+    }
+    if(firma) $('rpKunde').value = String(firma).trim();
 
     // Wenn Claude Werte mit Flags gemarkt hat, HINWEISE dynamisch generieren
     HINWEISE = [];
@@ -5354,13 +5427,25 @@ function berechnen(){
     zeit.push(['Überzeit '+gav.zuschlagSatz+'%',nf(uzeit)+' h']);
   }
 
-  var zTage = gav.zulage ? zeilen.filter(function(r){ return r.ist>gav.zulageAb; }).length : 0;
-  var zulage=zTage*gav.zulage, mittag=zTage*gav.mittag;
-  if(gav.zulage){
-    spesen.push(['Baustellenzulage · '+zTage+' Tage','CHF '+nf(zulage)]);
-    spesen.push(['Mittagessen · '+zTage+' Tage','CHF '+nf(mittag)]);
+  // Spesen-Berechnung getrennt für Baustellenzulage (an Zulageschwelle gebunden)
+  // und Mittagsentschädigung (bei jedem Tag mit substantieller Arbeitszeit).
+  // Elektrogewerbe hat z.B. Mittag ohne Baustellenzulage → beides muss separat funktionieren.
+  var bauTage = gav.zulage ? zeilen.filter(function(r){ return r.ist > gav.zulageAb; }).length : 0;
+  var mittagTage = gav.mittag ? zeilen.filter(function(r){ return r.ist >= 5; }).length : 0;
+  var zulage = bauTage * (gav.zulage || 0);
+  var mittag = mittagTage * (gav.mittag || 0);
+
+  if(gav.zulage || gav.mittag){
+    if(gav.zulage){
+      spesen.push(['Baustellenzulage · '+bauTage+' Tage à CHF '+nf(gav.zulage),'CHF '+nf(zulage)]);
+    }
+    if(gav.mittag){
+      spesen.push(['Mittagsentschädigung · '+mittagTage+' Tage à CHF '+nf(gav.mittag),'CHF '+nf(mittag)]);
+    }
     spesen.push(['Total','CHF '+nf(zulage+mittag),true]);
-  } else spesen.push(['Keine Spesenregelung im GAV','—']);
+  } else {
+    spesen.push(['Keine Spesenregelung im GAV','—']);
+  }
 
   var kst={};
   zeilen.forEach(function(r){ var k=r.kst||'ohne'; kst[k]=(kst[k]||0)+r.ist; });
