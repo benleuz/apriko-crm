@@ -5,6 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Apriko CRM</title>
 <script>
+/* Theme-Init sofort ausführen, um Flicker beim Laden zu vermeiden.
+   Priorität: localStorage → System-Präferenz → Dark als Default. */
+(function(){
+  try {
+    var saved = localStorage.getItem('apriko-theme');  // 'light' | 'dark' | null
+    var theme;
+    if (saved === 'light' || saved === 'dark') {
+      theme = saved;
+    } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+      theme = 'light';
+    } else {
+      theme = 'dark';
+    }
+    document.documentElement.setAttribute('data-theme', theme);
+  } catch(e) {}
+})();
+</script>
+<script>
 /*! @azure/msal-browser v2.38.3 2023-10-27 */
 "use strict";!function(e,t){"object"==typeof exports&&"undefined"!=typeof module?t(exports):"function"==typeof define&&define.amd?define(["exports"],t):t((e="undefined"!=typeof globalThis?globalThis:e||self).msal={})}(this,(function(e){
 /*! *****************************************************************************
@@ -97,6 +115,23 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
     --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
     --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
+
+  /* Light-Modus: Werte werden über [data-theme="light"] auf <html> gesetzt */
+  html[data-theme="light"] {
+    --bg: #f7f9f8;
+    --bg-elev: #ffffff;
+    --bg-card: #ffffff;
+    --border: #e5e9e7;
+    --border-soft: #eff2f0;
+    --text: #1a2624;
+    --text-dim: #5a716c;
+    --text-faint: #8aa19c;
+    --accent: #7cc040;       /* dunkleres Lime für Kontrast auf Hell */
+    --accent-2: #3ba884;
+    --accent-3: #2d95a5;
+    --danger: #dc2626;
+    --warn: #d97706;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
   body {
@@ -167,12 +202,19 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
     padding: 12px 16px; border-top: 1px solid var(--border-soft);
     font-size: 12px; color: var(--text-dim);
     display: flex; justify-content: space-between; align-items: center;
+    gap: 8px;
   }
+  .user-bar #user-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .user-bar button {
     background: none; border: none; color: var(--text-faint); cursor: pointer;
     font-size: 12px; font-family: inherit;
   }
   .user-bar button:hover { color: var(--text); }
+  .user-bar #theme-toggle-btn {
+    font-size: 15px; padding: 2px 6px; line-height: 1;
+    border: 1px solid var(--border-soft); border-radius: 3px;
+  }
+  .user-bar #theme-toggle-btn:hover { border-color: var(--accent); color: var(--accent); }
 
   /* Main content */
   main { overflow-y: auto; }
@@ -572,6 +614,39 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
     line-height:1.6;overflow-x:auto;margin-top:14px;font-family:ui-monospace,Menlo,monospace;white-space:pre}
   .rp-hint{font-size:13px;color:var(--rp-grey);margin-top:12px}
   @media(prefers-reduced-motion:reduce){.rp-drop,.rp-btn{transition:none}}
+
+  /* Splitscreen für Prüf-Ansicht: Tabelle links, Beleg rechts */
+  .rp-split-check{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;align-items:start;margin-top:8px}
+  @media(max-width:1100px){ .rp-split-check{grid-template-columns:1fr} }
+  .rp-check-left{min-width:0}
+  .rp-check-right{min-width:0}
+  .rp-table tbody tr{cursor:pointer}
+  .rp-table tbody tr.rp-row-active{background:#FFFBEB;box-shadow:inset 3px 0 0 var(--rp-lime-dark)}
+
+  /* Beleg-Tabs */
+  .rp-beleg-tabs{display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap;border-bottom:1px solid var(--rp-line);padding-bottom:8px}
+  .rp-beleg-tab{background:transparent;border:1px solid var(--rp-line);color:var(--rp-grey);
+    padding:4px 12px;font-size:12px;border-radius:4px;cursor:pointer;font-family:inherit}
+  .rp-beleg-tab:hover{background:var(--rp-bg);color:var(--rp-dark)}
+  .rp-beleg-tab.rp-active{background:var(--rp-dark);color:var(--rp-lime);border-color:var(--rp-dark)}
+
+  /* Beleg-Viewer */
+  .rp-beleg-viewer{background:var(--rp-bg);border:1px solid var(--rp-line);border-radius:6px;
+    min-height:400px;max-height:600px;overflow:auto;display:flex;align-items:center;justify-content:center;padding:8px;position:relative}
+  .rp-beleg-empty{color:var(--rp-grey);font-size:13px;text-align:center;line-height:1.6}
+  .rp-beleg-empty small{color:#9CA3AF;font-size:11px}
+  .rp-beleg-viewer img{max-width:100%;max-height:600px;object-fit:contain;cursor:zoom-in;
+    border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,0.1)}
+  .rp-beleg-viewer embed,.rp-beleg-viewer iframe{width:100%;height:600px;border:none;background:var(--rp-white)}
+  .rp-beleg-info{position:absolute;top:8px;left:8px;background:rgba(31,41,55,0.85);color:var(--rp-white);
+    font-size:10px;padding:3px 8px;border-radius:3px;pointer-events:none}
+
+  /* Vollbild-Overlay */
+  .rp-lightbox{position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:9999;display:flex;
+    align-items:center;justify-content:center;padding:20px;cursor:zoom-out}
+  .rp-lightbox img{max-width:95vw;max-height:95vh;object-fit:contain}
+  .rp-lightbox-close{position:absolute;top:16px;right:20px;color:#fff;font-size:28px;
+    cursor:pointer;background:none;border:none;font-family:inherit}
 </style>
 </head>
 <body>
@@ -599,9 +674,11 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button data-view="companies"><span class="ic">◳</span> Firmen</button>
       <button data-view="contacts"><span class="ic">◉</span> Kontakte</button>
       <button data-view="tasks"><span class="ic">✓</span> Aufgaben</button>
+      <button data-view="profiles" id="nav-profiles" hidden><span class="ic">⚙</span> Profile</button>
     </nav>
     <div class="user-bar">
       <span id="user-name">–</span>
+      <button id="theme-toggle-btn" onclick="toggleTheme()" title="Theme wechseln">☀</button>
       <button onclick="logout()">Logout</button>
     </div>
   </aside>
@@ -680,19 +757,34 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
             <span><i style="background:var(--rp-mid);border:1px solid var(--rp-mid-b)"></i>Korrektur auf dem Beleg</span>
             <span><i style="background:#fff;border:1px solid #D1D5DB"></i>Eindeutig</span>
           </div>
-          <div class="rp-scroll">
-            <table class="rp-table">
-              <thead><tr>
-                <th>Datum</th><th>Tag</th><th>Kostenstelle</th>
-                <th class="rp-num">Soll</th><th class="rp-num">Ist</th>
-                <th class="rp-num">Differenz</th><th>Beleg</th>
-              </tr></thead>
-              <tbody id="rpTbody"></tbody>
-              <tfoot><tr><td colspan="3">Total</td>
-                <td class="rp-num" id="rpTSoll">—</td><td class="rp-num" id="rpTIst">—</td>
-                <td class="rp-num" id="rpTDiff">—</td><td></td></tr></tfoot>
-            </table>
+
+          <!-- Beleg-Tabs -->
+          <div class="rp-beleg-tabs" id="rpBelegTabs" hidden></div>
+
+          <!-- Split: Tabelle links, Beleg rechts -->
+          <div class="rp-split-check">
+            <div class="rp-check-left">
+              <div class="rp-scroll">
+                <table class="rp-table">
+                  <thead><tr>
+                    <th>Datum</th><th>Tag</th><th>Kostenstelle</th>
+                    <th class="rp-num">Soll</th><th class="rp-num">Ist</th>
+                    <th class="rp-num">Differenz</th><th>Beleg</th>
+                  </tr></thead>
+                  <tbody id="rpTbody"></tbody>
+                  <tfoot><tr><td colspan="3">Total</td>
+                    <td class="rp-num" id="rpTSoll">—</td><td class="rp-num" id="rpTIst">—</td>
+                    <td class="rp-num" id="rpTDiff">—</td><td></td></tr></tfoot>
+                </table>
+              </div>
+            </div>
+            <div class="rp-check-right">
+              <div class="rp-beleg-viewer" id="rpBelegViewer">
+                <div class="rp-beleg-empty">Beleg wird hier angezeigt<br><small>Klick auf eine Tabellenzeile zum Wechseln</small></div>
+              </div>
+            </div>
           </div>
+
           <ul class="rp-notes" id="rpNotes"></ul>
           <div class="rp-actions">
             <button class="rp-btn" id="rpConfirm">Werte bestätigen und berechnen</button>
@@ -909,8 +1001,99 @@ let msalApp = null;
 let account = null;
 let siteId = null;
 let listIds = {};
-let cache = { companies: [], contacts: [], deals: [], activities: [], customers: [], monthlyrevenue: [], budget: [] };
+let cache = { companies: [], contacts: [], deals: [], activities: [], customers: [], monthlyrevenue: [], budget: [], userprofiles: [] };
 let currentView = "dashboard";
+
+/* ===========================================================
+   Berechtigungssystem
+   =========================================================== */
+const SUPER_ADMIN_EMAIL = "benjamin@apriko.com";  // hat immer volle Rechte
+const ALL_VIEWS = ["dashboard","pipeline","customers","revenue","stats","bpocheck","rapport","companies","contacts","tasks","profiles"];
+/* currentUser wird nach dem Login gesetzt:
+   { email, isSuperAdmin, role: "Admin"|"User", allowedViews: string[] } */
+let currentUser = null;
+
+function isSuperAdmin(email) {
+  return String(email || "").toLowerCase() === SUPER_ADMIN_EMAIL;
+}
+
+function isAdmin() {
+  return currentUser && (currentUser.isSuperAdmin || currentUser.role === "Admin");
+}
+
+function canAccessView(viewName) {
+  if (!currentUser) return false;
+  if (currentUser.isSuperAdmin) return true;
+  return currentUser.allowedViews.includes(viewName);
+}
+
+/* Sucht den User-Profileintrag anhand E-Mail und baut daraus currentUser. */
+function resolveCurrentUser(email) {
+  const emailLower = String(email || "").toLowerCase();
+  const superAdmin = isSuperAdmin(email);
+
+  // Profileintrag suchen: über Email-Feld ODER über UserPerson.email
+  const profile = (cache.userprofiles || []).find(p => {
+    const pEmail = String(p.Email || "").toLowerCase();
+    const personEmail = String((p.UserPersonLookupId && p.UserPerson && p.UserPerson.email) || "").toLowerCase();
+    return pEmail === emailLower || personEmail === emailLower;
+  });
+
+  if (superAdmin) {
+    // Super-Admin hat immer alles, auch wenn nicht in Liste
+    return {
+      email: email,
+      isSuperAdmin: true,
+      role: "Admin",
+      allowedViews: ALL_VIEWS.slice()
+    };
+  }
+
+  if (!profile) {
+    // Kein Eintrag → kein Zugriff
+    return null;
+  }
+
+  // AllowedViews kann als Multi-Choice-Array oder String kommen
+  let allowedViews = [];
+  if (Array.isArray(profile.AllowedViews)) {
+    allowedViews = profile.AllowedViews;
+  } else if (typeof profile.AllowedViews === "string" && profile.AllowedViews.trim()) {
+    allowedViews = profile.AllowedViews.split(/[,;]/).map(s => s.trim()).filter(Boolean);
+  }
+
+  return {
+    email: email,
+    isSuperAdmin: false,
+    role: profile.Role || "User",
+    allowedViews: allowedViews,
+    profileId: profile.id
+  };
+}
+
+/* ===========================================================
+   Theme-Toggle
+   =========================================================== */
+function getCurrentTheme() {
+  return document.documentElement.getAttribute("data-theme") || "dark";
+}
+
+function toggleTheme() {
+  const next = getCurrentTheme() === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  try { localStorage.setItem("apriko-theme", next); } catch(e) {}
+  // User-Bar-Button-Icon aktualisieren
+  updateThemeButton();
+}
+
+function updateThemeButton() {
+  const btn = document.getElementById("theme-toggle-btn");
+  if (btn) {
+    const isDark = getCurrentTheme() === "dark";
+    btn.textContent = isDark ? "☀" : "☾";
+    btn.title = isDark ? "Zu Hell-Modus wechseln" : "Zu Dunkel-Modus wechseln";
+  }
+}
 
 function showError(msg) {
   const el = document.getElementById("login-error");
@@ -993,7 +1176,7 @@ async function bootstrap() {
   // Lists holen
   const lists = await graph(`/sites/${siteId}/lists?$select=id,name,displayName`);
   for (const l of lists.value) {
-    if (["Companies", "Contacts", "Deals", "Activities", "Customers", "MonthlyRevenue", "Budget"].includes(l.displayName)) {
+    if (["Companies", "Contacts", "Deals", "Activities", "Customers", "MonthlyRevenue", "Budget", "UserProfiles"].includes(l.displayName)) {
       listIds[l.displayName] = l.id;
     }
   }
@@ -1001,6 +1184,10 @@ async function bootstrap() {
   const missing = required.filter(r => !listIds[r]);
   if (missing.length) {
     throw new Error("Fehlende Listen auf SharePoint: " + missing.join(", ") + ". Siehe SETUP.md.");
+  }
+  // UserProfiles ist optional — wenn nicht vorhanden, greift nur Super-Admin
+  if (!listIds.UserProfiles) {
+    console.warn("UserProfiles-Liste nicht gefunden — nur Super-Admin hat Zugriff.");
   }
 }
 
@@ -1040,9 +1227,33 @@ async function startApp() {
   document.getElementById("login-screen").style.display = "none";
   document.getElementById("app").classList.add("ready");
   document.getElementById("user-name").textContent = account.username.split("@")[0];
+  updateThemeButton();
 
   try {
     await bootstrap();
+
+    // UserProfiles zuerst laden, damit die Berechtigungsprüfung greift
+    if (listIds.UserProfiles) {
+      try {
+        // Person-Feld mit expand holen, damit .email verfügbar ist
+        const data = await graph(`/sites/${siteId}/lists/${listIds.UserProfiles}/items?expand=fields&$top=999`);
+        cache.userprofiles = data.value.map(item => ({ id: item.id, ...item.fields }));
+      } catch (e) {
+        console.warn("UserProfiles konnten nicht geladen werden:", e.message);
+        cache.userprofiles = [];
+      }
+    }
+
+    // currentUser anhand E-Mail auflösen
+    currentUser = resolveCurrentUser(account.username);
+
+    if (!currentUser) {
+      // Kein Zugriff → Access-Denied-Screen und Ende
+      renderAccessDenied();
+      return;
+    }
+
+    // Restliche Daten nur laden, wenn Zugriff besteht
     cache.companies = await loadList("Companies");
     cache.contacts = await loadList("Contacts");
     cache.deals = await loadList("Deals");
@@ -1050,13 +1261,65 @@ async function startApp() {
     cache.customers = await loadList("Customers");
     cache.monthlyrevenue = await loadList("MonthlyRevenue");
     cache.budget = await loadList("Budget");
+
+    applyPermissionsToNav();
     bindNav();
+
+    // Falls die Standard-Ansicht (dashboard) für diesen User gesperrt ist,
+    // auf die erste erlaubte View wechseln
+    if (!canAccessView(currentView)) {
+      currentView = currentUser.allowedViews[0] || "dashboard";
+      document.querySelectorAll("nav button").forEach(x => x.classList.remove("active"));
+      const first = document.querySelector(`nav button[data-view="${currentView}"]`);
+      if (first) first.classList.add("active");
+    }
+
     render();
   } catch (e) {
     console.error(e);
     document.getElementById("view-content").innerHTML =
       `<div class="empty" style="color: var(--danger);">${escape(e.message)}</div>`;
   }
+}
+
+/* Sidebar-Buttons filtern: nur AllowedViews werden angezeigt.
+   Profile-Menü nur für Admins sichtbar. */
+function applyPermissionsToNav() {
+  document.querySelectorAll("nav button[data-view]").forEach(btn => {
+    const view = btn.dataset.view;
+    if (view === "profiles") {
+      // Nur für Admins
+      btn.hidden = !isAdmin();
+    } else {
+      btn.hidden = !canAccessView(view);
+    }
+  });
+}
+
+function renderAccessDenied() {
+  const content = document.getElementById("view-content");
+  const rapportView = document.getElementById("view-rapport");
+  if (rapportView) rapportView.hidden = true;
+  content.hidden = false;
+
+  // Sidebar ausblenden — kein Zugriff auf irgendwas
+  document.querySelectorAll("nav button").forEach(b => b.hidden = true);
+  document.getElementById("view-title").textContent = "Zugriff verweigert";
+  document.getElementById("view-actions").innerHTML = "";
+
+  content.innerHTML = `
+    <div style="max-width:520px;margin:80px auto;text-align:center;padding:40px 32px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px">
+      <div style="font-size:48px;margin-bottom:16px;color:var(--warn)">⚠</div>
+      <h2 style="margin-bottom:12px;color:var(--text)">Kein Zugriff auf das Apriko CRM</h2>
+      <p style="color:var(--text-dim);margin-bottom:8px;line-height:1.6">
+        Dein Account <b style="color:var(--text)">${escape(account.username)}</b> ist nicht für den Zugriff auf das CRM freigeschaltet.
+      </p>
+      <p style="color:var(--text-faint);font-size:12px;margin-bottom:28px">
+        Bitte wende dich an einen Administrator, um freigeschaltet zu werden.
+      </p>
+      <button class="btn" onclick="logout()" style="padding:10px 24px">Abmelden</button>
+    </div>
+  `;
 }
 
 function bindNav() {
@@ -1078,9 +1341,34 @@ function render() {
     dashboard: "Dashboard", pipeline: "Pipeline",
     customers: "Kunden", revenue: "Umsätze", stats: "Statistiken",
     bpocheck: "BPO Checkliste", rapport: "Rapport",
-    companies: "Firmen", contacts: "Kontakte", tasks: "Aufgaben"
+    companies: "Firmen", contacts: "Kontakte", tasks: "Aufgaben",
+    profiles: "Profile"
   };
-  document.getElementById("view-title").textContent = titles[currentView];
+
+  // Router-Guard: hat der User Zugriff auf diese View?
+  // Profile ist ein Admin-only Bereich.
+  const requiresAdmin = currentView === "profiles";
+  const hasAccess = requiresAdmin ? isAdmin() : canAccessView(currentView);
+
+  if (!hasAccess) {
+    // Statt Access-Denied zurück auf die erste erlaubte View
+    const fallback = (currentUser && currentUser.allowedViews[0]) || "dashboard";
+    if (fallback === currentView) {
+      // Absoluter Fallback: leere Seite mit Hinweis
+      document.getElementById("view-title").textContent = "Keine Berechtigung";
+      document.getElementById("view-actions").innerHTML = "";
+      document.getElementById("view-content").innerHTML =
+        `<div class="empty" style="color:var(--text-dim)">Du hast keine Berechtigung für diese Ansicht.</div>`;
+      return;
+    }
+    currentView = fallback;
+    document.querySelectorAll("nav button").forEach(x => x.classList.remove("active"));
+    const b = document.querySelector(`nav button[data-view="${currentView}"]`);
+    if (b) b.classList.add("active");
+    // Weiter mit render()
+  }
+
+  document.getElementById("view-title").textContent = titles[currentView] || currentView;
   document.getElementById("view-actions").innerHTML = "";
   const content = document.getElementById("view-content");
   const rapportView = document.getElementById("view-rapport");
@@ -1105,6 +1393,7 @@ function render() {
   else if (currentView === "companies") renderCompanies(content);
   else if (currentView === "contacts") renderContacts(content);
   else if (currentView === "tasks") renderTasks(content);
+  else if (currentView === "profiles") renderProfiles(content);
 }
 
 /* ---------- Dashboard ---------- */
@@ -3548,6 +3837,206 @@ function lookupRelated(activity) {
   return null;
 }
 
+/* ---------- Profiles (Admin) ---------- */
+/* Verwaltet die UserProfiles-Liste: welche User dürfen was sehen? */
+
+const VIEW_LABELS_FOR_PROFILE = [
+  { key: "dashboard", label: "Dashboard" },
+  { key: "pipeline", label: "Pipeline" },
+  { key: "customers", label: "Kunden" },
+  { key: "revenue", label: "Umsätze" },
+  { key: "stats", label: "Statistiken" },
+  { key: "bpocheck", label: "BPO Checkliste" },
+  { key: "rapport", label: "Rapport" },
+  { key: "companies", label: "Firmen" },
+  { key: "contacts", label: "Kontakte" },
+  { key: "tasks", label: "Aufgaben" },
+  { key: "profiles", label: "Profile (Admin)" }
+];
+
+function renderProfiles(el) {
+  // Zusatz-Aktionen im Topbar
+  document.getElementById("view-actions").innerHTML = `
+    <button class="btn btn-primary btn-sm" onclick="openProfileModal(null)">+ Profil hinzufügen</button>
+  `;
+
+  if (!listIds.UserProfiles) {
+    el.innerHTML = `
+      <div class="empty" style="padding:40px;text-align:center">
+        Die SharePoint-Liste <code>UserProfiles</code> wurde nicht gefunden.<br>
+        <small style="color:var(--text-faint)">Bitte auf ${escape(CONFIG.siteHost + CONFIG.sitePath)} anlegen.</small>
+      </div>`;
+    return;
+  }
+
+  const profiles = cache.userprofiles || [];
+
+  el.innerHTML = `
+    <div style="padding:20px 28px">
+      <div style="background:rgba(184,233,134,0.05);border:1px solid var(--border-soft);border-radius:6px;padding:12px 16px;margin-bottom:20px;font-size:12px;color:var(--text-dim);line-height:1.6">
+        Hier verwaltest du, wer auf welche Bereiche des CRMs zugreifen darf.
+        <b style="color:var(--text)">${escape(SUPER_ADMIN_EMAIL)}</b> hat unabhängig von diesen Einstellungen immer vollen Zugriff (Super-Admin).
+      </div>
+
+      <table class="table">
+        <thead><tr>
+          <th style="width:280px">E-Mail</th>
+          <th style="width:100px">Rolle</th>
+          <th>Freigeschaltete Bereiche</th>
+          <th style="width:120px;text-align:right">Aktionen</th>
+        </tr></thead>
+        <tbody>
+          ${profiles.length === 0 ? `
+            <tr><td colspan="4" class="empty">Noch keine Profile angelegt. Klick auf "+ Profil hinzufügen".</td></tr>
+          ` : profiles.map(p => {
+            const views = Array.isArray(p.AllowedViews) ? p.AllowedViews
+              : (typeof p.AllowedViews === "string" ? p.AllowedViews.split(/[,;]/).map(s => s.trim()).filter(Boolean) : []);
+            const viewLabels = views.map(v => {
+              const found = VIEW_LABELS_FOR_PROFILE.find(x => x.key === v);
+              return found ? found.label : v;
+            });
+            const displayEmail = p.Email || (p.UserPerson && p.UserPerson.email) || "(kein Email)";
+            const roleBadge = p.Role === "Admin"
+              ? `<span style="background:rgba(184,233,134,0.15);color:var(--accent);padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">Admin</span>`
+              : `<span style="color:var(--text-dim);font-size:12px">User</span>`;
+            return `
+              <tr>
+                <td style="font-weight:500">${escape(displayEmail)}</td>
+                <td>${roleBadge}</td>
+                <td style="color:var(--text-dim);font-size:12px">
+                  ${views.length === 0 ? `<span style="color:var(--warn)">— (kein Zugriff)</span>`
+                    : (views.length >= ALL_VIEWS.length - 1 ? `<span style="color:var(--accent)">Alle Bereiche</span>`
+                      : viewLabels.map(l => `<span style="display:inline-block;background:var(--bg-elev);padding:2px 7px;border-radius:3px;margin:1px 3px 1px 0">${escape(l)}</span>`).join(""))}
+                </td>
+                <td style="text-align:right">
+                  <button class="btn btn-sm" onclick="openProfileModal(${p.id})">Bearbeiten</button>
+                  <button class="btn btn-sm" style="color:var(--danger)" onclick="deleteProfile(${p.id})">✕</button>
+                </td>
+              </tr>
+            `;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+/* Modal für Neu/Bearbeiten */
+function openProfileModal(profileId) {
+  const isEdit = profileId != null;
+  const profile = isEdit ? (cache.userprofiles || []).find(p => p.id == profileId) : null;
+  const currentEmail = profile ? (profile.Email || (profile.UserPerson && profile.UserPerson.email) || "") : "";
+  const currentRole = profile ? (profile.Role || "User") : "User";
+  const currentViews = profile
+    ? (Array.isArray(profile.AllowedViews) ? profile.AllowedViews
+       : (typeof profile.AllowedViews === "string" ? profile.AllowedViews.split(/[,;]/).map(s => s.trim()).filter(Boolean) : []))
+    : ["dashboard"];  // Neuer User: Dashboard als Default freischalten
+
+  const bodyHtml = `
+      <div style="margin-bottom:14px">
+        <label style="display:block;font-size:12px;color:var(--text-dim);margin-bottom:5px">E-Mail-Adresse</label>
+        <input type="email" id="profile-email" value="${escape(currentEmail)}"
+          ${isEdit ? "readonly style=\"opacity:0.6;cursor:not-allowed\"" : ""}
+          placeholder="vorname.nachname@apriko.com"
+          style="width:100%;padding:8px 10px;background:var(--bg-elev);border:1px solid var(--border);color:var(--text);border-radius:4px;font-family:inherit;font-size:13px">
+        ${isEdit ? '' : '<div style="font-size:11px;color:var(--text-faint);margin-top:4px">Muss exakt mit dem Login-Namen des Users in Entra ID übereinstimmen.</div>'}
+      </div>
+
+      <div style="margin-bottom:14px">
+        <label style="display:block;font-size:12px;color:var(--text-dim);margin-bottom:5px">Rolle</label>
+        <select id="profile-role" style="width:100%;padding:8px 10px;background:var(--bg-elev);border:1px solid var(--border);color:var(--text);border-radius:4px;font-family:inherit;font-size:13px">
+          <option value="User" ${currentRole === "User" ? "selected" : ""}>User (kein Zugriff auf Profile-Verwaltung)</option>
+          <option value="Admin" ${currentRole === "Admin" ? "selected" : ""}>Admin (darf Profile verwalten)</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom:6px">
+        <label style="display:block;font-size:12px;color:var(--text-dim);margin-bottom:8px">
+          Freigeschaltete Bereiche
+          <button type="button" onclick="toggleAllViews(true)" style="float:right;font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer">Alle</button>
+          <button type="button" onclick="toggleAllViews(false)" style="float:right;font-size:11px;color:var(--text-faint);background:none;border:none;cursor:pointer;margin-right:12px">Keine</button>
+        </label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--bg);padding:12px;border:1px solid var(--border);border-radius:4px">
+          ${VIEW_LABELS_FOR_PROFILE.map(v => `
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:4px 6px;border-radius:3px;font-size:13px">
+              <input type="checkbox" class="profile-view-cb" value="${v.key}" ${currentViews.includes(v.key) ? "checked" : ""}
+                style="cursor:pointer;accent-color:var(--accent);width:auto;margin:0">
+              <span>${escape(v.label)}</span>
+            </label>
+          `).join("")}
+        </div>
+      </div>
+  `;
+
+  showModal(isEdit ? "Profil bearbeiten" : "Neues Profil anlegen", bodyHtml, [
+    `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
+    `<button class="btn btn-primary" onclick="saveProfile(${profileId == null ? "null" : profileId})">${isEdit ? "Speichern" : "Anlegen"}</button>`
+  ]);
+}
+
+function toggleAllViews(select) {
+  document.querySelectorAll(".profile-view-cb").forEach(cb => cb.checked = select);
+}
+
+async function saveProfile(profileId) {
+  const email = document.getElementById("profile-email").value.trim();
+  const role = document.getElementById("profile-role").value;
+  const views = Array.from(document.querySelectorAll(".profile-view-cb:checked")).map(cb => cb.value);
+
+  if (!email) { alert("Bitte E-Mail eingeben."); return; }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { alert("Ungültige E-Mail-Adresse."); return; }
+
+  // Duplicate-Check nur beim Neu-Anlegen
+  if (profileId == null) {
+    const existing = (cache.userprofiles || []).find(p =>
+      String(p.Email || "").toLowerCase() === email.toLowerCase()
+    );
+    if (existing) { alert("Für diese E-Mail existiert bereits ein Profil."); return; }
+  }
+
+  const fields = {
+    Email: email,
+    Role: role,
+    AllowedViews: views  // SharePoint Choice Multi-Value nimmt Array
+  };
+
+  try {
+    if (profileId == null) {
+      // Title ist meist required — nehmen wir die E-Mail als Titel
+      fields.Title = email;
+      await createItem("UserProfiles", fields);
+    } else {
+      await updateItem("UserProfiles", profileId, fields);
+    }
+    await reload("UserProfiles");
+
+    // Falls der bearbeitete User der aktuell eingeloggte ist, currentUser neu aufbauen
+    if (currentUser && String(email).toLowerCase() === String(currentUser.email).toLowerCase() && !currentUser.isSuperAdmin) {
+      currentUser = resolveCurrentUser(currentUser.email);
+      applyPermissionsToNav();
+    }
+
+    closeModal();
+    render();
+  } catch (e) {
+    alert("Speichern fehlgeschlagen: " + e.message);
+  }
+}
+
+async function deleteProfile(profileId) {
+  const p = (cache.userprofiles || []).find(x => x.id == profileId);
+  if (!p) return;
+  const email = p.Email || (p.UserPerson && p.UserPerson.email) || "(unbekannt)";
+  if (!confirm(`Profil für ${email} wirklich löschen? Der User verliert damit den Zugriff auf das CRM.`)) return;
+  try {
+    await deleteItem("UserProfiles", profileId);
+    await reload("UserProfiles");
+    render();
+  } catch (e) {
+    alert("Löschen fehlgeschlagen: " + e.message);
+  }
+}
+
 /* ---------- Detail views ---------- */
 function openCompany(id) {
   const c = cache.companies.find(x => x.id == id);
@@ -4177,7 +4666,50 @@ window.initRapport = function(){
 
   $('rpScan').addEventListener('click',scan);
   $('rpDemo').addEventListener('click',function(){
-    files=[{name:'IMG_1398.jpeg',size:'1842 KB'}]; renderFiles(); scan(); });
+    // Demo-Beleg als inline SVG (simuliert handschriftlichen Rapport)
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 700" font-family="Comic Sans MS, cursive">'+
+      '<rect width="500" height="700" fill="#F5F1E8"/>'+
+      '<text x="250" y="40" text-anchor="middle" font-size="22" font-weight="bold" fill="#1F2937">ARBEITSRAPPORT</text>'+
+      '<text x="30" y="80" font-size="14" fill="#374151">Woche 34 / 2026 · Mustermann Max</text>'+
+      '<line x1="30" y1="100" x2="470" y2="100" stroke="#374151" stroke-width="1"/>'+
+      '<text x="30" y="130" font-size="12" fill="#6B7280">DATUM</text>'+
+      '<text x="130" y="130" font-size="12" fill="#6B7280">KST</text>'+
+      '<text x="240" y="130" font-size="12" fill="#6B7280">STD</text>'+
+      '<text x="310" y="130" font-size="12" fill="#6B7280">BEMERKUNG</text>'+
+      '<line x1="30" y1="140" x2="470" y2="140" stroke="#D1D5DB"/>'+
+      '<text x="30" y="180" font-size="16" fill="#1E3A8A">17.08. Mo</text>'+
+      '<text x="130" y="180" font-size="16" fill="#1E3A8A">1312</text>'+
+      '<text x="240" y="180" font-size="16" fill="#1E3A8A">10.00</text>'+
+      '<text x="30" y="220" font-size="16" fill="#1E3A8A">18.08. Di</text>'+
+      '<text x="130" y="220" font-size="16" fill="#1E3A8A">KISPI</text>'+
+      '<text x="240" y="220" font-size="16" fill="#1E3A8A">9.50</text>'+
+      '<text x="30" y="260" font-size="16" fill="#1E3A8A">19.08. Mi</text>'+
+      '<text x="130" y="260" font-size="16" fill="#1E3A8A">131?</text>'+
+      '<text x="240" y="260" font-size="16" fill="#1E3A8A">10.00</text>'+
+      '<text x="310" y="260" font-size="12" fill="#DC2626">schlecht lesbar</text>'+
+      '<text x="30" y="300" font-size="16" fill="#1E3A8A">20.08. Do</text>'+
+      '<text x="130" y="300" font-size="16" fill="#1E3A8A">1312</text>'+
+      '<text x="240" y="300" font-size="16" fill="#1E3A8A"><tspan text-decoration="line-through">10.00</tspan> <tspan fill="#DC2626">3.50</tspan></text>'+
+      '<text x="310" y="300" font-size="12" fill="#374151">Halbtag Arzt</text>'+
+      '<text x="30" y="340" font-size="16" fill="#1E3A8A">21.08. Fr</text>'+
+      '<text x="130" y="340" font-size="16" fill="#1E3A8A">KISPI</text>'+
+      '<text x="240" y="340" font-size="16" fill="#1E3A8A">11.00</text>'+
+      '<line x1="30" y1="380" x2="470" y2="380" stroke="#374151"/>'+
+      '<text x="30" y="410" font-size="14" font-weight="bold" fill="#1F2937">Total: 44.00 h</text>'+
+      '<text x="30" y="480" font-size="14" fill="#374151">Baustelle: Zürich Enge 8003</text>'+
+      '<text x="30" y="510" font-size="14" fill="#374151">Datum:_______  Unterschrift MA: ___________</text>'+
+      '<text x="30" y="560" font-size="14" fill="#374151">Vorarbeiter: ___________________________</text>'+
+      '</svg>';
+    var url = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+    files = [{
+      name: 'IMG_1398.jpeg',  // Name matched mit ERKANNT[].beleg = 'IMG_1398'
+      size: '1842 KB',
+      url: url,
+      type: 'image'
+    }];
+    renderFiles();
+    scan();
+  });
   $('rpLoad').addEventListener('click',loadGav);
   $('rpConfirm').addEventListener('click',function(){
     berechnen(); unlock($('rpS4')); $('rpS4').scrollIntoView({behavior:'smooth',block:'start'}); });
@@ -4191,7 +4723,18 @@ window.initRapport = function(){
 };
 
 function addFiles(list){
-  for(var i=0;i<list.length;i++) files.push({name:list[i].name,size:(list[i].size/1024).toFixed(0)+' KB'});
+  for(var i=0;i<list.length;i++){
+    var f = list[i];
+    // Object-URL für Vorschau erstellen (Browser hält die File-Referenz)
+    var url = URL.createObjectURL(f);
+    var isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+    files.push({
+      name: f.name,
+      size: (f.size/1024).toFixed(0)+' KB',
+      url: url,
+      type: isPdf ? 'pdf' : 'image'
+    });
+  }
   renderFiles();
 }
 function renderFiles(){
@@ -4208,6 +4751,82 @@ function scan(){
     unlock($('rpS2')); $('rpS2').scrollIntoView({behavior:'smooth',block:'start'});
   },900);
 }
+
+/* Aktuell angezeigter Beleg-Name (Filename ohne Extension zum Matchen mit r.beleg) */
+var currentBeleg = null;
+
+function belegBaseName(name){
+  return String(name||'').replace(/\.[a-z0-9]+$/i,'');
+}
+
+/* Zeigt den Beleg mit dem gegebenen "Base-Namen" (z.B. IMG_1398) im Viewer an.
+   Sucht die Datei in files[] anhand des Namens-Prefix. */
+function showBeleg(belegName){
+  if(!belegName) return;
+  currentBeleg = belegName;
+  var viewer = $('rpBelegViewer');
+
+  // Datei suchen: exakter Match ohne Extension
+  var file = files.find(function(f){
+    return belegBaseName(f.name).toLowerCase() === String(belegName).toLowerCase();
+  });
+
+  if(!file){
+    // Kein Match → Platzhalter mit Hinweis
+    viewer.innerHTML = '<div class="rp-beleg-empty">Beleg <b>'+esc(belegName)+
+      '</b> nicht in den hochgeladenen Dateien gefunden.<br><small>Der OCR-Prozess hat den Namen anders gesetzt als die Datei heisst.</small></div>';
+  } else if(file.type === 'pdf'){
+    viewer.innerHTML = '<div class="rp-beleg-info">'+esc(file.name)+'</div>'+
+      '<embed src="'+file.url+'" type="application/pdf">';
+  } else {
+    viewer.innerHTML = '<div class="rp-beleg-info">'+esc(file.name)+' · Klick zum Vergrössern</div>'+
+      '<img src="'+file.url+'" alt="'+esc(file.name)+'" onclick="__rpLightbox(this.src)">';
+  }
+
+  // Tabs updaten
+  renderBelegTabs();
+
+  // Zeilen-Highlight aktualisieren
+  Array.prototype.forEach.call(document.querySelectorAll('#rpTbody tr'), function(tr){
+    tr.classList.toggle('rp-row-active',
+      belegBaseName(tr.getAttribute('data-beleg')||'').toLowerCase() === String(belegName).toLowerCase());
+  });
+}
+
+/* Tabs oben — nur wenn mehr als 1 unterschiedlicher Beleg da ist */
+function renderBelegTabs(){
+  var tabsEl = $('rpBelegTabs');
+  // Alle unterschiedlichen Beleg-Namen aus den Zeilen + den hochgeladenen Files zusammenfassen
+  var zeilenBelege = zeilen.map(function(r){ return r.beleg; }).filter(function(v,i,a){ return v && a.indexOf(v)===i; });
+  var uploadedBelege = files.map(function(f){ return belegBaseName(f.name); });
+  var alle = zeilenBelege.concat(uploadedBelege.filter(function(b){ return zeilenBelege.indexOf(b)===-1; }));
+
+  if(alle.length <= 1){
+    tabsEl.hidden = true;
+    tabsEl.innerHTML = '';
+    return;
+  }
+  tabsEl.hidden = false;
+  tabsEl.innerHTML = alle.map(function(b){
+    var isActive = String(b).toLowerCase() === String(currentBeleg||'').toLowerCase();
+    return '<button class="rp-beleg-tab '+(isActive?'rp-active':'')+
+      '" data-beleg="'+esc(b)+'">'+esc(b)+'</button>';
+  }).join('');
+  tabsEl.onclick = function(e){
+    var b = e.target.getAttribute('data-beleg');
+    if(b) showBeleg(b);
+  };
+}
+
+/* Lightbox für Vollbild-Anzeige */
+window.__rpLightbox = function(src){
+  var box = document.createElement('div');
+  box.className = 'rp-lightbox';
+  box.innerHTML = '<button class="rp-lightbox-close" aria-label="Schliessen">×</button>'+
+                  '<img src="'+src+'" alt="">';
+  box.onclick = function(){ document.body.removeChild(box); };
+  document.body.appendChild(box);
+};
 
 function loadGav(){
   var b=$('rpLoad'); b.disabled=true; b.textContent='Wird abgefragt …';
@@ -4228,7 +4847,10 @@ function loadGav(){
       return '<div class="rp-fact"><dt>'+esc(r[0])+'</dt><dd>'+esc(r[1])+'</dd></div>'; }).join('');
     $('rpSrc').innerHTML = 'Quelle: <code>'+esc(gav.quelle)+'</code>';
     b.textContent='Eckwerte neu laden'; b.disabled=false;
-    renderTable(); unlock($('rpS3')); $('rpS3').scrollIntoView({behavior:'smooth',block:'start'});
+    renderTable();
+    // Ersten Beleg automatisch anzeigen
+    if(zeilen.length > 0 && zeilen[0].beleg) showBeleg(zeilen[0].beleg);
+    unlock($('rpS3')); $('rpS3').scrollIntoView({behavior:'smooth',block:'start'});
   },700);
 }
 
@@ -4236,7 +4858,7 @@ function sollOf(){ return gav.sollTag!==null ? gav.sollTag : gav.normal/5; }
 
 function renderTable(){
   $('rpTbody').innerHTML = zeilen.map(function(r,i){
-    return '<tr><td>'+esc(r.datum)+'</td><td>'+esc(r.tag)+'</td>'+
+    return '<tr data-beleg="'+esc(r.beleg)+'" data-i="'+i+'"><td>'+esc(r.datum)+'</td><td>'+esc(r.tag)+'</td>'+
       '<td><input type="text" value="'+esc(r.kst)+'" data-i="'+i+'" data-f="kst" class="'+
         (r.kstFlag?'rp-f-'+r.kstFlag:'')+'"></td>'+
       '<td class="rp-num" id="rpSoll'+i+'">—</td>'+
@@ -4252,6 +4874,15 @@ function renderTable(){
     else { zeilen[i].kst=e.target.value.trim(); zeilen[i].kstFlag=null; }
     e.target.classList.remove('rp-f-low','rp-f-mid');
     recalcRows(); countFlags();
+  };
+
+  // Zeilen-Klick zeigt den zugehörigen Beleg. Nicht triggern, wenn in Input geklickt wurde.
+  $('rpTbody').onclick = function(e){
+    if(e.target.tagName === 'INPUT') return;
+    var tr = e.target.closest('tr');
+    if(!tr) return;
+    var b = tr.getAttribute('data-beleg');
+    if(b) showBeleg(b);
   };
 
   $('rpNotes').innerHTML = HINWEISE.map(function(h){
