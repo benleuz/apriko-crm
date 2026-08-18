@@ -3994,15 +3994,19 @@ async function saveProfile(profileId) {
     if (existing) { alert("Für diese E-Mail existiert bereits ein Profil."); return; }
   }
 
+  // SharePoint Multi-Choice-Felder brauchen über Graph API zwingend die
+  // @odata.type-Annotation, damit das Array als Collection(Edm.String) akzeptiert wird.
+  // Ohne die Annotation antwortet Graph mit 400 "Invalid request".
   const fields = {
     Email: email,
     Role: role,
-    AllowedViews: views  // SharePoint Choice Multi-Value nimmt Array
+    "AllowedViews@odata.type": "Collection(Edm.String)",
+    AllowedViews: views
   };
 
   try {
     if (profileId == null) {
-      // Title ist meist required — nehmen wir die E-Mail als Titel
+      // Title ist bei SharePoint-Listen fast immer required
       fields.Title = email;
       await createItem("UserProfiles", fields);
     } else {
@@ -4019,7 +4023,18 @@ async function saveProfile(profileId) {
     closeModal();
     render();
   } catch (e) {
-    alert("Speichern fehlgeschlagen: " + e.message);
+    // Ausführliche Fehlermeldung: welches Feld genau macht Probleme?
+    const msg = e.message || String(e);
+    let hint = "";
+    if (/AllowedViews/i.test(msg)) {
+      hint = "\n\nHinweis: Prüfe, ob die Choice-Werte in der SharePoint-Liste UserProfiles exakt so heissen wie im CRM (dashboard, pipeline, customers, revenue, stats, bpocheck, rapport, companies, contacts, tasks, profiles). Gross-/Kleinschreibung zählt.";
+    } else if (/Role/i.test(msg)) {
+      hint = "\n\nHinweis: Prüfe, ob die Choice-Werte der Spalte Role exakt 'Admin' und 'User' heissen.";
+    } else if (/invalidRequest|Invalid request/i.test(msg)) {
+      hint = "\n\nHinweis: Vermutlich stimmt ein Choice-Wert nicht mit den in SharePoint definierten Optionen überein, oder das Feld AllowedViews ist NICHT als 'Choice (Multi-Select)' angelegt.";
+    }
+    alert("Speichern fehlgeschlagen: " + msg + hint);
+    console.error("saveProfile error, gesendete Felder:", fields);
   }
 }
 
