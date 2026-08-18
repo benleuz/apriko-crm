@@ -461,6 +461,117 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
   }
   .toast.show { opacity: 1; transform: translateY(0); }
   .toast.error { border-color: var(--danger); }
+
+  /* ============================================================ RAPPORT-MODUL
+     Alle Klassen mit rp- präfixiert. Eigene CSS-Variablen (--rp-*), damit es
+     nicht mit den bestehenden App-Variablen kollidiert. Der Rapport hat eine
+     helle Optik im Kontrast zum dunklen App-UI — bewusst so vom Autor.
+  */
+  #view-rapport{
+    --rp-lime:#D3F16B; --rp-lime-dark:#B8DC45; --rp-dark:#1F2937; --rp-dark-2:#374151;
+    --rp-grey:#6B7280; --rp-line:#E5E7EB; --rp-bg:#F9FAFB; --rp-white:#fff;
+    --rp-low:#FDE68A; --rp-low-b:#D97706; --rp-mid:#DBEAFE; --rp-mid-b:#2563EB; --rp-neg:#DC2626;
+    color:var(--rp-dark);
+  }
+
+  .rp-banner{background:#FEF9C3;border:1px solid #FDE047;border-radius:6px;
+    padding:12px 16px;margin-bottom:18px;font-size:13px;line-height:1.5;color:#713F12}
+  .rp-banner b{font-weight:700}
+
+  .rp-card{background:var(--rp-white);border:1px solid var(--rp-line);border-radius:8px;
+    margin-bottom:16px;overflow:hidden}
+  .rp-card.rp-locked{opacity:.45;pointer-events:none}
+  .rp-card-head{padding:14px 20px;border-bottom:1px solid var(--rp-line);
+    display:flex;align-items:center;gap:12px}
+  .rp-step{width:24px;height:24px;flex:0 0 24px;border-radius:50%;background:var(--rp-dark);
+    color:var(--rp-lime);font-size:12px;font-weight:700;display:grid;place-items:center}
+  .rp-card-head h3{font-size:15px;font-weight:700;margin:0;color:var(--rp-dark)}
+  .rp-card-head .rp-sub{margin-left:auto;font-size:12px;color:var(--rp-grey)}
+  .rp-card-body{padding:20px}
+
+  .rp-drop{border:2px dashed #D1D5DB;border-radius:8px;padding:34px 20px;text-align:center;
+    background:var(--rp-bg);cursor:pointer;transition:border-color .15s,background .15s}
+  .rp-drop:hover,.rp-drop.rp-over{border-color:var(--rp-lime-dark);background:#FBFEF4}
+  .rp-drop strong{display:block;font-size:15px;margin-bottom:4px;color:var(--rp-dark)}
+  .rp-drop span{color:var(--rp-grey);font-size:13px}
+  .rp-files{list-style:none;margin:14px 0 0;padding:0;display:flex;flex-direction:column;gap:6px}
+  .rp-files li{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--rp-bg);
+    border:1px solid var(--rp-line);border-radius:5px;font-size:13px;color:var(--rp-dark)}
+  .rp-files .rp-nm{font-weight:600}
+  .rp-files .rp-sz{color:var(--rp-grey);margin-left:auto;font-variant-numeric:tabular-nums}
+  .rp-dot{width:7px;height:7px;border-radius:50%;background:var(--rp-lime-dark);flex:0 0 7px}
+
+  .rp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}
+  .rp-grid label{display:block;font-size:11px;font-weight:700;text-transform:uppercase;
+    letter-spacing:.4px;color:var(--rp-grey);margin-bottom:5px}
+  .rp-grid input,.rp-grid select{width:100%;padding:8px 10px;border:1px solid #D1D5DB;
+    border-radius:5px;font-family:inherit;font-size:14px;background:var(--rp-white);color:var(--rp-dark)}
+  .rp-grid input:focus,.rp-grid select:focus{outline:2px solid var(--rp-lime-dark);
+    outline-offset:-1px;border-color:transparent}
+
+  .rp-actions{margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .rp-btn{font-family:inherit;font-size:14px;font-weight:700;border:none;border-radius:5px;
+    padding:9px 16px;cursor:pointer;background:var(--rp-lime);color:var(--rp-dark);transition:background .15s}
+  .rp-btn:hover{background:var(--rp-lime-dark)}
+  .rp-btn-dark{background:var(--rp-dark);color:var(--rp-white)}
+  .rp-btn-dark:hover{background:var(--rp-dark-2)}
+  .rp-btn-ghost{background:var(--rp-white);color:var(--rp-dark);border:1px solid #D1D5DB}
+  .rp-btn-ghost:hover{background:var(--rp-bg)}
+  .rp-btn:disabled{background:#E5E7EB;color:#9CA3AF;cursor:not-allowed}
+  .rp-btn:focus-visible{outline:2px solid var(--rp-dark);outline-offset:2px}
+
+  .rp-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1px;
+    background:var(--rp-line);border:1px solid var(--rp-line);border-radius:6px;
+    overflow:hidden;margin-top:16px}
+  .rp-fact{background:var(--rp-white);padding:12px 14px}
+  .rp-fact dt{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;
+    color:var(--rp-grey);margin-bottom:3px}
+  .rp-fact dd{font-size:14px;font-weight:600;margin:0;color:var(--rp-dark)}
+  .rp-src{margin-top:10px;font-size:12px;color:var(--rp-grey)}
+  .rp-src code{background:var(--rp-bg);padding:2px 6px;border-radius:3px;font-size:11px}
+
+  .rp-scroll{overflow-x:auto}
+  .rp-table{width:100%;border-collapse:collapse;font-size:14px;color:var(--rp-dark)}
+  .rp-table th{text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;
+    letter-spacing:.4px;color:var(--rp-grey);padding:8px 10px;
+    border-bottom:2px solid var(--rp-line);white-space:nowrap;background:var(--rp-white)}
+  .rp-table td{padding:6px 10px;border-bottom:1px solid var(--rp-line);vertical-align:middle;color:var(--rp-dark)}
+  .rp-table th.rp-num,.rp-table td.rp-num{text-align:right;font-variant-numeric:tabular-nums}
+  .rp-table tbody tr:hover{background:#FCFCFD}
+  .rp-table td input{width:100%;min-width:72px;padding:5px 7px;border:1px solid transparent;
+    border-radius:4px;font-family:inherit;font-size:14px;background:transparent;color:var(--rp-dark)}
+  .rp-table td input:hover{border-color:#D1D5DB;background:var(--rp-white)}
+  .rp-table td input.rp-num{text-align:right;font-variant-numeric:tabular-nums}
+  .rp-table td input.rp-f-low{background:var(--rp-low);border-color:var(--rp-low-b)}
+  .rp-table td input.rp-f-mid{background:var(--rp-mid);border-color:var(--rp-mid-b)}
+  .rp-table tfoot td{font-weight:700;border-top:2px solid var(--rp-dark);border-bottom:none;padding-top:10px}
+  .rp-minus{color:var(--rp-neg)}
+
+  .rp-legend{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:var(--rp-grey)}
+  .rp-legend i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+  .rp-notes{list-style:none;margin:16px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+  .rp-notes li{padding:10px 13px;border-radius:5px;font-size:13px;line-height:1.45;color:var(--rp-dark)}
+  .rp-notes li.rp-low{background:#FFFBEB;border-left:3px solid var(--rp-low-b)}
+  .rp-notes li.rp-mid{background:#EFF6FF;border-left:3px solid var(--rp-mid-b)}
+
+  .rp-split{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:20px}
+  .rp-panel h4{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;
+    color:var(--rp-grey);margin:0 0 10px}
+  .rp-rows{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+  .rp-rows li{display:flex;justify-content:space-between;gap:12px;padding:8px 0;
+    border-bottom:1px solid var(--rp-line);font-size:14px;color:var(--rp-dark)}
+  .rp-rows li:last-child{border-bottom:none}
+  .rp-rows li.rp-sum{border-top:2px solid var(--rp-dark);border-bottom:none;
+    margin-top:4px;padding-top:10px;font-weight:700}
+  .rp-rows .rp-v{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap}
+  .rp-bar{height:5px;background:var(--rp-line);border-radius:3px;overflow:hidden;margin-top:5px}
+  .rp-bar i{display:block;height:100%;background:var(--rp-lime-dark)}
+  .rp-pill{display:inline-block;background:var(--rp-lime);color:var(--rp-dark);font-size:11px;
+    font-weight:700;padding:2px 8px;border-radius:11px;margin-left:6px}
+  .rp-out{background:var(--rp-dark);color:#E5E7EB;padding:15px;border-radius:6px;font-size:12px;
+    line-height:1.6;overflow-x:auto;margin-top:14px;font-family:ui-monospace,Menlo,monospace;white-space:pre}
+  .rp-hint{font-size:13px;color:var(--rp-grey);margin-top:12px}
+  @media(prefers-reduced-motion:reduce){.rp-drop,.rp-btn{transition:none}}
 </style>
 </head>
 <body>
@@ -484,6 +595,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button data-view="revenue"><span class="ic">⌗</span> Umsätze</button>
       <button data-view="stats"><span class="ic">∑</span> Statistiken</button>
       <button data-view="bpocheck"><span class="ic">☑</span> BPO Checkliste</button>
+      <button data-view="rapport"><span class="ic">▤</span> Rapport</button>
       <button data-view="companies"><span class="ic">◳</span> Firmen</button>
       <button data-view="contacts"><span class="ic">◉</span> Kontakte</button>
       <button data-view="tasks"><span class="ic">✓</span> Aufgaben</button>
@@ -501,6 +613,113 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
     </div>
     <div class="content" id="view-content">
       <div class="full-loading"><div class="loading"></div></div>
+    </div>
+
+    <!-- ============================================================ RAPPORT-VIEW
+         Selbstverwaltender Container. Wird per JS show/hide gesteuert (nicht neu
+         gerendert), damit der interne State (Dateien, Zeilen, GAV) beim
+         Tab-Wechsel erhalten bleibt.
+    -->
+    <div class="content" id="view-rapport" hidden>
+
+      <div class="rp-banner">
+        <b>Demo-Modul.</b> Die Erkennung ist simuliert und nichts wird in SharePoint
+        gespeichert. Für den produktiven Betrieb braucht es die Azure Function für den
+        API-Aufruf sowie die tempdata-Anbindung.
+      </div>
+
+      <!-- 1 Upload -->
+      <div class="rp-card">
+        <div class="rp-card-head"><div class="rp-step">1</div><h3>Rapporte hochladen</h3>
+          <div class="rp-sub">Foto, Scan oder PDF</div></div>
+        <div class="rp-card-body">
+          <div class="rp-drop" id="rpDrop" tabindex="0" role="button" aria-label="Dateien auswählen">
+            <strong>Dateien hierhin ziehen</strong>
+            <span>oder klicken zum Auswählen — JPG, PNG, PDF</span>
+          </div>
+          <input type="file" id="rpPicker" multiple accept="image/*,.pdf" hidden>
+          <ul class="rp-files" id="rpFiles"></ul>
+          <div class="rp-actions">
+            <button class="rp-btn" id="rpScan" disabled>Rapporte auslesen</button>
+            <button class="rp-btn rp-btn-ghost" id="rpDemo">Beispiel laden</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2 Einsatz -->
+      <div class="rp-card rp-locked" id="rpS2">
+        <div class="rp-card-head"><div class="rp-step">2</div><h3>Einsatz bestimmen</h3>
+          <div class="rp-sub">Steuert, welcher GAV gerechnet wird</div></div>
+        <div class="rp-card-body">
+          <div class="rp-grid">
+            <div><label for="rpMa">Mitarbeiter</label>
+              <input type="text" id="rpMa" placeholder="Name oder Personalnummer"></div>
+            <div><label for="rpKunde">Einsatzbetrieb</label>
+              <input type="text" id="rpKunde" placeholder="Firma"></div>
+            <div><label for="rpPlz">PLZ Einsatzort</label>
+              <input type="text" id="rpPlz" value="8003"></div>
+            <div><label for="rpBranche">Branche</label>
+              <select id="rpBranche">
+                <option value="bau" selected>Bauhauptgewerbe</option>
+                <option value="pvl">Kein vorrangiger GAV</option>
+              </select></div>
+          </div>
+          <div class="rp-actions"><button class="rp-btn rp-btn-dark" id="rpLoad">GAV-Eckwerte laden</button></div>
+          <dl class="rp-facts" id="rpFacts" hidden></dl>
+          <p class="rp-src" id="rpSrc" hidden></p>
+        </div>
+      </div>
+
+      <!-- 3 Prüfen -->
+      <div class="rp-card rp-locked" id="rpS3">
+        <div class="rp-card-head"><div class="rp-step">3</div><h3>Prüfen und korrigieren</h3>
+          <div class="rp-sub">Markierte Felder gegen das Original abgleichen</div></div>
+        <div class="rp-card-body">
+          <div class="rp-legend">
+            <span><i style="background:var(--rp-low);border:1px solid var(--rp-low-b)"></i>Unsichere Erkennung</span>
+            <span><i style="background:var(--rp-mid);border:1px solid var(--rp-mid-b)"></i>Korrektur auf dem Beleg</span>
+            <span><i style="background:#fff;border:1px solid #D1D5DB"></i>Eindeutig</span>
+          </div>
+          <div class="rp-scroll">
+            <table class="rp-table">
+              <thead><tr>
+                <th>Datum</th><th>Tag</th><th>Kostenstelle</th>
+                <th class="rp-num">Soll</th><th class="rp-num">Ist</th>
+                <th class="rp-num">Differenz</th><th>Beleg</th>
+              </tr></thead>
+              <tbody id="rpTbody"></tbody>
+              <tfoot><tr><td colspan="3">Total</td>
+                <td class="rp-num" id="rpTSoll">—</td><td class="rp-num" id="rpTIst">—</td>
+                <td class="rp-num" id="rpTDiff">—</td><td></td></tr></tfoot>
+            </table>
+          </div>
+          <ul class="rp-notes" id="rpNotes"></ul>
+          <div class="rp-actions">
+            <button class="rp-btn" id="rpConfirm">Werte bestätigen und berechnen</button>
+            <span class="rp-hint" id="rpFlags" style="margin-top:0"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4 Auswertung -->
+      <div class="rp-card rp-locked" id="rpS4">
+        <div class="rp-card-head"><div class="rp-step">4</div><h3>Auswertung und Export</h3>
+          <div class="rp-sub" id="rpGavTag"></div></div>
+        <div class="rp-card-body">
+          <div class="rp-split">
+            <div class="rp-panel"><h4>Arbeitszeit</h4><ul class="rp-rows" id="rpRZeit"></ul></div>
+            <div class="rp-panel"><h4>Spesen</h4><ul class="rp-rows" id="rpRSpesen"></ul></div>
+            <div class="rp-panel"><h4>Kostenstellen</h4><ul class="rp-rows" id="rpRKst"></ul></div>
+          </div>
+          <div class="rp-actions">
+            <button class="rp-btn rp-btn-dark" id="rpCsv">CSV herunterladen</button>
+            <button class="rp-btn rp-btn-ghost" id="rpXml">XML herunterladen</button>
+            <button class="rp-btn rp-btn-ghost" id="rpPeek">Vorschau anzeigen</button>
+          </div>
+          <pre class="rp-out" id="rpOut" hidden></pre>
+        </div>
+      </div>
+
     </div>
   </main>
 </div>
@@ -858,12 +1077,24 @@ function render() {
   const titles = {
     dashboard: "Dashboard", pipeline: "Pipeline",
     customers: "Kunden", revenue: "Umsätze", stats: "Statistiken",
-    bpocheck: "BPO Checkliste",
+    bpocheck: "BPO Checkliste", rapport: "Rapport",
     companies: "Firmen", contacts: "Kontakte", tasks: "Aufgaben"
   };
   document.getElementById("view-title").textContent = titles[currentView];
   document.getElementById("view-actions").innerHTML = "";
   const content = document.getElementById("view-content");
+  const rapportView = document.getElementById("view-rapport");
+
+  // Rapport hat einen eigenen statischen Container mit State — nur show/hide,
+  // sonst würde der Upload-/Auswertungs-State beim Tab-Wechsel verloren gehen.
+  if (currentView === "rapport") {
+    content.hidden = true;
+    rapportView.hidden = false;
+    if (typeof window.initRapport === "function") window.initRapport();
+    return;
+  }
+  content.hidden = false;
+  rapportView.hidden = true;
 
   if (currentView === "dashboard") renderDashboard(content);
   else if (currentView === "pipeline") renderPipeline(content);
@@ -3889,6 +4120,265 @@ document.getElementById("modal").onclick = e => {
 };
 
 init();
+
+/* ============================================================ RAPPORT-MODUL
+   Vollständig in IIFE gekapselt, nach aussen nur window.initRapport.
+   Der Router ruft initRapport() auf wenn der Rapport-Tab geöffnet wird.
+   Der ready-Guard sorgt dafür, dass Listener nur einmal attached werden.
+*/
+(function(){
+'use strict';
+
+var GAV = {
+  bau:{ name:'LMV Bauhauptgewerbe 2026–2031', modell:'Jahresarbeitszeit 2112 h',
+    sollTag:9.00, sollHerkunft:'Arbeitszeitkalender PBK ZH 2026, August',
+    zuschlagAb:50, zuschlagSatz:25, konto:'−20 bis +120 h',
+    zulage:4.00, zulageAb:5.5, mittag:16.00,
+    quelle:'tempdata-API · 8003 / Bauhauptgewerbe · Stand 01.04.2026' },
+  pvl:{ name:'GAV Personalverleih (Standard)', modell:'42 h Woche',
+    sollTag:null, sollHerkunft:'42 h Wochenarbeitszeit',
+    normal:42, ueberstundenBis:45, tagesGrenze:9.5, zuschlagSatz:25,
+    konto:'Überstunden 1:1 kompensierbar', zulage:0, zulageAb:null, mittag:0,
+    quelle:'tempdata-API · kein vorrangiger Branchen-GAV · Stand 01.01.2026' }
+};
+
+var ERKANNT = [
+  {datum:'17.08.2026',tag:'Mo',kst:'1312', kstFlag:null,  ist:10.00,istFlag:null, beleg:'IMG_1398'},
+  {datum:'18.08.2026',tag:'Di',kst:'KISPI',kstFlag:null,  ist:9.50, istFlag:null, beleg:'IMG_1398'},
+  {datum:'19.08.2026',tag:'Mi',kst:'1311', kstFlag:'low', ist:10.00,istFlag:null, beleg:'IMG_1398'},
+  {datum:'20.08.2026',tag:'Do',kst:'1312', kstFlag:null,  ist:3.50, istFlag:'mid',beleg:'IMG_1398'},
+  {datum:'21.08.2026',tag:'Fr',kst:'KISPI',kstFlag:null,  ist:11.00,istFlag:null, beleg:'IMG_1398'}
+];
+var HINWEISE = [
+  {typ:'low',feld:'Mittwoch, Kostenstelle',text:'Letzte Ziffer nicht eindeutig — 1311 oder 1312. Gegen das Original prüfen.'},
+  {typ:'mid',feld:'Donnerstag, Stunden',text:'Auf dem Beleg durchgestrichen und überschrieben. Übernommen wurde 3.50 statt ursprünglich 10.00.'},
+  {typ:'low',feld:'Donnerstag, Grund',text:'Halbtag mit 3.50 h. Ob geplant oder Absenz, geht aus dem Beleg nicht hervor — bei Absenz gelten andere Entschädigungsregeln.'}
+];
+
+var zeilen=[], gav=null, files=[], ergebnis=null, ready=false;
+function $(id){ return document.getElementById(id); }
+function nf(n){ return n.toFixed(2); }
+function esc(s){ return String(s).replace(/[<>&"]/g,function(c){
+  return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]; }); }
+function unlock(el){ el.classList.remove('rp-locked'); }
+
+window.initRapport = function(){
+  if(ready) return; ready=true;
+
+  var drop=$('rpDrop'), picker=$('rpPicker');
+  drop.addEventListener('click',function(){ picker.click(); });
+  drop.addEventListener('keydown',function(e){
+    if(e.key==='Enter'||e.key===' '){ e.preventDefault(); picker.click(); } });
+  drop.addEventListener('dragover',function(e){ e.preventDefault(); drop.classList.add('rp-over'); });
+  drop.addEventListener('dragleave',function(){ drop.classList.remove('rp-over'); });
+  drop.addEventListener('drop',function(e){
+    e.preventDefault(); drop.classList.remove('rp-over'); addFiles(e.dataTransfer.files); });
+  picker.addEventListener('change',function(e){ addFiles(e.target.files); });
+
+  $('rpScan').addEventListener('click',scan);
+  $('rpDemo').addEventListener('click',function(){
+    files=[{name:'IMG_1398.jpeg',size:'1842 KB'}]; renderFiles(); scan(); });
+  $('rpLoad').addEventListener('click',loadGav);
+  $('rpConfirm').addEventListener('click',function(){
+    berechnen(); unlock($('rpS4')); $('rpS4').scrollIntoView({behavior:'smooth',block:'start'}); });
+  $('rpCsv').addEventListener('click',function(){ dl(buildCsv(),'rapport.csv','text/csv;charset=utf-8'); });
+  $('rpXml').addEventListener('click',function(){ dl(buildXml(),'rapport.xml','application/xml;charset=utf-8'); });
+  $('rpPeek').addEventListener('click',function(){
+    var o=$('rpOut');
+    if(o.hidden){ o.textContent=buildCsv()+'\n\n'+buildXml(); o.hidden=false; this.textContent='Vorschau ausblenden'; }
+    else { o.hidden=true; this.textContent='Vorschau anzeigen'; }
+  });
+};
+
+function addFiles(list){
+  for(var i=0;i<list.length;i++) files.push({name:list[i].name,size:(list[i].size/1024).toFixed(0)+' KB'});
+  renderFiles();
+}
+function renderFiles(){
+  $('rpFiles').innerHTML = files.map(function(f){
+    return '<li><span class="rp-dot"></span><span class="rp-nm">'+esc(f.name)+
+           '</span><span class="rp-sz">'+esc(f.size)+'</span></li>'; }).join('');
+  $('rpScan').disabled = files.length===0;
+}
+function scan(){
+  var b=$('rpScan'); b.disabled=true; b.textContent='Wird ausgelesen …';
+  setTimeout(function(){
+    zeilen = ERKANNT.map(function(r){ return Object.assign({},r); });
+    b.textContent='Erneut auslesen'; b.disabled=false;
+    unlock($('rpS2')); $('rpS2').scrollIntoView({behavior:'smooth',block:'start'});
+  },900);
+}
+
+function loadGav(){
+  var b=$('rpLoad'); b.disabled=true; b.textContent='Wird abgefragt …';
+  setTimeout(function(){
+    gav = GAV[$('rpBranche').value];
+    var rows = [
+      ['GAV',gav.name],['Arbeitszeitmodell',gav.modell],
+      ['Sollzeit', gav.sollTag ? nf(gav.sollTag)+' h pro Tag' : nf(gav.normal)+' h pro Woche'],
+      ['Zuschlag', gav.zuschlagAb ? gav.zuschlagSatz+'% ab '+gav.zuschlagAb+' h pro Woche'
+        : gav.zuschlagSatz+'% ab '+gav.ueberstundenBis+' h Woche oder '+gav.tagesGrenze+' h Tag'],
+      ['Stundenkonto',gav.konto],
+      ['Baustellenzulage', gav.zulage ? 'CHF '+nf(gav.zulage)+' ab '+gav.zulageAb+' h' : 'keine'],
+      ['Mittagessen', gav.mittag ? 'CHF '+nf(gav.mittag)+' bedingt' : 'keine'],
+      ['Sollzeit-Herkunft',gav.sollHerkunft]
+    ];
+    $('rpFacts').hidden=false; $('rpSrc').hidden=false;
+    $('rpFacts').innerHTML = rows.map(function(r){
+      return '<div class="rp-fact"><dt>'+esc(r[0])+'</dt><dd>'+esc(r[1])+'</dd></div>'; }).join('');
+    $('rpSrc').innerHTML = 'Quelle: <code>'+esc(gav.quelle)+'</code>';
+    b.textContent='Eckwerte neu laden'; b.disabled=false;
+    renderTable(); unlock($('rpS3')); $('rpS3').scrollIntoView({behavior:'smooth',block:'start'});
+  },700);
+}
+
+function sollOf(){ return gav.sollTag!==null ? gav.sollTag : gav.normal/5; }
+
+function renderTable(){
+  $('rpTbody').innerHTML = zeilen.map(function(r,i){
+    return '<tr><td>'+esc(r.datum)+'</td><td>'+esc(r.tag)+'</td>'+
+      '<td><input type="text" value="'+esc(r.kst)+'" data-i="'+i+'" data-f="kst" class="'+
+        (r.kstFlag?'rp-f-'+r.kstFlag:'')+'"></td>'+
+      '<td class="rp-num" id="rpSoll'+i+'">—</td>'+
+      '<td><input type="text" inputmode="decimal" class="rp-num '+(r.istFlag?'rp-f-'+r.istFlag:'')+
+        '" value="'+nf(r.ist)+'" data-i="'+i+'" data-f="ist"></td>'+
+      '<td class="rp-num" id="rpDiff'+i+'">—</td>'+
+      '<td style="color:var(--rp-grey);font-size:12px">'+esc(r.beleg)+'</td></tr>';
+  }).join('');
+
+  $('rpTbody').oninput = function(e){
+    var i=+e.target.dataset.i, f=e.target.dataset.f;
+    if(f==='ist'){ var v=parseFloat(String(e.target.value).replace(',','.')); zeilen[i].ist=isNaN(v)?0:v; zeilen[i].istFlag=null; }
+    else { zeilen[i].kst=e.target.value.trim(); zeilen[i].kstFlag=null; }
+    e.target.classList.remove('rp-f-low','rp-f-mid');
+    recalcRows(); countFlags();
+  };
+
+  $('rpNotes').innerHTML = HINWEISE.map(function(h){
+    return '<li class="rp-'+h.typ+'"><b>'+esc(h.feld)+'</b> — '+esc(h.text)+'</li>'; }).join('');
+  recalcRows(); countFlags();
+}
+
+function recalcRows(){
+  var sS=0,sI=0,s=sollOf();
+  zeilen.forEach(function(r,i){
+    var d=r.ist-s; sS+=s; sI+=r.ist;
+    $('rpSoll'+i).textContent=nf(s);
+    var c=$('rpDiff'+i);
+    c.textContent=(d>0?'+':'')+nf(d);
+    c.className='rp-num'+(d<0?' rp-minus':'');
+  });
+  $('rpTSoll').textContent=nf(sS); $('rpTIst').textContent=nf(sI);
+  var d=sI-sS, t=$('rpTDiff');
+  t.textContent=(d>0?'+':'')+nf(d);
+  t.className='rp-num'+(d<0?' rp-minus':'');
+}
+function countFlags(){
+  var n=zeilen.filter(function(r){ return r.kstFlag||r.istFlag; }).length;
+  $('rpFlags').textContent = n ? n+' markierte Felder noch nicht geprüft' : 'Alle Markierungen geprüft';
+}
+
+function berechnen(){
+  var soll=sollOf();
+  var tIst=zeilen.reduce(function(a,r){ return a+r.ist; },0);
+  var tSoll=soll*zeilen.length;
+  var zeit=[], spesen=[], zuschlag=0, uest=0, uzeit=0, normal=0;
+
+  if(gav.sollTag!==null){
+    zuschlag=Math.max(0,tIst-gav.zuschlagAb);
+    zeit.push(['Sollzeit laut Kalender',nf(tSoll)+' h']);
+    zeit.push(['Geleistet',nf(tIst)+' h']);
+    zeit.push([(tIst>=tSoll?'Mehrstunden':'Minderstunden')+' ins Konto',
+               (tIst-tSoll>0?'+':'')+nf(tIst-tSoll)+' h']);
+    zeit.push(['Zuschlagspflichtig '+gav.zuschlagSatz+'%',nf(zuschlag)+' h']);
+  } else {
+    normal=Math.min(tIst,gav.normal);
+    uest=Math.max(0,Math.min(tIst,gav.ueberstundenBis)-gav.normal);
+    var wo=Math.max(0,tIst-gav.ueberstundenBis);
+    var tg=zeilen.reduce(function(a,r){ return a+Math.max(0,r.ist-gav.tagesGrenze); },0);
+    uzeit=Math.max(wo,tg); zuschlag=uzeit;
+    zeit.push(['Geleistet',nf(tIst)+' h']);
+    zeit.push(['Normalarbeitszeit',nf(normal)+' h']);
+    zeit.push(['Überstunden ohne Zuschlag',nf(uest)+' h']);
+    zeit.push(['Überzeit '+gav.zuschlagSatz+'%',nf(uzeit)+' h']);
+  }
+
+  var zTage = gav.zulage ? zeilen.filter(function(r){ return r.ist>gav.zulageAb; }).length : 0;
+  var zulage=zTage*gav.zulage, mittag=zTage*gav.mittag;
+  if(gav.zulage){
+    spesen.push(['Baustellenzulage · '+zTage+' Tage','CHF '+nf(zulage)]);
+    spesen.push(['Mittagessen · '+zTage+' Tage','CHF '+nf(mittag)]);
+    spesen.push(['Total','CHF '+nf(zulage+mittag),true]);
+  } else spesen.push(['Keine Spesenregelung im GAV','—']);
+
+  var kst={};
+  zeilen.forEach(function(r){ var k=r.kst||'ohne'; kst[k]=(kst[k]||0)+r.ist; });
+  ergebnis={tIst:tIst,tSoll:tSoll,zuschlag:zuschlag,zulage:zulage,mittag:mittag,kst:kst};
+
+  $('rpGavTag').textContent=gav.name;
+  $('rpRZeit').innerHTML=zeit.map(function(r,i){
+    return '<li class="'+(i===zeit.length-1?'rp-sum':'')+'"><span>'+esc(r[0])+
+           '</span><span class="rp-v">'+esc(r[1])+'</span></li>'; }).join('');
+  $('rpRSpesen').innerHTML=spesen.map(function(r){
+    return '<li class="'+(r[2]?'rp-sum':'')+'"><span>'+esc(r[0])+
+           '</span><span class="rp-v">'+esc(r[1])+'</span></li>'; }).join('');
+  $('rpRKst').innerHTML=Object.keys(kst).sort(function(a,b){ return kst[b]-kst[a]; })
+    .map(function(k){
+      var p = tIst ? kst[k]/tIst*100 : 0;
+      return '<li><span>'+esc(k)+'<span class="rp-pill">'+p.toFixed(1)+'%</span>'+
+             '<div class="rp-bar"><i style="width:'+p+'%"></i></div></span>'+
+             '<span class="rp-v">'+nf(kst[k])+' h</span></li>';
+    }).join('') + '<li class="rp-sum"><span>Total</span><span class="rp-v">'+nf(tIst)+' h</span></li>';
+
+  $('rpOut').hidden=true; $('rpPeek').textContent='Vorschau anzeigen';
+}
+
+function buildCsv(){
+  var soll=sollOf(), L=[];
+  L.push('Datum;Tag;Kostenstelle;Soll;Ist;Differenz;Baustellenzulage;Mittagessen');
+  zeilen.forEach(function(r){
+    var z = (gav.zulage && r.ist>gav.zulageAb) ? gav.zulage : 0;
+    var m = (gav.mittag && r.ist>gav.zulageAb) ? gav.mittag : 0;
+    L.push([r.datum,r.tag,r.kst,nf(soll),nf(r.ist),nf(r.ist-soll),nf(z),nf(m)].join(';'));
+  });
+  L.push(['TOTAL','','',nf(ergebnis.tSoll),nf(ergebnis.tIst),
+          nf(ergebnis.tIst-ergebnis.tSoll),nf(ergebnis.zulage),nf(ergebnis.mittag)].join(';'));
+  L.push('');
+  L.push('Mitarbeiter;'+$('rpMa').value);
+  L.push('Einsatzbetrieb;'+$('rpKunde').value);
+  L.push('GAV;'+gav.name);
+  L.push('Sollzeit-Herkunft;'+gav.sollHerkunft);
+  L.push('Zuschlagspflichtig '+gav.zuschlagSatz+'%;'+nf(ergebnis.zuschlag)+' h');
+  L.push('Quelle;'+gav.quelle);
+  return L.join('\n');
+}
+function buildXml(){
+  var soll=sollOf();
+  function x(s){ return String(s).replace(/[<>&]/g,function(c){
+    return {'<':'&lt;','>':'&gt;','&':'&amp;'}[c]; }); }
+  var o='<?xml version="1.0" encoding="UTF-8"?>\n<Rapport gav="'+x(gav.name)+
+        '" plz="'+x($('rpPlz').value)+'">\n';
+  o+='  <Mitarbeiter>'+x($('rpMa').value||'—')+'</Mitarbeiter>\n';
+  o+='  <Einsatzbetrieb>'+x($('rpKunde').value||'—')+'</Einsatzbetrieb>\n  <Tage>\n';
+  zeilen.forEach(function(r){
+    o+='    <Tag datum="'+x(r.datum)+'" kostenstelle="'+x(r.kst)+'">\n';
+    o+='      <Soll>'+nf(soll)+'</Soll>\n      <Ist>'+nf(r.ist)+'</Ist>\n';
+    o+='      <Differenz>'+nf(r.ist-soll)+'</Differenz>\n    </Tag>\n';
+  });
+  o+='  </Tage>\n  <Total soll="'+nf(ergebnis.tSoll)+'" ist="'+nf(ergebnis.tIst)+'"/>\n';
+  o+='  <Zuschlag satz="'+gav.zuschlagSatz+'" stunden="'+nf(ergebnis.zuschlag)+'"/>\n';
+  o+='  <Spesen baustellenzulage="'+nf(ergebnis.zulage)+'" mittagessen="'+nf(ergebnis.mittag)+'"/>\n';
+  o+='  <Quelle>'+x(gav.quelle)+'</Quelle>\n</Rapport>';
+  return o;
+}
+function dl(txt,name,typ){
+  var u=URL.createObjectURL(new Blob([txt],{type:typ}));
+  var a=document.createElement('a'); a.href=u; a.download=name;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(u);
+}
+
+})();
 </script>
 </body>
 </html>
