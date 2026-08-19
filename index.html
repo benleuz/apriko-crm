@@ -216,6 +216,14 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
   }
   .user-bar #theme-toggle-btn:hover { border-color: var(--accent); color: var(--accent); }
 
+  /* Version-Tag ganz unten in der Sidebar — dezent, nicht ablenkend */
+  .version-tag {
+    padding: 8px 16px 12px; font-size: 10px; color: var(--text-faint);
+    text-align: center; letter-spacing: 0.02em; font-family: var(--font-mono);
+    border-top: 1px solid var(--border-soft);
+    user-select: text;  /* Damit man die Version zum Copy-Paste markieren kann */
+  }
+
   /* Main content */
   main { overflow-y: auto; }
   .topbar {
@@ -615,6 +623,19 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
   .rp-hint{font-size:13px;color:var(--rp-grey);margin-top:12px}
   @media(prefers-reduced-motion:reduce){.rp-drop,.rp-btn{transition:none}}
 
+  /* Karte 2: Split-Layout mit Formular links und Beleg-Preview rechts */
+  .rp-s2-layout{display:grid;grid-template-columns:1fr 260px;gap:16px;align-items:start}
+  @media(max-width:900px){ .rp-s2-layout{grid-template-columns:1fr} }
+  .rp-s2-form{min-width:0}
+  .rp-s2-preview{background:var(--rp-bg);border:1px solid var(--rp-line);border-radius:5px;padding:10px}
+  .rp-s2-preview-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;
+    color:var(--rp-grey);margin-bottom:6px}
+  .rp-s2-preview-inner{width:100%;aspect-ratio:3/4;overflow:hidden;border-radius:4px;background:var(--rp-white);
+    display:flex;align-items:center;justify-content:center;cursor:zoom-in}
+  .rp-s2-preview-inner img{max-width:100%;max-height:100%;object-fit:contain;image-orientation:from-image}
+  .rp-s2-preview-inner embed{width:100%;height:100%;border:none}
+  .rp-s2-preview-inner .rp-thumb-pdf{width:100%;height:100%}
+
   /* Rapport-Toolbar oben rechts (Reset etc.) */
   .rp-toolbar{display:flex;justify-content:flex-end;padding:8px 4px;margin-bottom:8px}
   .rp-btn-sm{padding:5px 12px;font-size:12px}
@@ -624,7 +645,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
   .rp-thumb{position:relative;background:var(--rp-bg);border:1px solid var(--rp-line);border-radius:5px;
     aspect-ratio:3/4;overflow:hidden;cursor:zoom-in;transition:border-color 0.15s}
   .rp-thumb:hover{border-color:var(--rp-lime-dark)}
-  .rp-thumb img{width:100%;height:100%;object-fit:cover}
+  .rp-thumb img{width:100%;height:100%;object-fit:cover;image-orientation:from-image}
   .rp-thumb-pdf{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;
     background:linear-gradient(135deg,#F3F4F6,#E5E7EB);color:var(--rp-grey);font-size:32px}
   .rp-thumb-pdf span{font-size:10px;margin-top:4px;color:var(--rp-dark);font-weight:600}
@@ -682,10 +703,12 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
   .rp-beleg-empty{color:var(--rp-grey);font-size:13px;text-align:center;line-height:1.6}
   .rp-beleg-empty small{color:#9CA3AF;font-size:11px}
   .rp-beleg-viewer img{max-width:100%;max-height:600px;object-fit:contain;cursor:zoom-in;
-    border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,0.1)}
+    border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,0.1);image-orientation:from-image}
   .rp-beleg-viewer embed,.rp-beleg-viewer iframe{width:100%;height:600px;border:none;background:var(--rp-white)}
   .rp-beleg-info{position:absolute;top:8px;left:8px;background:rgba(31,41,55,0.85);color:var(--rp-white);
     font-size:10px;padding:3px 8px;border-radius:3px;pointer-events:none}
+  /* Global: Bilder respektieren immer die EXIF-Orientierung */
+  img{image-orientation:from-image}
 
   /* Vollbild-Overlay */
   .rp-lightbox{position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:9999;display:flex;
@@ -726,6 +749,9 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <span id="user-name">–</span>
       <button id="theme-toggle-btn" onclick="toggleTheme()" title="Theme wechseln">☀</button>
       <button onclick="logout()">Logout</button>
+    </div>
+    <div class="version-tag" title="Aktuelle Build-Version">
+      Apriko CRM · <span id="app-version">v1.3.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -789,20 +815,29 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
         <div class="rp-card-head"><div class="rp-step">2</div><h3>Einsatz bestimmen</h3>
           <div class="rp-sub">Steuert, welcher GAV gerechnet wird</div></div>
         <div class="rp-card-body">
-          <div class="rp-grid">
-            <div><label for="rpMa">Mitarbeiter</label>
-              <input type="text" id="rpMa" placeholder="Name oder Personalnummer"></div>
-            <div><label for="rpKunde">Einsatzbetrieb</label>
-              <input type="text" id="rpKunde" placeholder="Firma"></div>
-            <div><label for="rpPlz">PLZ Einsatzort</label>
-              <input type="text" id="rpPlz" value="8003"></div>
-            <div><label for="rpBranche">Branche</label>
-              <select id="rpBranche">
-                <option value="bau" selected>Bauhauptgewerbe</option>
-                <option value="elektro">Elektrogewerbe (LGAV)</option>
-                <option value="maler">Malergewerbe (LMV Maler/Gipser)</option>
-                <option value="pvl">Kein vorrangiger GAV</option>
-              </select></div>
+          <div class="rp-s2-layout">
+            <div class="rp-s2-form">
+              <div class="rp-grid">
+                <div><label for="rpMa">Mitarbeiter</label>
+                  <input type="text" id="rpMa" placeholder="Name oder Personalnummer"></div>
+                <div><label for="rpKunde">Einsatzbetrieb</label>
+                  <input type="text" id="rpKunde" placeholder="Firma"></div>
+                <div><label for="rpPlz">PLZ Einsatzort</label>
+                  <input type="text" id="rpPlz" value="8003"></div>
+                <div><label for="rpBranche">Branche</label>
+                  <select id="rpBranche">
+                    <option value="bau" selected>Bauhauptgewerbe</option>
+                    <option value="elektro">Elektrogewerbe (LGAV)</option>
+                    <option value="maler">Malergewerbe (LMV Maler/Gipser)</option>
+                    <option value="pvl">Kein vorrangiger GAV</option>
+                  </select></div>
+              </div>
+            </div>
+            <!-- Kleine Beleg-Vorschau, damit User schon hier prüfen kann was hochgeladen wurde -->
+            <div class="rp-s2-preview" id="rpS2Preview" hidden>
+              <div class="rp-s2-preview-label">Hochgeladener Beleg</div>
+              <div class="rp-s2-preview-inner" id="rpS2PreviewInner"></div>
+            </div>
           </div>
           <div class="rp-actions"><button class="rp-btn rp-btn-dark" id="rpLoad">GAV-Eckwerte laden</button></div>
           <dl class="rp-facts" id="rpFacts" hidden></dl>
@@ -4732,6 +4767,69 @@ function isWeekend(iso){
   return d === 0 || d === 6;
 }
 
+/* Sanity-Check gegen OCR-Lesefehler bei handschriftlichen Jahreszahlen.
+   Handschrift-Verwechslungen (4/6, 3/8, 5/6) führen oft zu Jahren
+   die klar in der Vergangenheit liegen. Wenn ein Datum mehr als 6 Monate
+   in der Vergangenheit liegt UND das aktuelle Jahr näher wäre, wird korrigiert.
+   Rückgabe: { corrected: 'dd.mm.yyyy', changed: bool, oldYear: number|null } */
+function correctYearIfSuspicious(datumStr){
+  var m = String(datumStr || '').match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if(!m) return { corrected: datumStr, changed: false, oldYear: null };
+  var day = parseInt(m[1], 10);
+  var month = parseInt(m[2], 10);
+  var year = parseInt(m[3], 10);
+
+  var now = new Date();
+  var currentYear = now.getFullYear();
+  var currentMonth = now.getMonth() + 1;
+
+  var recordDate = new Date(year, month - 1, day);
+  var daysDiff = (now.getTime() - recordDate.getTime()) / 86400000;
+
+  // Wenn Datum >6 Monate in Vergangenheit: verdächtig
+  // Ausnahme: wir sind im Jan/Feb — dann ist Nov/Dez des Vorjahres noch normal
+  var toleranceDays = 180;
+  if(currentMonth <= 2){
+    toleranceDays = 240;  // ~8 Monate Toleranz in Jan/Feb
+  }
+
+  if(daysDiff <= toleranceDays && daysDiff >= -30){
+    return { corrected: datumStr, changed: false, oldYear: null };
+  }
+
+  // Probiere: aktuelles Jahr — liegt das näher?
+  var altDate = new Date(currentYear, month - 1, day);
+  var altDiff = Math.abs((now.getTime() - altDate.getTime()) / 86400000);
+
+  // Auch Vorjahr probieren (für Jan/Feb-Fall)
+  var altDate2 = new Date(currentYear - 1, month - 1, day);
+  var altDiff2 = Math.abs((now.getTime() - altDate2.getTime()) / 86400000);
+
+  var bestYear = currentYear;
+  var bestDiff = altDiff;
+  if(altDiff2 < bestDiff){
+    bestYear = currentYear - 1;
+    bestDiff = altDiff2;
+  }
+
+  // Bias: Zukunfts-Rapporte sind unplausibel. Wenn das aktuelle Jahr das Datum
+  // in die Zukunft schieben würde und das Original nur mässig weit zurück liegt,
+  // bleib beim Original.
+  var altIstZukunft = altDate.getTime() > now.getTime();
+  if(altIstZukunft && bestYear === currentYear && daysDiff < 400){
+    return { corrected: datumStr, changed: false, oldYear: null };
+  }
+
+  // Nur korrigieren wenn das Alternativ-Datum deutlich näher liegt
+  if(bestDiff < Math.abs(daysDiff) && bestYear !== year){
+    var newDatum = String(day).padStart(2,'0') + '.' +
+                   String(month).padStart(2,'0') + '.' + bestYear;
+    return { corrected: newDatum, changed: true, oldYear: year };
+  }
+
+  return { corrected: datumStr, changed: false, oldYear: null };
+}
+
 var GAV = {
   bau: {
     name: 'LMV Bauhauptgewerbe',
@@ -4914,13 +5012,22 @@ function resetRapport(){
   $('rpPlz').value = '';
   $('rpBranche').value = 'bau';
   delete $('rpBranche').dataset.userChosen;
+  delete $('rpPlz').dataset.userChosen;
   $('rpFacts').hidden = true;
   $('rpFacts').innerHTML = '';
   $('rpSrc').hidden = true;
   $('rpSrc').innerHTML = '';
   $('rpLoad').textContent = 'GAV-Eckwerte laden';
+  var previewC = $('rpS2Preview');
+  var previewI = $('rpS2PreviewInner');
+  if(previewC){ previewC.hidden = true; }
+  if(previewI){ previewI.innerHTML = ''; previewI.onclick = null; }
   var badge = document.getElementById('rpGavSuggestBadge');
   if(badge) badge.remove();
+  var enrichBadge = document.getElementById('rpEnrichBadge');
+  if(enrichBadge) enrichBadge.remove();
+  var newGavWarn = document.getElementById('rpNewGavWarn');
+  if(newGavWarn) newGavWarn.remove();
 
   // Karte 3: Tabelle, Hinweise, Beleg-Viewer, Tabs leeren
   $('rpTbody').innerHTML = '';
@@ -5005,6 +5112,11 @@ window.initRapport = function(){
     // Etwaige Auto-Vorschlags-Badge entfernen
     var badge = document.getElementById('rpGavSuggestBadge');
     if(badge) badge.remove();
+  });
+
+  // Analog für PLZ: wenn User manuell tippt, nicht mehr auto-überschreiben
+  $('rpPlz').addEventListener('input', function(){
+    this.dataset.userChosen = '1';
   });
   $('rpConfirm').addEventListener('click',function(){
     berechnen(); unlock($('rpS4')); $('rpS4').scrollIntoView({behavior:'smooth',block:'start'}); });
@@ -5114,8 +5226,33 @@ function scan(){
     setTimeout(function(){
       zeilen = ERKANNT.map(function(r){ return Object.assign({},r); });
       b.textContent='Erneut auslesen'; b.disabled=false;
-      unlock($('rpS2')); $('rpS2').scrollIntoView({behavior:'smooth',block:'start'});
+      unlock($('rpS2'));
+      renderS2Preview();
+      $('rpS2').scrollIntoView({behavior:'smooth',block:'start'});
     },900);
+  }
+}
+
+/* Rendert eine Vorschau des ersten hochgeladenen Belegs in Karte 2,
+   damit der User schon vor der GAV-Wahl sehen kann, was hochgeladen wurde.
+   Klick öffnet Vollansicht via Lightbox. */
+function renderS2Preview(){
+  var container = $('rpS2Preview');
+  var inner = $('rpS2PreviewInner');
+  if(!container || !inner) return;
+  if(!files.length){
+    container.hidden = true;
+    inner.innerHTML = '';
+    return;
+  }
+  container.hidden = false;
+  var f = files[0];  // erste Datei
+  if(f.type === 'pdf'){
+    inner.innerHTML = '<embed src="'+f.url+'" type="application/pdf">';
+    inner.onclick = function(){ window.open(f.url, '_blank'); };
+  } else {
+    inner.innerHTML = '<img src="'+f.url+'" alt="'+esc(f.name)+'">';
+    inner.onclick = function(){ window.__rpLightbox(f.url); };
   }
 }
 
@@ -5167,6 +5304,35 @@ function hideLoading(){
 }
 
 /* File → Base64 (nur der Data-Teil, ohne data:...;base64,-Prefix) */
+/* Konvertiert ein Bild-Blob in ein neues Blob mit korrigierter EXIF-Orientierung.
+   Handy-Fotos haben oft eine EXIF-Rotation-Flag, das Claude Vision NICHT respektiert
+   — dadurch sieht Claude das Bild "liegend" statt aufrecht und liest schlecht.
+   Wir nutzen createImageBitmap mit imageOrientation: 'from-image' um das
+   Bild korrekt zu drehen, zeichnen es auf Canvas und exportieren neu.
+   Für PDFs oder wenn Rotation fehlschlägt: Original zurückgeben. */
+async function normalizeImageOrientation(file){
+  if(!file || !file.type || !file.type.startsWith('image/')) return file;
+  if(typeof createImageBitmap === 'undefined') return file;
+  try {
+    var bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    var canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    var ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close && bitmap.close();
+    return await new Promise(function(resolve){
+      canvas.toBlob(function(blob){
+        // Blob als File-artiges Objekt mit .type
+        resolve(blob || file);
+      }, 'image/jpeg', 0.92);
+    });
+  } catch(e) {
+    console.warn('normalizeImageOrientation failed, using original:', e);
+    return file;
+  }
+}
+
 function fileToBase64(file){
   return new Promise(function(resolve, reject){
     var reader = new FileReader();
@@ -5183,6 +5349,280 @@ function fileToBase64(file){
 /* OCR via Anthropic Claude Vision API.
    Nimmt das erste Bild oder PDF aus files[], sendet an die API mit strukturiertem Prompt,
    parst das JSON-Ergebnis, füllt zeilen[] und HINWEISE[]. */
+/* Startet den Web-Enrich im Hintergrund. Zeigt einen dezenten Lade-Text
+   an, während Claude sucht, und ersetzt ihn dann durch die Info-Badge. */
+function startCompanyEnrich(firma){
+  // Alten Badge entfernen und Loading-Placeholder anzeigen
+  var oldBadge = document.getElementById('rpEnrichBadge');
+  if(oldBadge) oldBadge.remove();
+
+  var loading = document.createElement('div');
+  loading.id = 'rpEnrichBadge';
+  loading.style.cssText = 'margin-top:8px;padding:8px 12px;background:var(--rp-bg);' +
+    'border-left:3px solid #9CA3AF;border-radius:3px;font-size:11px;color:var(--rp-grey);line-height:1.6;' +
+    'display:flex;align-items:center;gap:8px';
+  loading.innerHTML =
+    '<div style="width:12px;height:12px;border:2px solid #E5E7EB;border-top-color:#3B82F6;' +
+    'border-radius:50%;animation:rp-spin 0.8s linear infinite"></div>' +
+    '<span>Suche im Web nach der Firma <b>' + esc(firma) + '</b>…</span>';
+  var target = $('rpFacts');
+  if(target && target.parentNode){
+    target.parentNode.insertBefore(loading, target);
+  }
+
+  enrichCompanyInfo(firma).then(function(enrich){
+    if(!enrich){
+      // Fehler oder nicht gefunden: dezente Meldung, kein Auto-Fill
+      var badge = document.getElementById('rpEnrichBadge');
+      if(badge){
+        badge.style.borderLeftColor = '#9CA3AF';
+        badge.innerHTML = '🌐 <b>Web-Recherche:</b> Firma konnte im Web nicht eindeutig gefunden werden. Bitte PLZ manuell eintragen.';
+      }
+      return;
+    }
+
+    // PLZ-Feld nur setzen wenn User's noch nicht selber angepasst hat.
+    var plzInput = $('rpPlz');
+    if(!plzInput.dataset.userChosen && enrich.plz){
+      plzInput.value = enrich.plz;
+    }
+
+    // NEUER GAV: wenn Claude einen GAV vorschlägt, den wir nicht kennen,
+    // und dazu die Referenzwerte mitliefert → temporär registrieren und
+    // im Dropdown verfügbar machen. Der Admin (Beni) sieht eine gelbe Warnung
+    // mit dem Prosa-Hinweis von Claude.
+    if(enrich.gavKey && !GAV[enrich.gavKey] && enrich.gavReferenz){
+      registerNewGav(enrich.gavKey, enrich.gavReferenz);
+      showNewGavWarning(enrich);
+    } else {
+      // Etwaige alte Warnung aus vorherigem Rapport entfernen
+      var oldWarn = document.getElementById('rpNewGavWarn');
+      if(oldWarn) oldWarn.remove();
+    }
+
+    // GAV im Dropdown setzen (auch wenn's ein neuer war — der ist jetzt registriert)
+    var brancheSelect = $('rpBranche');
+    if(enrich.gavKey && GAV[enrich.gavKey] && !brancheSelect.dataset.userChosen){
+      brancheSelect.value = enrich.gavKey;
+      var oldGavBadge = document.getElementById('rpGavSuggestBadge');
+      if(oldGavBadge) oldGavBadge.remove();
+    }
+
+    // Info-Badge mit den gefundenen Details anzeigen
+    showEnrichBadge(enrich);
+  });
+}
+
+/* Registriert einen von Claude entdeckten neuen GAV zur Laufzeit.
+   Nur in-memory — beim Neuladen der Seite ist er wieder weg. Für Prototyp OK.
+   Fügt auch eine <option> zum Branche-Dropdown hinzu, damit der User ihn
+   auch für spätere Rapporte manuell wählen kann. */
+function registerNewGav(gavKey, gavReferenz){
+  GAV[gavKey] = {
+    name: gavReferenz.name || ('GAV ' + gavKey),
+    modell: gavReferenz.modell || '(unbekannt)',
+    sollTag: typeof gavReferenz.sollTag === 'number' ? gavReferenz.sollTag : 8.0,
+    sollHerkunft: gavReferenz.sollHerkunft || 'von Claude aufbereitet',
+    zuschlagAb: typeof gavReferenz.zuschlagAb === 'number' ? gavReferenz.zuschlagAb : 45,
+    zuschlagSatz: typeof gavReferenz.zuschlagSatz === 'number' ? gavReferenz.zuschlagSatz : 25,
+    konto: gavReferenz.konto || '(nicht spezifiziert)',
+    zulage: typeof gavReferenz.zulage === 'number' ? gavReferenz.zulage : 0,
+    zulageAb: gavReferenz.zulageAb || null,
+    mittag: typeof gavReferenz.mittag === 'number' ? gavReferenz.mittag : 0,
+    kantone: Array.isArray(gavReferenz.kantone) ? gavReferenz.kantone : null,
+    quelle: (gavReferenz.quelle || 'unbekannt') + ' · ⚠️ von Claude Web-Search aufbereitet, nicht verifiziert'
+  };
+
+  // Dropdown-Option hinzufügen wenn noch nicht vorhanden
+  var select = $('rpBranche');
+  if(select && !select.querySelector('option[value="' + gavKey + '"]')){
+    var opt = document.createElement('option');
+    opt.value = gavKey;
+    opt.textContent = '🆕 ' + GAV[gavKey].name;
+    select.appendChild(opt);
+  }
+}
+
+/* Zeigt eine auffällige gelbe Warnung, dass ein neuer, unverifizierter GAV
+   von Claude beigebracht wurde. Der Admin soll das gegenprüfen. */
+function showNewGavWarning(enrich){
+  var oldWarn = document.getElementById('rpNewGavWarn');
+  if(oldWarn) oldWarn.remove();
+
+  var gav = GAV[enrich.gavKey];
+  if(!gav) return;
+
+  var warn = document.createElement('div');
+  warn.id = 'rpNewGavWarn';
+  warn.style.cssText = 'margin-top:8px;padding:12px 14px;background:#FEF3C7;border-left:4px solid #F59E0B;' +
+    'border-radius:4px;font-size:12px;color:#78350F;line-height:1.6';
+  warn.innerHTML =
+    '<div style="font-weight:700;font-size:13px;margin-bottom:6px">🚨 Achtung: Neuer GAV entdeckt</div>' +
+    '<b>' + esc(gav.name) + '</b> (Key: <code>' + esc(enrich.gavKey) + '</code>)<br>' +
+    'Diese Firma gehört zu einem GAV, der bisher nicht in Apriko hinterlegt war. ' +
+    'Claude hat die Referenzwerte automatisch via Web-Suche aufbereitet:<br>' +
+    '<div style="margin-top:6px;padding:6px 10px;background:rgba(255,255,255,0.6);border-radius:3px;font-size:11px">' +
+    '<b>Kurz-Übersicht:</b> ' + esc(gav.modell) + ' · ' + nf(gav.sollTag) + ' h/Tag · ' +
+    gav.zuschlagSatz + '% ab ' + gav.zuschlagAb + ' h/Wo' +
+    (gav.mittag ? ' · CHF ' + nf(gav.mittag) + ' Mittag' : '') +
+    (gav.zulage ? ' · CHF ' + nf(gav.zulage) + ' Baustelle' : '') +
+    '</div>' +
+    (enrich.gavAdminHinweis ?
+      '<div style="margin-top:8px;font-style:italic">💬 <b>Hinweis von Claude:</b> ' + esc(enrich.gavAdminHinweis) + '</div>' : '') +
+    '<div style="margin-top:8px;font-size:11px;color:#92400E">' +
+    '⚠️ Bitte gegen die offiziellen GAV-Dokumente prüfen und ggf. korrigieren, bevor der Rapport freigegeben wird. ' +
+    'Der neue GAV ist nur in dieser Session verfügbar — für Persistenz muss er in Apriko fest hinterlegt werden.' +
+    '</div>';
+
+  var target = $('rpFacts');
+  if(target && target.parentNode){
+    target.parentNode.insertBefore(warn, target);
+  }
+}
+
+/* Reichert die Firmen-Info via Anthropic Web Search an.
+   Sucht im Web nach der Firma, extrahiert Website, PLZ und schlägt einen GAV vor.
+   Wird nach dem OCR-Scan aufgerufen wenn eine Firma erkannt wurde.
+
+   Rückgabe: { website, plz, ort, taetigkeit, gavKey, gavGrund } oder null bei Fehler.
+   Fehler werden still geschluckt — das ist eine "nice to have"-Anreicherung. */
+async function enrichCompanyInfo(firma){
+  var key = localStorage.getItem('apriko-anthropic-key');
+  if(!key || !firma || firma.length < 3) return null;
+
+  var prompt =
+    'Suche im Web nach folgender Schweizer Firma und extrahiere die relevanten Daten:\n\n' +
+    'Firmenname: "' + firma + '"\n\n' +
+    'Aufgaben:\n' +
+    '1. Finde die offizielle Website der Firma (z.B. via Google-Suche).\n' +
+    '2. Ermittle den Hauptsitz (PLZ und Ort in der Schweiz).\n' +
+    '3. Bestimme das Tätigkeitsfeld / die Branche (kurz, z.B. "Elektro-Installation", "Malerei", "Bauhauptgewerbe", "Sanitär", "Schreinerei", "Metallbau").\n' +
+    '4. Ordne einem GAV zu. Bekannte Optionen (bevorzugen wenn passend):\n' +
+    '   - "bau" = LMV Bauhauptgewerbe (Maurer, Hochbau, Tiefbau, Betonbau, Erdbau)\n' +
+    '   - "elektro" = LGAV Elektro- und Telekommunikations-Installationsbranche\n' +
+    '   - "maler" = LMV Maler- und Gipsergewerbe\n' +
+    '   - "pvl" = GAV Personalverleih (nur als Fallback wenn keine spezifische Branche passt)\n' +
+    '5. WENN die Firma zu einem GAV gehört, der NICHT in der Liste oben steht (z.B. Sanitär, Schreinerei, Metallbau, Gebäudetechnik, Gebäudereinigung, Coiffeur, Gärtner, Bäcker, Gastronomie, Detailhandel, etc.), setze gavKey auf einen sinnvollen kurzen Key ("sanitaer", "schreinerei", "metallbau", "gebtechnik", etc.) UND liefere zusätzlich die Felder "gavIstNeu": true und "gavReferenz" mit den GAV-Referenzwerten. Recherchiere die Werte im Web, wenn möglich.\n\n' +
+    'Antworte AUSSCHLIESSLICH mit einem gültigen JSON-Objekt in genau diesem Format, ohne Erklärungen, ohne Markdown-Code-Fences:\n' +
+    '{\n' +
+    '  "website": "https://www.beispiel.ch",\n' +
+    '  "plz": "8003",\n' +
+    '  "ort": "Zürich",\n' +
+    '  "taetigkeit": "Elektro-Installation",\n' +
+    '  "gavKey": "elektro",\n' +
+    '  "gavIstNeu": false,\n' +
+    '  "gavGrund": "Firma ist im Elektro-Installationsbereich tätig (siehe Website)"\n' +
+    '}\n\n' +
+    'Bei NEUEM GAV zusätzlich das Feld "gavReferenz" mit dieser Struktur einfügen:\n' +
+    '"gavReferenz": {\n' +
+    '  "name": "GAV Sanitär/Heizung/Klima",\n' +
+    '  "modell": "Wochenarbeitszeit 40 h",\n' +
+    '  "sollTag": 8.0,\n' +
+    '  "sollHerkunft": "40 h/Woche gemäss GAV",\n' +
+    '  "zuschlagAb": 45,\n' +
+    '  "zuschlagSatz": 25,\n' +
+    '  "konto": "Überzeit ab 45 h/Wo mit 25% Zuschlag",\n' +
+    '  "zulage": 0,\n' +
+    '  "zulageAb": null,\n' +
+    '  "mittag": 18.0,\n' +
+    '  "kantone": ["ZH","BE","BS","BL","AG","SG","LU","ZG","SO","SH","AR","AI","GR","TG","GL","OW","NW","UR","SZ","FR"],\n' +
+    '  "quelle": "GAV Sanitär (SSHL/suissetec) 2024-2027"\n' +
+    '}\n' +
+    'UND ein Feld "gavAdminHinweis" mit 2-3 Sätzen für den Admin, was zu beachten ist (welche Besonderheiten, Kanton-Anwendbarkeit, Referenzquelle).\n\n' +
+    'Wenn du die Firma nicht eindeutig findest: setze die entsprechenden Felder auf leeren String "" bzw. gavKey auf null. Nur das JSON, sonst nichts.';
+
+  try {
+    var response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 2000,
+        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    if(!response.ok){
+      console.warn('enrichCompanyInfo: API-Fehler ' + response.status);
+      return null;
+    }
+
+    var data = await response.json();
+    // Content besteht aus mehreren Blöcken: server_tool_use, web_search_tool_result, text
+    // Wir nehmen alle text-Blöcke und suchen den mit JSON darin
+    var textBlocks = (data.content || [])
+      .filter(function(c){ return c.type === 'text'; })
+      .map(function(c){ return c.text; });
+
+    var text = textBlocks.join('\n').trim()
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/```\s*$/, '')
+      .trim();
+
+    var parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch(e){
+      // Erstes { bis letztes } extrahieren
+      var start = text.indexOf('{');
+      var end = text.lastIndexOf('}');
+      if(start >= 0 && end > start){
+        parsed = JSON.parse(text.substring(start, end + 1));
+      } else {
+        console.warn('enrichCompanyInfo: kein JSON in Response');
+        return null;
+      }
+    }
+
+    return {
+      website: String(parsed.website || '').trim(),
+      plz: String(parsed.plz || '').trim(),
+      ort: String(parsed.ort || '').trim(),
+      taetigkeit: String(parsed.taetigkeit || '').trim(),
+      // gavKey akzeptieren, auch wenn nicht bekannt — dann prüfen wir gavReferenz
+      gavKey: parsed.gavKey ? String(parsed.gavKey).trim() : null,
+      gavIstNeu: parsed.gavIstNeu === true,
+      gavReferenz: parsed.gavReferenz && typeof parsed.gavReferenz === 'object' ? parsed.gavReferenz : null,
+      gavGrund: String(parsed.gavGrund || '').trim(),
+      gavAdminHinweis: String(parsed.gavAdminHinweis || '').trim()
+    };
+  } catch(e){
+    console.warn('enrichCompanyInfo error:', e);
+    return null;
+  }
+}
+
+/* Zeigt eine Info-Badge unter dem PLZ/Branche-Bereich mit den Web-Enrich-Daten */
+function showEnrichBadge(enrich){
+  var oldBadge = document.getElementById('rpEnrichBadge');
+  if(oldBadge) oldBadge.remove();
+
+  var facts = [];
+  if(enrich.website) facts.push('<a href="' + esc(enrich.website) + '" target="_blank" rel="noopener" style="color:#065F46;text-decoration:underline">' + esc(enrich.website.replace(/^https?:\/\//, '')) + '</a>');
+  if(enrich.plz && enrich.ort) facts.push('📍 ' + esc(enrich.plz) + ' ' + esc(enrich.ort));
+  if(enrich.taetigkeit) facts.push('🏢 ' + esc(enrich.taetigkeit));
+
+  var facts_html = facts.length ? facts.join(' &nbsp;·&nbsp; ') : 'Firma konnte im Web nicht eindeutig gefunden werden.';
+
+  var badge = document.createElement('div');
+  badge.id = 'rpEnrichBadge';
+  badge.style.cssText = 'margin-top:8px;padding:8px 12px;background:#EFF6FF;border-left:3px solid #3B82F6;' +
+    'border-radius:3px;font-size:11px;color:#1E3A8A;line-height:1.6';
+  badge.innerHTML = '🌐 <b>Web-Recherche:</b> ' + facts_html;
+
+  // Vor dem GAV-Facts-Panel einfügen
+  var target = $('rpFacts');
+  if(target && target.parentNode){
+    target.parentNode.insertBefore(badge, target);
+  }
+}
+
 async function scanWithClaude(){
   var b = $('rpScan');
   var key = getAnthropicKey();
@@ -5207,15 +5647,35 @@ async function scanWithClaude(){
   );
 
   try {
-    var b64 = await fileToBase64(docFile.blob);
+    // Bild vor dem Upload zu Claude orientierungs-korrigieren (EXIF respect).
+    // Handy-Fotos werden sonst schräg an Claude gesendet.
+    var uploadBlob = docFile.blob;
+    if(!isPdf){
+      uploadBlob = await normalizeImageOrientation(docFile.blob);
+    }
+    var b64 = await fileToBase64(uploadBlob);
 
     var belegKurz = docFile.name.replace(/\.[^.]+$/,'');
+
+    // Aktuelles Datum als Kontext, damit Claude weiss welches Jahr "wahrscheinlich" ist.
+    // OCR liest handschriftliche Jahreszahlen oft falsch (6 vs 4, 8 vs 3 etc.).
+    var jetzt = new Date();
+    var heuteStr = String(jetzt.getDate()).padStart(2,'0') + '.' +
+                   String(jetzt.getMonth()+1).padStart(2,'0') + '.' +
+                   jetzt.getFullYear();
+    var aktuellesJahr = jetzt.getFullYear();
+    var istJanFeb = (jetzt.getMonth() < 2);  // Januar oder Februar
+
     var prompt =
       'Du bist ein OCR-Extraktor für Schweizer Arbeitsrapporte und Monatsrapporte aus der Personalverleih- und Baubranche. ' +
       'Extrahiere aus diesem Beleg (Foto, Scan oder digitales PDF):\n' +
       '1. Den Namen des Mitarbeiters (Vorname und Nachname, getrennt)\n' +
       '2. Die Firma / den Auftraggeber / Kunden\n' +
       '3. Alle Tageszeilen mit Arbeitsstunden\n\n' +
+      'KONTEXT: Heute ist ' + heuteStr + '. Aktuelles Jahr ist ' + aktuellesJahr + '. ' +
+      (istJanFeb
+        ? 'ACHTUNG: Wir sind im Januar/Februar — Rapporte können auch aus dem Dezember/November des Vorjahres (' + (aktuellesJahr-1) + ') stammen. Prüfe Monat und Jahr sorgfältig.\n\n'
+        : 'Rapporte sind typischerweise aus den letzten 1-2 Monaten. Ein Datum aus einem Vorjahr ist SEHR unwahrscheinlich.\n\n') +
       'RAPPORT-FORMATE die du erkennen musst:\n' +
       'A) WOCHEN-RAPPORT (handschriftlich, ~5-7 Zeilen): Ein Tag pro Zeile mit Datum, Kostenstelle, Stunden\n' +
       'B) MONATS-RAPPORT (tabellarisch, digital erzeugt): Eine Tabelle mit Leistungsarten als Zeilen und Tagen 1-31 als SPALTEN. Jede Zelle enthält die Stunden für diesen Tag/diese Leistung. Der Rapport-Header nennt den Zeitraum (z.B. "01.07.2026 bis 31.07.2026"). Personalnummer + Name stehen typischerweise als eigene Zeile (z.B. "4575 Mathot Anthony").\n\n' +
@@ -5224,24 +5684,29 @@ async function scanWithClaude(){
       '{\n' +
       '  "mitarbeiter": {"vorname": "Anthony", "nachname": "Mathot"},\n' +
       '  "firma": "Ernst Selmoni AG",\n' +
-      '  "zeitraumVon": "01.07.2026",\n' +
-      '  "zeitraumBis": "31.07.2026",\n' +
+      '  "zeitraumVon": "01.07.' + aktuellesJahr + '",\n' +
+      '  "zeitraumBis": "31.07.' + aktuellesJahr + '",\n' +
       '  "zeilen": [\n' +
-      '    {"datum":"01.07.2026","tag":"Mi","kst":"1205","ist":8.0,"kstFlag":null,"istFlag":null,"beleg":"' + belegKurz + '"}\n' +
+      '    {"datum":"01.07.' + aktuellesJahr + '","tag":"Mi","kst":"1205","ist":8.0,"kstFlag":null,"istFlag":null,"beleg":"' + belegKurz + '"}\n' +
       '  ]\n' +
       '}\n\n' +
-      'Regeln:\n' +
-      '- zeitraumVon/zeitraumBis: bei Monatsrapporten aus dem Header ("Bewegungen von 01.07.2026 bis 31.07.2026"). Bei Wochenrapporten leer lassen ("" oder null) — wird dann aus den Datum-Zeilen abgeleitet.\n' +
-      '- Datum immer als dd.mm.yyyy. Bei Monatsrapporten das Jahr aus dem Zeitraum-Header übernehmen.\n' +
+      'REGELN FÜR DATUM UND JAHR:\n' +
+      '- Datum immer als dd.mm.yyyy.\n' +
+      '- Wenn das Jahr auf dem Beleg NICHT klar erkennbar ist: nimm ' + aktuellesJahr + '.\n' +
+      '- Wenn das Jahr handschriftlich UND schwer lesbar ist (typische Verwechslungen: 4/6, 3/8, 5/6): bevorzuge ' + aktuellesJahr + ' oder ' + (aktuellesJahr-1) + ', NIEMALS ältere Jahre.\n' +
+      '- Wenn du ein Jahr aus dem Beleg nimmst, das weiter als 1 Jahr in der Vergangenheit liegt: setze istFlag "low" (auch wenn die Zahl klar aussieht), weil das sehr unwahrscheinlich ist.\n' +
+      '- Bei Monatsrapporten: Jahr aus dem Zeitraum-Header übernehmen.\n\n' +
+      'WEITERE REGELN:\n' +
       '- Wochentag zweistellig: Mo/Di/Mi/Do/Fr/Sa/So.\n' +
       '- Ist-Stunden immer als Dezimalzahl (8.0 nicht "8:00"). Nur Tage mit >0 Stunden aufnehmen.\n' +
-      '- kst: Kostenstelle oder Leistungsart-Nummer als String (z.B. "1205", "1312", "KISPI"). Leer wenn nicht vorhanden.\n' +
+      '- kst: KOSTENSTELLE / AUFTRAGSNUMMER / OBJEKT-NR als String. Diese Spalte kann auf dem Rapport verschieden heissen: "Auftrag", "Auftragsnr.", "Kostenstelle", "KST", "Baustelle", "Objekt", "Position", "Projekt". Nimm die numerische Kennung (z.B. "261245", "1205", "1312"), NICHT die Adressbeschreibung dahinter ("Neubadstr. 95, Basel / Meier"). Bei Buchstaben-Codes wie "KISPI" die ganze Bezeichnung. Leer wenn wirklich keine da ist.\n' +
+      '- BEI MONATSRAPPORTEN mit Aufträgen als Zeilen: jede Auftragszeile hat oben links die Auftragsnummer. Die Zellen der Zeile enthalten die Stunden pro Tag. Erzeuge eine Zeile pro (Auftrag × Tag) mit >0 Stunden. Beispiel: Auftrag "261245 Neubadstr." hat am 10. den Wert 8.75 → {datum:"10.MM.YYYY",kst:"261245",ist:8.75}.\n' +
       '- kstFlag: "low" wenn schwer lesbar/mehrdeutig, sonst null.\n' +
       '- istFlag: "mid" wenn korrigiert/durchgestrichen, "low" wenn schlecht lesbar, sonst null.\n' +
-      '- Bei digital erzeugten PDFs (Monatsrapport, klar strukturierte Tabelle): kstFlag und istFlag NULL, da alles gut lesbar.\n' +
+      '- Bei digital erzeugten PDFs (klar strukturierte Tabelle): Flags meist null, da alles gut lesbar.\n' +
       '- Bei handschriftlichen Fotos: die Flags aktiv nutzen wo unsicher.\n' +
       '- Fehlender Vorname/Nachname/Firma: leerer String "" (kein Ratewert).\n' +
-      '- Firma-Namen sauber mit Rechtsform (AG, GmbH). Bei "Selmoni Gruppe" die formelle Firma "Ernst Selmoni AG" wählen wenn sie im Rapport steht.\n\n' +
+      '- Firma-Namen sauber mit Rechtsform (AG, GmbH).\n\n' +
       'Nur das JSON, sonst nichts.';
 
     // Content-Block: PDF als "document", Bild als "image"
@@ -5348,6 +5813,33 @@ async function scanWithClaude(){
       };
     });
 
+    // Jahres-Sanity-Check: OCR liest handschriftliche Jahreszahlen oft falsch.
+    // Wir korrigieren automatisch, wenn ein Datum unplausibel weit in der
+    // Vergangenheit liegt und ein aktuelleres Jahr näher wäre.
+    var yearCorrections = {};  // { alteJahreszahl: {neu: X, count: N} } für Sammel-Hinweis
+    buchungen.forEach(function(b){
+      var check = correctYearIfSuspicious(b.datum);
+      if(check.changed){
+        b.datum = check.corrected;
+        // Auch das Zeitraum-Datum korrigieren wenn's dasselbe Jahr betrifft
+        var key = check.oldYear;
+        if(!yearCorrections[key]){
+          yearCorrections[key] = { neu: check.corrected.slice(-4), count: 0 };
+        }
+        yearCorrections[key].count++;
+      }
+    });
+
+    // Auch die Zeitraum-Daten prüfen (falls Claude sie im Header falsch gelesen hat)
+    if(zeitraumVon){
+      var checkVon = correctYearIfSuspicious(zeitraumVon);
+      if(checkVon.changed) zeitraumVon = checkVon.corrected;
+    }
+    if(zeitraumBis){
+      var checkBis = correctYearIfSuspicious(zeitraumBis);
+      if(checkBis.changed) zeitraumBis = checkBis.corrected;
+    }
+
     // Chronologisch sortieren
     buchungen.sort(function(a, b){ return dateKey(a.datum) - dateKey(b.datum); });
 
@@ -5410,22 +5902,37 @@ async function scanWithClaude(){
     }
     if(firma){
       $('rpKunde').value = String(firma).trim();
-      // Automatisch den passenden GAV vorschlagen anhand des Firmennamens
+      // Automatisch den passenden GAV vorschlagen anhand des Firmennamens (schneller Keyword-Match)
       var vorschlag = suggestGavFromFirma(firma);
       if(vorschlag && GAV[vorschlag]){
         var brancheSelect = $('rpBranche');
-        // Nur setzen wenn der User noch nichts anderes bewusst gewählt hat.
-        // Wir prüfen das über einen Marker: wenn schon manuell geändert, überschreibt es nicht.
         if(!brancheSelect.dataset.userChosen){
           brancheSelect.value = vorschlag;
-          // Hinweis-Badge unter dem Select anzeigen
           showGavSuggestion(vorschlag, firma);
         }
       }
+
+      // Parallel: Web-Enrich starten (kann 5-15 Sek dauern).
+      // Läuft im Hintergrund, blockiert den User nicht.
+      startCompanyEnrich(firma);
     }
 
     // Wenn Claude Werte mit Flags gemarkt hat, HINWEISE dynamisch generieren
     HINWEISE = [];
+
+    // Zuerst: Sammel-Hinweis über Jahres-Korrekturen (falls vorgekommen)
+    Object.keys(yearCorrections).forEach(function(altesJahr){
+      var info = yearCorrections[altesJahr];
+      HINWEISE.push({
+        typ: 'mid',
+        feld: 'Jahres-Auto-Korrektur',
+        text: info.count + ' Datum-Einträge wurden von Jahr ' + altesJahr + ' auf ' + info.neu +
+          ' korrigiert. Das erkannte Jahr lag unplausibel weit in der Vergangenheit — ' +
+          'wahrscheinlich hat Claude die handschriftliche Jahreszahl falsch gelesen (typisch: 6↔4, 3↔8). ' +
+          'Bitte gegen Original prüfen!'
+      });
+    });
+
     zeilen.forEach(function(r){
       if(r.kstFlag){
         HINWEISE.push({typ: r.kstFlag, feld: r.datum + ' Kostenstelle',
@@ -5443,6 +5950,7 @@ async function scanWithClaude(){
     b.textContent = 'Erneut auslesen';
     b.disabled = false;
     unlock($('rpS2'));
+    renderS2Preview();
     $('rpS2').scrollIntoView({behavior:'smooth',block:'start'});
 
   } catch(e){
@@ -5614,15 +6122,27 @@ function renderTable(){
     }
   }
 
+  // Helper: rendert die Datum-Zelle. Die erste Zeile bekommt ein Input-Feld
+  // (type="date"), damit der User bei falsch erkanntem Startdatum korrigieren
+  // kann. Alle folgenden Tage werden dann automatisch mit-verschoben.
+  function renderDatumCell(r, i){
+    if(i === 0){
+      var iso = r.datum.slice(6,10) + '-' + r.datum.slice(3,5) + '-' + r.datum.slice(0,2);
+      return '<input type="date" value="'+esc(iso)+'" id="rpFirstDate" '+
+        'title="Beim Ändern werden alle folgenden Tage automatisch mit-verschoben" '+
+        'style="border:1px solid var(--rp-line);padding:2px 6px;font-family:inherit;font-size:13px;width:140px;background:var(--rp-white)">';
+    }
+    return esc(r.datum);
+  }
+
   $('rpTbody').innerHTML = zeilen.map(function(r,i){
-    // Frei-Tage: keine Inputs, ausgegraut, mit "frei"-Label
+    // Frei-Tage: keine Inputs für kst/ist, ausgegraut, mit "frei"-Label
     if(r.absent){
       var cls = 'rp-row-absent';
-      // Wochenenden noch etwas dezenter
       var isoDate = r.datum.slice(6,10)+'-'+r.datum.slice(3,5)+'-'+r.datum.slice(0,2);
       if(isWeekend(isoDate)) cls += ' rp-row-weekend';
       return '<tr class="'+cls+'" data-i="'+i+'">'+
-        '<td>'+esc(r.datum)+'</td>'+
+        '<td>'+renderDatumCell(r, i)+'</td>'+
         '<td>'+esc(r.tag)+'</td>'+
         '<td style="color:var(--rp-grey);font-style:italic">' + (isWeekend(isoDate) ? 'Wochenende' : '—') + '</td>'+
         '<td class="rp-num" id="rpSoll'+i+'">—</td>'+
@@ -5630,7 +6150,7 @@ function renderTable(){
         '<td class="rp-num" id="rpDiff'+i+'">—</td>'+
         '<td></td></tr>';
     }
-    return '<tr data-beleg="'+esc(r.beleg)+'" data-i="'+i+'"><td>'+esc(r.datum)+'</td><td>'+esc(r.tag)+'</td>'+
+    return '<tr data-beleg="'+esc(r.beleg)+'" data-i="'+i+'"><td>'+renderDatumCell(r, i)+'</td><td>'+esc(r.tag)+'</td>'+
       '<td><input type="text" value="'+esc(r.kst)+'" data-i="'+i+'" data-f="kst" class="'+
         (r.kstFlag?'rp-f-'+r.kstFlag:'')+'"></td>'+
       '<td class="rp-num" id="rpSoll'+i+'">—</td>'+
@@ -5641,12 +6161,23 @@ function renderTable(){
   }).join('');
 
   $('rpTbody').oninput = function(e){
+    // Datum-Input separat behandeln (weiter unten)
+    if(e.target.id === 'rpFirstDate') return;
     var i=+e.target.dataset.i, f=e.target.dataset.f;
     if(f==='ist'){ var v=parseFloat(String(e.target.value).replace(',','.')); zeilen[i].ist=isNaN(v)?0:v; zeilen[i].istFlag=null; }
     else { zeilen[i].kst=e.target.value.trim(); zeilen[i].kstFlag=null; }
     e.target.classList.remove('rp-f-low','rp-f-mid');
     recalcRows(); countFlags();
   };
+
+  // Erstes Datum: bei Änderung Offset berechnen und alle Zeilen mit-verschieben
+  var firstDateInput = document.getElementById('rpFirstDate');
+  if(firstDateInput){
+    firstDateInput.addEventListener('change', function(){
+      if(!this.value) return;  // leerer Wert ignorieren
+      shiftAllDatesFromFirst(this.value);
+    });
+  }
 
   // Zeilen-Klick zeigt den zugehörigen Beleg. Nicht triggern, wenn in Input geklickt wurde.
   $('rpTbody').onclick = function(e){
@@ -5660,6 +6191,56 @@ function renderTable(){
   $('rpNotes').innerHTML = HINWEISE.map(function(h){
     return '<li class="rp-'+h.typ+'"><b>'+esc(h.feld)+'</b> — '+esc(h.text)+'</li>'; }).join('');
   recalcRows(); countFlags();
+}
+
+/* Wenn der User in der Prüftabelle das erste Datum ändert (z.B. weil OCR
+   das Jahr oder den Monat falsch gelesen hat), werden alle anderen Zeilen
+   um den entsprechenden Tages-Offset mit-verschoben.
+   Der Wochentag wird pro Zeile neu berechnet. Auch der Zeitraum-Header
+   und der Zeitraum-Bereich in window.__rpZeitraum werden angepasst. */
+function shiftAllDatesFromFirst(newIsoDate){
+  if(!zeilen.length) return;
+  var firstZeile = zeilen[0];
+  var oldKey = dateKey(firstZeile.datum);
+  // newIsoDate ist yyyy-mm-dd → dateKey braucht yyyy-mm-dd oder dd.mm.yyyy
+  var newKey = dateKey(newIsoDate);
+  if(!oldKey || !newKey) return;
+  var offset = newKey - oldKey;
+  if(offset === 0) return;
+
+  // Alle Zeilen verschieben (inkl. absent-Tage) und Wochentag neu berechnen
+  zeilen.forEach(function(z){
+    var k = dateKey(z.datum) + offset;
+    z.datum = keyToDeutsch(k);
+    z.tag = tagKurz(keyToDate(k));
+  });
+
+  // Zeitraum-Header aktualisieren
+  if(window.__rpZeitraum){
+    var vonKey = dateKey(window.__rpZeitraum.von) + offset;
+    var bisKey = dateKey(window.__rpZeitraum.bis) + offset;
+    window.__rpZeitraum = {
+      von: keyToDeutsch(vonKey),
+      bis: keyToDeutsch(bisKey)
+    };
+  }
+
+  // Sammel-Hinweis anhängen (nur wenn nicht schon einer existiert)
+  var hasShiftHint = HINWEISE.some(function(h){ return h.feld === 'Datums-Verschiebung'; });
+  if(!hasShiftHint){
+    var richtung = offset > 0 ? '+' : '';
+    HINWEISE.unshift({
+      typ: 'mid',
+      feld: 'Datums-Verschiebung',
+      text: 'Alle Tage wurden um ' + richtung + offset + ' Tage verschoben (Startdatum manuell korrigiert).'
+    });
+  }
+
+  // Re-Rendering — Fokus geht dabei verloren, wird gleich wiederhergestellt
+  renderTable();
+  // Re-focus des Datum-Feldes, damit der User im Flow bleibt
+  var input = document.getElementById('rpFirstDate');
+  if(input) input.focus();
 }
 
 function recalcRows(){
