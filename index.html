@@ -783,7 +783,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.4.3</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.4.4</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -864,7 +864,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
                     </button>
                   </div></div>
                 <div><label for="rpPlz">PLZ Einsatzort</label>
-                  <input type="text" id="rpPlz" value="8003"></div>
+                  <input type="text" id="rpPlz" placeholder="z.B. 8003"></div>
                 <div><label for="rpBranche">Branche</label>
                   <select id="rpBranche">
                     <option value="bau" selected>Bauhauptgewerbe</option>
@@ -6022,7 +6022,20 @@ async function scanWithClaude(){
       '4. Erzeuge eine JSON-Zeile pro (Tag × Auftrag) mit >0 Stunden. Wenn Auftrag 261245 am 10. den Wert 8.75 hat: {datum:"10.MM.YYYY", kst:"261245", ist:8.75}. Wenn zusätzlich Auftrag 261263 am 10. den Wert 4.00 hat: eine zweite Zeile mit kst:"261263".\n' +
       '5. GANZ WICHTIG — KEINE DOPPELTEN WERTE: Jede Zelle im Rapport wird GENAU EINMAL extrahiert. Wenn eine Zelle leer ist, DARF dieser Auftrag an diesem Tag NICHT in dein JSON. Kopiere NICHT den Wert eines Vor- oder Folgetages "zur Sicherheit". Wenn du unsicher bist ob eine Zelle einen Wert hat, LIESS SIE ALS LEER (weniger Zeilen ist besser als falsche Zeilen).\n' +
       '6. TOTAL-ZEILE ist eine SANITY-CHECK, KEINE eigene Buchung: Am unteren Rand steht "Total Lohnstunden" oder "Total produktive Stunden" mit einer Zahl pro Tag. Diese Zeile wird NICHT als eigene Buchung übernommen! Sie dient nur der Selbstkontrolle: die Summe deiner extrahierten Zeilen pro Tag MUSS diesem Total entsprechen. Wenn Summe > Total: du hast Werte doppelt/falsch zugeordnet — lösche die überflüssigen. Wenn Summe < Total: du hast Werte übersehen.\n' +
-      '7. FIRMA/EINSATZBETRIEB: bei Personalverleih-Rapporten ist oft KEINE eindeutige Kundenfirma genannt (weil der Mitarbeiter für verschiedene Aufträge verliehen wird). Wenn der Rapport nur Auftrag-Adressen hat aber keinen zentralen "Kunden": setze firma auf leeren String "".\n\n' +
+      '7. FIRMA / EINSATZBETRIEB — AKTIV SUCHEN, MEHRERE ORTE PRÜFEN:\n' +
+      '   Der Einsatzbetrieb (= Kunde beim Personalverleih, = die Firma wo der Mitarbeiter tatsächlich arbeitet) steht typischerweise an einer dieser Stellen:\n' +
+      '   a) Als Firmenlogo/Firmenname oben im Header (z.B. links oder rechts)\n' +
+      '   b) In einer Vordruck-Zeile wie "Einsatzfirma:", "Kunde:", "Baustelle:", "Auftraggeber:", "Einsatzbetrieb:"\n' +
+      '   c) In einer Adress-Zeile unten oder in der Fusszeile\n' +
+      '   d) Bei einem handschriftlichen Wochenrapport oft in einem Feld "Einsatzfirma" oder ähnlich, ausgefüllt vom Mitarbeiter\n' +
+      '   e) Als Text neben oder unter einer Unterschrift ("Unterschrift Einsatzfirma / Stempel")\n' +
+      '   f) Wenn NUR eine Auftrag-Adresse da ist (z.B. "Neubadstr. 95, Basel / Meier"), ist "Meier" möglicherweise der Kundenname — dann setz "Meier" als firma.\n' +
+      '   \n' +
+      '   BEVORZUGE die EINSATZFIRMA / KUNDENFIRMA gegenüber der Personalverleih-Firma (Verleiher). Typische Personalverleih-Firmen: "worknet ag", "Adecco", "Randstad", "Kelly Services", "Manpower", "Interiman" — diese sind der VERLEIHER, NICHT der Einsatzbetrieb. Wenn du beides findest, wähle die andere.\n' +
+      '   \n' +
+      '   Wenn du am oberen Rand nur ein Logo der Personalverleih-Firma siehst, aber weiter unten einen konkreten Firmennamen/Kunden — nimm den unteren.\n' +
+      '   \n' +
+      '   Erst wenn du wirklich nirgends einen plausiblen Kundenamen findest: firma = "".\n\n' +
 
       'Antworte AUSSCHLIESSLICH mit einem gültigen JSON-Objekt in genau diesem Format, ohne Erklärungen, ohne Markdown-Code-Fences:\n' +
       '{\n' +
@@ -6411,6 +6424,18 @@ function loadGav(){
   setTimeout(function(){
     gav = GAV[$('rpBranche').value];
     var plz = String($('rpPlz').value || '').trim();
+
+    // Wenn keine PLZ eingegeben wurde: dezent darauf hinweisen, aber
+    // trotzdem den GAV laden (Kanton-abhängige Regeln greifen dann nicht).
+    if(!plz){
+      b.disabled = false;
+      b.textContent = 'GAV-Eckwerte laden';
+      if(!confirm('Keine PLZ eingegeben. Ohne PLZ kann der Kanton nicht bestimmt werden und Kanton-abhängige Regeln greifen nicht (z.B. LMV Bauhauptgewerbe Gültigkeit, Quellensteuer). Trotzdem fortfahren?')){
+        $('rpPlz').focus();
+        return;
+      }
+    }
+
     var kanton = (typeof plzToKanton === 'function') ? plzToKanton(plz) : null;
 
     // Sanity-Check: Bau-GAV ausserhalb der PBK-Kantone?
