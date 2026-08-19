@@ -936,7 +936,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.11.1</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.12.2</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -3557,7 +3557,7 @@ const einsatzDashState = {
   bm: { rows: [], fileName: null },   // Margen-/Ertragsdaten (BM-Export)
   bet: { rows: [], fileName: null },  // Beteiligungen: Anstellungsnummer → Recruiter-Anteile
   kb: { rows: [], fileName: null },   // KickBack: Debitor (Kunden-Nr) → Rückvergütungs-%
-  bmF: { von: "", bis: "", kunde: "", recruiter: "" },  // Filter Marge-Tab
+  bmF: { von: "", bis: "", kunde: "", recruiter: "", ma: "" },  // Filter Marge-Tab
   customerId: null,  // gewählter Kunde (cache.customers id)
   stichtag: null,    // ISO yyyy-mm-dd — Default heute
   pieDim: "gav",     // Dimension des Kuchendiagramms
@@ -3863,7 +3863,7 @@ async function uploadBmCsv(input) {
     }
     einsatzDashState.bm.rows = parsed.rows.map(bmNorm).filter(b => b.placement);
     einsatzDashState.bm.fileName = file.name;
-    einsatzDashState.bmF = { von:"", bis:"", kunde:"", recruiter:"" };
+    einsatzDashState.bmF = { von:"", bis:"", kunde:"", recruiter:"", ma:"" };
     einsatzDashState.tab = "marge";  // direkt hinspringen
     render();
     toast(einsatzDashState.bm.rows.length + " Positionen aus Margen-Export geladen");
@@ -3887,7 +3887,7 @@ async function uploadDashFiles(input) {
       if (h.includes("Placement Nr") && h.includes("Margenstufe")) {
         einsatzDashState.bm.rows = parsed.rows.map(bmNorm).filter(b => b.placement);
         einsatzDashState.bm.fileName = file.name;
-        einsatzDashState.bmF = { von:"", bis:"", kunde:"", recruiter:"" };
+        einsatzDashState.bmF = { von:"", bis:"", kunde:"", recruiter:"", ma:"" };
         loaded.push("Margen (" + einsatzDashState.bm.rows.length + " Pos.)");
       } else if (h.includes("Anstellungsnummer") && h.includes("Beteiligung")) {
         einsatzDashState.bet.rows = parsed.rows
@@ -3973,6 +3973,7 @@ function bmFilteredRows() {
   if (f.bis)       rows = rows.filter(b => b.periode <= f.bis);
   if (f.kunde)     rows = rows.filter(b => b.kunde === f.kunde);
   if (f.recruiter) rows = rows.filter(b => b.recruiter === f.recruiter);
+  if (f.ma)        rows = rows.filter(b => b.ma === f.ma);
   return rows;
 }
 
@@ -4040,6 +4041,7 @@ function bmRenderContent() {
   const perioden = [...new Set(einsatzDashState.bm.rows.map(b => b.periode))].sort();
   const kunden = [...new Set(einsatzDashState.bm.rows.map(b => b.kunde).filter(Boolean))].sort();
   const recruiters = [...new Set(einsatzDashState.bm.rows.map(b => b.recruiter).filter(Boolean))].sort();
+  const mas = [...new Set(einsatzDashState.bm.rows.map(b => b.ma).filter(Boolean))].sort();
   const mkOpts = (list, cur) => list.map(v => `<option value="${escape(v)}" ${v===cur?"selected":""}>${escape(v)}</option>`).join("");
   const activeF = Object.values(f).filter(v => v).length;
 
@@ -4135,10 +4137,10 @@ function bmRenderContent() {
 
   const placementTable = `
     <div class="ed-card">
-      <div class="ed-card-title">Pro Einsatz <span style="color:var(--text-faint);font-weight:400">(${byPlacement.length} Placement${byPlacement.length===1?"":"s"}${hasEinsatzData ? ", verknüpft mit Einsatzliste" : ""})</span></div>
+      <div class="ed-card-title">Pro Einsatz <span style="color:var(--text-faint);font-weight:400">(${byPlacement.length} Einsätze${hasEinsatzData ? ", verknüpft mit Einsatzliste" : ""})</span></div>
       <div class="table-wrap"><table>
         <thead><tr>
-          <th>Placement</th><th>Mitarbeiter</th><th>Kunde</th>
+          <th>Einsatz-Nr</th><th>Mitarbeiter</th><th>Kunde</th>
           ${hasEinsatzData ? "<th>GAV</th>" : ""}
           <th style="text-align:right">Umsatz</th><th style="text-align:right">Lohn</th>
           <th style="text-align:right">Sozialleist.</th>
@@ -4231,6 +4233,72 @@ function bmRenderContent() {
 
   // ---- Margen-Insights ----
   const bmInsights = [];
+
+  // ---- Kunden-Konzentration: wo entsteht Umsatz, wo entsteht Marge? ----
+  const byKunde = bmGroupBy(rows, b => b.kunde).filter(([k]) => k !== "(leer)");
+  if (byKunde.length >= 2) {
+    const topU = byKunde.slice().sort((a,b) => b[1].umsatz - a[1].umsatz)[0];
+    const topM = byKunde.slice().sort((a,b) => b[1].marge - a[1].marge)[0];
+    if (topU[0] === topM[0]) {
+      bmInsights.push(`🥇 Dein wichtigster Kunde ist <strong>${escape(topM[0])}</strong> — meister Umsatz (${bmChf(topU[1].umsatz)}) UND meiste Bruttomarge (${bmChf(topM[1].marge)}, ${bmPct(topM[1].margep)}).`);
+    } else {
+      bmInsights.push(`🥇 Am meisten <strong>Umsatz</strong> machst du bei <strong>${escape(topU[0])}</strong> (${bmChf(topU[1].umsatz)}, ${bmPct(topU[1].margep)} Marge) — die meiste <strong>Bruttomarge</strong> aber bei <strong>${escape(topM[0])}</strong> (${bmChf(topM[1].marge)}, ${bmPct(topM[1].margep)}). Umsatz ist nicht gleich Gewinn.`);
+    }
+    // Klumpenrisiko: Anteil der Top-3-Kunden an der Gesamtmarge
+    if (byKunde.length >= 4 && agg.marge > 0) {
+      const top3 = byKunde.slice().sort((a,b) => b[1].marge - a[1].marge).slice(0,3);
+      const anteil = top3.reduce((s,[,a]) => s + a.marge, 0) / agg.marge * 100;
+      if (anteil >= 60) {
+        bmInsights.push(`🎯 Klumpenrisiko: Die Top-3-Kunden (${top3.map(([k]) => escape(k)).join(", ")}) liefern <strong>${bmPct(anteil)}</strong> deiner gesamten Bruttomarge.`);
+      }
+    }
+  }
+
+  // ---- GAV-Vergleich (via Verknüpfung mit der Einsatzliste) ----
+  if (hasEinsatzData) {
+    const byGav = bmGroupBy(rows, b => {
+      const e = bmLookupEinsatz(b.placement);
+      return e ? (e["GAV"]||"").trim().replace("Personalverleih ","PV ") : "";
+    }).filter(([k, a]) => k && k !== "(leer)" && a.umsatz > 0);
+    if (byGav.length >= 2) {
+      const sorted = byGav.slice().sort((a,b) => b[1].margep - a[1].margep);
+      const [bestG, bA] = sorted[0];
+      const [worstG, wA] = sorted[sorted.length-1];
+      bmInsights.push(`📋 Margenstärkster GAV: <strong>${escape(bestG)}</strong> mit ${bmPct(bA.margep)} (${bmChf(bA.marge)} auf ${bmChf(bA.umsatz)} Umsatz) — Schlusslicht ist <strong>${escape(worstG)}</strong> mit ${bmPct(wA.margep)}.`);
+    }
+  }
+
+  // ---- Laufzeit × Marge: sind die Langläufer wirklich die besseren? ----
+  // Laufzeit = Anzahl unterschiedlicher Leistungsperioden pro Placement (aus dem BM-File selbst)
+  const monateProPl = {};
+  rows.forEach(b => (monateProPl[b.placement] = monateProPl[b.placement] || new Set()).add(b.periode));
+  if (byPlacement.length >= 4) {
+    const withDauer = byPlacement.map(([pl, a]) => ({ pl, a, monate: monateProPl[pl] ? monateProPl[pl].size : 0 }));
+    const grenze = 4;  // ab 4 Monaten "Langläufer"
+    const lang = withDauer.filter(x => x.monate >= grenze);
+    const kurz = withDauer.filter(x => x.monate < grenze);
+    if (lang.length >= 2 && kurz.length >= 2) {
+      const pctOf = arr => {
+        const u = arr.reduce((s,x) => s + x.a.umsatz, 0);
+        const m = arr.reduce((s,x) => s + x.a.marge, 0);
+        return u ? m/u*100 : 0;
+      };
+      const pLang = pctOf(lang), pKurz = pctOf(kurz);
+      if (pLang > pKurz) {
+        bmInsights.push(`⏳ Deine These stimmt: <strong>Langläufer</strong> (≥${grenze} Monate, ${lang.length} Einsätze) erzielen <strong>${bmPct(pLang)}</strong> Marge — kürzere Einsätze nur ${bmPct(pKurz)}. Verlängern lohnt sich.`);
+      } else {
+        bmInsights.push(`⏳ Überraschung: Kürzere Einsätze (<${grenze} Monate) erzielen mit ${bmPct(pKurz)} mehr Marge als die Langläufer (${bmPct(pLang)}) — Langläufer-Konditionen prüfen.`);
+      }
+    }
+  }
+
+  // ---- Bester Recruiter (Primärer Recruiter aus dem BM-File) ----
+  const byRec = bmGroupBy(rows, b => b.recruiter).filter(([k]) => k !== "(leer)");
+  if (byRec.length >= 2) {
+    const topR = byRec.slice().sort((a,b) => b[1].marge - a[1].marge)[0];
+    bmInsights.push(`🏅 Am meisten Bruttomarge erwirtschaftet <strong>${escape(topR[0])}</strong>: ${bmChf(topR[1].marge)} (${bmPct(topR[1].margep)} auf ${bmChf(topR[1].umsatz)} Umsatz).`);
+  }
+
   if (byMonth.length >= 2) {
     const sortedByBm = byMonth.slice().sort((a,b) => b[1].marge - a[1].marge);
     const [bestM, bestA] = sortedByBm[0];
@@ -4267,7 +4335,10 @@ function bmRenderContent() {
       ${recruiters.length ? `<label class="ed-filter"><span>Recruiter</span>
         <select onchange="einsatzDashState.bmF.recruiter=this.value;render()">
           <option value="">Alle</option>${mkOpts(recruiters, f.recruiter)}</select></label>` : ""}
-      ${activeF ? `<button class="ed-clear-btn" onclick="einsatzDashState.bmF={von:'',bis:'',kunde:'',recruiter:''};render()">✕ Filter löschen</button>` : ""}
+      ${mas.length ? `<label class="ed-filter"><span>Mitarbeiter</span>
+        <select onchange="einsatzDashState.bmF.ma=this.value;render()">
+          <option value="">Alle</option>${mkOpts(mas, f.ma)}</select></label>` : ""}
+      ${activeF ? `<button class="ed-clear-btn" onclick="einsatzDashState.bmF={von:'',bis:'',kunde:'',recruiter:'',ma:''};render()">✕ Filter löschen</button>` : ""}
       <div style="flex:1;text-align:right;font-size:11px;color:var(--text-faint);align-self:center">
         ${escape(einsatzDashState.bm.fileName||"")} · ${einsatzDashState.bm.rows.length} Positionen
       </div>
@@ -4280,7 +4351,7 @@ function bmRenderContent() {
       ${kpi("🏦", bmChf(agg.sozial), "Sozialleistungen", "", "")}
       ${kickback > 0 ? kpi("↩️", bmChf(kickback), "Kickback", "Kunden-Rückvergütung", "ed-kpi-warn") : ""}
       ${kpi("💰", bmChf(margeNachKb), "Bruttomarge" + (kickback > 0 ? " (nach Kickback)" : ""), bmPct(agg.umsatz ? margeNachKb/agg.umsatz*100 : 0), margeNachKb >= 0 ? "ed-kpi-accent" : "ed-kpi-danger")}
-      ${kpi("📄", byPlacement.length, "Placements", "", "")}
+      ${kpi("📄", byPlacement.length, "Einsätze", "", "")}
     </div>
 
     ${bmInsights.length ? `<div class="ed-card ed-insights">
@@ -4378,7 +4449,7 @@ function resetEinsatzDash() {
   einsatzDashState.bm = { rows: [], fileName: null };
   einsatzDashState.bet = { rows: [], fileName: null };
   einsatzDashState.kb = { rows: [], fileName: null };
-  einsatzDashState.bmF = { von:"", bis:"", kunde:"", recruiter:"" };
+  einsatzDashState.bmF = { von:"", bis:"", kunde:"", recruiter:"", ma:"" };
   einsatzDashState.tab = "einsaetze";
   einsatzDashState.f = { von:"", bis:"", gav:"", berater:"", gs:"", kunde:"", suche:"" };
   render();
