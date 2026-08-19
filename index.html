@@ -921,7 +921,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.7.3</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.7.4</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -3932,6 +3932,7 @@ function renderEinsatzDash(el) {
   }
   const stichtag = einsatzDashState.stichtag;
   const heuteIso = new Date().toISOString().slice(0,10);
+  const f = einsatzDashState.f;  // Filterleiste — VOR dem Chart-Block deklarieren (TDZ!)
 
   // ---- Gefilterte Rows (Filterleiste) + aktive am Stichtag ----
   const rows = edFilteredRows();
@@ -4158,7 +4159,6 @@ function renderEinsatzDash(el) {
   const beraterList = edUnique(r => edBerater(r));
   const gsList = edUnique(r => (r["Verantwortliche Geschäftsstelle"]||"").trim());
   const kundenList = edUnique(r => (r["Kunde"]||"").trim());
-  const f = einsatzDashState.f;
 
   const mkSelect = (key, label, list, current) => {
     if (!list.length) return "";
