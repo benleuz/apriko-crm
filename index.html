@@ -751,7 +751,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.3.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.3.1</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -5248,7 +5248,17 @@ function renderS2Preview(){
   container.hidden = false;
   var f = files[0];  // erste Datei
   if(f.type === 'pdf'){
-    inner.innerHTML = '<embed src="'+f.url+'" type="application/pdf">';
+    // Bei PDFs: Icon-Kachel + "Öffnen"-Link. Ein embedded PDF ist im
+    // 260px-Vorschau-Bereich unbrauchbar (Text zu klein) und hat oft
+    // Rotationsprobleme bei Landscape-PDFs.
+    inner.innerHTML =
+      '<div style="text-align:center;padding:20px;color:var(--rp-dark)">' +
+        '<div style="font-size:48px;line-height:1">📄</div>' +
+        '<div style="margin-top:12px;font-size:12px;font-weight:600;word-break:break-word">' + esc(f.name) + '</div>' +
+        '<div style="margin-top:8px;font-size:11px;color:var(--rp-grey)">' + esc(f.size) + '</div>' +
+        '<div style="margin-top:14px;padding:6px 12px;background:var(--rp-lime-dark);color:var(--rp-white);' +
+          'border-radius:3px;font-size:11px;display:inline-block">↗ In neuem Tab öffnen</div>' +
+      '</div>';
     inner.onclick = function(){ window.open(f.url, '_blank'); };
   } else {
     inner.innerHTML = '<img src="'+f.url+'" alt="'+esc(f.name)+'">';
@@ -5677,17 +5687,25 @@ async function scanWithClaude(){
         ? 'ACHTUNG: Wir sind im Januar/Februar — Rapporte können auch aus dem Dezember/November des Vorjahres (' + (aktuellesJahr-1) + ') stammen. Prüfe Monat und Jahr sorgfältig.\n\n'
         : 'Rapporte sind typischerweise aus den letzten 1-2 Monaten. Ein Datum aus einem Vorjahr ist SEHR unwahrscheinlich.\n\n') +
       'RAPPORT-FORMATE die du erkennen musst:\n' +
-      'A) WOCHEN-RAPPORT (handschriftlich, ~5-7 Zeilen): Ein Tag pro Zeile mit Datum, Kostenstelle, Stunden\n' +
-      'B) MONATS-RAPPORT (tabellarisch, digital erzeugt): Eine Tabelle mit Leistungsarten als Zeilen und Tagen 1-31 als SPALTEN. Jede Zelle enthält die Stunden für diesen Tag/diese Leistung. Der Rapport-Header nennt den Zeitraum (z.B. "01.07.2026 bis 31.07.2026"). Personalnummer + Name stehen typischerweise als eigene Zeile (z.B. "4575 Mathot Anthony").\n\n' +
-      'Bei Monats-Rapporten: erzeuge EINE Zeile pro TAG mit gebuchten Stunden (Zellen mit >0 Stunden). Wenn mehrere Leistungsarten am gleichen Tag stehen, jeweils eigene Zeilen. Als "kst" die Leistungsart-Nummer (z.B. "1205").\n\n' +
+      'A) WOCHEN-RAPPORT (handschriftlich, ~5-7 Zeilen): Ein Tag pro Zeile mit Datum, Kostenstelle, Stunden.\n' +
+      'B) MONATS-/PERIODEN-RAPPORT (digital, tabellarisch): Header oben mit Personalnummer und Name (z.B. "Stundenblatt von 90237 Ngama Jonathan Pharel" oder "4575 Mathot Anthony"). Zeitraum-Angabe (z.B. "Periode von 09.08.2026 bis 15.08.2026"). Dann eine breite Tabelle mit AUFTRAG- oder LEISTUNGSART-Zeilen (z.B. "261245 Neubadstr. 95, Basel / Meier", "1205 Montage") und TAG-SPALTEN 09, 10, 11, ... 31. Jede Zelle enthält die Stunden dieses Tages für diesen Auftrag.\n\n' +
+
+      'WICHTIGE HINWEISE FÜR MONATS-/PERIODEN-RAPPORTE:\n' +
+      '1. MITARBEITER-HEADER: Ganz oben steht typischerweise "Stundenblatt von {PN} {Name}" oder ähnlich. Extrahiere daraus Vor- und Nachname. Bei "Ngama Jonathan Pharel" ist das ein zusammengesetzter Name — nimm die ganze Zeichenkette pragmatisch auseinander (z.B. nachname="Ngama", vorname="Jonathan Pharel").\n' +
+      '2. KOSTENSTELLEN sind NICHT die Personalnummer und NICHT der Mitarbeiter-Name! Sie stehen als erste Spalte JEDER AUFTRAG-ZEILE (z.B. "261245", "261263"). Verwechsle das nicht.\n' +
+      '3. TAG-SPALTEN-ZUORDNUNG: Zähle die Spaltenüberschriften GENAU. Die erste Spalte im Zeitraum "09.08. - 15.08." ist der 09.08., die zweite der 10.08. usw. VORSICHT vor Off-by-one-Fehlern! Wenn der 09.08. ein Samstag ist und keine Werte hat, ist die nächste Spalte (10.08. Montag) trotzdem der Montag, nicht "der erste Werktag = 11.08.". Zähle IMMER von der Kalenderspalte.\n' +
+      '4. Erzeuge eine JSON-Zeile pro (Tag × Auftrag) mit >0 Stunden. Wenn Auftrag 261245 am 10. den Wert 8.75 hat: {datum:"10.MM.YYYY", kst:"261245", ist:8.75}. Wenn zusätzlich Auftrag 261263 am 10. den Wert 4.00 hat: eine zweite Zeile mit kst:"261263".\n' +
+      '5. Prüfe deine Ergebnisse gegen die TOTAL-ZEILE unten: die Summe deiner extrahierten Stunden pro Tag muss dem Total dieses Tages entsprechen. Wenn nicht: du hast Werte übersehen oder falsch zugeordnet.\n' +
+      '6. FIRMA/EINSATZBETRIEB: bei Personalverleih-Rapporten ist oft KEINE eindeutige Kundenfirma genannt (weil der Mitarbeiter für verschiedene Aufträge verliehen wird). Wenn der Rapport nur Auftrag-Adressen hat aber keinen zentralen "Kunden": setze firma auf leeren String "".\n\n' +
+
       'Antworte AUSSCHLIESSLICH mit einem gültigen JSON-Objekt in genau diesem Format, ohne Erklärungen, ohne Markdown-Code-Fences:\n' +
       '{\n' +
-      '  "mitarbeiter": {"vorname": "Anthony", "nachname": "Mathot"},\n' +
-      '  "firma": "Ernst Selmoni AG",\n' +
-      '  "zeitraumVon": "01.07.' + aktuellesJahr + '",\n' +
-      '  "zeitraumBis": "31.07.' + aktuellesJahr + '",\n' +
+      '  "mitarbeiter": {"vorname": "Jonathan Pharel", "nachname": "Ngama"},\n' +
+      '  "firma": "",\n' +
+      '  "zeitraumVon": "09.08.' + aktuellesJahr + '",\n' +
+      '  "zeitraumBis": "15.08.' + aktuellesJahr + '",\n' +
       '  "zeilen": [\n' +
-      '    {"datum":"01.07.' + aktuellesJahr + '","tag":"Mi","kst":"1205","ist":8.0,"kstFlag":null,"istFlag":null,"beleg":"' + belegKurz + '"}\n' +
+      '    {"datum":"10.08.' + aktuellesJahr + '","tag":"Mo","kst":"261245","ist":8.75,"kstFlag":null,"istFlag":null,"beleg":"' + belegKurz + '"}\n' +
       '  ]\n' +
       '}\n\n' +
       'REGELN FÜR DATUM UND JAHR:\n' +
@@ -5699,14 +5717,12 @@ async function scanWithClaude(){
       'WEITERE REGELN:\n' +
       '- Wochentag zweistellig: Mo/Di/Mi/Do/Fr/Sa/So.\n' +
       '- Ist-Stunden immer als Dezimalzahl (8.0 nicht "8:00"). Nur Tage mit >0 Stunden aufnehmen.\n' +
-      '- kst: KOSTENSTELLE / AUFTRAGSNUMMER / OBJEKT-NR als String. Diese Spalte kann auf dem Rapport verschieden heissen: "Auftrag", "Auftragsnr.", "Kostenstelle", "KST", "Baustelle", "Objekt", "Position", "Projekt". Nimm die numerische Kennung (z.B. "261245", "1205", "1312"), NICHT die Adressbeschreibung dahinter ("Neubadstr. 95, Basel / Meier"). Bei Buchstaben-Codes wie "KISPI" die ganze Bezeichnung. Leer wenn wirklich keine da ist.\n' +
-      '- BEI MONATSRAPPORTEN mit Aufträgen als Zeilen: jede Auftragszeile hat oben links die Auftragsnummer. Die Zellen der Zeile enthalten die Stunden pro Tag. Erzeuge eine Zeile pro (Auftrag × Tag) mit >0 Stunden. Beispiel: Auftrag "261245 Neubadstr." hat am 10. den Wert 8.75 → {datum:"10.MM.YYYY",kst:"261245",ist:8.75}.\n' +
+      '- kst: Numerische Kennung ("261245", "1205"), NICHT Beschreibung, NICHT Personalnummer des Mitarbeiters. Leer wenn wirklich keine da ist.\n' +
       '- kstFlag: "low" wenn schwer lesbar/mehrdeutig, sonst null.\n' +
       '- istFlag: "mid" wenn korrigiert/durchgestrichen, "low" wenn schlecht lesbar, sonst null.\n' +
-      '- Bei digital erzeugten PDFs (klar strukturierte Tabelle): Flags meist null, da alles gut lesbar.\n' +
+      '- Bei digital erzeugten PDFs (klar strukturierte Tabelle): Flags meist null.\n' +
       '- Bei handschriftlichen Fotos: die Flags aktiv nutzen wo unsicher.\n' +
-      '- Fehlender Vorname/Nachname/Firma: leerer String "" (kein Ratewert).\n' +
-      '- Firma-Namen sauber mit Rechtsform (AG, GmbH).\n\n' +
+      '- Fehlender Vorname/Nachname/Firma: leerer String "" (kein Ratewert).\n\n' +
       'Nur das JSON, sonst nichts.';
 
     // Content-Block: PDF als "document", Bild als "image"
@@ -6004,8 +6020,12 @@ function showBeleg(belegName){
     viewer.innerHTML = '<div class="rp-beleg-empty">Beleg <b>'+esc(belegName)+
       '</b> nicht in den hochgeladenen Dateien gefunden.<br><small>Der OCR-Prozess hat den Namen anders gesetzt als die Datei heisst.</small></div>';
   } else if(file.type === 'pdf'){
-    viewer.innerHTML = '<div class="rp-beleg-info">'+esc(file.name)+'</div>'+
-      '<embed src="'+file.url+'" type="application/pdf">';
+    // <iframe> statt <embed>: der Browser-eigene PDF-Viewer respektiert die
+    // interne PDF-Orientierung besser. #view=Fit skaliert das PDF auf die
+    // Container-Grösse, so werden auch Landscape-PDFs korrekt eingepasst.
+    viewer.innerHTML = '<div class="rp-beleg-info">'+esc(file.name)+' · '+
+      '<a href="'+file.url+'" target="_blank" style="color:inherit;text-decoration:underline">in neuem Tab öffnen</a></div>'+
+      '<iframe src="'+file.url+'#view=Fit&toolbar=1" title="'+esc(file.name)+'"></iframe>';
   } else {
     viewer.innerHTML = '<div class="rp-beleg-info">'+esc(file.name)+' · Klick zum Vergrössern</div>'+
       '<img src="'+file.url+'" alt="'+esc(file.name)+'" onclick="__rpLightbox(this.src)">';
