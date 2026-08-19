@@ -615,6 +615,10 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
   .rp-hint{font-size:13px;color:var(--rp-grey);margin-top:12px}
   @media(prefers-reduced-motion:reduce){.rp-drop,.rp-btn{transition:none}}
 
+  /* Rapport-Toolbar oben rechts (Reset etc.) */
+  .rp-toolbar{display:flex;justify-content:flex-end;padding:8px 4px;margin-bottom:8px}
+  .rp-btn-sm{padding:5px 12px;font-size:12px}
+
   /* Thumbnails der hochgeladenen Bilder in Karte 1 */
   .rp-thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin:12px 0}
   .rp-thumb{position:relative;background:var(--rp-bg);border:1px solid var(--rp-line);border-radius:5px;
@@ -651,7 +655,18 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
   @media(max-width:1100px){ .rp-split-check{grid-template-columns:1fr} }
   .rp-check-left{min-width:0}
   .rp-check-right{min-width:0}
+
+  /* Zeitraum-Header oberhalb der Prüftabelle */
+  .rp-zeitraum-header{padding:8px 12px;background:var(--rp-bg);border:1px solid var(--rp-line);
+    border-radius:5px;margin-bottom:8px;font-size:13px;color:var(--rp-dark)}
+
+  /* Frei-Tage (Nicht-Arbeitstage im Rapport-Zeitraum) */
+  .rp-row-absent{opacity:0.55;background:transparent}
+  .rp-row-absent td{padding-top:4px;padding-bottom:4px;font-size:12px}
+  .rp-row-weekend{background:#F9FAFB;opacity:0.45}
+
   .rp-table tbody tr{cursor:pointer}
+  .rp-table tbody tr.rp-row-absent{cursor:default}
   .rp-table tbody tr.rp-row-active{background:#FFFBEB;box-shadow:inset 3px 0 0 var(--rp-lime-dark)}
 
   /* Beleg-Tabs */
@@ -730,10 +745,8 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
     -->
     <div class="content" id="view-rapport" hidden>
 
-      <div class="rp-banner">
-        <b>Demo-Modul.</b> Die Erkennung ist simuliert und nichts wird in SharePoint
-        gespeichert. Für den produktiven Betrieb braucht es die Azure Function für den
-        API-Aufruf sowie die tempdata-Anbindung.
+      <div class="rp-toolbar">
+        <button type="button" class="rp-btn rp-btn-ghost rp-btn-sm" id="rpReset" title="Rapport-Ansicht zurücksetzen">↺ Alles zurücksetzen</button>
       </div>
 
       <!-- 1 Upload -->
@@ -761,13 +774,12 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
               <button type="button" class="rp-btn-link" id="rpKeyBtn" style="display:none">API-Key ändern</button>
             </div>
             <div class="rp-ocr-hint" id="rpOcrHint">
-              Ohne Anhaken werden Demo-Werte eingefügt. Mit Anhaken wird das Bild an die Anthropic Claude API gesendet und ausgelesen.
+              Bilder und PDFs werden an die Anthropic Claude API gesendet und ausgelesen.
             </div>
           </div>
 
           <div class="rp-actions">
             <button class="rp-btn" id="rpScan" disabled>Rapporte auslesen</button>
-            <button class="rp-btn rp-btn-ghost" id="rpDemo">Beispiel laden</button>
           </div>
         </div>
       </div>
@@ -788,6 +800,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
               <select id="rpBranche">
                 <option value="bau" selected>Bauhauptgewerbe</option>
                 <option value="elektro">Elektrogewerbe (LGAV)</option>
+                <option value="maler">Malergewerbe (LMV Maler/Gipser)</option>
                 <option value="pvl">Kein vorrangiger GAV</option>
               </select></div>
           </div>
@@ -4687,6 +4700,38 @@ init();
    Zusammengestellt aus LMV Bauhauptgewerbe 2026-2028 und GAV Personalverleih.
    ACHTUNG: Prototyp — Werte müssen vor Produktivgang mit tempdata-API oder
    den offiziellen SBV/PBK/swissstaffing-Quellen abgeglichen werden. */
+/* Datums-Helper für den Rapport-Modul.
+   Wir arbeiten mit einem "dateKey" = Tage seit 1970-01-01 (int), damit
+   Iteration und Vergleich einfach sind. */
+function dateKey(s){
+  if(!s) return 0;
+  var t = String(s).trim();
+  // dd.mm.yyyy → yyyy-mm-dd
+  var m = t.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if(m){
+    t = m[3]+'-'+('0'+m[2]).slice(-2)+'-'+('0'+m[1]).slice(-2);
+  }
+  var d = new Date(t);
+  if(isNaN(d.getTime())) return 0;
+  return Math.floor(d.getTime() / 86400000);
+}
+function keyToDate(k){
+  var d = new Date(k * 86400000);
+  return d.toISOString().slice(0,10);  // yyyy-mm-dd
+}
+function keyToDeutsch(k){
+  var iso = keyToDate(k);
+  return iso.slice(8,10)+'.'+iso.slice(5,7)+'.'+iso.slice(0,4);
+}
+function tagKurz(iso){
+  var d = new Date(iso + 'T00:00:00');
+  return ['So','Mo','Di','Mi','Do','Fr','Sa'][d.getDay()];
+}
+function isWeekend(iso){
+  var d = new Date(iso + 'T00:00:00').getDay();
+  return d === 0 || d === 6;
+}
+
 var GAV = {
   bau: {
     name: 'LMV Bauhauptgewerbe',
@@ -4736,8 +4781,69 @@ var GAV = {
     // LGAV Elektro gilt schweizweit; explizit auch Basel-Stadt
     kantone: ['ZH','BE','LU','UR','SZ','OW','NW','GL','ZG','FR','SO','BS','BL','SH','AR','AI','SG','GR','AG','TG','TI','VD','VS','NE','GE','JU'],
     quelle: 'LGAV EIT.swiss / Unia 2024-2027 · schweizweit gültig'
+  },
+  maler: {
+    name: 'LMV Maler- und Gipsergewerbe',
+    modell: 'Wochenarbeitszeit 40 h (Jahressoll ~2088 h)',
+    sollTag: 8.00,           // 40h / 5 Tage
+    sollHerkunft: 'LMV Maler/Gipser · 40 h/Woche · schweizweit',
+    zuschlagAb: 45,          // Überzeit ab 45h/Woche
+    zuschlagSatz: 25,        // 25% Zuschlag
+    konto: 'Jahresarbeitszeit-Modell; Überzeit ab 45 h/Wo mit 25% Zuschlag; Konto ±60 h',
+    zulage: 0,               // Keine Baustellenzulage wie Bauhauptgewerbe
+    zulageAb: null,
+    mittag: 18.00,           // CHF Mittagsentschädigung wenn auswärts (Richtwert)
+    // LMV Maler/Gipser gilt schweizweit inkl. BS
+    kantone: ['ZH','BE','LU','UR','SZ','OW','NW','GL','ZG','FR','SO','BS','BL','SH','AR','AI','SG','GR','AG','TG','TI','VD','VS','NE','GE','JU'],
+    quelle: 'LMV Maler und Gipser · SMGV / Unia / Syna 2024-2026'
   }
 };
+
+/* Vorschlag welcher GAV zum Firmennamen passt.
+   Rückgabe: Key aus GAV oder null wenn kein sicherer Vorschlag möglich.
+   Reihenfolge der Checks nach Spezifität — je spezifischer die Keywords,
+   desto weiter oben. */
+function suggestGavFromFirma(firma){
+  if(!firma) return null;
+  var f = String(firma).toLowerCase();
+
+  // Maler/Gipser
+  if(/\b(maler|gipser|stukkateur|malerei|farb-|verputz)/i.test(f)) return 'maler';
+
+  // Elektro
+  if(/\b(elektro|elektriker|installations?|telecom|selmoni|starkstrom)/i.test(f)) return 'elektro';
+
+  // Bauhauptgewerbe (letzte Prüfung — "bau" ist unspezifisch)
+  if(/\b(bauunter|hochbau|tiefbau|erdbau|betonbau|maurer)\b/i.test(f)) return 'bau';
+  // Nur "bau" oder "AG bau" wenn keine spezifischere Branche gefunden
+  if(/\bbau(-|\s|_|$)/i.test(f)) return 'bau';
+
+  // Kein sicherer Match
+  return null;
+}
+
+/* Zeigt eine kleine Info-Badge unter dem Branche-Select mit dem Auto-Vorschlag. */
+function showGavSuggestion(gavKey, firma){
+  var select = $('rpBranche');
+  var badgeId = 'rpGavSuggestBadge';
+  var existing = document.getElementById(badgeId);
+  if(existing) existing.remove();
+
+  var badge = document.createElement('div');
+  badge.id = badgeId;
+  badge.style.cssText = 'margin-top:6px;padding:6px 10px;background:#ECFDF5;border-left:3px solid #10B981;' +
+    'border-radius:3px;font-size:11px;color:#065F46;line-height:1.5';
+  badge.innerHTML = '💡 <b>Auto-Vorschlag:</b> ' + esc(GAV[gavKey].name) +
+    ' — basierend auf Firma "' + esc(firma) + '"';
+  select.parentNode.appendChild(badge);
+  // Badge nach 12 Sek dezent ausblenden
+  setTimeout(function(){
+    if(badge.parentNode){
+      badge.style.transition = 'opacity 1s';
+      badge.style.opacity = '0.4';
+    }
+  }, 12000);
+}
 
 /* Ableiten aus PLZ, ob der Bau-GAV für diesen Kanton greift.
    Wenn nicht (z.B. Tessin), fällt der Betrieb auf den GAV Personalverleih zurück. */
@@ -4766,6 +4872,89 @@ function nf(n){ return n.toFixed(2); }
 function esc(s){ return String(s).replace(/[<>&"]/g,function(c){
   return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]; }); }
 function unlock(el){ el.classList.remove('rp-locked'); }
+function lock(el){ el.classList.add('rp-locked'); }
+
+/* Setzt das komplette Rapport-Modul auf den Ausgangszustand zurück:
+   - alle hochgeladenen Dateien werden verworfen (inkl. Object-URLs, um Memory-Leaks zu vermeiden)
+   - Zeilen, GAV-Auswahl, Karte-2/3/4 leeren und wieder locken
+   - Input-Felder in Karte 2 leeren
+   - OCR-Config verstecken, aber API-Key bleibt erhalten
+   Wird vom Reset-Button in der Toolbar aufgerufen. */
+function resetRapport(){
+  // Object-URLs freigeben (verhindert Memory-Leaks bei vielen Uploads)
+  files.forEach(function(f){
+    if(f.url && f.url.indexOf('blob:') === 0){
+      try { URL.revokeObjectURL(f.url); } catch(e) {}
+    }
+  });
+
+  // State leeren
+  files = [];
+  zeilen = [];
+  gav = null;
+  ergebnis = null;
+  currentBeleg = null;
+  window.__rpZeitraum = null;
+  HINWEISE = [];
+
+  // Karte 1: Dateiliste, Thumbnails, OCR-Config zurücksetzen
+  $('rpFiles').innerHTML = '';
+  $('rpThumbs').innerHTML = '';
+  $('rpThumbs').hidden = true;
+  $('rpOcrConfig').hidden = true;
+  $('rpUseClaude').checked = false;
+  $('rpScan').disabled = true;
+  $('rpScan').textContent = 'Rapporte auslesen';
+  var picker = $('rpPicker');
+  if(picker) picker.value = '';  // File-Input auch leeren
+
+  // Karte 2: Eingaben leeren, Facts verstecken, Auto-Vorschlags-Badge weg
+  $('rpKunde').value = '';
+  $('rpMa').value = '';
+  $('rpPlz').value = '';
+  $('rpBranche').value = 'bau';
+  delete $('rpBranche').dataset.userChosen;
+  $('rpFacts').hidden = true;
+  $('rpFacts').innerHTML = '';
+  $('rpSrc').hidden = true;
+  $('rpSrc').innerHTML = '';
+  $('rpLoad').textContent = 'GAV-Eckwerte laden';
+  var badge = document.getElementById('rpGavSuggestBadge');
+  if(badge) badge.remove();
+
+  // Karte 3: Tabelle, Hinweise, Beleg-Viewer, Tabs leeren
+  $('rpTbody').innerHTML = '';
+  $('rpNotes').innerHTML = '';
+  var zeitraumHeader = document.getElementById('rpZeitraumHeader');
+  if(zeitraumHeader){ zeitraumHeader.innerHTML = ''; zeitraumHeader.hidden = true; }
+  var belegTabs = $('rpBelegTabs');
+  if(belegTabs){ belegTabs.innerHTML = ''; belegTabs.hidden = true; }
+  var viewer = $('rpBelegViewer');
+  if(viewer) viewer.innerHTML = '<div class="rp-beleg-empty">Beleg wird hier angezeigt<br><small>Klick auf eine Tabellenzeile zum Wechseln</small></div>';
+  $('rpTSoll').textContent = '—';
+  $('rpTIst').textContent = '—';
+  $('rpTDiff').textContent = '—';
+  $('rpFlags').textContent = '';
+
+  // Karte 4: Auswertung leeren
+  var out = $('rpOut');
+  if(out){ out.hidden = true; out.textContent = ''; }
+  ['rpRZeit','rpRSpesen','rpRKst','rpGavTag'].forEach(function(id){
+    var el = $(id);
+    if(el) el.innerHTML = '';
+  });
+  var peek = $('rpPeek');
+  if(peek) peek.textContent = 'Vorschau anzeigen';
+
+  // Karten 2, 3, 4 wieder locken
+  lock($('rpS2'));
+  lock($('rpS3'));
+  lock($('rpS4'));
+
+  // Zurück nach oben scrollen
+  $('rpS2').scrollIntoView({behavior:'smooth',block:'start'});
+  window.scrollTo({top:0, behavior:'smooth'});
+}
 
 window.initRapport = function(){
   if(ready) return; ready=true;
@@ -4800,62 +4989,23 @@ window.initRapport = function(){
   // API-Key ändern/löschen
   $('rpKeyBtn').addEventListener('click', clearAnthropicKey);
 
-  $('rpDemo').addEventListener('click',function(){
-    // Demo-Beleg als inline SVG (simuliert handschriftlichen Rapport)
-    var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 700" font-family="Comic Sans MS, cursive">'+
-      '<rect width="500" height="700" fill="#F5F1E8"/>'+
-      '<text x="250" y="40" text-anchor="middle" font-size="22" font-weight="bold" fill="#1F2937">ARBEITSRAPPORT</text>'+
-      '<text x="30" y="80" font-size="14" fill="#374151">Woche 34 / 2026 · Mustermann Max</text>'+
-      '<line x1="30" y1="100" x2="470" y2="100" stroke="#374151" stroke-width="1"/>'+
-      '<text x="30" y="130" font-size="12" fill="#6B7280">DATUM</text>'+
-      '<text x="130" y="130" font-size="12" fill="#6B7280">KST</text>'+
-      '<text x="240" y="130" font-size="12" fill="#6B7280">STD</text>'+
-      '<text x="310" y="130" font-size="12" fill="#6B7280">BEMERKUNG</text>'+
-      '<line x1="30" y1="140" x2="470" y2="140" stroke="#D1D5DB"/>'+
-      '<text x="30" y="180" font-size="16" fill="#1E3A8A">17.08. Mo</text>'+
-      '<text x="130" y="180" font-size="16" fill="#1E3A8A">1312</text>'+
-      '<text x="240" y="180" font-size="16" fill="#1E3A8A">10.00</text>'+
-      '<text x="30" y="220" font-size="16" fill="#1E3A8A">18.08. Di</text>'+
-      '<text x="130" y="220" font-size="16" fill="#1E3A8A">KISPI</text>'+
-      '<text x="240" y="220" font-size="16" fill="#1E3A8A">9.50</text>'+
-      '<text x="30" y="260" font-size="16" fill="#1E3A8A">19.08. Mi</text>'+
-      '<text x="130" y="260" font-size="16" fill="#1E3A8A">131?</text>'+
-      '<text x="240" y="260" font-size="16" fill="#1E3A8A">10.00</text>'+
-      '<text x="310" y="260" font-size="12" fill="#DC2626">schlecht lesbar</text>'+
-      '<text x="30" y="300" font-size="16" fill="#1E3A8A">20.08. Do</text>'+
-      '<text x="130" y="300" font-size="16" fill="#1E3A8A">1312</text>'+
-      '<text x="240" y="300" font-size="16" fill="#1E3A8A"><tspan text-decoration="line-through">10.00</tspan> <tspan fill="#DC2626">3.50</tspan></text>'+
-      '<text x="310" y="300" font-size="12" fill="#374151">Halbtag Arzt</text>'+
-      '<text x="30" y="340" font-size="16" fill="#1E3A8A">21.08. Fr</text>'+
-      '<text x="130" y="340" font-size="16" fill="#1E3A8A">KISPI</text>'+
-      '<text x="240" y="340" font-size="16" fill="#1E3A8A">11.00</text>'+
-      '<line x1="30" y1="380" x2="470" y2="380" stroke="#374151"/>'+
-      '<text x="30" y="410" font-size="14" font-weight="bold" fill="#1F2937">Total: 44.00 h</text>'+
-      '<text x="30" y="480" font-size="14" fill="#374151">Baustelle: Zürich Enge 8003</text>'+
-      '<text x="30" y="510" font-size="14" fill="#374151">Datum:_______  Unterschrift MA: ___________</text>'+
-      '<text x="30" y="560" font-size="14" fill="#374151">Vorarbeiter: ___________________________</text>'+
-      '</svg>';
-    var url = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
-    // Original ERKANNT-Hinweise wieder einsetzen (Claude-OCR könnte HINWEISE überschrieben haben)
-    HINWEISE = [
-      {typ:'low',feld:'Mittwoch, Kostenstelle',text:'Letzte Ziffer nicht eindeutig — 1311 oder 1312. Gegen das Original prüfen.'},
-      {typ:'mid',feld:'Donnerstag, Stunden',text:'Auf dem Beleg durchgestrichen und überschrieben. Übernommen wurde 3.50 statt ursprünglich 10.00.'},
-      {typ:'low',feld:'Donnerstag, Grund',text:'Halbtag mit 3.50 h. Ob geplant oder Absenz, geht aus dem Beleg nicht hervor — bei Absenz gelten andere Entschädigungsregeln.'}
-    ];
-    files = [{
-      name: 'IMG_1398.jpeg',  // Name matched mit ERKANNT[].beleg = 'IMG_1398'
-      size: '1842 KB',
-      url: url,
-      type: 'image'
-    }];
-    renderFiles();
-    renderThumbs();
-    // Bei Demo: Vision-Toggle deaktivieren (SVG lässt sich schlecht per Vision lesen und ergibt Kosten)
-    $('rpUseClaude').checked = false;
-    updateOcrConfigVisibility();
-    scan();
+  // "Alles zurücksetzen" — kompletten State des Rapport-Moduls leeren
+  $('rpReset').addEventListener('click', function(){
+    if(files.length > 0 || zeilen.length > 0){
+      if(!confirm('Alle Daten des aktuellen Rapports löschen und von vorne beginnen?')) return;
+    }
+    resetRapport();
   });
+
   $('rpLoad').addEventListener('click',loadGav);
+  // Merken wenn der User die Branche manuell wechselt — dann überschreibt der
+  // Auto-Vorschlag beim nächsten Scan nichts mehr.
+  $('rpBranche').addEventListener('change', function(){
+    this.dataset.userChosen = '1';
+    // Etwaige Auto-Vorschlags-Badge entfernen
+    var badge = document.getElementById('rpGavSuggestBadge');
+    if(badge) badge.remove();
+  });
   $('rpConfirm').addEventListener('click',function(){
     berechnen(); unlock($('rpS4')); $('rpS4').scrollIntoView({behavior:'smooth',block:'start'}); });
   $('rpCsv').addEventListener('click',function(){ dl(buildCsv(),'rapport.csv','text/csv;charset=utf-8'); });
@@ -5074,11 +5224,14 @@ async function scanWithClaude(){
       '{\n' +
       '  "mitarbeiter": {"vorname": "Anthony", "nachname": "Mathot"},\n' +
       '  "firma": "Ernst Selmoni AG",\n' +
+      '  "zeitraumVon": "01.07.2026",\n' +
+      '  "zeitraumBis": "31.07.2026",\n' +
       '  "zeilen": [\n' +
       '    {"datum":"01.07.2026","tag":"Mi","kst":"1205","ist":8.0,"kstFlag":null,"istFlag":null,"beleg":"' + belegKurz + '"}\n' +
       '  ]\n' +
       '}\n\n' +
       'Regeln:\n' +
+      '- zeitraumVon/zeitraumBis: bei Monatsrapporten aus dem Header ("Bewegungen von 01.07.2026 bis 31.07.2026"). Bei Wochenrapporten leer lassen ("" oder null) — wird dann aus den Datum-Zeilen abgeleitet.\n' +
       '- Datum immer als dd.mm.yyyy. Bei Monatsrapporten das Jahr aus dem Zeitraum-Header übernehmen.\n' +
       '- Wochentag zweistellig: Mo/Di/Mi/Do/Fr/Sa/So.\n' +
       '- Ist-Stunden immer als Dezimalzahl (8.0 nicht "8:00"). Nur Tage mit >0 Stunden aufnehmen.\n' +
@@ -5163,15 +5316,19 @@ async function scanWithClaude(){
     }
 
     // Backwards-compat: falls Claude doch nur ein Array liefert
-    var rawZeilen, mitarbeiter, firma;
+    var rawZeilen, mitarbeiter, firma, zeitraumVon, zeitraumBis;
     if(Array.isArray(parsed)){
       rawZeilen = parsed;
       mitarbeiter = null;
       firma = '';
+      zeitraumVon = null;
+      zeitraumBis = null;
     } else {
       rawZeilen = parsed.zeilen || [];
       mitarbeiter = parsed.mitarbeiter || null;
       firma = parsed.firma || '';
+      zeitraumVon = parsed.zeitraumVon || null;
+      zeitraumBis = parsed.zeitraumBis || null;
     }
 
     if(!Array.isArray(rawZeilen) || rawZeilen.length === 0){
@@ -5179,7 +5336,7 @@ async function scanWithClaude(){
     }
 
     // Normalisieren
-    zeilen = rawZeilen.map(function(r){
+    var buchungen = rawZeilen.map(function(r){
       return {
         datum: String(r.datum || ''),
         tag: String(r.tag || ''),
@@ -5191,6 +5348,58 @@ async function scanWithClaude(){
       };
     });
 
+    // Chronologisch sortieren
+    buchungen.sort(function(a, b){ return dateKey(a.datum) - dateKey(b.datum); });
+
+    // Zeitraum bestimmen: bevorzugt aus Claude, sonst aus min/max der Buchungen
+    var vonKey = dateKey(zeitraumVon) || (buchungen[0] && dateKey(buchungen[0].datum));
+    var bisKey = dateKey(zeitraumBis) || (buchungen[buchungen.length - 1] && dateKey(buchungen[buchungen.length - 1].datum));
+
+    // Zeilen expandieren: für jeden Tag im Zeitraum eine Zeile.
+    // Für Tage mit Buchung: alle Buchungen (kann mehrere pro Tag geben, z.B. 2 Leistungsarten).
+    // Für Tage ohne Buchung: Placeholder-Zeile mit ist=0, absent=true, damit Wochenenden/Frei sichtbar sind.
+    if(vonKey && bisKey && bisKey >= vonKey){
+      zeilen = [];
+      var buchungByDate = {};
+      buchungen.forEach(function(b){
+        var k = dateKey(b.datum);
+        if(!buchungByDate[k]) buchungByDate[k] = [];
+        buchungByDate[k].push(b);
+      });
+      for(var k = vonKey; k <= bisKey; k++){
+        var isoDate = keyToDate(k);
+        var dd = isoDate.slice(8,10)+'.'+isoDate.slice(5,7)+'.'+isoDate.slice(0,4);
+        var buchungenDesTages = buchungByDate[k];
+        if(buchungenDesTages){
+          buchungenDesTages.forEach(function(b){
+            b.tag = b.tag || tagKurz(isoDate);
+            zeilen.push(b);
+          });
+        } else {
+          // Frei-Tag / kein Eintrag
+          zeilen.push({
+            datum: dd,
+            tag: tagKurz(isoDate),
+            kst: '',
+            kstFlag: null,
+            ist: 0,
+            istFlag: null,
+            beleg: belegKurz,
+            absent: true  // Marker für Rendering
+          });
+        }
+      }
+    } else {
+      // Kein Zeitraum ableitbar → nur die Buchungen selbst
+      zeilen = buchungen;
+    }
+
+    // Zeitraum global merken für Header-Anzeige in Karte 3
+    window.__rpZeitraum = (vonKey && bisKey) ? {
+      von: keyToDeutsch(vonKey),
+      bis: keyToDeutsch(bisKey)
+    } : null;
+
     // Karte 2 Felder auto-befüllen wenn Claude was gefunden hat
     if(mitarbeiter){
       var maStr = [mitarbeiter.vorname, mitarbeiter.nachname]
@@ -5199,7 +5408,21 @@ async function scanWithClaude(){
         .join(' ');
       if(maStr) $('rpMa').value = maStr;
     }
-    if(firma) $('rpKunde').value = String(firma).trim();
+    if(firma){
+      $('rpKunde').value = String(firma).trim();
+      // Automatisch den passenden GAV vorschlagen anhand des Firmennamens
+      var vorschlag = suggestGavFromFirma(firma);
+      if(vorschlag && GAV[vorschlag]){
+        var brancheSelect = $('rpBranche');
+        // Nur setzen wenn der User noch nichts anderes bewusst gewählt hat.
+        // Wir prüfen das über einen Marker: wenn schon manuell geändert, überschreibt es nicht.
+        if(!brancheSelect.dataset.userChosen){
+          brancheSelect.value = vorschlag;
+          // Hinweis-Badge unter dem Select anzeigen
+          showGavSuggestion(vorschlag, firma);
+        }
+      }
+    }
 
     // Wenn Claude Werte mit Flags gemarkt hat, HINWEISE dynamisch generieren
     HINWEISE = [];
@@ -5239,19 +5462,37 @@ function belegBaseName(name){
 }
 
 /* Zeigt den Beleg mit dem gegebenen "Base-Namen" (z.B. IMG_1398) im Viewer an.
-   Sucht die Datei in files[] anhand des Namens-Prefix. */
+   Robust gegen Namens-Mismatches: wenn nur EINE Datei hochgeladen ist, wird immer
+   diese angezeigt, egal was der OCR-Prozess als Beleg-Namen extrahiert hat.
+   (Bei Selmoni-Monatsrapporten kommt z.B. "KW 32" raus, aber die Datei heisst
+    natürlich anders — das darf nicht zum leeren Viewer führen.) */
 function showBeleg(belegName){
   if(!belegName) return;
   currentBeleg = belegName;
   var viewer = $('rpBelegViewer');
 
-  // Datei suchen: exakter Match ohne Extension
-  var file = files.find(function(f){
+  var file = null;
+
+  // Priorität 1: exakter Name-Match (ohne Extension, case-insensitive)
+  file = files.find(function(f){
     return belegBaseName(f.name).toLowerCase() === String(belegName).toLowerCase();
   });
 
+  // Priorität 2: bei genau EINER hochgeladenen Datei → immer diese nehmen
+  if(!file && files.length === 1){
+    file = files[0];
+  }
+
+  // Priorität 3: partieller Match (Datei-Name enthält Beleg-Name oder umgekehrt)
   if(!file){
-    // Kein Match → Platzhalter mit Hinweis
+    var bnLow = String(belegName).toLowerCase();
+    file = files.find(function(f){
+      var fnLow = belegBaseName(f.name).toLowerCase();
+      return fnLow.indexOf(bnLow) >= 0 || bnLow.indexOf(fnLow) >= 0;
+    });
+  }
+
+  if(!file){
     viewer.innerHTML = '<div class="rp-beleg-empty">Beleg <b>'+esc(belegName)+
       '</b> nicht in den hochgeladenen Dateien gefunden.<br><small>Der OCR-Prozess hat den Namen anders gesetzt als die Datei heisst.</small></div>';
   } else if(file.type === 'pdf'){
@@ -5272,24 +5513,22 @@ function showBeleg(belegName){
   });
 }
 
-/* Tabs oben — nur wenn mehr als 1 unterschiedlicher Beleg da ist */
+/* Tabs oben — nur wenn mehr als 1 hochgeladene Datei vorhanden.
+   Sonst ist Tab-Navigation sinnlos (es gibt ja nur eine Datei anzuzeigen). */
 function renderBelegTabs(){
   var tabsEl = $('rpBelegTabs');
-  // Alle unterschiedlichen Beleg-Namen aus den Zeilen + den hochgeladenen Files zusammenfassen
-  var zeilenBelege = zeilen.map(function(r){ return r.beleg; }).filter(function(v,i,a){ return v && a.indexOf(v)===i; });
-  var uploadedBelege = files.map(function(f){ return belegBaseName(f.name); });
-  var alle = zeilenBelege.concat(uploadedBelege.filter(function(b){ return zeilenBelege.indexOf(b)===-1; }));
-
-  if(alle.length <= 1){
+  if(files.length <= 1){
     tabsEl.hidden = true;
     tabsEl.innerHTML = '';
     return;
   }
+  // Bei mehreren Dateien: Tabs pro Datei-Name (nicht pro Beleg-Name aus OCR)
   tabsEl.hidden = false;
-  tabsEl.innerHTML = alle.map(function(b){
-    var isActive = String(b).toLowerCase() === String(currentBeleg||'').toLowerCase();
+  tabsEl.innerHTML = files.map(function(f){
+    var name = belegBaseName(f.name);
+    var isActive = String(name).toLowerCase() === String(currentBeleg||'').toLowerCase();
     return '<button class="rp-beleg-tab '+(isActive?'rp-active':'')+
-      '" data-beleg="'+esc(b)+'">'+esc(b)+'</button>';
+      '" data-beleg="'+esc(name)+'">'+esc(name)+'</button>';
   }).join('');
   tabsEl.onclick = function(e){
     var b = e.target.getAttribute('data-beleg');
@@ -5350,7 +5589,47 @@ function loadGav(){
 function sollOf(){ return gav.sollTag!==null ? gav.sollTag : gav.normal/5; }
 
 function renderTable(){
+  // Zeitraum-Header oberhalb der Tabelle einblenden (falls vorhanden)
+  var headerEl = $('rpZeitraumHeader');
+  if(!headerEl){
+    // Erst-Init: Header-Element vor die Tabelle einfügen
+    var scrollDiv = $('rpTbody').closest('.rp-scroll');
+    if(scrollDiv){
+      var h = document.createElement('div');
+      h.id = 'rpZeitraumHeader';
+      h.className = 'rp-zeitraum-header';
+      scrollDiv.parentNode.insertBefore(h, scrollDiv);
+      headerEl = h;
+    }
+  }
+  if(headerEl){
+    if(window.__rpZeitraum){
+      var frei = zeilen.filter(function(r){ return r.absent; }).length;
+      var arbeit = zeilen.length - frei;
+      headerEl.innerHTML = '<b>Zeitraum:</b> ' + esc(window.__rpZeitraum.von) + ' – ' + esc(window.__rpZeitraum.bis) +
+        ' &nbsp;·&nbsp; <span style="color:var(--rp-grey)">' + arbeit + ' Buchungen, ' + frei + ' freie Tage</span>';
+      headerEl.hidden = false;
+    } else {
+      headerEl.hidden = true;
+    }
+  }
+
   $('rpTbody').innerHTML = zeilen.map(function(r,i){
+    // Frei-Tage: keine Inputs, ausgegraut, mit "frei"-Label
+    if(r.absent){
+      var cls = 'rp-row-absent';
+      // Wochenenden noch etwas dezenter
+      var isoDate = r.datum.slice(6,10)+'-'+r.datum.slice(3,5)+'-'+r.datum.slice(0,2);
+      if(isWeekend(isoDate)) cls += ' rp-row-weekend';
+      return '<tr class="'+cls+'" data-i="'+i+'">'+
+        '<td>'+esc(r.datum)+'</td>'+
+        '<td>'+esc(r.tag)+'</td>'+
+        '<td style="color:var(--rp-grey);font-style:italic">' + (isWeekend(isoDate) ? 'Wochenende' : '—') + '</td>'+
+        '<td class="rp-num" id="rpSoll'+i+'">—</td>'+
+        '<td class="rp-num" style="color:var(--rp-grey)">0.00</td>'+
+        '<td class="rp-num" id="rpDiff'+i+'">—</td>'+
+        '<td></td></tr>';
+    }
     return '<tr data-beleg="'+esc(r.beleg)+'" data-i="'+i+'"><td>'+esc(r.datum)+'</td><td>'+esc(r.tag)+'</td>'+
       '<td><input type="text" value="'+esc(r.kst)+'" data-i="'+i+'" data-f="kst" class="'+
         (r.kstFlag?'rp-f-'+r.kstFlag:'')+'"></td>'+
@@ -5386,11 +5665,20 @@ function renderTable(){
 function recalcRows(){
   var sS=0,sI=0,s=sollOf();
   zeilen.forEach(function(r,i){
-    var d=r.ist-s; sS+=s; sI+=r.ist;
-    $('rpSoll'+i).textContent=nf(s);
-    var c=$('rpDiff'+i);
-    c.textContent=(d>0?'+':'')+nf(d);
-    c.className='rp-num'+(d<0?' rp-minus':'');
+    // Frei-Tage haben Sollzeit=0 (weder Über- noch Minderstunden zählen dort)
+    var soll = r.absent ? 0 : s;
+    var d = r.ist - soll;
+    sS += soll;
+    sI += r.ist;
+    $('rpSoll'+i).textContent = r.absent ? '—' : nf(soll);
+    var c = $('rpDiff'+i);
+    if(r.absent){
+      c.textContent = '—';
+      c.className = 'rp-num';
+    } else {
+      c.textContent = (d>0?'+':'')+nf(d);
+      c.className = 'rp-num'+(d<0?' rp-minus':'');
+    }
   });
   $('rpTSoll').textContent=nf(sS); $('rpTIst').textContent=nf(sI);
   var d=sI-sS, t=$('rpTDiff');
@@ -5404,13 +5692,15 @@ function countFlags(){
 
 function berechnen(){
   var soll=sollOf();
+  // Nur "echte" Arbeitszeilen zählen für Sollzeit — Frei-Tage haben keine Sollzeit
+  var arbeitsZeilen = zeilen.filter(function(r){ return !r.absent; });
   var tIst=zeilen.reduce(function(a,r){ return a+r.ist; },0);
-  var tSoll=soll*zeilen.length;
+  var tSoll=soll*arbeitsZeilen.length;
   var zeit=[], spesen=[], zuschlag=0, uest=0, uzeit=0, normal=0;
 
   if(gav.sollTag!==null){
     zuschlag=Math.max(0,tIst-gav.zuschlagAb);
-    zeit.push(['Sollzeit laut Kalender',nf(tSoll)+' h']);
+    zeit.push(['Sollzeit laut Kalender',nf(tSoll)+' h ('+arbeitsZeilen.length+' Arbeitstage à '+nf(soll)+' h)']);
     zeit.push(['Geleistet',nf(tIst)+' h']);
     zeit.push([(tIst>=tSoll?'Mehrstunden':'Minderstunden')+' ins Konto',
                (tIst-tSoll>0?'+':'')+nf(tIst-tSoll)+' h']);
