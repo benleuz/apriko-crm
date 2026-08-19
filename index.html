@@ -886,8 +886,12 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
   /* Zeitraum-Presets in der Filterleiste */
   .ed-preset-row{display:flex;gap:4px}
 
-  /* Tab-Leiste des Kundendashboards (Einsätze | Marge) */
-  .ed-tabbar{display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--border)}
+  /* Zeitraum-Hinweis-Banner (bei aktivem Von/Bis-Filter) */
+  .ed-range-banner{background:rgba(184,233,134,0.07);border:1px solid var(--accent);border-radius:6px;
+    padding:9px 14px;margin-bottom:14px;font-size:12px;color:var(--text-dim);line-height:1.5}
+  .ed-range-banner strong{color:var(--text)}
+
+  /* Tab-Leiste des Kundendashboards (Einsätze | Marge) */  .ed-tabbar{display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--border)}
   .ed-tab{background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-dim);
     padding:9px 18px;font-size:13px;cursor:pointer;font-family:inherit;display:inline-flex;
     align-items:center;gap:6px;transition:all .12s;margin-bottom:-1px}
@@ -932,7 +936,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.8.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.8.2</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -3775,9 +3779,9 @@ function edInsights(rows, aktivRows, stichtag) {
    Logik (verifiziert am Beispiel-Export):
    - Umsatz  = Σ Total wo Art=Rate und Buchhaltungsrelevant=Ja
    - Kosten gestuft nach Margenstufe (Salary, BH=Ja):
-       L1 = Direktlohn inkl. Zulagen/Ferien/13.  → BM1 = Umsatz − L1
-       L2 = weitere direkte Kosten               → BM2 = BM1 − L2
-       L3 = Soziallasten (AG-Beiträge 7xxx)      → BM3 = BM2 − L3
+       Lohn            = Salary Level 1+2 (Direktlohn inkl. Zulagen/Ferien/13.)
+       Sozialleistungen = Salary Level 3 (AG-Beiträge 7xxx)
+       Bruttomarge      = Umsatz − Lohn − Sozialleistungen
    - BH=Nein-Zeilen (z.B. informativer "Stundenlohn") werden ignoriert,
      sonst würden Grundlohn+Ferien+13. doppelt gezählt.
    Verknüpfung zur Einsatzliste: Placement Nr ↔ Einsatz-Nummer.
@@ -3838,7 +3842,12 @@ function bmFilteredRows() {
   return rows;
 }
 
-/* Kern-Aggregation: Umsatz + Kostenstufen + Margen über beliebige BM-Rows */
+/* Kern-Aggregation über beliebige BM-Rows.
+   Vereinfachte Sicht (das Einzige was zählt):
+   - Umsatz          = Σ Rate, buchhaltungsrelevant
+   - Lohn            = Σ Salary Level 1+2 (Direktlohn inkl. Zulagen/Ferien/13.)
+   - Sozialleistungen = Σ Salary Level 3 (AG-Beiträge)
+   - Bruttomarge     = Umsatz − Lohn − Sozialleistungen */
 function bmAgg(rows) {
   let umsatz = 0, l1 = 0, l2 = 0, l3 = 0;
   rows.forEach(b => {
@@ -3850,10 +3859,10 @@ function bmAgg(rows) {
       else l3 += b.total;
     }
   });
-  const bm1 = umsatz - l1, bm2 = bm1 - l2, bm3 = bm2 - l3;
-  return { umsatz, l1, l2, l3, bm1, bm2, bm3,
-    bm1p: umsatz ? bm1/umsatz*100 : 0,
-    bm3p: umsatz ? bm3/umsatz*100 : 0 };
+  const lohn = l1 + l2;
+  const marge = umsatz - lohn - l3;
+  return { umsatz, lohn, sozial: l3, marge,
+    margep: umsatz ? marge/umsatz*100 : 0 };
 }
 
 /* Gruppierung nach Key-Funktion → [[key, agg], ...] sortiert */
@@ -3884,7 +3893,7 @@ function bmRenderContent() {
         <div style="font-size:12px;line-height:1.7">
           Lade oben den Margen-Export (CSV) hoch — die Datei mit Placement Nr,<br>
           Rate/Salary-Positionen, Buchhaltungsrelevanz und Margenstufen.<br>
-          Daraus berechne ich Umsatz, BM1 und BM3 pro Monat und pro Einsatz.
+          Daraus berechne ich Umsatz, Lohn, Sozialleistungen und Bruttomarge.
         </div>
       </div>`;
   }
@@ -3900,46 +3909,44 @@ function bmRenderContent() {
   const mkOpts = (list, cur) => list.map(v => `<option value="${escape(v)}" ${v===cur?"selected":""}>${escape(v)}</option>`).join("");
   const activeF = Object.values(f).filter(v => v).length;
 
-  // ---- Monats-Aggregation + Balken-Chart (Umsatz vs. Kosten, BM3-Label) ----
+  // ---- Monats-Aggregation + Balken-Chart (Umsatz vs. Kosten, Bruttomargen-Label) ----
   const byMonth = bmGroupBy(rows, b => b.periode).sort((a,b) => a[0].localeCompare(b[0]));
   let monthChart = "";
   if (byMonth.length > 1) {
     const W = 900, H = 210, PAD = 34;
-    const maxV = Math.max(1, ...byMonth.map(([,a]) => Math.max(a.umsatz, a.l1+a.l2+a.l3)));
+    const maxV = Math.max(1, ...byMonth.map(([,a]) => Math.max(a.umsatz, a.lohn+a.sozial)));
     const groupW = (W - 2*PAD) / byMonth.length;
     const barW = Math.min(28, groupW * 0.32);
     const y = v => H - PAD - Math.max(0, v) * (H - 2*PAD) / maxV;
     const bars = byMonth.map(([m, a], i) => {
       const gx = PAD + i*groupW + groupW/2;
-      const kosten = a.l1 + a.l2 + a.l3;
-      const bmCol = a.bm3 >= 0 ? "var(--accent)" : "var(--danger)";
+      const kosten = a.lohn + a.sozial;
+      const bmCol = a.marge >= 0 ? "var(--accent)" : "var(--danger)";
       return `
         <rect x="${(gx-barW-2).toFixed(1)}" y="${y(a.umsatz).toFixed(1)}" width="${barW}" height="${(H-PAD-y(a.umsatz)).toFixed(1)}" fill="#6FC3DF" rx="2"/>
         <rect x="${(gx+2).toFixed(1)}" y="${y(kosten).toFixed(1)}" width="${barW}" height="${(H-PAD-y(kosten)).toFixed(1)}" fill="#95A5A6" rx="2"/>
-        <text x="${gx.toFixed(1)}" y="${(Math.min(y(a.umsatz), y(kosten))-6).toFixed(1)}" text-anchor="middle" fill="${bmCol}" font-size="10" font-weight="700">${a.bm3>=0?"+":""}${Math.round(a.bm3/1000*10)/10}k</text>
+        <text x="${gx.toFixed(1)}" y="${(Math.min(y(a.umsatz), y(kosten))-6).toFixed(1)}" text-anchor="middle" fill="${bmCol}" font-size="10" font-weight="700">${a.marge>=0?"+":""}${Math.round(a.marge/1000*10)/10}k</text>
         <text x="${gx.toFixed(1)}" y="${H-10}" text-anchor="middle" fill="var(--text-faint)" font-size="10">${escape(m.slice(5))}/${escape(m.slice(2,4))}</text>`;
     }).join("");
     monthChart = `
       <div class="ed-card" style="grid-column:1/-1">
-        <div class="ed-card-title">Umsatz vs. Kosten pro Monat <span style="color:var(--text-faint);font-weight:400">(Label = BM3)</span></div>
+        <div class="ed-card-title">Umsatz vs. Kosten pro Monat <span style="color:var(--text-faint);font-weight:400">(Label = Bruttomarge)</span></div>
         <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" preserveAspectRatio="xMidYMid meet">${bars}</svg>
         <div class="ed-legend">
           <span class="ed-legend-item"><span class="ed-legend-dot" style="background:#6FC3DF"></span>Umsatz (Rate)</span>
-          <span class="ed-legend-item"><span class="ed-legend-dot" style="background:#95A5A6"></span>Kosten (Salary)</span>
-          <span class="ed-legend-item"><span class="ed-legend-dot" style="background:var(--accent)"></span>BM3 positiv</span>
-          <span class="ed-legend-item"><span class="ed-legend-dot" style="background:var(--danger)"></span>BM3 negativ</span>
+          <span class="ed-legend-item"><span class="ed-legend-dot" style="background:#95A5A6"></span>Lohn + Sozialleistungen</span>
+          <span class="ed-legend-item"><span class="ed-legend-dot" style="background:var(--accent)"></span>Bruttomarge positiv</span>
+          <span class="ed-legend-item"><span class="ed-legend-dot" style="background:var(--danger)"></span>Bruttomarge negativ</span>
         </div>
       </div>`;
   }
 
-  // ---- Margen-Wasserfall: Umsatz → −L1 → BM1 → −L3 → BM3 ----
+  // ---- Margen-Treppe: Umsatz → −Lohn → −Sozialleistungen → Bruttomarge ----
   const wf = [
     ["Umsatz", agg.umsatz, "#6FC3DF"],
-    ["− Direktlohn (L1)", -agg.l1, "#95A5A6"],
-    ["BM1", agg.bm1, "var(--accent)"],
-    ...(agg.l2 ? [["− L2", -agg.l2, "#95A5A6"], ["BM2", agg.bm2, "var(--accent)"]] : []),
-    ["− Soziallasten (L3)", -agg.l3, "#95A5A6"],
-    ["BM3", agg.bm3, agg.bm3 >= 0 ? "var(--accent)" : "var(--danger)"]
+    ["− Lohn", -agg.lohn, "#95A5A6"],
+    ["− Sozialleistungen", -agg.sozial, "#95A5A6"],
+    ["Bruttomarge", agg.marge, agg.marge >= 0 ? "var(--accent)" : "var(--danger)"]
   ];
   const wfMax = Math.max(1, ...wf.map(([,v]) => Math.abs(v)));
   const waterfall = `
@@ -3957,7 +3964,7 @@ function bmRenderContent() {
 
   // ---- Placement-Tabelle (verknüpft mit Einsatzliste, falls geladen) ----
   const byPlacement = bmGroupBy(rows, b => b.placement)
-    .sort((a,b) => b[1].bm3 - a[1].bm3);
+    .sort((a,b) => b[1].marge - a[1].marge);
   const hasEinsatzData = einsatzDashState.rows.length > 0;
   const placementMeta = {};
   rows.forEach(b => {
@@ -3971,24 +3978,26 @@ function bmRenderContent() {
         <thead><tr>
           <th>Placement</th><th>Mitarbeiter</th><th>Kunde</th>
           ${hasEinsatzData ? "<th>GAV</th>" : ""}
-          <th style="text-align:right">Umsatz</th><th style="text-align:right">BM1</th>
-          <th style="text-align:right">BM3</th><th style="text-align:right">BM3 %</th>
+          <th style="text-align:right">Umsatz</th><th style="text-align:right">Lohn</th>
+          <th style="text-align:right">Sozialleist.</th>
+          <th style="text-align:right">Bruttomarge</th><th style="text-align:right">Marge %</th>
         </tr></thead>
         <tbody>
           ${byPlacement.map(([pl, a]) => {
             const meta = placementMeta[pl] || {};
             const einsatz = hasEinsatzData ? bmLookupEinsatz(pl) : null;
             const gav = einsatz ? (einsatz["GAV"]||"—").replace("Personalverleih ","PV ") : null;
-            const bmCol = a.bm3 >= 0 ? "var(--accent)" : "var(--danger)";
+            const bmCol = a.marge >= 0 ? "var(--accent)" : "var(--danger)";
             return `<tr>
               <td><strong>${escape(pl)}</strong></td>
               <td>${escape(meta.ma||"—")}</td>
               <td class="dim">${escape(meta.kunde||"—")}</td>
               ${hasEinsatzData ? `<td class="dim" style="font-size:11px">${einsatz ? escape(gav) : '<span style="color:var(--text-faint)">nicht in Einsatzliste</span>'}</td>` : ""}
               <td style="text-align:right">${bmChf(a.umsatz)}</td>
-              <td style="text-align:right">${bmChf(a.bm1)}</td>
-              <td style="text-align:right;color:${bmCol};font-weight:600">${bmChf(a.bm3)}</td>
-              <td style="text-align:right;color:${bmCol}">${bmPct(a.bm3p)}</td>
+              <td style="text-align:right" class="dim">${bmChf(a.lohn)}</td>
+              <td style="text-align:right" class="dim">${bmChf(a.sozial)}</td>
+              <td style="text-align:right;color:${bmCol};font-weight:600">${bmChf(a.marge)}</td>
+              <td style="text-align:right;color:${bmCol}">${bmPct(a.margep)}</td>
             </tr>`;
           }).join("")}
         </tbody>
@@ -4002,20 +4011,19 @@ function bmRenderContent() {
       <div class="table-wrap"><table>
         <thead><tr>
           <th>Periode</th><th style="text-align:right">Umsatz</th>
-          <th style="text-align:right">Direktlohn</th><th style="text-align:right">Soziallasten</th>
-          <th style="text-align:right">BM1</th><th style="text-align:right">BM3</th><th style="text-align:right">BM3 %</th>
+          <th style="text-align:right">Lohn</th><th style="text-align:right">Sozialleistungen</th>
+          <th style="text-align:right">Bruttomarge</th><th style="text-align:right">Marge %</th>
         </tr></thead>
         <tbody>
           ${byMonth.map(([m, a]) => {
-            const bmCol = a.bm3 >= 0 ? "var(--accent)" : "var(--danger)";
+            const bmCol = a.marge >= 0 ? "var(--accent)" : "var(--danger)";
             return `<tr>
               <td><strong>${escape(m)}</strong></td>
               <td style="text-align:right">${bmChf(a.umsatz)}</td>
-              <td style="text-align:right" class="dim">${bmChf(a.l1)}</td>
-              <td style="text-align:right" class="dim">${bmChf(a.l3)}</td>
-              <td style="text-align:right">${bmChf(a.bm1)}</td>
-              <td style="text-align:right;color:${bmCol};font-weight:600">${bmChf(a.bm3)}</td>
-              <td style="text-align:right;color:${bmCol}">${bmPct(a.bm3p)}</td>
+              <td style="text-align:right" class="dim">${bmChf(a.lohn)}</td>
+              <td style="text-align:right" class="dim">${bmChf(a.sozial)}</td>
+              <td style="text-align:right;color:${bmCol};font-weight:600">${bmChf(a.marge)}</td>
+              <td style="text-align:right;color:${bmCol}">${bmPct(a.margep)}</td>
             </tr>`;
           }).join("")}
         </tbody>
@@ -4025,16 +4033,16 @@ function bmRenderContent() {
   // ---- Margen-Insights ----
   const bmInsights = [];
   if (byMonth.length >= 2) {
-    const sortedByBm = byMonth.slice().sort((a,b) => b[1].bm3 - a[1].bm3);
+    const sortedByBm = byMonth.slice().sort((a,b) => b[1].marge - a[1].marge);
     const [bestM, bestA] = sortedByBm[0];
-    bmInsights.push(`🏆 Bester Monat: <strong>${escape(bestM)}</strong> mit ${bmChf(bestA.bm3)} BM3 (${bmPct(bestA.bm3p)}).`);
-    const negMonths = byMonth.filter(([,a]) => a.bm3 < 0);
+    bmInsights.push(`🏆 Bester Monat: <strong>${escape(bestM)}</strong> mit ${bmChf(bestA.marge)} Bruttomarge (${bmPct(bestA.margep)}).`);
+    const negMonths = byMonth.filter(([,a]) => a.marge < 0);
     if (negMonths.length) {
-      bmInsights.push(`⚠️ <strong>${negMonths.length} Monat${negMonths.length>1?"e":""}</strong> mit negativer Marge: ${negMonths.map(([m,a]) => escape(m) + " (" + bmChf(a.bm3) + ")").join(", ")} — typisch bei Lohnzahlung ohne (bzw. vor) Kundenverrechnung.`);
+      bmInsights.push(`⚠️ <strong>${negMonths.length} Monat${negMonths.length>1?"e":""}</strong> mit negativer Marge: ${negMonths.map(([m,a]) => escape(m) + " (" + bmChf(a.marge) + ")").join(", ")} — typisch bei Lohnzahlung ohne (bzw. vor) Kundenverrechnung.`);
     }
   }
   if (agg.umsatz > 0) {
-    bmInsights.push(`📊 Soziallasten fressen <strong>${bmPct(agg.l3/agg.umsatz*100)}</strong> des Umsatzes — von ${bmPct(agg.bm1p)} BM1 bleiben ${bmPct(agg.bm3p)} BM3.`);
+    bmInsights.push(`📊 Sozialleistungen kosten dich <strong>${bmPct(agg.sozial/agg.umsatz*100)}</strong> des Umsatzes — unter dem Strich bleiben ${bmPct(agg.margep)} Bruttomarge.`);
   }
 
   const kpi = (icon, value, label, sub, accent) => `
@@ -4069,9 +4077,9 @@ function bmRenderContent() {
     <!-- Margen-KPIs -->
     <div class="ed-kpi-grid">
       ${kpi("💵", bmChf(agg.umsatz), "Umsatz", byMonth.length + " Monate", "")}
-      ${kpi("💰", bmChf(agg.bm1), "BM1 (nach Direktlohn)", bmPct(agg.bm1p), "ed-kpi-accent")}
-      ${kpi("🏦", bmChf(agg.l3), "Soziallasten (L3)", "", "")}
-      ${kpi("✅", bmChf(agg.bm3), "BM3 (netto)", bmPct(agg.bm3p), agg.bm3 >= 0 ? "ed-kpi-accent" : "ed-kpi-danger")}
+      ${kpi("👷", bmChf(agg.lohn), "Lohn", "", "")}
+      ${kpi("🏦", bmChf(agg.sozial), "Sozialleistungen", "", "")}
+      ${kpi("💰", bmChf(agg.marge), "Bruttomarge", bmPct(agg.margep), agg.marge >= 0 ? "ed-kpi-accent" : "ed-kpi-danger")}
       ${kpi("📄", byPlacement.length, "Placements", "", "")}
     </div>
 
@@ -4610,8 +4618,31 @@ function renderEinsatzDash(el) {
       ${activeFilterCount ? `<button class="ed-clear-btn" onclick="einsatzDashState.f={von:'',bis:'',gav:'',berater:'',gs:'',kunde:'',suche:''};render()">✕ Filter löschen</button>` : ""}
     </div>
 
+    <!-- Zeitraum-Hinweis: macht sichtbar, was der Von/Bis-Filter bewirkt -->
+    ${zeitraumMode ? (() => {
+      const total = einsatzDashState.rows.length;
+      const inRange = rows.length;
+      const rangeTxt = (f.von ? edFormatIso(f.von) : "Anfang") + " – " + (f.bis ? edFormatIso(f.bis) : "Ende");
+      const msg = inRange === total
+        ? `Der gewählte Zeitraum <strong>${rangeTxt}</strong> umfasst <strong>alle ${total} Einsätze</strong> der Datei — engere Grenzen setzen, um zu filtern.`
+        : `Zeitraum <strong>${rangeTxt}</strong>: <strong>${inRange} von ${total}</strong> Einsätzen überlappen den Bereich. Alle Zahlen unten beziehen sich darauf.`;
+      return `<div class="ed-range-banner">🗓 ${msg}</div>`;
+    })() : ""}
+
     <!-- KPI-Kacheln -->
     <div class="ed-kpi-grid">
+      ${zeitraumMode ? (() => {
+        // Zeitraum-bezogene KPIs: Eintritte/Austritte INNERHALB [von, bis], Ø Dauer
+        const von = f.von || "0000-01-01", bis = f.bis || "9999-12-31";
+        const einIn = rows.filter(r => { const v = edToIso(r["Eintrittsdatum"]); return v && v >= von && v <= bis; }).length;
+        const ausIn = rows.filter(r => { const b = edToIso(r["Austrittsdatum"]); return b && b >= von && b <= bis; }).length;
+        const dauern = rows.map(r => edDauer(r, stichtag)).filter(d => d !== null);
+        const dAvg = dauern.length ? dauern.reduce((s,v)=>s+v,0)/dauern.length : 0;
+        return kpi("🗓", rows.length, "Einsätze im Zeitraum", "", "ed-kpi-accent")
+             + kpi("📈", einIn, "Eintritte im Zeitraum", "", "")
+             + kpi("📉", ausIn, "Austritte im Zeitraum", "", "")
+             + kpi("⏱", dAvg.toLocaleString("de-CH",{maximumFractionDigits:0}) + " Tage", "Ø Einsatzdauer", "", "");
+      })() : ""}
       ${kpi("👷", aktivRows.length, "Im Einsatz am Stichtag", uniqueMa !== aktivRows.length ? uniqueMa + " Mitarbeiter" : "", "ed-kpi-accent")}
       ${margeDisplay !== null ? kpi("💰", margeDisplay, "Ø Marge", margeVals.length + " Einsätze mit Marge", "ed-kpi-accent") : ""}
       ${lohnAvg !== null ? kpi("💵", "CHF " + lohnAvg.toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2}), "Ø Stundenlohn", "", "") : ""}
