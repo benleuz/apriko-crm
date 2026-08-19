@@ -936,7 +936,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.11.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.11.1</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -4276,7 +4276,7 @@ function bmRenderContent() {
     <!-- Margen-KPIs -->
     <div class="ed-kpi-grid">
       ${kpi("💵", bmChf(agg.umsatz), "Umsatz", byMonth.length + " Monate", "")}
-      ${kpi("👷", bmChf(agg.lohn), "Lohn", "", "")}
+      ${kpi("👷", bmChf(agg.lohn), "Lohn", agg.lohn > 0 ? "Faktor " + (agg.umsatz/agg.lohn).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2}) : "", "")}
       ${kpi("🏦", bmChf(agg.sozial), "Sozialleistungen", "", "")}
       ${kickback > 0 ? kpi("↩️", bmChf(kickback), "Kickback", "Kunden-Rückvergütung", "ed-kpi-warn") : ""}
       ${kpi("💰", bmChf(margeNachKb), "Bruttomarge" + (kickback > 0 ? " (nach Kickback)" : ""), bmPct(agg.umsatz ? margeNachKb/agg.umsatz*100 : 0), margeNachKb >= 0 ? "ed-kpi-accent" : "ed-kpi-danger")}
@@ -4629,6 +4629,14 @@ function renderEinsatzDash(el) {
       ? margeAvg.toLocaleString("de-CH",{minimumFractionDigits:1,maximumFractionDigits:1}) + "%"
       : "CHF " + margeAvg.toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2});
 
+  // Ø Faktor (Tarif / Stundenlohn) über die aktiven Einsätze — Kernzahl im Verleih
+  const faktorVals = aktivRows.map(r => {
+    const t = parsePct((r["Tarif"]||"").trim());
+    const l = parsePct((r["Stundenlohn"]||"").trim());
+    return (t > 0 && l > 0) ? t / l : null;
+  }).filter(v => v !== null);
+  const faktorAvg = faktorVals.length ? faktorVals.reduce((s,v)=>s+v,0)/faktorVals.length : null;
+
   // ---- Verlaufs-Chart: aktive pro Tag, optional aufgeteilt nach Dimension ----
   let minIso = null, maxIso = null;
   rows.forEach(r => {
@@ -4967,6 +4975,7 @@ function renderEinsatzDash(el) {
       ${kpi("👷", aktivRows.length, "Im Einsatz am Stichtag",
         hasPrev ? vjDelta(aktivRows.length, prevAktiv) : (uniqueMa !== aktivRows.length ? uniqueMa + " Mitarbeiter" : ""), "ed-kpi-accent")}
       ${margeDisplay !== null ? kpi("💰", margeDisplay, "Ø Marge", margeVals.length + " Einsätze mit Marge", "ed-kpi-accent") : ""}
+      ${faktorAvg !== null ? kpi("✖️", faktorAvg.toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2}), "Ø Faktor", "Tarif ÷ Stundenlohn, " + faktorVals.length + " Einsätze", "ed-kpi-accent") : ""}
       ${kpi("📈", eintritteNext7.length, "Eintritte nächste 7 Tage", "", "")}
       ${kpi("📉", austritteNext7.length, "Austritte nächste 7 Tage", "", austritteNext7.length > 0 ? "ed-kpi-warn" : "")}
       ${kpi("🆕", eintritteLast7.length, "Eintritte letzte 7 Tage", "", "")}
