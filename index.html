@@ -936,7 +936,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.10.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.11.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -3564,6 +3564,7 @@ const einsatzDashState = {
   barDim: "funktion",// Dimension des Balken-Vergleichs
   chartSplit: "",    // Verlaufs-Chart aufteilen nach Dimension ("" = Gesamt)
   showAllRows: false,// Tabelle: auch kommende/beendete zeigen
+  sort: { col: "", dir: 1 },  // Tabellen-Sortierung (Klick auf Spaltenkopf)
   f: {               // Filterleiste Einsätze-Tab
     von: "", bis: "",       // Zeitraum (Einsatz überlappt diesen Bereich)
     gav: "", berater: "",   // Dropdown-Filter
@@ -3599,7 +3600,17 @@ function edAvailableDims() {
 function edDist(rows, dimKey, maxGroups) {
   const get = edDim(dimKey).get;
   const dist = {};
+  const useBet = dimKey === "berater" && einsatzDashState.bet.rows.length > 0;
   rows.forEach(r => {
+    if (useBet) {
+      /* Beteiligungs-gewichtet: ein 50/50-Einsatz zählt bei beiden Recruitern
+         je 0.5. Ohne Beteiligungs-Eintrag: voller Punkt beim Spalten-Berater. */
+      const bets = betFor((r["Einsatz-Nummer"]||"").trim());
+      if (bets.length) {
+        bets.forEach(b => dist[b.recruiter] = (dist[b.recruiter]||0) + b.anteil);
+        return;
+      }
+    }
     const v = get(r) || "(leer)";
     dist[v] = (dist[v]||0) + 1;
   });
@@ -3610,6 +3621,33 @@ function edDist(rows, dimKey, maxGroups) {
     entries = [...top, ["Andere", rest]];
   }
   return entries;
+}
+
+/* Zahlformat für (evtl. gebrochene) Einsatz-Zählungen: 12 / 11.5 */
+function edFmtCount(n) {
+  return n.toLocaleString("de-CH", { maximumFractionDigits: 1 });
+}
+
+/* Tabellen-Sortierung: Klick auf Spaltenkopf, zweiter Klick dreht die Richtung */
+function edSortTable(col) {
+  const s = einsatzDashState.sort;
+  if (s.col === col) s.dir = -s.dir;
+  else { s.col = col; s.dir = 1; }
+  render();
+}
+
+/* Sortier-Wert einer Zeile für eine Tabellen-Spalte */
+function edSortVal(r, col) {
+  switch (col) {
+    case "kandidat": return edKandidat(r).toLowerCase();
+    case "kunde":    return (r["Kunde"]||"").toLowerCase();
+    case "gav":      return (r["GAV"]||"").toLowerCase();
+    case "eintritt": return edToIso(r["Eintrittsdatum"]) || "";
+    case "austritt": return edToIso(r["Austrittsdatum"]) || "9999-12-31";  // laufende zuletzt
+    case "nr":       return (r["Einsatz-Nummer"]||"");
+    case "berater":  return edBerater(r).toLowerCase();
+    default:         return "";
+  }
 }
 
 /* SVG-Pfad für ein Kuchen-Segment (Winkel in Radiant, 12-Uhr-Start via -PI/2 Offset) */
@@ -4527,9 +4565,22 @@ function renderEinsatzDash(el) {
   const rows = edFilteredRows();
   const aktivRows = rows.filter(r => edActiveOn(r, stichtag));
 
-  // ---- Vorjahres-Vergleich (falls Vorjahres-Liste geladen) ----
-  const hasPrev = einsatzDashState.prevRows.length > 0;
-  const prevRows = hasPrev ? edFilteredPrevRows() : [];
+  // ---- Vorjahres-Vergleich ----
+  // Quelle A: separate Vorjahres-Datei (prevRows).
+  // Quelle B: die Hauptliste selbst deckt das Vorjahr ab — erkennbar daran,
+  //           dass Einsätze mit Austritt VOR dem Stichtag-Jahr enthalten sind
+  //           (ein reiner Aktuell-Export enthält solche abgeschlossenen nie).
+  const stYear = stichtag.slice(0,4);
+  const hasPrevFile = einsatzDashState.prevRows.length > 0;
+  const hasPrevInMain = !hasPrevFile && einsatzDashState.rows.some(r => {
+    const b = edToIso(r["Austrittsdatum"]);
+    return b && b < stYear + "-01-01";
+  });
+  const hasPrev = hasPrevFile || hasPrevInMain;
+  // Fürs Vorjahr: gleiche Dropdown-Filter, Von/Bis um 1 Jahr zurückverschoben
+  const prevRows = hasPrevFile ? edFilteredPrevRows()
+                 : hasPrevInMain ? edApplyFilters(einsatzDashState.rows, -1)
+                 : [];
   const prevStichtag = edShiftYearIso(stichtag, -1);
   const prevAktiv = hasPrev ? prevRows.filter(r => edActiveOn(r, prevStichtag)).length : 0;
   /* Delta-Badge für KPI-Subzeilen: "VJ: 78 · +23%" */
@@ -4578,11 +4629,6 @@ function renderEinsatzDash(el) {
       ? margeAvg.toLocaleString("de-CH",{minimumFractionDigits:1,maximumFractionDigits:1}) + "%"
       : "CHF " + margeAvg.toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2});
 
-  // Ø Stundenlohn analog (Zusatz-Kachel, nur wenn Daten)
-  const lohnRaw = aktivRows.map(r => (r["Stundenlohn"]||"").trim()).filter(Boolean);
-  const lohnVals = lohnRaw.map(parsePct);
-  const lohnAvg = lohnVals.length ? lohnVals.reduce((s,v)=>s+v,0)/lohnVals.length : null;
-
   // ---- Verlaufs-Chart: aktive pro Tag, optional aufgeteilt nach Dimension ----
   let minIso = null, maxIso = null;
   rows.forEach(r => {
@@ -4598,14 +4644,36 @@ function renderEinsatzDash(el) {
 
   // Serien bestimmen: "" = eine Gesamt-Serie, sonst Top-5-Werte + "Andere"
   let seriesDefs;
+  const betWeighted = split === "berater" && einsatzDashState.bet.rows.length > 0;
   if (!split) {
-    seriesDefs = [{ name: "Gesamt", match: () => true }];
+    seriesDefs = [{ name: "Gesamt", count: rs => rs.length }];
+  } else if (betWeighted) {
+    /* Berater-Split mit Beteiligungen: Serien zählen die Anteils-Summen */
+    const topVals = edDist(rows, split, 6).map(([v]) => v).filter(v => v !== "Andere");
+    const weightFor = (rs, name, invert) => {
+      let sum = 0;
+      rs.forEach(r => {
+        const bets = betFor((r["Einsatz-Nummer"]||"").trim());
+        if (bets.length) {
+          const own = bets.filter(b => invert ? !topVals.includes(b.recruiter) : b.recruiter === name);
+          own.forEach(b => sum += b.anteil);
+        } else {
+          const fall = edBerater(r) || "(leer)";
+          if (invert ? !topVals.includes(fall) : fall === name) sum += 1;
+        }
+      });
+      return sum;
+    };
+    seriesDefs = topVals.map(val => ({ name: val, count: rs => weightFor(rs, val, false) }));
+    if (edDist(rows, split).length > topVals.length) {
+      seriesDefs.push({ name: "Andere", count: rs => weightFor(rs, null, true) });
+    }
   } else {
     const get = edDim(split).get;
     const topVals = edDist(rows, split, 6).map(([v]) => v).filter(v => v !== "Andere");
-    seriesDefs = topVals.map(val => ({ name: val, match: r => (get(r)||"(leer)") === val }));
+    seriesDefs = topVals.map(val => ({ name: val, count: rs => rs.filter(r => (get(r)||"(leer)") === val).length }));
     if (edDist(rows, split).length > topVals.length) {
-      seriesDefs.push({ name: "Andere", match: r => !topVals.includes(get(r)||"(leer)") });
+      seriesDefs.push({ name: "Andere", count: rs => rs.filter(r => !topVals.includes(get(r)||"(leer)")).length });
     }
   }
 
@@ -4655,7 +4723,7 @@ function renderEinsatzDash(el) {
       const active = rows.filter(r => edActiveOn(r, iso));
       chartDays.push({
         iso,
-        counts: seriesDefs.map(s => active.filter(s.match).length),
+        counts: seriesDefs.map(s => s.count(active)),
         // Vorjahres-Wert: gleicher Kalendertag −1 Jahr auf der Vorjahres-Liste
         prev: hasPrev ? prevRows.filter(r => edActiveOn(r, edShiftYearIso(iso, -1))).length : null
       });
@@ -4711,7 +4779,7 @@ function renderEinsatzDash(el) {
         </div>
         <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" preserveAspectRatio="xMidYMid meet">
           ${prevLine}${lines}${stLine}
-          <text x="${PAD}" y="${PAD-10}" fill="var(--text-faint)" font-size="10">max ${maxN}</text>
+          <text x="${PAD}" y="${PAD-10}" fill="var(--text-faint)" font-size="10">max ${edFmtCount(maxN)}</text>
           ${labels}
         </svg>
         ${legend}
@@ -4740,7 +4808,7 @@ function renderEinsatzDash(el) {
         <svg viewBox="0 0 180 180" style="width:150px;height:150px;flex-shrink:0">
           ${segs}
           <circle cx="${cx}" cy="${cy}" r="46" fill="var(--bg-card)"/>
-          <text x="${cx}" y="${cy-4}" text-anchor="middle" fill="var(--text)" font-size="26" font-weight="700">${pieTotal}</text>
+          <text x="${cx}" y="${cy-4}" text-anchor="middle" fill="var(--text)" font-size="26" font-weight="700">${edFmtCount(pieTotal)}</text>
           <text x="${cx}" y="${cy+15}" text-anchor="middle" fill="var(--text-faint)" font-size="9">aktiv</text>
         </svg>
         <div class="ed-pie-legend">
@@ -4748,7 +4816,7 @@ function renderEinsatzDash(el) {
             <div class="ed-pie-legend-row">
               <span class="ed-legend-dot" style="background:${ED_COLORS[i % ED_COLORS.length]}"></span>
               <span class="ed-pie-legend-name" title="${escape(name)}">${escape(name)}</span>
-              <span class="ed-pie-legend-n">${n}</span>
+              <span class="ed-pie-legend-n">${edFmtCount(n)}</span>
               <span class="ed-pie-legend-pct">${(n/pieTotal*100).toFixed(0)}%</span>
             </div>`).join("")}
         </div>
@@ -4769,7 +4837,7 @@ function renderEinsatzDash(el) {
         <div class="ed-gav-bar-wrap">
           <div class="ed-gav-bar" style="width:${(n/barMax*100).toFixed(0)}%;background:${ED_COLORS[i % ED_COLORS.length]}"></div>
         </div>
-        <div class="ed-gav-n">${n}</div>
+        <div class="ed-gav-n">${edFmtCount(n)}</div>
       </div>`).join("")
     : `<div style="color:var(--text-faint);font-size:12px;padding:12px 0">Keine aktiven Einsätze am Stichtag</div>`;
   const barChips = `<div class="ed-dim-chips">${availDims.map(d =>
@@ -4808,7 +4876,12 @@ function renderEinsatzDash(el) {
   const zeitraumMode = !!(f.von || f.bis);
   const showAll = einsatzDashState.showAllRows || zeitraumMode;
   const statusOrder = { aktiv: 0, kommend: 1, beendet: 2, unklar: 3 };
+  const sortState = einsatzDashState.sort;
   const tableRows = (showAll ? rows : aktivRows).slice().sort((a,b) => {
+    if (sortState.col) {
+      const va = edSortVal(a, sortState.col), vb = edSortVal(b, sortState.col);
+      return va.localeCompare(vb, "de-CH", { numeric: true }) * sortState.dir;
+    }
     const sa = statusOrder[edStatus(a, stichtag)], sb = statusOrder[edStatus(b, stichtag)];
     if (sa !== sb) return sa - sb;
     return (edToIso(a["Eintrittsdatum"])||"").localeCompare(edToIso(b["Eintrittsdatum"])||"");
@@ -4838,7 +4911,7 @@ function renderEinsatzDash(el) {
       </div>
       <div class="ed-stichtag-info">
         ${escape(einsatzDashState.fileName||"")} · ${einsatzDashState.rows.length} Einsätze in Datei
-        ${einsatzDashState.prevRows.length ? ` · <span style="color:var(--text-faint)">Vorjahr: ${escape(einsatzDashState.prevFileName||"")} (${einsatzDashState.prevRows.length})</span>` : ""}
+        ${einsatzDashState.prevRows.length ? ` · <span style="color:var(--text-faint)">Vorjahr: ${escape(einsatzDashState.prevFileName||"")} (${einsatzDashState.prevRows.length})</span>` : hasPrevInMain ? ` · <span style="color:var(--text-faint)">Vorjahresdaten in der Liste erkannt — Vergleich aktiv</span>` : ""}
         ${activeFilterCount ? ` · <span style="color:var(--accent)">${activeFilterCount} Filter aktiv (${rows.length} im Bereich)</span>` : ""}
       </div>
     </div>
@@ -4894,7 +4967,6 @@ function renderEinsatzDash(el) {
       ${kpi("👷", aktivRows.length, "Im Einsatz am Stichtag",
         hasPrev ? vjDelta(aktivRows.length, prevAktiv) : (uniqueMa !== aktivRows.length ? uniqueMa + " Mitarbeiter" : ""), "ed-kpi-accent")}
       ${margeDisplay !== null ? kpi("💰", margeDisplay, "Ø Marge", margeVals.length + " Einsätze mit Marge", "ed-kpi-accent") : ""}
-      ${lohnAvg !== null ? kpi("💵", "CHF " + lohnAvg.toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2}), "Ø Stundenlohn", "", "") : ""}
       ${kpi("📈", eintritteNext7.length, "Eintritte nächste 7 Tage", "", "")}
       ${kpi("📉", austritteNext7.length, "Austritte nächste 7 Tage", "", austritteNext7.length > 0 ? "ed-kpi-warn" : "")}
       ${kpi("🆕", eintritteLast7.length, "Eintritte letzte 7 Tage", "", "")}
@@ -4989,20 +5061,27 @@ function renderEinsatzDash(el) {
             ${showAll ? "Nur aktive zeigen" : "+ " + hiddenCount + " kommende/beendete einblenden"}
           </button>` : ""}
       </div>
-      <div class="table-wrap"><table>
+      ${(() => {
+        const sTh = (col, label) => {
+          const active = sortState.col === col;
+          const arrow = active ? (sortState.dir === 1 ? " ▲" : " ▼") : "";
+          return `<th onclick="edSortTable('${col}')" style="cursor:pointer;user-select:none${active ? ";color:var(--accent)" : ""}" title="Sortieren">${label}${arrow}</th>`;
+        };
+        return `<div class="table-wrap"><table>
         <thead><tr>
           ${showAll ? "<th>Status</th>" : ""}
-          <th>Kandidat</th><th>Funktion</th><th>GAV</th>
-          <th>Eintritt</th><th>Austritt</th><th>Einsatz-Nr</th>
-          ${beraterList.length ? "<th>Berater</th>" : ""}
-        </tr></thead>
+          ${sTh("kandidat","Kandidat")}${sTh("kunde","Kunde")}${sTh("gav","GAV")}
+          ${sTh("eintritt","Eintritt")}${sTh("austritt","Austritt")}${sTh("nr","Einsatz-Nr")}
+          ${beraterList.length ? sTh("berater","Berater") : ""}
+        </tr></thead>`;
+      })()}
         <tbody>
           ${tableRows.map(r => {
             const s = edStatus(r, stichtag);
             return `<tr style="${s==='beendet' ? 'opacity:0.5' : ''}">
               ${showAll ? `<td>${statusBadge(s)}</td>` : ""}
               <td><strong>${escape(edKandidat(r))}</strong></td>
-              <td class="dim">${escape((r["Einsatz als"]||"—").substring(0,40))}</td>
+              <td class="dim">${escape((r["Kunde"]||"—").substring(0,40))}</td>
               <td class="dim" style="font-size:11px">${escape((r["GAV"]||"—").replace("Personalverleih ","PV "))}</td>
               <td>${edFormatIso(edToIso(r["Eintrittsdatum"]))}</td>
               <td>${r["Austrittsdatum"] ? edFormatIso(edToIso(r["Austrittsdatum"])) : '<span style="color:var(--accent)">laufend</span>'}</td>
