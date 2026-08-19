@@ -642,6 +642,22 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
 
   /* Thumbnails der hochgeladenen Bilder in Karte 1 */
   .rp-thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin:12px 0}
+
+  /* Grosse Vorschau der ersten hochgeladenen Datei — direkt nach Upload in Karte 1 */
+  .rp-featured{margin:16px 0;border:1px solid var(--rp-line);border-radius:6px;background:var(--rp-bg);overflow:hidden}
+  .rp-featured-cap{padding:8px 12px;font-size:11px;color:var(--rp-grey);background:var(--rp-white);
+    border-bottom:1px solid var(--rp-line)}
+  .rp-featured-cap b{color:var(--rp-dark)}
+  .rp-featured-img-wrap{padding:12px;text-align:center;background:var(--rp-bg);max-height:600px;overflow:auto}
+  .rp-featured-img-wrap img{max-width:100%;max-height:560px;cursor:zoom-in;border-radius:3px;
+    box-shadow:0 1px 4px rgba(0,0,0,0.08);image-orientation:from-image;background:var(--rp-white)}
+  .rp-featured-loading{padding:40px;text-align:center;color:var(--rp-grey);font-size:13px}
+  .rp-featured-controls{padding:6px 12px;background:var(--rp-white);border-bottom:1px solid var(--rp-line);
+    display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+  .rp-featured-controls button{padding:4px 10px;font-size:11px;border:1px solid var(--rp-line);
+    background:var(--rp-bg);color:var(--rp-dark);border-radius:3px;cursor:pointer;font-family:inherit}
+  .rp-featured-controls button:hover{background:var(--rp-lime);border-color:var(--rp-lime-dark)}
+  @keyframes rp-spin{to{transform:rotate(360deg)}}
   .rp-thumb{position:relative;background:var(--rp-bg);border:1px solid var(--rp-line);border-radius:5px;
     aspect-ratio:3/4;overflow:hidden;cursor:zoom-in;transition:border-color 0.15s}
   .rp-thumb:hover{border-color:var(--rp-lime-dark)}
@@ -751,7 +767,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.3.1</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.4.1</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -789,6 +805,9 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
 
           <!-- Thumbnails der hochgeladenen Bilder -->
           <div class="rp-thumbs" id="rpThumbs" hidden></div>
+
+          <!-- Grosse Vorschau der ersten Datei, direkt nach Upload sichtbar -->
+          <div class="rp-featured" id="rpFeatured" hidden></div>
 
           <!-- OCR-Modus + API-Key -->
           <div class="rp-ocr-config" id="rpOcrConfig" hidden>
@@ -4984,6 +5003,9 @@ function resetRapport(){
     if(f.url && f.url.indexOf('blob:') === 0){
       try { URL.revokeObjectURL(f.url); } catch(e) {}
     }
+    if(f.previewUrl && f.previewUrl !== f.url && f.previewUrl.indexOf('blob:') === 0){
+      try { URL.revokeObjectURL(f.previewUrl); } catch(e) {}
+    }
   });
 
   // State leeren
@@ -4995,10 +5017,12 @@ function resetRapport(){
   window.__rpZeitraum = null;
   HINWEISE = [];
 
-  // Karte 1: Dateiliste, Thumbnails, OCR-Config zurücksetzen
+  // Karte 1: Dateiliste, Thumbnails, Featured, OCR-Config zurücksetzen
   $('rpFiles').innerHTML = '';
   $('rpThumbs').innerHTML = '';
   $('rpThumbs').hidden = true;
+  var featured = $('rpFeatured');
+  if(featured){ featured.innerHTML = ''; featured.hidden = true; }
   $('rpOcrConfig').hidden = true;
   $('rpUseClaude').checked = false;
   $('rpScan').disabled = true;
@@ -5129,30 +5153,152 @@ window.initRapport = function(){
   });
 };
 
-function addFiles(list){
+async function addFiles(list){
+  var added = [];
   for(var i=0;i<list.length;i++){
     var f = list[i];
-    // Object-URL für Vorschau erstellen (Browser hält die File-Referenz)
     var url = URL.createObjectURL(f);
     var isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
-    files.push({
+    var entry = {
       name: f.name,
       size: (f.size/1024).toFixed(0)+' KB',
-      url: url,
+      url: url,          // Original-URL (PDF oder Bild) — für "In neuem Tab öffnen"
+      previewUrl: url,   // URL fürs Anzeigen (bei PDF wird das gleich zum PNG)
       type: isPdf ? 'pdf' : 'image',
-      blob: f  // Original-File-Referenz für OCR-Upload
-    });
+      blob: f,           // Original-File — für Fallback / falls PDF-Render scheitert
+      ocrBlob: f,        // Was tatsächlich zur OCR-API geht (bei PDF: gerendertes PNG)
+      renderPending: isPdf  // Marker: bei PDF müssen wir noch rendern
+    };
+    files.push(entry);
+    added.push(entry);
   }
   renderFiles();
   renderThumbs();
+  renderFeaturedPreview();  // Grosse Vorschau in Karte 1 sofort zeigen
   updateOcrConfigVisibility();
+
+  // PDFs im Hintergrund zu PNG rendern (dauert 200-1000ms pro Seite).
+  // Bilder brauchen keine Konvertierung.
+  added.forEach(function(entry){
+    if(!entry.renderPending) return;
+    entry.renderStatus = 'pending';
+    renderPdfToImage(entry.blob, 2.0).then(function(pngBlob){
+      // PDF-URL bleibt für "in neuem Tab öffnen", aber Preview + OCR nutzen das PNG
+      entry.previewUrl = URL.createObjectURL(pngBlob);
+      entry.ocrBlob = pngBlob;
+      entry.ocrType = 'image';  // Marker: Bild-Endpunkt nutzen, nicht PDF
+      entry.renderStatus = 'ready';
+      entry.renderPending = false;
+      // UI mit neuem Preview aktualisieren
+      renderThumbs();
+      renderFeaturedPreview();
+    }).catch(function(err){
+      console.warn('PDF-Render fehlgeschlagen für ' + entry.name + ':', err);
+      entry.renderStatus = 'failed';
+      entry.renderPending = false;
+      // Fallback: PDF wird trotzdem als "document" an Claude gesendet
+    });
+  });
 }
+
 function renderFiles(){
   $('rpFiles').innerHTML = files.map(function(f){
     return '<li><span class="rp-dot"></span><span class="rp-nm">'+esc(f.name)+
            '</span><span class="rp-sz">'+esc(f.size)+'</span></li>'; }).join('');
   $('rpScan').disabled = files.length===0;
 }
+
+/* Grosse Vorschau der ERSTEN hochgeladenen Datei direkt in Karte 1,
+   damit der User sofort sieht was hochgeladen wurde — bevor er auf
+   "Rapporte auslesen" klickt. Ähnlich einer Featured-Preview.
+   PDFs zeigen entweder das gerenderte PNG (nach ein paar hundert ms)
+   oder einen "wird gerendert..."-Platzhalter.
+   Bei Bildern/gerenderten PDFs: Rotate-Buttons für schräge Fotos. */
+function renderFeaturedPreview(){
+  var el = $('rpFeatured');
+  if(!el) return;
+  if(!files.length){
+    el.hidden = true;
+    el.innerHTML = '';
+    return;
+  }
+  el.hidden = false;
+  var f = files[0];
+  var caption = '<div class="rp-featured-cap">' +
+    '<b>' + esc(f.name) + '</b> · ' + esc(f.size) +
+    (files.length > 1 ? ' · <span style="color:var(--rp-grey)">(erste von ' + files.length + ')</span>' : '') +
+    ' · <a href="' + f.url + '" target="_blank" rel="noopener" style="color:var(--rp-lime-dark);text-decoration:underline">in neuem Tab öffnen</a>' +
+    '</div>';
+  if(f.type === 'pdf' && f.renderStatus === 'pending'){
+    el.innerHTML = caption +
+      '<div class="rp-featured-loading">' +
+      '<div style="width:24px;height:24px;border:3px solid #E5E7EB;border-top-color:var(--rp-lime-dark);' +
+      'border-radius:50%;animation:rp-spin 0.8s linear infinite;margin:0 auto 12px"></div>' +
+      'PDF wird zum Prüfen aufbereitet…</div>';
+    return;
+  }
+  if(f.type === 'pdf' && f.renderStatus === 'failed'){
+    el.innerHTML = caption +
+      '<div class="rp-featured-loading" style="color:#B91C1C">' +
+      '⚠️ PDF konnte nicht als Bild dargestellt werden. Bitte in neuem Tab öffnen zum Prüfen.</div>';
+    return;
+  }
+  // Rotate-Buttons für schräge Fotos / falsch orientierte Scans.
+  // Werden auch fürs OCR angewendet (das ocrBlob wird mit-rotiert).
+  var rotateControls =
+    '<div class="rp-featured-controls">' +
+      '<span style="color:var(--rp-grey);font-size:11px;margin-right:8px">Falsch orientiert?</span>' +
+      '<button type="button" onclick="__rpRotate(-90)" title="90° nach links drehen">↺ Links</button>' +
+      '<button type="button" onclick="__rpRotate(90)" title="90° nach rechts drehen">↻ Rechts</button>' +
+      '<button type="button" onclick="__rpRotate(180)" title="Auf den Kopf stellen">↻ 180°</button>' +
+    '</div>';
+  el.innerHTML = caption + rotateControls +
+    '<div class="rp-featured-img-wrap"><img src="' + (f.previewUrl || f.url) + '" alt="' + esc(f.name) + '" ' +
+    'onclick="__rpLightbox(this.src)" title="Klick zum Vergrössern"></div>';
+}
+
+/* Dreht die aktuell in der Featured-Preview gezeigte Datei um X° und
+   aktualisiert alle Vorschauen. Das rotierte Bild wird auch beim OCR-Call
+   verwendet, also nutzt Claude die vom User korrigierte Orientierung. */
+async function rotateFirstFile(degrees){
+  var f = files[0];
+  if(!f) return;
+  var srcUrl = f.previewUrl || f.url;
+  var img = new Image();
+  await new Promise(function(resolve, reject){
+    img.onload = resolve;
+    img.onerror = function(e){ reject(new Error('Bild konnte nicht geladen werden')); };
+    img.src = srcUrl;
+  });
+  var w = img.naturalWidth, h = img.naturalHeight;
+  var canvas = document.createElement('canvas');
+  var absDeg = Math.abs(degrees) % 360;
+  if(absDeg === 90 || absDeg === 270){
+    canvas.width = h; canvas.height = w;
+  } else {
+    canvas.width = w; canvas.height = h;
+  }
+  var ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.translate(canvas.width/2, canvas.height/2);
+  ctx.rotate(degrees * Math.PI / 180);
+  ctx.drawImage(img, -w/2, -h/2);
+  var newBlob = await new Promise(function(resolve){
+    canvas.toBlob(function(blob){ resolve(blob); }, 'image/png', 0.95);
+  });
+  // Alte previewUrl freigeben (aber f.url NICHT, das ist die Original-Datei)
+  if(f.previewUrl && f.previewUrl !== f.url && f.previewUrl.indexOf('blob:') === 0){
+    try { URL.revokeObjectURL(f.previewUrl); } catch(e) {}
+  }
+  f.previewUrl = URL.createObjectURL(newBlob);
+  f.ocrBlob = newBlob;
+  f.renderStatus = 'ready';
+  renderThumbs();
+  renderFeaturedPreview();
+  renderS2Preview();
+}
+window.__rpRotate = rotateFirstFile;
 
 /* Rendert Thumbnails aller hochgeladenen Dateien in Karte 1.
    Bilder als Bild-Thumbnail, PDFs als Icon-Kachel. Klick öffnet Lightbox. */
@@ -5166,21 +5312,27 @@ function renderThumbs(){
   el.hidden = false;
   el.innerHTML = files.map(function(f, i){
     var content;
-    if(f.type === 'pdf'){
+    if(f.type === 'pdf' && f.renderStatus !== 'ready'){
       content = '<div class="rp-thumb-pdf">📄<span>PDF</span></div>';
     } else {
-      content = '<img src="'+f.url+'" alt="'+esc(f.name)+'">';
+      // Ab jetzt zeigt auch das PDF sein gerendertes Bild
+      content = '<img src="'+(f.previewUrl || f.url)+'" alt="'+esc(f.name)+'">';
     }
     var short = f.name.length > 20 ? f.name.substring(0, 17) + '…' : f.name;
     return '<div class="rp-thumb" data-idx="'+i+'" title="Klick zum Vergrössern">'+
       content +
       '<div class="rp-thumb-label">'+esc(short)+'</div></div>';
   }).join('');
-  // Klick auf Thumb öffnet Lightbox (nur für Bilder)
   Array.prototype.forEach.call(el.querySelectorAll('.rp-thumb'), function(div){
     div.addEventListener('click', function(){
       var f = files[+div.dataset.idx];
-      if(f.type === 'image') window.__rpLightbox(f.url);
+      var url = f.previewUrl || f.url;
+      // Nur Bilder in Lightbox; PDFs die noch nicht gerendert sind → neuer Tab
+      if(f.type === 'image' || (f.type === 'pdf' && f.renderStatus === 'ready')){
+        window.__rpLightbox(url);
+      } else {
+        window.open(f.url, '_blank');
+      }
     });
   });
 }
@@ -5247,10 +5399,11 @@ function renderS2Preview(){
   }
   container.hidden = false;
   var f = files[0];  // erste Datei
-  if(f.type === 'pdf'){
-    // Bei PDFs: Icon-Kachel + "Öffnen"-Link. Ein embedded PDF ist im
-    // 260px-Vorschau-Bereich unbrauchbar (Text zu klein) und hat oft
-    // Rotationsprobleme bei Landscape-PDFs.
+  // Wenn ein PDF gerendert wurde, zeige das PNG statt Icon-Kachel.
+  // Der User sieht damit das gleiche Bild, das Claude sieht.
+  var previewSrc = f.previewUrl || f.url;
+  if(f.type === 'pdf' && f.renderStatus !== 'ready'){
+    // Rendering noch nicht fertig oder fehlgeschlagen — Icon-Kachel als Fallback
     inner.innerHTML =
       '<div style="text-align:center;padding:20px;color:var(--rp-dark)">' +
         '<div style="font-size:48px;line-height:1">📄</div>' +
@@ -5261,8 +5414,8 @@ function renderS2Preview(){
       '</div>';
     inner.onclick = function(){ window.open(f.url, '_blank'); };
   } else {
-    inner.innerHTML = '<img src="'+f.url+'" alt="'+esc(f.name)+'">';
-    inner.onclick = function(){ window.__rpLightbox(f.url); };
+    inner.innerHTML = '<img src="'+previewSrc+'" alt="'+esc(f.name)+'">';
+    inner.onclick = function(){ window.__rpLightbox(previewSrc); };
   }
 }
 
@@ -5320,6 +5473,55 @@ function hideLoading(){
    Wir nutzen createImageBitmap mit imageOrientation: 'from-image' um das
    Bild korrekt zu drehen, zeichnen es auf Canvas und exportieren neu.
    Für PDFs oder wenn Rotation fehlschlägt: Original zurückgeben. */
+/* Lazy-Loader für pdf.js — nur wenn wirklich ein PDF verarbeitet wird.
+   pdf.js wird von CDN geholt (v3.11 wegen breiter Browser-Kompatibilität).
+   Rückgabe: das globale pdfjsLib-Objekt. */
+var _pdfjsPromise = null;
+function loadPdfJs(){
+  if(_pdfjsPromise) return _pdfjsPromise;
+  _pdfjsPromise = new Promise(function(resolve, reject){
+    if(window.pdfjsLib){
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      return resolve(window.pdfjsLib);
+    }
+    var s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    s.onload = function(){
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      resolve(window.pdfjsLib);
+    };
+    s.onerror = function(){ reject(new Error('pdf.js konnte nicht geladen werden')); };
+    document.head.appendChild(s);
+  });
+  return _pdfjsPromise;
+}
+
+/* Rendert die erste Seite eines PDF-Blobs zu einem PNG-Blob.
+   scale = 2.5 gibt bei einem A4-PDF ca. 2100x2970 Pixel — ausreichend Detail
+   damit Claude Vision die Tabellenspalten sauber unterscheiden kann.
+   PDF.js respektiert die im PDF eingebettete Rotation automatisch. */
+async function renderPdfToImage(pdfBlob, scale){
+  scale = scale || 2.0;
+  var lib = await loadPdfJs();
+  var buf = await pdfBlob.arrayBuffer();
+  var pdf = await lib.getDocument({ data: buf, disableWorker: false }).promise;
+  var page = await pdf.getPage(1);
+  var viewport = page.getViewport({ scale: scale });
+  var canvas = document.createElement('canvas');
+  canvas.width = Math.floor(viewport.width);
+  canvas.height = Math.floor(viewport.height);
+  var ctx = canvas.getContext('2d');
+  // Weisser Hintergrund (PDFs haben transparent)
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+  return await new Promise(function(resolve){
+    canvas.toBlob(function(blob){ resolve(blob); }, 'image/png');
+  });
+}
+
 async function normalizeImageOrientation(file){
   if(!file || !file.type || !file.type.startsWith('image/')) return file;
   if(typeof createImageBitmap === 'undefined') return file;
@@ -5657,12 +5859,48 @@ async function scanWithClaude(){
   );
 
   try {
-    // Bild vor dem Upload zu Claude orientierungs-korrigieren (EXIF respect).
-    // Handy-Fotos werden sonst schräg an Claude gesendet.
-    var uploadBlob = docFile.blob;
-    if(!isPdf){
+    // Wenn PDF: das schon beim Upload gerenderte PNG verwenden (hohe DPI, gut lesbar).
+    // Wenn Bild: EXIF-Rotation korrigieren.
+    // Fallback: wenn der PDF-Render fehlgeschlagen ist, das Original-PDF nehmen.
+    var uploadBlob;
+    var sendAsPdf = false;
+
+    if(isPdf){
+      if(docFile.renderStatus === 'ready' && docFile.ocrBlob){
+        // Das gerenderte PNG hat viel höhere DPI als Claude's interne PDF-Rasterung
+        uploadBlob = docFile.ocrBlob;
+        sendAsPdf = false;
+      } else if(docFile.renderStatus === 'pending'){
+        // Rendering noch nicht fertig — kurz warten
+        showLoading('PDF wird für die OCR aufbereitet…', 'Höhere Auflösung = bessere Erkennung');
+        // Warten bis fertig (max 15 Sek)
+        var waited = 0;
+        while(docFile.renderStatus === 'pending' && waited < 15000){
+          await new Promise(function(r){ setTimeout(r, 200); });
+          waited += 200;
+        }
+        if(docFile.renderStatus === 'ready' && docFile.ocrBlob){
+          uploadBlob = docFile.ocrBlob;
+          sendAsPdf = false;
+        } else {
+          // Fallback: als PDF senden
+          uploadBlob = docFile.blob;
+          sendAsPdf = true;
+        }
+      } else {
+        // Fallback: PDF-Render failed → Original-PDF senden
+        uploadBlob = docFile.blob;
+        sendAsPdf = true;
+      }
+    } else {
+      // Bilder: EXIF-Rotation korrigieren
       uploadBlob = await normalizeImageOrientation(docFile.blob);
     }
+
+    showLoading(
+      isPdf ? 'Claude liest den Rapport…' : 'Claude liest den Rapport…',
+      'Das kann 10-30 Sekunden dauern'
+    );
     var b64 = await fileToBase64(uploadBlob);
 
     var belegKurz = docFile.name.replace(/\.[^.]+$/,'');
@@ -5725,9 +5963,10 @@ async function scanWithClaude(){
       '- Fehlender Vorname/Nachname/Firma: leerer String "" (kein Ratewert).\n\n' +
       'Nur das JSON, sonst nichts.';
 
-    // Content-Block: PDF als "document", Bild als "image"
+    // Content-Block: bei rendered-PDF-zu-PNG oder normalem Bild → "image".
+    // Nur wenn Fallback greift (PDF-Render fehlgeschlagen): "document".
     var mediaBlock;
-    if(isPdf){
+    if(sendAsPdf){
       mediaBlock = {
         type: 'document',
         source: {
@@ -6020,12 +6259,17 @@ function showBeleg(belegName){
     viewer.innerHTML = '<div class="rp-beleg-empty">Beleg <b>'+esc(belegName)+
       '</b> nicht in den hochgeladenen Dateien gefunden.<br><small>Der OCR-Prozess hat den Namen anders gesetzt als die Datei heisst.</small></div>';
   } else if(file.type === 'pdf'){
-    // <iframe> statt <embed>: der Browser-eigene PDF-Viewer respektiert die
-    // interne PDF-Orientierung besser. #view=Fit skaliert das PDF auf die
-    // Container-Grösse, so werden auch Landscape-PDFs korrekt eingepasst.
-    viewer.innerHTML = '<div class="rp-beleg-info">'+esc(file.name)+' · '+
-      '<a href="'+file.url+'" target="_blank" style="color:inherit;text-decoration:underline">in neuem Tab öffnen</a></div>'+
-      '<iframe src="'+file.url+'#view=Fit&toolbar=1" title="'+esc(file.name)+'"></iframe>';
+    // Wenn wir das PDF schon als PNG haben, das anzeigen (perfekte Orientation,
+    // lesbare Grösse). Sonst Fallback zu iframe mit dem originalen PDF.
+    if(file.renderStatus === 'ready' && file.previewUrl){
+      viewer.innerHTML = '<div class="rp-beleg-info">'+esc(file.name)+' · '+
+        '<a href="'+file.url+'" target="_blank" style="color:inherit;text-decoration:underline">Original-PDF öffnen</a></div>'+
+        '<img src="'+file.previewUrl+'" alt="'+esc(file.name)+'" onclick="__rpLightbox(this.src)">';
+    } else {
+      viewer.innerHTML = '<div class="rp-beleg-info">'+esc(file.name)+' · '+
+        '<a href="'+file.url+'" target="_blank" style="color:inherit;text-decoration:underline">in neuem Tab öffnen</a></div>'+
+        '<iframe src="'+file.url+'#view=Fit&toolbar=1" title="'+esc(file.name)+'"></iframe>';
+    }
   } else {
     viewer.innerHTML = '<div class="rp-beleg-info">'+esc(file.name)+' · Klick zum Vergrössern</div>'+
       '<img src="'+file.url+'" alt="'+esc(file.name)+'" onclick="__rpLightbox(this.src)">';
@@ -6264,27 +6508,67 @@ function shiftAllDatesFromFirst(newIsoDate){
 }
 
 function recalcRows(){
-  var sS=0,sI=0,s=sollOf();
-  zeilen.forEach(function(r,i){
-    // Frei-Tage haben Sollzeit=0 (weder Über- noch Minderstunden zählen dort)
-    var soll = r.absent ? 0 : s;
-    var d = r.ist - soll;
-    sS += soll;
-    sI += r.ist;
-    $('rpSoll'+i).textContent = r.absent ? '—' : nf(soll);
-    var c = $('rpDiff'+i);
-    if(r.absent){
-      c.textContent = '—';
-      c.className = 'rp-num';
-    } else {
-      c.textContent = (d>0?'+':'')+nf(d);
-      c.className = 'rp-num'+(d<0?' rp-minus':'');
+  var s = sollOf();  // Sollzeit pro Arbeitstag (z.B. 8.00)
+
+  // Zeilen nach Datum gruppieren. Bei mehreren Buchungen am selben Tag
+  // (z.B. Mo 8h Kostenstelle A + Mo 1.25h Kostenstelle B) gilt Soll NUR
+  // für den ganzen Tag, nicht pro Buchung. Sonst würde -6.75 statt +0.25 stehen.
+  var perDate = {};
+  var dateOrder = [];  // um chronologische Reihenfolge zu wahren
+  zeilen.forEach(function(r, i){
+    if(!perDate[r.datum]){
+      perDate[r.datum] = {
+        indices: [], istSum: 0,
+        // absent nur wenn ALLE Zeilen dieses Tages absent sind
+        allAbsent: true
+      };
+      dateOrder.push(r.datum);
     }
+    perDate[r.datum].indices.push(i);
+    perDate[r.datum].istSum += r.ist;
+    if(!r.absent) perDate[r.datum].allAbsent = false;
   });
-  $('rpTSoll').textContent=nf(sS); $('rpTIst').textContent=nf(sI);
-  var d=sI-sS, t=$('rpTDiff');
-  t.textContent=(d>0?'+':'')+nf(d);
-  t.className='rp-num'+(d<0?' rp-minus':'');
+
+  var sS = 0, sI = 0;
+  dateOrder.forEach(function(datum){
+    var group = perDate[datum];
+    var tagSoll = group.allAbsent ? 0 : s;
+    sS += tagSoll;
+    sI += group.istSum;
+    var tagDiff = group.istSum - tagSoll;
+
+    // Für jede Zeile des Tages: erste kriegt Soll+Diff des Tages, weitere "—"
+    group.indices.forEach(function(idx, pos){
+      var r = zeilen[idx];
+      var sollCell = $('rpSoll' + idx);
+      var diffCell = $('rpDiff' + idx);
+      if(!sollCell || !diffCell) return;
+
+      if(pos === 0){
+        // Erste Buchung des Tages: zeigt Soll und Tages-Differenz
+        sollCell.textContent = group.allAbsent ? '—' : nf(tagSoll);
+        if(group.allAbsent){
+          diffCell.textContent = '—';
+          diffCell.className = 'rp-num';
+        } else {
+          diffCell.textContent = (tagDiff > 0 ? '+' : '') + nf(tagDiff);
+          diffCell.className = 'rp-num' + (tagDiff < 0 ? ' rp-minus' : '');
+        }
+      } else {
+        // Zusatz-Buchung am selben Tag: nur Ist zählt, Soll/Diff bleiben "—"
+        sollCell.textContent = '—';
+        diffCell.textContent = '—';
+        diffCell.className = 'rp-num';
+      }
+    });
+  });
+
+  $('rpTSoll').textContent = nf(sS);
+  $('rpTIst').textContent = nf(sI);
+  var totalDiff = sI - sS;
+  var t = $('rpTDiff');
+  t.textContent = (totalDiff > 0 ? '+' : '') + nf(totalDiff);
+  t.className = 'rp-num' + (totalDiff < 0 ? ' rp-minus' : '');
 }
 function countFlags(){
   var n=zeilen.filter(function(r){ return r.kstFlag||r.istFlag; }).length;
@@ -6293,15 +6577,30 @@ function countFlags(){
 
 function berechnen(){
   var soll=sollOf();
-  // Nur "echte" Arbeitszeilen zählen für Sollzeit — Frei-Tage haben keine Sollzeit
-  var arbeitsZeilen = zeilen.filter(function(r){ return !r.absent; });
-  var tIst=zeilen.reduce(function(a,r){ return a+r.ist; },0);
-  var tSoll=soll*arbeitsZeilen.length;
+  // Arbeitstage sind UNIQUE Datum-Werte (nicht Zeilen!), sonst zählen wir
+  // bei mehreren Buchungen am gleichen Tag den Tag mehrfach für die Sollzeit.
+  var arbeitsDaten = {};
+  zeilen.forEach(function(r){
+    if(!r.absent) arbeitsDaten[r.datum] = true;
+  });
+  var arbeitstageAnzahl = Object.keys(arbeitsDaten).length;
+  var tIst = zeilen.reduce(function(a,r){ return a+r.ist; }, 0);
+  var tSoll = soll * arbeitstageAnzahl;
+
+  // Spesen-Regeln operieren pro Tag, nicht pro Buchung. Also gruppieren wir
+  // erst Ist-Stunden pro Datum und bewerten dann diese Tages-Summen.
+  var istProTag = {};
+  zeilen.forEach(function(r){
+    if(r.absent) return;
+    istProTag[r.datum] = (istProTag[r.datum] || 0) + r.ist;
+  });
+  var tagesSummen = Object.keys(istProTag).map(function(k){ return istProTag[k]; });
+
   var zeit=[], spesen=[], zuschlag=0, uest=0, uzeit=0, normal=0;
 
   if(gav.sollTag!==null){
     zuschlag=Math.max(0,tIst-gav.zuschlagAb);
-    zeit.push(['Sollzeit laut Kalender',nf(tSoll)+' h ('+arbeitsZeilen.length+' Arbeitstage à '+nf(soll)+' h)']);
+    zeit.push(['Sollzeit laut Kalender',nf(tSoll)+' h ('+arbeitstageAnzahl+' Arbeitstage à '+nf(soll)+' h)']);
     zeit.push(['Geleistet',nf(tIst)+' h']);
     zeit.push([(tIst>=tSoll?'Mehrstunden':'Minderstunden')+' ins Konto',
                (tIst-tSoll>0?'+':'')+nf(tIst-tSoll)+' h']);
@@ -6310,7 +6609,10 @@ function berechnen(){
     normal=Math.min(tIst,gav.normal);
     uest=Math.max(0,Math.min(tIst,gav.ueberstundenBis)-gav.normal);
     var wo=Math.max(0,tIst-gav.ueberstundenBis);
-    var tg=zeilen.reduce(function(a,r){ return a+Math.max(0,r.ist-gav.tagesGrenze); },0);
+    // Tages-Grenzen-Überzeit auf Tages-SUMMEN prüfen, nicht auf einzelne Buchungen
+    var tg = tagesSummen.reduce(function(a, tagesIst){
+      return a + Math.max(0, tagesIst - gav.tagesGrenze);
+    }, 0);
     uzeit=Math.max(wo,tg); zuschlag=uzeit;
     zeit.push(['Geleistet',nf(tIst)+' h']);
     zeit.push(['Normalarbeitszeit',nf(normal)+' h']);
@@ -6320,9 +6622,11 @@ function berechnen(){
 
   // Spesen-Berechnung getrennt für Baustellenzulage (an Zulageschwelle gebunden)
   // und Mittagsentschädigung (bei jedem Tag mit substantieller Arbeitszeit).
-  // Elektrogewerbe hat z.B. Mittag ohne Baustellenzulage → beides muss separat funktionieren.
-  var bauTage = gav.zulage ? zeilen.filter(function(r){ return r.ist > gav.zulageAb; }).length : 0;
-  var mittagTage = gav.mittag ? zeilen.filter(function(r){ return r.ist >= 5; }).length : 0;
+  // WICHTIG: Wir bewerten die Tages-SUMMEN (istProTag), nicht die einzelnen
+  // Buchungen — sonst würde ein Tag mit 2 Buchungen à 4h nicht als Zulage-Tag
+  // zählen, obwohl er insgesamt 8h hat.
+  var bauTage = gav.zulage ? tagesSummen.filter(function(x){ return x > gav.zulageAb; }).length : 0;
+  var mittagTage = gav.mittag ? tagesSummen.filter(function(x){ return x >= 5; }).length : 0;
   var zulage = bauTage * (gav.zulage || 0);
   var mittag = mittagTage * (gav.mittag || 0);
 
