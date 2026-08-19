@@ -648,8 +648,10 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
   /* Rapport-Toolbar oben rechts (Reset etc.) */
   .rp-toolbar{display:flex;justify-content:flex-end;padding:8px 4px;margin-bottom:8px}
 
-  /* Zweispalten-Layout: Cards links, Beleg-Preview permanent rechts (sticky) */
-  .rp-main-layout{display:grid;grid-template-columns:1fr 420px;gap:16px;align-items:start}
+  /* Zweispalten-Layout: Cards links, Beleg-Preview permanent rechts (sticky).
+     KEIN align-items:start — sonst kollabiert die rechte Spalte auf die
+     Höhe des Sticky-Elements und Sticky funktioniert nicht mehr. */
+  .rp-main-layout{display:grid;grid-template-columns:1fr 420px;gap:16px}
   .rp-cards-col{min-width:0}
   .rp-preview-col{min-width:0}
   .rp-preview-sticky{position:sticky;top:12px;background:var(--rp-white);border:1px solid var(--rp-line);
@@ -821,7 +823,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.5.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.5.1</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
