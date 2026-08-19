@@ -627,6 +627,15 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
   .rp-s2-layout{display:grid;grid-template-columns:1fr 260px;gap:16px;align-items:start}
   @media(max-width:900px){ .rp-s2-layout{grid-template-columns:1fr} }
   .rp-s2-form{min-width:0}
+
+  /* Input mit rechts-daneben-Button (z.B. Einsatzbetrieb + Websuche) */
+  .rp-field-with-btn{display:flex;gap:6px;align-items:stretch}
+  .rp-field-with-btn input{flex:1;min-width:0}
+  .rp-enrich-btn{padding:0 12px;font-size:11px;font-weight:600;white-space:nowrap;
+    border:1px solid var(--rp-line);background:var(--rp-bg);color:var(--rp-dark);
+    border-radius:3px;cursor:pointer;font-family:inherit}
+  .rp-enrich-btn:hover:not(:disabled){background:var(--rp-lime);border-color:var(--rp-lime-dark)}
+  .rp-enrich-btn:disabled{opacity:0.4;cursor:not-allowed}
   .rp-s2-preview{background:var(--rp-bg);border:1px solid var(--rp-line);border-radius:5px;padding:10px}
   .rp-s2-preview-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;
     color:var(--rp-grey);margin-bottom:6px}
@@ -702,6 +711,13 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
   .rp-row-absent td{padding-top:4px;padding-bottom:4px;font-size:12px}
   .rp-row-weekend{background:#F9FAFB;opacity:0.45}
 
+  /* Plausibilitäts-Warnungen: >10h/Tag → gelb (grenzwertig, prüfen);
+     >12h/Tag → rot & fett (praktisch überall arbeitsrechtlich verboten). */
+  .rp-row-warn10{background:#FEF3C7 !important}
+  .rp-row-warn10 td{border-top-color:#F59E0B}
+  .rp-row-warn12{background:#FEE2E2 !important}
+  .rp-row-warn12 td{border-top-color:#DC2626;font-weight:600;color:#7F1D1D}
+
   .rp-table tbody tr{cursor:pointer}
   .rp-table tbody tr.rp-row-absent{cursor:default}
   .rp-table tbody tr.rp-row-active{background:#FFFBEB;box-shadow:inset 3px 0 0 var(--rp-lime-dark)}
@@ -767,7 +783,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.4.1</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.4.3</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -840,7 +856,13 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
                 <div><label for="rpMa">Mitarbeiter</label>
                   <input type="text" id="rpMa" placeholder="Name oder Personalnummer"></div>
                 <div><label for="rpKunde">Einsatzbetrieb</label>
-                  <input type="text" id="rpKunde" placeholder="Firma"></div>
+                  <div class="rp-field-with-btn">
+                    <input type="text" id="rpKunde" placeholder="Firma">
+                    <button type="button" id="rpEnrichBtn" class="rp-enrich-btn" disabled
+                      title="Firma im Web suchen (PLZ, Tätigkeit, GAV). Kostet ca. 0.02 USD.">
+                      🔍 Suchen
+                    </button>
+                  </div></div>
                 <div><label for="rpPlz">PLZ Einsatzort</label>
                   <input type="text" id="rpPlz" value="8003"></div>
                 <div><label for="rpBranche">Branche</label>
@@ -5052,6 +5074,8 @@ function resetRapport(){
   if(enrichBadge) enrichBadge.remove();
   var newGavWarn = document.getElementById('rpNewGavWarn');
   if(newGavWarn) newGavWarn.remove();
+  var enrichBtn = $('rpEnrichBtn');
+  if(enrichBtn){ enrichBtn.disabled = true; enrichBtn.innerHTML = '🔍 Suchen'; }
 
   // Karte 3: Tabelle, Hinweise, Beleg-Viewer, Tabs leeren
   $('rpTbody').innerHTML = '';
@@ -5142,6 +5166,35 @@ window.initRapport = function(){
   $('rpPlz').addEventListener('input', function(){
     this.dataset.userChosen = '1';
   });
+
+  // Einsatzbetrieb-Feld: bei Änderung Enrich-Button aktivieren/deaktivieren.
+  // Auch Enrich-Badge zurücksetzen (die alten Web-Recherche-Daten sind für
+  // den alten Firmennamen, nicht für den neuen).
+  $('rpKunde').addEventListener('input', function(){
+    updateEnrichBtnState();
+    // Alte Web-Recherche-Info entfernen falls Firma geändert wurde
+    var oldBadge = document.getElementById('rpEnrichBadge');
+    if(oldBadge) oldBadge.remove();
+    var oldNewGav = document.getElementById('rpNewGavWarn');
+    if(oldNewGav) oldNewGav.remove();
+  });
+
+  // Web-Suche-Button: manuell auslösen, mit aktuellem Firmen-Wert (der
+  // vom User korrigiert worden sein kann, z.B. Rechtsform ergänzt).
+  $('rpEnrichBtn').addEventListener('click', function(){
+    var firma = $('rpKunde').value.trim();
+    if(!firma || firma.length < 3){
+      alert('Bitte zuerst einen Einsatzbetrieb-Namen eingeben (mindestens 3 Zeichen).');
+      return;
+    }
+    // Key-Check vor der Suche (verhindert leere Fehler)
+    if(!localStorage.getItem('apriko-anthropic-key')){
+      var k = getAnthropicKey();
+      if(!k) return;
+    }
+    startCompanyEnrich(firma);
+  });
+
   $('rpConfirm').addEventListener('click',function(){
     berechnen(); unlock($('rpS4')); $('rpS4').scrollIntoView({behavior:'smooth',block:'start'}); });
   $('rpCsv').addEventListener('click',function(){ dl(buildCsv(),'rapport.csv','text/csv;charset=utf-8'); });
@@ -5564,6 +5617,14 @@ function fileToBase64(file){
 /* Startet den Web-Enrich im Hintergrund. Zeigt einen dezenten Lade-Text
    an, während Claude sucht, und ersetzt ihn dann durch die Info-Badge. */
 function startCompanyEnrich(firma){
+  // Button in Loading-Zustand
+  var btn = $('rpEnrichBtn');
+  var btnOriginalText = btn ? btn.innerHTML : '';
+  if(btn){
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Sucht…';
+  }
+
   // Alten Badge entfernen und Loading-Placeholder anzeigen
   var oldBadge = document.getElementById('rpEnrichBadge');
   if(oldBadge) oldBadge.remove();
@@ -5582,7 +5643,16 @@ function startCompanyEnrich(firma){
     target.parentNode.insertBefore(loading, target);
   }
 
+  // Wiederherstellung des Buttons (egal ob erfolgreich oder Fehler)
+  function restoreBtn(){
+    if(btn){
+      btn.innerHTML = btnOriginalText || '🔍 Suchen';
+      updateEnrichBtnState();
+    }
+  }
+
   enrichCompanyInfo(firma).then(function(enrich){
+    restoreBtn();
     if(!enrich){
       // Fehler oder nicht gefunden: dezente Meldung, kein Auto-Fill
       var badge = document.getElementById('rpEnrichBadge');
@@ -5622,6 +5692,14 @@ function startCompanyEnrich(firma){
 
     // Info-Badge mit den gefundenen Details anzeigen
     showEnrichBadge(enrich);
+  }).catch(function(err){
+    console.warn('enrich failed:', err);
+    restoreBtn();
+    var badge = document.getElementById('rpEnrichBadge');
+    if(badge){
+      badge.style.borderLeftColor = '#DC2626';
+      badge.innerHTML = '⚠️ <b>Web-Recherche fehlgeschlagen:</b> ' + esc(err.message || 'Unbekannter Fehler');
+    }
   });
 }
 
@@ -5835,6 +5913,15 @@ function showEnrichBadge(enrich){
   }
 }
 
+/* Aktiviert/deaktiviert den "🔍 Suchen"-Button je nach Feld-Inhalt.
+   Kein Klick möglich wenn Feld leer oder zu kurz. */
+function updateEnrichBtnState(){
+  var btn = $('rpEnrichBtn');
+  if(!btn) return;
+  var val = ($('rpKunde').value || '').trim();
+  btn.disabled = val.length < 3;
+}
+
 async function scanWithClaude(){
   var b = $('rpScan');
   var key = getAnthropicKey();
@@ -5933,8 +6020,9 @@ async function scanWithClaude(){
       '2. KOSTENSTELLEN sind NICHT die Personalnummer und NICHT der Mitarbeiter-Name! Sie stehen als erste Spalte JEDER AUFTRAG-ZEILE (z.B. "261245", "261263"). Verwechsle das nicht.\n' +
       '3. TAG-SPALTEN-ZUORDNUNG: Zähle die Spaltenüberschriften GENAU. Die erste Spalte im Zeitraum "09.08. - 15.08." ist der 09.08., die zweite der 10.08. usw. VORSICHT vor Off-by-one-Fehlern! Wenn der 09.08. ein Samstag ist und keine Werte hat, ist die nächste Spalte (10.08. Montag) trotzdem der Montag, nicht "der erste Werktag = 11.08.". Zähle IMMER von der Kalenderspalte.\n' +
       '4. Erzeuge eine JSON-Zeile pro (Tag × Auftrag) mit >0 Stunden. Wenn Auftrag 261245 am 10. den Wert 8.75 hat: {datum:"10.MM.YYYY", kst:"261245", ist:8.75}. Wenn zusätzlich Auftrag 261263 am 10. den Wert 4.00 hat: eine zweite Zeile mit kst:"261263".\n' +
-      '5. Prüfe deine Ergebnisse gegen die TOTAL-ZEILE unten: die Summe deiner extrahierten Stunden pro Tag muss dem Total dieses Tages entsprechen. Wenn nicht: du hast Werte übersehen oder falsch zugeordnet.\n' +
-      '6. FIRMA/EINSATZBETRIEB: bei Personalverleih-Rapporten ist oft KEINE eindeutige Kundenfirma genannt (weil der Mitarbeiter für verschiedene Aufträge verliehen wird). Wenn der Rapport nur Auftrag-Adressen hat aber keinen zentralen "Kunden": setze firma auf leeren String "".\n\n' +
+      '5. GANZ WICHTIG — KEINE DOPPELTEN WERTE: Jede Zelle im Rapport wird GENAU EINMAL extrahiert. Wenn eine Zelle leer ist, DARF dieser Auftrag an diesem Tag NICHT in dein JSON. Kopiere NICHT den Wert eines Vor- oder Folgetages "zur Sicherheit". Wenn du unsicher bist ob eine Zelle einen Wert hat, LIESS SIE ALS LEER (weniger Zeilen ist besser als falsche Zeilen).\n' +
+      '6. TOTAL-ZEILE ist eine SANITY-CHECK, KEINE eigene Buchung: Am unteren Rand steht "Total Lohnstunden" oder "Total produktive Stunden" mit einer Zahl pro Tag. Diese Zeile wird NICHT als eigene Buchung übernommen! Sie dient nur der Selbstkontrolle: die Summe deiner extrahierten Zeilen pro Tag MUSS diesem Total entsprechen. Wenn Summe > Total: du hast Werte doppelt/falsch zugeordnet — lösche die überflüssigen. Wenn Summe < Total: du hast Werte übersehen.\n' +
+      '7. FIRMA/EINSATZBETRIEB: bei Personalverleih-Rapporten ist oft KEINE eindeutige Kundenfirma genannt (weil der Mitarbeiter für verschiedene Aufträge verliehen wird). Wenn der Rapport nur Auftrag-Adressen hat aber keinen zentralen "Kunden": setze firma auf leeren String "".\n\n' +
 
       'Antworte AUSSCHLIESSLICH mit einem gültigen JSON-Objekt in genau diesem Format, ohne Erklärungen, ohne Markdown-Code-Fences:\n' +
       '{\n' +
@@ -6166,11 +6254,11 @@ async function scanWithClaude(){
           showGavSuggestion(vorschlag, firma);
         }
       }
-
-      // Parallel: Web-Enrich starten (kann 5-15 Sek dauern).
-      // Läuft im Hintergrund, blockiert den User nicht.
-      startCompanyEnrich(firma);
     }
+    // Web-Enrich wird NICHT mehr automatisch gestartet — der User klickt
+    // manuell auf "🔍 Suchen" wenn er's braucht (kostet Geld, ~0.02 USD).
+    // Wir aktivieren nur den Button falls die Firma da ist.
+    updateEnrichBtnState();
 
     // Wenn Claude Werte mit Flags gemarkt hat, HINWEISE dynamisch generieren
     HINWEISE = [];
@@ -6510,6 +6598,11 @@ function shiftAllDatesFromFirst(newIsoDate){
 function recalcRows(){
   var s = sollOf();  // Sollzeit pro Arbeitstag (z.B. 8.00)
 
+  // Vorher: alte Warn-Klassen von allen Zeilen entfernen (falls sich Ist geändert hat)
+  Array.prototype.forEach.call(document.querySelectorAll('#rpTbody tr'), function(tr){
+    tr.classList.remove('rp-row-warn10', 'rp-row-warn12');
+  });
+
   // Zeilen nach Datum gruppieren. Bei mehreren Buchungen am selben Tag
   // (z.B. Mo 8h Kostenstelle A + Mo 1.25h Kostenstelle B) gilt Soll NUR
   // für den ganzen Tag, nicht pro Buchung. Sonst würde -6.75 statt +0.25 stehen.
@@ -6519,7 +6612,6 @@ function recalcRows(){
     if(!perDate[r.datum]){
       perDate[r.datum] = {
         indices: [], istSum: 0,
-        // absent nur wenn ALLE Zeilen dieses Tages absent sind
         allAbsent: true
       };
       dateOrder.push(r.datum);
@@ -6537,7 +6629,13 @@ function recalcRows(){
     sI += group.istSum;
     var tagDiff = group.istSum - tagSoll;
 
-    // Für jede Zeile des Tages: erste kriegt Soll+Diff des Tages, weitere "—"
+    // Plausibilitäts-Prüfung pro Tag: >10h grenzwertig, >12h praktisch überall verboten
+    var warnClass = null;
+    if(!group.allAbsent){
+      if(group.istSum > 12) warnClass = 'rp-row-warn12';
+      else if(group.istSum > 10) warnClass = 'rp-row-warn10';
+    }
+
     group.indices.forEach(function(idx, pos){
       var r = zeilen[idx];
       var sollCell = $('rpSoll' + idx);
@@ -6551,7 +6649,14 @@ function recalcRows(){
           diffCell.textContent = '—';
           diffCell.className = 'rp-num';
         } else {
-          diffCell.textContent = (tagDiff > 0 ? '+' : '') + nf(tagDiff);
+          // Diff-Zelle: bei >10/>12 mit Warn-Icon versehen
+          var diffText = (tagDiff > 0 ? '+' : '') + nf(tagDiff);
+          if(warnClass === 'rp-row-warn12'){
+            diffText += ' ⚠️';
+          } else if(warnClass === 'rp-row-warn10'){
+            diffText += ' ⚠';
+          }
+          diffCell.textContent = diffText;
           diffCell.className = 'rp-num' + (tagDiff < 0 ? ' rp-minus' : '');
         }
       } else {
@@ -6559,6 +6664,12 @@ function recalcRows(){
         sollCell.textContent = '—';
         diffCell.textContent = '—';
         diffCell.className = 'rp-num';
+      }
+
+      // Warn-Klasse auf die tr (für Hintergrund-Highlight)
+      if(warnClass){
+        var tr = sollCell.closest('tr');
+        if(tr) tr.classList.add(warnClass);
       }
     });
   });
