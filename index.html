@@ -936,7 +936,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.9.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.10.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -3550,8 +3550,10 @@ function resetBpoCheck() {
    =========================================================== */
 const einsatzDashState = {
   tab: "einsaetze",  // "einsaetze" | "marge"
-  rows: [],          // geparste Einsatzlisten-Zeilen
+  rows: [],          // geparste Einsatzlisten-Zeilen (aktuelles Jahr)
   fileName: null,
+  prevRows: [],      // Einsatzliste Vorjahr (für Vergleiche)
+  prevFileName: null,
   bm: { rows: [], fileName: null },   // Margen-/Ertragsdaten (BM-Export)
   bet: { rows: [], fileName: null },  // Beteiligungen: Anstellungsnummer → Recruiter-Anteile
   kb: { rows: [], fileName: null },   // KickBack: Debitor (Kunden-Nr) → Rückvergütungs-%
@@ -3871,10 +3873,7 @@ async function uploadDashFiles(input) {
         einsatzDashState.kb.fileName = file.name;
         loaded.push("Kickback (" + einsatzDashState.kb.rows.length + ")");
       } else if (h.includes("Eintrittsdatum") && h.includes("GAV")) {
-        einsatzDashState.rows = parsed.rows;
-        einsatzDashState.fileName = file.name;
-        einsatzDashState.f = { von:"", bis:"", gav:"", berater:"", gs:"", kunde:"", suche:"" };
-        loaded.push("Einsatzliste (" + parsed.rows.length + ")");
+        loaded.push(edAssignEinsatzliste(parsed.rows, file.name));
       } else {
         toast("Unbekanntes Format: " + file.name, true);
       }
@@ -4321,7 +4320,8 @@ async function uploadEinsatzDashCsv(input) {
     }
     einsatzDashState.rows = parsed.rows;
     einsatzDashState.fileName = file.name;
-    // Filter zurücksetzen wenn neue Datei
+    // Hinweis: dieser Legacy-Pfad ersetzt die Hauptliste direkt;
+    // der Multi-Upload (uploadDashFiles) macht die Haupt/Vorjahr-Zuordnung.
     einsatzDashState.f = { von:"", bis:"", gav:"", berater:"", gs:"", kunde:"", suche:"" };
     render();
     toast(parsed.rows.length + " Einsätze geladen");
@@ -4335,6 +4335,8 @@ function resetEinsatzDash() {
   if (!confirm("Dashboard zurücksetzen? Einsatzliste UND Margen-Daten werden verworfen.")) return;
   einsatzDashState.rows = [];
   einsatzDashState.fileName = null;
+  einsatzDashState.prevRows = [];
+  einsatzDashState.prevFileName = null;
   einsatzDashState.bm = { rows: [], fileName: null };
   einsatzDashState.bet = { rows: [], fileName: null };
   einsatzDashState.kb = { rows: [], fileName: null };
@@ -4362,16 +4364,61 @@ function edStichtagShift(days) {
   render();
 }
 
-/* Wendet die Filterleiste auf alle Zeilen an (OHNE Stichtag —
-   der Stichtag ist eine eigene Dimension für die KPI-Kacheln). */
-function edFilteredRows() {
+/* ISO-Datum um n Jahre verschieben (für Vorjahres-Vergleiche) */
+function edShiftYearIso(iso, delta) {
+  const d = new Date(iso + "T00:00:00");
+  d.setFullYear(d.getFullYear() + delta);
+  return d.toISOString().slice(0,10);
+}
+
+/* Dominantes Jahr einer Einsatzliste (häufigstes Jahr der Eintrittsdaten) —
+   dient der automatischen Zuordnung Hauptliste vs. Vorjahr beim Upload. */
+function edDominantYear(rows) {
+  const counts = {};
+  rows.forEach(r => {
+    const iso = edToIso(r["Eintrittsdatum"]);
+    if (iso) { const y = iso.slice(0,4); counts[y] = (counts[y]||0) + 1; }
+  });
+  const best = Object.entries(counts).sort((a,b) => b[1]-a[1])[0];
+  return best ? parseInt(best[0], 10) : null;
+}
+
+/* Neue Einsatzliste einsortieren: die mit dem neueren dominanten Jahr wird
+   Hauptliste, die ältere automatisch Vorjahr. Gleiches Jahr → ersetzen. */
+function edAssignEinsatzliste(rows, fileName) {
+  const s = einsatzDashState;
+  const newYear = edDominantYear(rows);
+  const curYear = s.rows.length ? edDominantYear(s.rows) : null;
+  const resetF = () => { s.f = { von:"", bis:"", gav:"", berater:"", gs:"", kunde:"", suche:"" }; };
+  if (curYear === null || newYear === null || newYear === curYear) {
+    s.rows = rows; s.fileName = fileName; resetF();
+    return "Einsatzliste " + (newYear || "?") + " (" + rows.length + ")";
+  }
+  if (newYear > curYear) {
+    s.prevRows = s.rows; s.prevFileName = s.fileName;   // bisherige wird Vorjahr
+    s.rows = rows; s.fileName = fileName; resetF();
+    return "Einsatzliste " + newYear + " (" + rows.length + "), bisherige als Vorjahr " + curYear;
+  }
+  s.prevRows = rows; s.prevFileName = fileName;          // neue ist älter → Vorjahr
+  return "Vorjahres-Einsatzliste " + newYear + " (" + rows.length + ")";
+}
+
+/* Wendet die Filterleiste auf beliebige Zeilen an (OHNE Stichtag —
+   der Stichtag ist eine eigene Dimension für die KPI-Kacheln).
+   shiftYears verschiebt die Von/Bis-Grenzen, damit dieselben Filter
+   sinnvoll auf die Vorjahres-Liste passen (−1 Jahr). */
+function edApplyFilters(baseRows, shiftYears) {
   const f = einsatzDashState.f;
-  let rows = einsatzDashState.rows;
+  let rows = baseRows;
 
   // Zeitraum: Einsatz muss den [von, bis]-Bereich überlappen
   if (f.von || f.bis) {
-    const von = f.von || "0000-01-01";
-    const bis = f.bis || "9999-12-31";
+    let von = f.von || "0000-01-01";
+    let bis = f.bis || "9999-12-31";
+    if (shiftYears) {
+      if (f.von) von = edShiftYearIso(f.von, shiftYears);
+      if (f.bis) bis = edShiftYearIso(f.bis, shiftYears);
+    }
     rows = rows.filter(r => {
       const eVon = edToIso(r["Eintrittsdatum"]);
       const eBis = edToIso(r["Austrittsdatum"]) || "9999-12-31";
@@ -4392,6 +4439,15 @@ function edFilteredRows() {
       (r["Erlernter Beruf"]||"").toLowerCase().includes(q));
   }
   return rows;
+}
+
+function edFilteredRows() {
+  return edApplyFilters(einsatzDashState.rows, 0);
+}
+
+/* Gefilterte Vorjahres-Zeilen (Zeitraum-Filter um 1 Jahr zurückverschoben) */
+function edFilteredPrevRows() {
+  return edApplyFilters(einsatzDashState.prevRows, -1);
 }
 
 /* Unique-Werte einer Spalte für Filter-Dropdowns */
@@ -4470,6 +4526,20 @@ function renderEinsatzDash(el) {
   // ---- Gefilterte Rows (Filterleiste) + aktive am Stichtag ----
   const rows = edFilteredRows();
   const aktivRows = rows.filter(r => edActiveOn(r, stichtag));
+
+  // ---- Vorjahres-Vergleich (falls Vorjahres-Liste geladen) ----
+  const hasPrev = einsatzDashState.prevRows.length > 0;
+  const prevRows = hasPrev ? edFilteredPrevRows() : [];
+  const prevStichtag = edShiftYearIso(stichtag, -1);
+  const prevAktiv = hasPrev ? prevRows.filter(r => edActiveOn(r, prevStichtag)).length : 0;
+  /* Delta-Badge für KPI-Subzeilen: "VJ: 78 · +23%" */
+  const vjDelta = (cur, prev) => {
+    if (!hasPrev) return "";
+    if (!prev) return "VJ: 0";
+    const pct = (cur - prev) / prev * 100;
+    const col = pct >= 0 ? "var(--accent)" : "var(--danger)";
+    return `VJ: ${prev} · <span style="color:${col}">${pct >= 0 ? "+" : ""}${pct.toFixed(0)}%</span>`;
+  };
   const kommendRows = rows.filter(r => edStatus(r, stichtag) === "kommend");
   const beendetRows = rows.filter(r => edStatus(r, stichtag) === "beendet");
 
@@ -4583,7 +4653,12 @@ function renderEinsatzDash(el) {
     while (d <= endD) {
       const iso = d.toISOString().slice(0,10);
       const active = rows.filter(r => edActiveOn(r, iso));
-      chartDays.push({ iso, counts: seriesDefs.map(s => active.filter(s.match).length) });
+      chartDays.push({
+        iso,
+        counts: seriesDefs.map(s => active.filter(s.match).length),
+        // Vorjahres-Wert: gleicher Kalendertag −1 Jahr auf der Vorjahres-Liste
+        prev: hasPrev ? prevRows.filter(r => edActiveOn(r, edShiftYearIso(iso, -1))).length : null
+      });
       d.setDate(d.getDate() + (weekly ? 7 : 1));
     }
   }
@@ -4591,7 +4666,7 @@ function renderEinsatzDash(el) {
   let chartHtml = "";
   if (chartDays.length > 1) {
     const W = 900, H = 190, PAD = 28;
-    const maxN = Math.max(1, ...chartDays.map(p => Math.max(...p.counts)));
+    const maxN = Math.max(1, ...chartDays.map(p => Math.max(...p.counts, p.prev || 0)));
     const x = i => PAD + i * (W - 2*PAD) / (chartDays.length - 1);
     const y = n => H - PAD - n * (H - 2*PAD) / maxN;
 
@@ -4603,6 +4678,11 @@ function renderEinsatzDash(el) {
       return area + `<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2"/>`;
     }).join("");
 
+    // Vorjahres-Linie: grau gestrichelt, nur in der Gesamt-Ansicht
+    const prevLine = (hasPrev && !split && chartDays.some(p => p.prev !== null))
+      ? `<polyline points="${chartDays.map((p,i) => `${x(i).toFixed(1)},${y(p.prev||0).toFixed(1)}`).join(" ")}" fill="none" stroke="var(--text-faint)" stroke-width="1.5" stroke-dasharray="5,4"/>`
+      : "";
+
     const stIdx = chartDays.findIndex(p => p.iso === stichtag);
     const stLine = stIdx >= 0
       ? `<line x1="${x(stIdx)}" y1="${PAD-6}" x2="${x(stIdx)}" y2="${H-PAD}" stroke="var(--text-faint)" stroke-width="1.5" stroke-dasharray="4,3"/>
@@ -4612,8 +4692,11 @@ function renderEinsatzDash(el) {
     const labels = labIdx.map(i =>
       `<text x="${x(i)}" y="${H-8}" text-anchor="middle" fill="var(--text-faint)" font-size="10">${edFormatIso(chartDays[i].iso)}</text>`).join("");
 
-    const legend = split ? `<div class="ed-legend">${seriesDefs.map((s,si) =>
-      `<span class="ed-legend-item"><span class="ed-legend-dot" style="background:${ED_COLORS[si % ED_COLORS.length]}"></span>${escape(s.name)}</span>`).join("")}</div>` : "";
+    const legend = (split || (hasPrev && !split)) ? `<div class="ed-legend">${
+      split ? seriesDefs.map((s,si) =>
+        `<span class="ed-legend-item"><span class="ed-legend-dot" style="background:${ED_COLORS[si % ED_COLORS.length]}"></span>${escape(s.name)}</span>`).join("")
+      : `<span class="ed-legend-item"><span class="ed-legend-dot" style="background:${ED_COLORS[0]}"></span>Aktuell</span>`
+    }${(hasPrev && !split) ? `<span class="ed-legend-item"><span style="display:inline-block;width:16px;border-top:2px dashed var(--text-faint)"></span>Vorjahr (gleiche Kalendertage)</span>` : ""}</div>` : "";
 
     const splitChips = `<div class="ed-dim-chips">
       <button class="ed-dim-chip ${!split?"active":""}" onclick="einsatzDashState.chartSplit='';render()">Gesamt</button>
@@ -4627,7 +4710,7 @@ function renderEinsatzDash(el) {
           ${splitChips}
         </div>
         <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" preserveAspectRatio="xMidYMid meet">
-          ${lines}${stLine}
+          ${prevLine}${lines}${stLine}
           <text x="${PAD}" y="${PAD-10}" fill="var(--text-faint)" font-size="10">max ${maxN}</text>
           ${labels}
         </svg>
@@ -4755,6 +4838,7 @@ function renderEinsatzDash(el) {
       </div>
       <div class="ed-stichtag-info">
         ${escape(einsatzDashState.fileName||"")} · ${einsatzDashState.rows.length} Einsätze in Datei
+        ${einsatzDashState.prevRows.length ? ` · <span style="color:var(--text-faint)">Vorjahr: ${escape(einsatzDashState.prevFileName||"")} (${einsatzDashState.prevRows.length})</span>` : ""}
         ${activeFilterCount ? ` · <span style="color:var(--accent)">${activeFilterCount} Filter aktiv (${rows.length} im Bereich)</span>` : ""}
       </div>
     </div>
@@ -4807,7 +4891,8 @@ function renderEinsatzDash(el) {
              + kpi("📉", ausIn, "Austritte im Zeitraum", "", "")
              + kpi("⏱", dAvg.toLocaleString("de-CH",{maximumFractionDigits:0}) + " Tage", "Ø Einsatzdauer", "", "");
       })() : ""}
-      ${kpi("👷", aktivRows.length, "Im Einsatz am Stichtag", uniqueMa !== aktivRows.length ? uniqueMa + " Mitarbeiter" : "", "ed-kpi-accent")}
+      ${kpi("👷", aktivRows.length, "Im Einsatz am Stichtag",
+        hasPrev ? vjDelta(aktivRows.length, prevAktiv) : (uniqueMa !== aktivRows.length ? uniqueMa + " Mitarbeiter" : ""), "ed-kpi-accent")}
       ${margeDisplay !== null ? kpi("💰", margeDisplay, "Ø Marge", margeVals.length + " Einsätze mit Marge", "ed-kpi-accent") : ""}
       ${lohnAvg !== null ? kpi("💵", "CHF " + lohnAvg.toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2}), "Ø Stundenlohn", "", "") : ""}
       ${kpi("📈", eintritteNext7.length, "Eintritte nächste 7 Tage", "", "")}
@@ -4820,6 +4905,11 @@ function renderEinsatzDash(el) {
     <!-- ✨ Insights: automatisch berechnete Aussagen aus den Daten -->
     ${(() => {
       const insights = edInsights(rows, aktivRows, stichtag);
+      if (hasPrev && prevAktiv > 0) {
+        const pct = (aktivRows.length - prevAktiv) / prevAktiv * 100;
+        const dir = pct >= 0 ? "über" : "unter";
+        insights.unshift(`📅 Am Stichtag sind <strong>${aktivRows.length}</strong> im Einsatz — ${Math.abs(pct).toFixed(0)}% ${dir} Vorjahr (${prevAktiv} am ${edFormatIso(prevStichtag)}).`);
+      }
       if (!insights.length) return "";
       return `<div class="ed-card ed-insights">
         <div class="ed-card-title">✨ Insights</div>
