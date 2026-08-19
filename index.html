@@ -921,7 +921,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.7.2</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.7.3</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -4006,19 +4006,46 @@ function renderEinsatzDash(el) {
   }
 
   const chartDays = [];
+  let chartWindowLabel = "";
   if (minIso && maxIso) {
-    // Fenster: 60 Tage zurück, 7 Tage nach vorne (Fokus auf Rückblick + kurze Vorschau)
-    const capMin = new Date(stD.getTime() - 60*24*3600*1000).toISOString().slice(0,10);
-    const capMax = new Date(stD.getTime() + 7*24*3600*1000).toISOString().slice(0,10);
-    const start = minIso < capMin ? capMin : minIso;
-    const end = maxIso > capMax ? capMax : maxIso;
+    /* Fenster-Logik:
+       - Von/Bis-Filter gesetzt → genau dieser Bereich wird gezeichnet
+       - sonst Default: Montag der aktuellen Woche bis Ende Jahr
+         (mindestens aber 2 Wochen, falls das Jahresende nahe ist)
+       Auflösung: täglich bis 70 Tage Spannweite, darüber wöchentlich —
+       Messpunkte dann jeweils am Montag. */
+    let start, end;
+    if (f.von || f.bis) {
+      start = f.von || minIso;
+      end = f.bis || maxIso;
+      chartWindowLabel = edFormatIso(start) + " – " + edFormatIso(end);
+    } else {
+      const today = new Date();
+      const dow = (today.getDay() + 6) % 7;  // Mo=0 … So=6
+      const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - dow);
+      start = monday.toISOString().slice(0,10);
+      const eoy = today.getFullYear() + "-12-31";
+      const min2w = new Date(monday.getTime() + 14*24*3600*1000).toISOString().slice(0,10);
+      end = eoy > min2w ? eoy : min2w;
+      chartWindowLabel = "ab Montag " + edFormatIso(start) + " bis Ende Jahr";
+    }
+
+    const spanDays = (new Date(end + "T00:00:00") - new Date(start + "T00:00:00")) / (24*3600*1000);
+    const weekly = spanDays > 70;
+    if (weekly) chartWindowLabel += ", wöchentlich (Montage)";
+
     let d = new Date(start + "T00:00:00");
+    if (weekly) {
+      // Auf den nächsten Montag vorrücken, damit jeder Messpunkt ein Montag ist
+      const dw = (d.getDay() + 6) % 7;
+      if (dw !== 0) d.setDate(d.getDate() + (7 - dw));
+    }
     const endD = new Date(end + "T00:00:00");
     while (d <= endD) {
       const iso = d.toISOString().slice(0,10);
       const active = rows.filter(r => edActiveOn(r, iso));
       chartDays.push({ iso, counts: seriesDefs.map(s => active.filter(s.match).length) });
-      d.setDate(d.getDate() + 1);
+      d.setDate(d.getDate() + (weekly ? 7 : 1));
     }
   }
 
@@ -4057,7 +4084,7 @@ function renderEinsatzDash(el) {
     chartHtml = `
       <div class="ed-card" style="grid-column:1/-1">
         <div class="ed-card-head">
-          <div class="ed-card-title">Aktive Einsätze im Verlauf <span style="color:var(--text-faint);font-weight:400">(60 Tage zurück, 7 Tage voraus)</span></div>
+          <div class="ed-card-title">Aktive Einsätze im Verlauf <span style="color:var(--text-faint);font-weight:400">(${chartWindowLabel})</span></div>
           ${splitChips}
         </div>
         <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" preserveAspectRatio="xMidYMid meet">
@@ -4153,7 +4180,12 @@ function renderEinsatzDash(el) {
     </div>`;
 
   // ---- Tabelle: standardmässig NUR aktive am Stichtag ----
-  const showAll = einsatzDashState.showAllRows;
+  // ---- Tabelle ----
+  // Standard: nur aktive am Stichtag. AUSNAHME: sobald Von/Bis gesetzt ist,
+  // wechselt die Tabelle in den Zeitraum-Modus und zeigt alle Einsätze,
+  // die den gewählten Bereich überlappen (sonst "passiert" beim Filtern nichts).
+  const zeitraumMode = !!(f.von || f.bis);
+  const showAll = einsatzDashState.showAllRows || zeitraumMode;
   const statusOrder = { aktiv: 0, kommend: 1, beendet: 2, unklar: 3 };
   const tableRows = (showAll ? rows : aktivRows).slice().sort((a,b) => {
     const sa = statusOrder[edStatus(a, stichtag)], sb = statusOrder[edStatus(b, stichtag)];
@@ -4260,10 +4292,12 @@ function renderEinsatzDash(el) {
     <div class="ed-card" style="margin-top:16px">
       <div class="ed-card-head">
         <div class="ed-card-title">
-          ${showAll ? "Alle Einsätze" : "Im Einsatz am " + edFormatIso(stichtag)}
+          ${zeitraumMode
+            ? "Einsätze im Zeitraum " + (f.von ? edFormatIso(f.von) : "…") + " – " + (f.bis ? edFormatIso(f.bis) : "…")
+            : showAll ? "Alle Einsätze" : "Im Einsatz am " + edFormatIso(stichtag)}
           <span style="color:var(--text-faint);font-weight:400">(${tableRows.length})</span>
         </div>
-        ${hiddenCount > 0 || showAll ? `
+        ${!zeitraumMode && (hiddenCount > 0 || showAll) ? `
           <button class="ed-dim-chip ${showAll?"active":""}" onclick="einsatzDashState.showAllRows=!einsatzDashState.showAllRows;render()">
             ${showAll ? "Nur aktive zeigen" : "+ " + hiddenCount + " kommende/beendete einblenden"}
           </button>` : ""}
