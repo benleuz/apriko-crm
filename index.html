@@ -864,7 +864,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.15.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.16.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -3483,6 +3483,7 @@ const einsatzDashState = {
   bet: { rows: [], fileName: null },  // Beteiligungen: Anstellungsnummer → Recruiter-Anteile
   kb: { rows: [], fileName: null },   // KickBack: Debitor (Kunden-Nr) → Rückvergütungs-%
   bmF: { von: "", bis: "", kunde: "", recruiter: "", ma: "" },  // Filter Marge-Tab
+  bmDim: "kunde",    // Dimension der Margen-Vergleichs-Karte im Marge-Tab
   customerId: null,  // gewählter Kunde (cache.customers id)
   stichtag: null,    // ISO yyyy-mm-dd — Default heute
   pieDim: "gav",     // Dimension des Kuchendiagramms
@@ -4159,6 +4160,52 @@ function bmRenderContent() {
       </div>`;
   }
 
+  // ---- Margen-Vergleich nach Dimension (Kunde/Recruiter/MA nativ, GAV/Frau-Mann/BVG via Einsatzliste) ----
+  const BM_DIMS = [
+    { key:"kunde",     label:"Kunde",      get:b => b.kunde },
+    { key:"recruiter", label:"Recruiter",  get:b => b.recruiter },
+    { key:"ma",        label:"Mitarbeiter",get:b => b.ma },
+    ...(hasEinsatzData ? [
+      { key:"gav",        label:"GAV",        get:b => { const e = bmLookupEinsatz(b.placement); return e ? (e["GAV"]||"").trim().replace("Personalverleih ","PV ") : ""; } },
+      { key:"geschlecht", label:"Frau/Mann",  get:b => { const e = bmLookupEinsatz(b.placement); return e ? (e["Geschlecht"]||"").trim() : ""; } },
+      { key:"bvg",        label:"BVG-Stufe",  get:b => { const e = bmLookupEinsatz(b.placement); return e ? edBvgStufe(e) : ""; } }
+    ] : [])
+  ];
+  const bmAvailDims = BM_DIMS.filter(d => rows.some(b => d.get(b)));
+  const bmDim = bmAvailDims.some(d => d.key === einsatzDashState.bmDim) ? einsatzDashState.bmDim : (bmAvailDims[0] ? bmAvailDims[0].key : "kunde");
+  let bmDimCard = "";
+  if (bmAvailDims.length) {
+    const dimGet = BM_DIMS.find(d => d.key === bmDim).get;
+    let groups = bmGroupBy(rows, dimGet).filter(([k]) => k !== "(leer)")
+      .sort((a,b) => b[1].marge - a[1].marge);
+    // Top 12, Rest zusammenfassen
+    if (groups.length > 12) {
+      const rest = groups.slice(12);
+      const restRows = rows.filter(b => rest.some(([k]) => (dimGet(b)||"(leer)") === k));
+      groups = groups.slice(0, 12).concat([["Andere (" + rest.length + ")", bmAgg(restRows)]]);
+    }
+    const gMax = Math.max(1, ...groups.map(([,a]) => Math.abs(a.marge)));
+    const bmDimChips = `<div class="ed-dim-chips">${bmAvailDims.map(d =>
+      `<button class="ed-dim-chip ${bmDim===d.key?"active":""}" onclick="einsatzDashState.bmDim='${d.key}';render()">${d.label}</button>`).join("")}</div>`;
+    bmDimCard = `
+      <div class="ed-card" style="grid-column:1/-1">
+        <div class="ed-card-head">
+          <div class="ed-card-title">Bruttomarge im Vergleich</div>
+          ${bmDimChips}
+        </div>
+        ${groups.map(([g, a], i) => `
+          <div class="ed-gav-row" style="grid-template-columns:minmax(0,1.1fr) 2fr 190px">
+            <div class="ed-gav-name" title="${escape(g)}">${escape(g)}</div>
+            <div class="ed-gav-bar-wrap">
+              <div class="ed-gav-bar" style="width:${(Math.abs(a.marge)/gMax*100).toFixed(0)}%;background:${a.marge >= 0 ? ED_COLORS[i % ED_COLORS.length] : "var(--danger)"}"></div>
+            </div>
+            <div class="ed-gav-n" style="min-width:190px;font-size:11px;text-align:right;color:${a.marge >= 0 ? "var(--text)" : "var(--danger)"}">
+              ${bmChf(a.marge)} · ${bmPct(a.margep)} <span style="color:var(--text-faint)">von ${bmChf(a.umsatz)}</span>
+            </div>
+          </div>`).join("")}
+      </div>`;
+  }
+
   // ---- Monats-Tabelle ----
   const monthTable = `
     <div class="ed-card" style="margin-top:16px">
@@ -4346,6 +4393,7 @@ function bmRenderContent() {
     <div class="ed-two-col">
       ${waterfall}
       ${recruiterCard || placementTable}
+      ${bmDimCard}
       ${recruiterCard ? placementTable.replace('<div class="ed-card">','<div class="ed-card" style="grid-column:1/-1">') : ""}
       ${monthChart}
     </div>
@@ -4894,14 +4942,31 @@ function renderEinsatzDash(el) {
   const barDim = availDims.some(d => d.key === einsatzDashState.barDim) ? einsatzDashState.barDim : (availDims[0]?.key || "gav");
   const barEntries = edDist(aktivRows, barDim, 10);
   const barMax = barEntries.length ? barEntries[0][1] : 1;
-  const barHtml = barEntries.length ? barEntries.map(([g, n], i) => `
-      <div class="ed-gav-row">
+  // Ø-Marge pro Gruppe (aus der Marge-Spalte, wenn befüllt) als Zusatz-Label
+  const barMargeFor = (() => {
+    const anyMarge = aktivRows.some(r => (r["Marge"]||"").trim());
+    if (!anyMarge) return () => null;
+    const isPct = aktivRows.some(r => (r["Marge"]||"").includes("%"));
+    const get = edDim(barDim).get;
+    return (g) => {
+      const vals = aktivRows.filter(r => (get(r)||"(leer)") === g)
+        .map(r => (r["Marge"]||"").trim()).filter(Boolean).map(parsePct);
+      if (!vals.length) return null;
+      const avg = vals.reduce((s,v)=>s+v,0)/vals.length;
+      return "Ø " + avg.toLocaleString("de-CH",{maximumFractionDigits:1}) + (isPct ? "%" : "");
+    };
+  })();
+  const barHtml = barEntries.length ? barEntries.map(([g, n], i) => {
+    const m = barMargeFor(g);
+    return `
+      <div class="ed-gav-row" ${m ? 'style="grid-template-columns:minmax(0,1fr) 2fr 110px"' : ""}>
         <div class="ed-gav-name" title="${escape(g)}">${escape(g)}</div>
         <div class="ed-gav-bar-wrap">
           <div class="ed-gav-bar" style="width:${(n/barMax*100).toFixed(0)}%;background:${ED_COLORS[i % ED_COLORS.length]}"></div>
         </div>
-        <div class="ed-gav-n">${edFmtCount(n)}</div>
-      </div>`).join("")
+        <div class="ed-gav-n" ${m ? 'style="min-width:110px;text-align:right;font-size:11px"' : ""}>${edFmtCount(n)}${m ? ` <span style="color:var(--accent)">· ${m}</span>` : ""}</div>
+      </div>`;
+  }).join("")
     : `<div style="color:var(--text-faint);font-size:12px;padding:12px 0">Keine aktiven Einsätze am Stichtag</div>`;
   const barChips = `<div class="ed-dim-chips">${availDims.map(d =>
     `<button class="ed-dim-chip ${barDim===d.key?"active":""}" onclick="einsatzDashState.barDim='${d.key}';render()">${d.label}</button>`).join("")}</div>`;
