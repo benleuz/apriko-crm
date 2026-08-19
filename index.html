@@ -875,6 +875,16 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
   .ed-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px}
   .ed-legend-item{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-dim)}
   .ed-legend-dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex-shrink:0}
+
+  /* Insights-Karte */
+  .ed-insights{margin-bottom:14px;border-left:3px solid var(--accent)}
+  .ed-insight-row{font-size:12.5px;color:var(--text-dim);padding:5px 0;line-height:1.5;
+    border-bottom:1px solid var(--border)}
+  .ed-insight-row:last-child{border-bottom:none}
+  .ed-insight-row strong{color:var(--text)}
+
+  /* Zeitraum-Presets in der Filterleiste */
+  .ed-preset-row{display:flex;gap:4px}
 </style>
 </head>
 <body>
@@ -911,7 +921,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.7.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.7.2</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -3600,6 +3610,149 @@ function edSearchInput(v) {
   }, 350);
 }
 
+/* Datums-Eingabe-Guard: type="date" feuert onchange schon während man
+   das Jahr tippt (Jahr "0002"). Erst rendern wenn das Jahr plausibel ist —
+   sonst Wert nur merken, damit der User in Ruhe weitertippen kann. */
+function edPlausibleDate(iso) {
+  if (!iso) return true;  // leeres Feld = Filter löschen, immer ok
+  const y = parseInt(iso.slice(0,4), 10);
+  return y >= 1990 && y <= 2100;
+}
+function edSetDateFilter(key, value) {
+  einsatzDashState.f[key] = value;
+  if (edPlausibleDate(value)) render();
+}
+function edSetStichtagGuarded(value) {
+  if (!value) return;
+  if (edPlausibleDate(value)) { einsatzDashState.stichtag = value; render(); }
+}
+
+/* Zeitraum-Presets für die Von/Bis-Filter */
+function edPreset(name) {
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth();
+  const iso = d => d.toISOString().slice(0,10);
+  const f = einsatzDashState.f;
+  if (name === "monat")   { f.von = iso(new Date(y, m, 1));            f.bis = iso(new Date(y, m+1, 0)); }
+  if (name === "quartal") { const q = Math.floor(m/3)*3;
+                            f.von = iso(new Date(y, q, 1));            f.bis = iso(new Date(y, q+3, 0)); }
+  if (name === "jahr")    { f.von = y + "-01-01";                      f.bis = y + "-12-31"; }
+  if (name === "alles")   { f.von = "";                                f.bis = ""; }
+  render();
+}
+
+/* ===========================================================
+   INSIGHTS-ENGINE: generiert aus den Daten markante Aussagen
+   ("Im Malergewerbe hast du die besten Margen", "Im Ausbau-
+   gewerbe dauern die Einsätze am längsten"). Rein lokal
+   berechnet — deterministisch, sofort, ohne API-Kosten.
+   =========================================================== */
+
+/* Einsatzdauer in Tagen: Austritt−Eintritt; laufende zählen bis Stichtag */
+function edDauer(row, stichtagIso) {
+  const von = edToIso(row["Eintrittsdatum"]);
+  if (!von) return null;
+  const bis = edToIso(row["Austrittsdatum"]) || stichtagIso;
+  const d = (new Date(bis) - new Date(von)) / (24*3600*1000);
+  return d >= 0 ? d + 1 : null;  // inklusiv: 1 Tag Einsatz = 1
+}
+
+/* Ø eines numerischen Felds pro Dimensions-Gruppe → [[gruppe, avg, n], ...] */
+function edGroupAvg(rows, dimKey, valueFn) {
+  const get = edDim(dimKey).get;
+  const groups = {};
+  rows.forEach(r => {
+    const g = get(r);
+    if (!g) return;
+    const v = valueFn(r);
+    if (v === null || v === undefined || isNaN(v)) return;
+    if (!groups[g]) groups[g] = { sum: 0, n: 0 };
+    groups[g].sum += v; groups[g].n++;
+  });
+  return Object.entries(groups)
+    .filter(([,o]) => o.n >= 2)   // Mini-Gruppen ausschliessen (1 Einsatz = kein Muster)
+    .map(([g,o]) => [g, o.sum/o.n, o.n])
+    .sort((a,b) => b[1]-a[1]);
+}
+
+/* Generiert bis zu 6 Insight-Sätze über die (gefilterten) Rows */
+function edInsights(rows, aktivRows, stichtag) {
+  const out = [];
+  const fmtN = n => n.toLocaleString("de-CH", {minimumFractionDigits:0, maximumFractionDigits:1});
+
+  // 1) Beste Ø-Marge pro GAV (nur wenn Marge-Daten vorhanden)
+  const margeByGav = edGroupAvg(rows, "gav", r => {
+    const s = (r["Marge"]||"").trim();
+    return s ? parsePct(s) : null;
+  });
+  if (margeByGav.length >= 2) {
+    const [best, bAvg] = margeByGav[0];
+    const [worst, wAvg] = margeByGav[margeByGav.length-1];
+    const isPct = rows.some(r => (r["Marge"]||"").includes("%"));
+    const u = isPct ? "%" : " CHF";
+    out.push(`💰 Die beste Ø-Marge holst du im <strong>${escape(best)}</strong> (${fmtN(bAvg)}${u}) — im <strong>${escape(worst)}</strong> ist sie mit ${fmtN(wAvg)}${u} am tiefsten.`);
+  }
+
+  // 2) Längste Ø-Einsatzdauer pro GAV
+  const dauerByGav = edGroupAvg(rows, "gav", r => edDauer(r, stichtag));
+  if (dauerByGav.length >= 2) {
+    const [longest, lAvg, lN] = dauerByGav[0];
+    const [shortest, sAvg] = dauerByGav[dauerByGav.length-1];
+    out.push(`⏱ Im <strong>${escape(longest)}</strong> dauern die Einsätze am längsten (Ø ${fmtN(lAvg)} Tage, ${lN} Einsätze) — im <strong>${escape(shortest)}</strong> nur Ø ${fmtN(sAvg)} Tage.`);
+  }
+
+  // 3) Dominante Funktion unter den aktiven
+  const funkDist = edDist(aktivRows, "funktion");
+  if (funkDist.length >= 2 && aktivRows.length >= 5 && funkDist[0][0] !== "(leer)") {
+    const [topF, topN] = funkDist[0];
+    const pct = Math.round(topN/aktivRows.length*100);
+    if (pct >= 20) {
+      out.push(`👷 <strong>${escape(topF)}</strong> ist deine häufigste Funktion am Stichtag — ${topN} von ${aktivRows.length} Einsätzen (${pct}%).`);
+    }
+  }
+
+  // 4) Wachstums-/Schrumpfungs-Trend: Eintritte vs. Austritte ±14 Tage
+  const stD = new Date(stichtag + "T00:00:00");
+  const in14 = new Date(stD.getTime() + 14*24*3600*1000).toISOString().slice(0,10);
+  const einN = rows.filter(r => { const v = edToIso(r["Eintrittsdatum"]); return v && v > stichtag && v <= in14; }).length;
+  const ausN = rows.filter(r => { const b = edToIso(r["Austrittsdatum"]); return b && b >= stichtag && b <= in14; }).length;
+  if (einN + ausN >= 3) {
+    if (einN > ausN * 1.5)      out.push(`📈 Wachstum voraus: In den nächsten 14 Tagen kommen <strong>${einN} Eintritte</strong> auf nur ${ausN} Austritte.`);
+    else if (ausN > einN * 1.5) out.push(`📉 Achtung Abbau: In den nächsten 14 Tagen stehen <strong>${ausN} Austritte</strong> nur ${einN} Eintritten gegenüber.`);
+    else                        out.push(`⚖️ Stabiler Bestand: die nächsten 14 Tage bringen ${einN} Eintritte und ${ausN} Austritte — praktisch ausgeglichen.`);
+  }
+
+  // 5) Kurzläufer-Quote (Fluktuations-Indikator)
+  const abgeschlossen = rows.filter(r => edToIso(r["Austrittsdatum"]));
+  if (abgeschlossen.length >= 10) {
+    const kurz = abgeschlossen.filter(r => { const d = edDauer(r, stichtag); return d !== null && d <= 5; }).length;
+    const pct = Math.round(kurz/abgeschlossen.length*100);
+    if (pct >= 25) out.push(`🔄 Hohe Fluktuation: <strong>${pct}%</strong> der abgeschlossenen Einsätze dauerten 5 Tage oder weniger (${kurz} von ${abgeschlossen.length}).`);
+  }
+
+  // 6) Ablaufende Bewilligungen unter den Aktiven
+  const in60 = new Date(stD.getTime() + 60*24*3600*1000).toISOString().slice(0,10);
+  const ablauf = aktivRows.filter(r => {
+    const bis = edToIso(r["Aufenthaltsbewilligung Gültig bis"]);
+    return bis && bis >= stichtag && bis <= in60;
+  });
+  if (ablauf.length > 0) {
+    out.push(`🛂 Handlungsbedarf: Bei <strong>${ablauf.length} aktiven Einsätzen</strong> läuft die Aufenthaltsbewilligung innert 60 Tagen ab.`);
+  }
+
+  // 7) Ø-Stundenlohn-Spread pro GAV (falls Lohndaten)
+  const lohnByGav = edGroupAvg(rows, "gav", r => {
+    const s = (r["Stundenlohn"]||"").trim();
+    return s ? parsePct(s) : null;
+  });
+  if (lohnByGav.length >= 2) {
+    const [top, tAvg] = lohnByGav[0];
+    out.push(`💵 Die höchsten Stundenlöhne zahlst du im <strong>${escape(top)}</strong> (Ø CHF ${fmtN(tAvg)}).`);
+  }
+
+  return out.slice(0, 6);
+}
+
 /* Datum eines CSV-Felds als ISO (yyyy-mm-dd) oder null */
 function edToIso(s) {
   const d = parseSwissDate(s);
@@ -3854,8 +4007,9 @@ function renderEinsatzDash(el) {
 
   const chartDays = [];
   if (minIso && maxIso) {
+    // Fenster: 60 Tage zurück, 7 Tage nach vorne (Fokus auf Rückblick + kurze Vorschau)
     const capMin = new Date(stD.getTime() - 60*24*3600*1000).toISOString().slice(0,10);
-    const capMax = new Date(stD.getTime() + 60*24*3600*1000).toISOString().slice(0,10);
+    const capMax = new Date(stD.getTime() + 7*24*3600*1000).toISOString().slice(0,10);
     const start = minIso < capMin ? capMin : minIso;
     const end = maxIso > capMax ? capMax : maxIso;
     let d = new Date(start + "T00:00:00");
@@ -3903,7 +4057,7 @@ function renderEinsatzDash(el) {
     chartHtml = `
       <div class="ed-card" style="grid-column:1/-1">
         <div class="ed-card-head">
-          <div class="ed-card-title">Aktive Einsätze im Verlauf <span style="color:var(--text-faint);font-weight:400">(±60 Tage um Stichtag)</span></div>
+          <div class="ed-card-title">Aktive Einsätze im Verlauf <span style="color:var(--text-faint);font-weight:400">(60 Tage zurück, 7 Tage voraus)</span></div>
           ${splitChips}
         </div>
         <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" preserveAspectRatio="xMidYMid meet">
@@ -4025,7 +4179,7 @@ function renderEinsatzDash(el) {
       <div class="ed-stichtag-main">
         <span class="ed-stichtag-label">📅 Stichtag</span>
         <button class="ed-day-btn" onclick="edStichtagShift(-1)" title="Ein Tag zurück">‹</button>
-        <input type="date" value="${stichtag}" onchange="edSetStichtag(this.value)" class="ed-date-input">
+        <input type="date" value="${stichtag}" onchange="edSetStichtagGuarded(this.value)" class="ed-date-input">
         <button class="ed-day-btn" onclick="edStichtagShift(1)" title="Ein Tag vor">›</button>
         ${stichtag !== heuteIso ? `<button class="ed-today-btn" onclick="edSetStichtag('${heuteIso}')">Heute</button>` : ""}
       </div>
@@ -4038,9 +4192,17 @@ function renderEinsatzDash(el) {
     <!-- Filterleiste -->
     <div class="ed-filterbar">
       <label class="ed-filter"><span>Von</span>
-        <input type="date" value="${f.von}" onchange="edSetFilter('von', this.value)"></label>
+        <input type="date" value="${f.von}" onchange="edSetDateFilter('von', this.value)"></label>
       <label class="ed-filter"><span>Bis</span>
-        <input type="date" value="${f.bis}" onchange="edSetFilter('bis', this.value)"></label>
+        <input type="date" value="${f.bis}" onchange="edSetDateFilter('bis', this.value)"></label>
+      <div class="ed-filter"><span>Schnellwahl</span>
+        <div class="ed-preset-row">
+          <button class="ed-dim-chip" onclick="edPreset('monat')">Monat</button>
+          <button class="ed-dim-chip" onclick="edPreset('quartal')">Quartal</button>
+          <button class="ed-dim-chip" onclick="edPreset('jahr')">Jahr</button>
+          <button class="ed-dim-chip" onclick="edPreset('alles')">Alles</button>
+        </div>
+      </div>
       ${mkSelect("gav", "GAV", gavs, f.gav)}
       ${mkSelect("berater", "Berater", beraterList, f.berater)}
       ${mkSelect("gs", "Geschäftsstelle", gsList, f.gs)}
@@ -4061,6 +4223,16 @@ function renderEinsatzDash(el) {
       ${kpi("📋", uniqueGav, "GAVs im Einsatz", "", "")}
       ${kpi("🛂", ablaufBewilligung.length, "Bewilligungen laufen ab", "in 60 Tagen", ablaufBewilligung.length > 0 ? "ed-kpi-danger" : "")}
     </div>
+
+    <!-- ✨ Insights: automatisch berechnete Aussagen aus den Daten -->
+    ${(() => {
+      const insights = edInsights(rows, aktivRows, stichtag);
+      if (!insights.length) return "";
+      return `<div class="ed-card ed-insights">
+        <div class="ed-card-title">✨ Insights</div>
+        ${insights.map(t => `<div class="ed-insight-row">${t}</div>`).join("")}
+      </div>`;
+    })()}
 
     <div class="ed-two-col">
       <!-- Kuchendiagramm mit Dimension-Wahl -->
