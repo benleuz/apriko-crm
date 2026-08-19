@@ -936,7 +936,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.12.2</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.13.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -3847,7 +3847,10 @@ function bmNorm(r) {
     name:      (r["Name"]||"").trim(),
     total:     bmParseNumber(r["Total"]),
     bh:        (r["Buchhaltungsrelevant"]||"").trim() === "Ja",
-    level:     (r["Margenstufe"]||"").trim()          // Level 1|2|3
+    level:     (r["Margenstufe"]||"").trim(),         // Level 1|2|3
+    // Festvermittlung: eigener Ertrag ohne Lohnkosten — darf die
+    // Temporär-Marge nicht verfälschen (erkannt am Positionsnamen)
+    fest:      /vermittl/i.test(r["Name"]||"") && (r["Art"]||"").trim() === "Rate"
   };
 }
 
@@ -3952,7 +3955,7 @@ function bmKickbackTotal(rows) {
   if (!einsatzDashState.kb.rows.length || !einsatzDashState.rows.length) return 0;
   const perPP = {};
   rows.forEach(b => {
-    if (!b.bh || b.art !== "Rate") return;
+    if (!b.bh || b.art !== "Rate" || b.fest) return;
     const key = b.placement + "|" + b.periode;
     perPP[key] = (perPP[key]||0) + b.total;
   });
@@ -3984,10 +3987,10 @@ function bmFilteredRows() {
    - Sozialleistungen = Σ Salary Level 3 (AG-Beiträge)
    - Bruttomarge     = Umsatz − Lohn − Sozialleistungen */
 function bmAgg(rows) {
-  let umsatz = 0, l1 = 0, l2 = 0, l3 = 0;
+  let umsatz = 0, fest = 0, l1 = 0, l2 = 0, l3 = 0;
   rows.forEach(b => {
     if (!b.bh) return;
-    if (b.art === "Rate") umsatz += b.total;
+    if (b.art === "Rate") { if (b.fest) fest += b.total; else umsatz += b.total; }
     else if (b.art === "Salary") {
       if (b.level === "Level 1") l1 += b.total;
       else if (b.level === "Level 2") l2 += b.total;
@@ -3996,7 +3999,7 @@ function bmAgg(rows) {
   });
   const lohn = l1 + l2;
   const marge = umsatz - lohn - l3;
-  return { umsatz, lohn, sozial: l3, marge,
+  return { umsatz, fest, lohn, sozial: l3, marge,
     margep: umsatz ? marge/umsatz*100 : 0 };
 }
 
@@ -4212,6 +4215,7 @@ function bmRenderContent() {
       <div class="table-wrap"><table>
         <thead><tr>
           <th>Periode</th><th style="text-align:right">Umsatz</th>
+          ${agg.fest > 0 ? '<th style="text-align:right">Festverm.</th>' : ""}
           <th style="text-align:right">Lohn</th><th style="text-align:right">Sozialleistungen</th>
           <th style="text-align:right">Bruttomarge</th><th style="text-align:right">Marge %</th>
         </tr></thead>
@@ -4221,6 +4225,7 @@ function bmRenderContent() {
             return `<tr>
               <td><strong>${escape(m)}</strong></td>
               <td style="text-align:right">${bmChf(a.umsatz)}</td>
+              ${agg.fest > 0 ? `<td style="text-align:right;color:var(--accent)">${a.fest ? bmChf(a.fest) : "—"}</td>` : ""}
               <td style="text-align:right" class="dim">${bmChf(a.lohn)}</td>
               <td style="text-align:right" class="dim">${bmChf(a.sozial)}</td>
               <td style="text-align:right;color:${bmCol};font-weight:600">${bmChf(a.marge)}</td>
@@ -4308,6 +4313,10 @@ function bmRenderContent() {
       bmInsights.push(`⚠️ <strong>${negMonths.length} Monat${negMonths.length>1?"e":""}</strong> mit negativer Marge: ${negMonths.map(([m,a]) => escape(m) + " (" + bmChf(a.marge) + ")").join(", ")} — typisch bei Lohnzahlung ohne (bzw. vor) Kundenverrechnung.`);
     }
   }
+  if (agg.fest > 0) {
+    const festPl = byPlacement.filter(([,a]) => a.fest > 0).length;
+    bmInsights.push(`🤝 Dazu kommen <strong>${bmChf(agg.fest)}</strong> aus Festvermittlungen (${festPl} Einsätze) — voller Deckungsbeitrag ohne Lohnkosten, separat vom Verleih-Umsatz ausgewiesen.`);
+  }
   if (agg.umsatz > 0) {
     bmInsights.push(`📊 Sozialleistungen kosten dich <strong>${bmPct(agg.sozial/agg.umsatz*100)}</strong> des Umsatzes — unter dem Strich bleiben ${bmPct(agg.margep)} Bruttomarge.`);
   }
@@ -4346,7 +4355,8 @@ function bmRenderContent() {
 
     <!-- Margen-KPIs -->
     <div class="ed-kpi-grid">
-      ${kpi("💵", bmChf(agg.umsatz), "Umsatz", byMonth.length + " Monate", "")}
+      ${kpi("💵", bmChf(agg.umsatz), "Umsatz Verleih", byMonth.length + " Monate", "")}
+      ${agg.fest > 0 ? kpi("🤝", bmChf(agg.fest), "Festvermittlungen", "eigener Ertrag, ohne Lohnkosten", "ed-kpi-accent") : ""}
       ${kpi("👷", bmChf(agg.lohn), "Lohn", agg.lohn > 0 ? "Faktor " + (agg.umsatz/agg.lohn).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2}) : "", "")}
       ${kpi("🏦", bmChf(agg.sozial), "Sozialleistungen", "", "")}
       ${kickback > 0 ? kpi("↩️", bmChf(kickback), "Kickback", "Kunden-Rückvergütung", "ed-kpi-warn") : ""}
