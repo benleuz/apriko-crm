@@ -921,7 +921,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.7.4</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.7.5</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -4021,19 +4021,24 @@ function renderEinsatzDash(el) {
       end = f.bis || maxIso;
       chartWindowLabel = edFormatIso(start) + " – " + edFormatIso(end);
     } else {
+      /* Default: alle Montage des aktuellen Jahres bis heute,
+         plus zwei Montage in die Zukunft.
+         Start = erster Montag ab 1.1., Ende = letzter Montag + 14 Tage. */
       const today = new Date();
       const dow = (today.getDay() + 6) % 7;  // Mo=0 … So=6
-      const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - dow);
-      start = monday.toISOString().slice(0,10);
-      const eoy = today.getFullYear() + "-12-31";
-      const min2w = new Date(monday.getTime() + 14*24*3600*1000).toISOString().slice(0,10);
-      end = eoy > min2w ? eoy : min2w;
-      chartWindowLabel = "ab Montag " + edFormatIso(start) + " bis Ende Jahr";
+      const lastMonday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - dow);
+      const jan1 = new Date(today.getFullYear(), 0, 1);
+      const jan1Dow = (jan1.getDay() + 6) % 7;
+      const firstMonday = jan1Dow === 0 ? jan1 : new Date(today.getFullYear(), 0, 1 + (7 - jan1Dow));
+      start = firstMonday.toISOString().slice(0,10);
+      end = new Date(lastMonday.getTime() + 14*24*3600*1000).toISOString().slice(0,10);
+      chartWindowLabel = "Montage seit " + edFormatIso(start) + " + 2 Wochen Vorschau";
     }
 
     const spanDays = (new Date(end + "T00:00:00") - new Date(start + "T00:00:00")) / (24*3600*1000);
-    const weekly = spanDays > 70;
-    if (weekly) chartWindowLabel += ", wöchentlich (Montage)";
+    // Default-Modus ist immer wöchentlich; bei Von/Bis-Override abhängig von der Spannweite
+    const weekly = (f.von || f.bis) ? spanDays > 70 : true;
+    if (weekly && (f.von || f.bis)) chartWindowLabel += ", wöchentlich (Montage)";
 
     let d = new Date(start + "T00:00:00");
     if (weekly) {
