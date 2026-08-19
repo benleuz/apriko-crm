@@ -647,6 +647,44 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
 
   /* Rapport-Toolbar oben rechts (Reset etc.) */
   .rp-toolbar{display:flex;justify-content:flex-end;padding:8px 4px;margin-bottom:8px}
+
+  /* Zweispalten-Layout: Cards links, Beleg-Preview permanent rechts (sticky) */
+  .rp-main-layout{display:grid;grid-template-columns:1fr 420px;gap:16px;align-items:start}
+  .rp-cards-col{min-width:0}
+  .rp-preview-col{min-width:0}
+  .rp-preview-sticky{position:sticky;top:12px;background:var(--rp-white);border:1px solid var(--rp-line);
+    border-radius:6px;overflow:hidden;max-height:calc(100vh - 24px);display:flex;flex-direction:column}
+  .rp-preview-header{padding:8px 12px;font-size:11px;color:var(--rp-grey);background:var(--rp-bg);
+    border-bottom:1px solid var(--rp-line);flex-shrink:0}
+  .rp-preview-header b{color:var(--rp-dark)}
+  .rp-preview-controls{padding:6px 12px;background:var(--rp-white);border-bottom:1px solid var(--rp-line);
+    display:flex;align-items:center;flex-wrap:wrap;gap:6px;flex-shrink:0}
+  .rp-preview-controls:empty{display:none}
+  .rp-preview-controls button{padding:4px 10px;font-size:11px;border:1px solid var(--rp-line);
+    background:var(--rp-bg);color:var(--rp-dark);border-radius:3px;cursor:pointer;font-family:inherit}
+  .rp-preview-controls button:hover{background:var(--rp-lime);border-color:var(--rp-lime-dark)}
+  .rp-preview-controls .rp-tab-active{background:var(--rp-lime);border-color:var(--rp-lime-dark);font-weight:600}
+  .rp-preview-body{flex:1;overflow-y:auto;padding:8px;background:var(--rp-bg);display:flex;
+    align-items:flex-start;justify-content:center}
+  .rp-preview-body img{max-width:100%;height:auto;cursor:zoom-in;border-radius:3px;
+    box-shadow:0 1px 4px rgba(0,0,0,0.1);image-orientation:from-image;background:var(--rp-white)}
+  .rp-preview-body iframe{width:100%;min-height:calc(100vh - 120px);border:none;background:var(--rp-white)}
+  .rp-preview-empty{padding:40px 20px;text-align:center;color:var(--rp-grey);font-size:13px;width:100%}
+  .rp-preview-loading{padding:40px;text-align:center;color:var(--rp-grey);font-size:13px;width:100%}
+
+  /* Karte 1 im "collapsed"-Modus nach Upload */
+  .rp-card-collapsed .rp-card-body{display:none}
+  .rp-card-collapsed .rp-card-head{cursor:pointer}
+  .rp-card-collapsed .rp-card-head::after{content:'▾';margin-left:auto;color:var(--rp-grey);font-size:14px}
+  .rp-card-collapsed-info{margin-left:auto;font-size:12px;color:var(--rp-grey);padding:0 8px}
+  .rp-card-collapsed-info b{color:var(--rp-dark)}
+
+  /* Bei schmalem Viewport: Preview unter die Cards */
+  @media(max-width:1100px){
+    .rp-main-layout{grid-template-columns:1fr}
+    .rp-preview-sticky{position:static;max-height:none}
+    .rp-preview-body iframe{min-height:500px}
+  }
   .rp-btn-sm{padding:5px 12px;font-size:12px}
 
   /* Thumbnails der hochgeladenen Bilder in Karte 1 */
@@ -783,7 +821,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.4.4</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.5.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -806,6 +844,9 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <div class="rp-toolbar">
         <button type="button" class="rp-btn rp-btn-ghost rp-btn-sm" id="rpReset" title="Rapport-Ansicht zurücksetzen">↺ Alles zurücksetzen</button>
       </div>
+
+      <div class="rp-main-layout">
+        <div class="rp-cards-col">
 
       <!-- 1 Upload -->
       <div class="rp-card">
@@ -850,8 +891,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
         <div class="rp-card-head"><div class="rp-step">2</div><h3>Einsatz bestimmen</h3>
           <div class="rp-sub">Steuert, welcher GAV gerechnet wird</div></div>
         <div class="rp-card-body">
-          <div class="rp-s2-layout">
-            <div class="rp-s2-form">
+          <div class="rp-s2-form">
               <div class="rp-grid">
                 <div><label for="rpMa">Mitarbeiter</label>
                   <input type="text" id="rpMa" placeholder="Name oder Personalnummer"></div>
@@ -873,12 +913,6 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
                     <option value="pvl">Kein vorrangiger GAV</option>
                   </select></div>
               </div>
-            </div>
-            <!-- Kleine Beleg-Vorschau, damit User schon hier prüfen kann was hochgeladen wurde -->
-            <div class="rp-s2-preview" id="rpS2Preview" hidden>
-              <div class="rp-s2-preview-label">Hochgeladener Beleg</div>
-              <div class="rp-s2-preview-inner" id="rpS2PreviewInner"></div>
-            </div>
           </div>
           <div class="rp-actions"><button class="rp-btn rp-btn-dark" id="rpLoad">GAV-Eckwerte laden</button></div>
           <dl class="rp-facts" id="rpFacts" hidden></dl>
@@ -900,28 +934,19 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
           <!-- Beleg-Tabs -->
           <div class="rp-beleg-tabs" id="rpBelegTabs" hidden></div>
 
-          <!-- Split: Tabelle links, Beleg rechts -->
-          <div class="rp-split-check">
-            <div class="rp-check-left">
-              <div class="rp-scroll">
-                <table class="rp-table">
-                  <thead><tr>
-                    <th>Datum</th><th>Tag</th><th>Kostenstelle</th>
-                    <th class="rp-num">Soll</th><th class="rp-num">Ist</th>
-                    <th class="rp-num">Differenz</th><th>Beleg</th>
-                  </tr></thead>
-                  <tbody id="rpTbody"></tbody>
-                  <tfoot><tr><td colspan="3">Total</td>
-                    <td class="rp-num" id="rpTSoll">—</td><td class="rp-num" id="rpTIst">—</td>
-                    <td class="rp-num" id="rpTDiff">—</td><td></td></tr></tfoot>
-                </table>
-              </div>
-            </div>
-            <div class="rp-check-right">
-              <div class="rp-beleg-viewer" id="rpBelegViewer">
-                <div class="rp-beleg-empty">Beleg wird hier angezeigt<br><small>Klick auf eine Tabellenzeile zum Wechseln</small></div>
-              </div>
-            </div>
+          <!-- Tabelle nutzt jetzt volle Breite — Beleg ist im sticky Panel rechts -->
+          <div class="rp-scroll">
+            <table class="rp-table">
+              <thead><tr>
+                <th>Datum</th><th>Tag</th><th>Kostenstelle</th>
+                <th class="rp-num">Soll</th><th class="rp-num">Ist</th>
+                <th class="rp-num">Differenz</th><th>Beleg</th>
+              </tr></thead>
+              <tbody id="rpTbody"></tbody>
+              <tfoot><tr><td colspan="3">Total</td>
+                <td class="rp-num" id="rpTSoll">—</td><td class="rp-num" id="rpTIst">—</td>
+                <td class="rp-num" id="rpTDiff">—</td><td></td></tr></tfoot>
+            </table>
           </div>
 
           <ul class="rp-notes" id="rpNotes"></ul>
@@ -950,6 +975,19 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
           <pre class="rp-out" id="rpOut" hidden></pre>
         </div>
       </div>
+
+        </div><!-- .rp-cards-col -->
+
+        <!-- Rechte Spalte: sticky Beleg-Preview, gross und permanent sichtbar -->
+        <aside class="rp-preview-col" id="rpPreviewCol" hidden>
+          <div class="rp-preview-sticky" id="rpPreviewSticky">
+            <div class="rp-preview-header" id="rpPreviewHeader"></div>
+            <div class="rp-preview-controls" id="rpPreviewControls"></div>
+            <div class="rp-preview-body" id="rpPreviewBody"></div>
+          </div>
+        </aside>
+
+      </div><!-- .rp-main-layout -->
 
     </div>
   </main>
@@ -5050,7 +5088,16 @@ function resetRapport(){
   $('rpScan').disabled = true;
   $('rpScan').textContent = 'Rapporte auslesen';
   var picker = $('rpPicker');
-  if(picker) picker.value = '';  // File-Input auch leeren
+  if(picker) picker.value = '';
+  expandUploadCard();  // falls kollabiert war
+
+  // Sticky Preview-Panel rechts leeren
+  _activePreviewIdx = 0;
+  var previewCol = $('rpPreviewCol');
+  if(previewCol) previewCol.hidden = true;
+  ['rpPreviewHeader','rpPreviewControls','rpPreviewBody'].forEach(function(id){
+    var e = $(id); if(e) e.innerHTML = '';
+  });
 
   // Karte 2: Eingaben leeren, Facts verstecken, Auto-Vorschlags-Badge weg
   $('rpKunde').value = '';
@@ -5064,10 +5111,6 @@ function resetRapport(){
   $('rpSrc').hidden = true;
   $('rpSrc').innerHTML = '';
   $('rpLoad').textContent = 'GAV-Eckwerte laden';
-  var previewC = $('rpS2Preview');
-  var previewI = $('rpS2PreviewInner');
-  if(previewC){ previewC.hidden = true; }
-  if(previewI){ previewI.innerHTML = ''; previewI.onclick = null; }
   var badge = document.getElementById('rpGavSuggestBadge');
   if(badge) badge.remove();
   var enrichBadge = document.getElementById('rpEnrichBadge');
@@ -5261,60 +5304,85 @@ function renderFiles(){
   $('rpScan').disabled = files.length===0;
 }
 
-/* Grosse Vorschau der ERSTEN hochgeladenen Datei direkt in Karte 1,
-   damit der User sofort sieht was hochgeladen wurde — bevor er auf
-   "Rapporte auslesen" klickt. Ähnlich einer Featured-Preview.
-   PDFs zeigen entweder das gerenderte PNG (nach ein paar hundert ms)
-   oder einen "wird gerendert..."-Platzhalter.
-   Bei Bildern/gerenderten PDFs: Rotate-Buttons für schräge Fotos. */
-function renderFeaturedPreview(){
-  var el = $('rpFeatured');
-  if(!el) return;
+/* Zentrale Preview-Funktion für das sticky Beleg-Panel rechts.
+   Zeigt den aktuell ausgewählten Beleg gross an, mit Tabs bei mehreren
+   Dateien, Rotate-Buttons und Klick-Handler von der Prüftabelle in Karte 3
+   zum Beleg-Wechseln. Ersetzt renderFeaturedPreview/renderS2Preview und
+   den grossen Beleg-Viewer in Karte 3. */
+var _activePreviewIdx = 0;
+
+function setActivePreview(idx){
+  if(idx < 0 || idx >= files.length) return;
+  _activePreviewIdx = idx;
+  renderPreviewCol();
+}
+window.setActivePreview = setActivePreview;
+
+function renderPreviewCol(){
+  var col = $('rpPreviewCol');
+  var header = $('rpPreviewHeader');
+  var controls = $('rpPreviewControls');
+  var body = $('rpPreviewBody');
+  if(!col || !header || !controls || !body) return;
+
   if(!files.length){
-    el.hidden = true;
-    el.innerHTML = '';
+    col.hidden = true;
+    header.innerHTML = ''; controls.innerHTML = ''; body.innerHTML = '';
     return;
   }
-  el.hidden = false;
-  var f = files[0];
-  var caption = '<div class="rp-featured-cap">' +
-    '<b>' + esc(f.name) + '</b> · ' + esc(f.size) +
-    (files.length > 1 ? ' · <span style="color:var(--rp-grey)">(erste von ' + files.length + ')</span>' : '') +
-    ' · <a href="' + f.url + '" target="_blank" rel="noopener" style="color:var(--rp-lime-dark);text-decoration:underline">in neuem Tab öffnen</a>' +
-    '</div>';
+  col.hidden = false;
+
+  if(_activePreviewIdx >= files.length) _activePreviewIdx = 0;
+  var f = files[_activePreviewIdx];
+
+  header.innerHTML = '<b>' + esc(f.name) + '</b> · ' + esc(f.size) +
+    ' · <a href="' + f.url + '" target="_blank" rel="noopener" ' +
+    'style="color:var(--rp-lime-dark);text-decoration:underline">Original öffnen</a>';
+
+  var controlHtml = '';
+  if(files.length > 1){
+    controlHtml += '<span style="color:var(--rp-grey);font-size:11px;margin-right:4px">Beleg:</span>';
+    files.forEach(function(file, i){
+      var active = i === _activePreviewIdx ? ' rp-tab-active' : '';
+      var short = file.name.length > 14 ? file.name.substring(0,12) + '…' : file.name;
+      controlHtml += '<button type="button" class="' + active + '" onclick="setActivePreview(' + i + ')" ' +
+        'title="' + esc(file.name) + '">' + esc(short) + '</button>';
+    });
+    controlHtml += '<span style="width:1px;background:var(--rp-line);align-self:stretch;margin:0 4px"></span>';
+  }
+  var canRotate = f.type === 'image' || (f.type === 'pdf' && f.renderStatus === 'ready');
+  if(canRotate){
+    controlHtml += '<button type="button" onclick="__rpRotate(-90)" title="90° nach links drehen">↺</button>' +
+      '<button type="button" onclick="__rpRotate(90)" title="90° nach rechts drehen">↻</button>' +
+      '<button type="button" onclick="__rpRotate(180)" title="Auf den Kopf stellen">180°</button>';
+  }
+  controls.innerHTML = controlHtml;
+
   if(f.type === 'pdf' && f.renderStatus === 'pending'){
-    el.innerHTML = caption +
-      '<div class="rp-featured-loading">' +
+    body.innerHTML = '<div class="rp-preview-loading">' +
       '<div style="width:24px;height:24px;border:3px solid #E5E7EB;border-top-color:var(--rp-lime-dark);' +
       'border-radius:50%;animation:rp-spin 0.8s linear infinite;margin:0 auto 12px"></div>' +
       'PDF wird zum Prüfen aufbereitet…</div>';
     return;
   }
   if(f.type === 'pdf' && f.renderStatus === 'failed'){
-    el.innerHTML = caption +
-      '<div class="rp-featured-loading" style="color:#B91C1C">' +
-      '⚠️ PDF konnte nicht als Bild dargestellt werden. Bitte in neuem Tab öffnen zum Prüfen.</div>';
+    body.innerHTML = '<div class="rp-preview-loading" style="color:#B91C1C">' +
+      '⚠️ PDF konnte nicht als Bild dargestellt werden.<br>' +
+      '<a href="' + f.url + '" target="_blank" style="color:var(--rp-lime-dark)">Original-PDF öffnen</a></div>';
     return;
   }
-  // Rotate-Buttons für schräge Fotos / falsch orientierte Scans.
-  // Werden auch fürs OCR angewendet (das ocrBlob wird mit-rotiert).
-  var rotateControls =
-    '<div class="rp-featured-controls">' +
-      '<span style="color:var(--rp-grey);font-size:11px;margin-right:8px">Falsch orientiert?</span>' +
-      '<button type="button" onclick="__rpRotate(-90)" title="90° nach links drehen">↺ Links</button>' +
-      '<button type="button" onclick="__rpRotate(90)" title="90° nach rechts drehen">↻ Rechts</button>' +
-      '<button type="button" onclick="__rpRotate(180)" title="Auf den Kopf stellen">↻ 180°</button>' +
-    '</div>';
-  el.innerHTML = caption + rotateControls +
-    '<div class="rp-featured-img-wrap"><img src="' + (f.previewUrl || f.url) + '" alt="' + esc(f.name) + '" ' +
-    'onclick="__rpLightbox(this.src)" title="Klick zum Vergrössern"></div>';
+  var src = f.previewUrl || f.url;
+  body.innerHTML = '<img src="' + src + '" alt="' + esc(f.name) + '" ' +
+    'onclick="__rpLightbox(this.src)" title="Klick zum Vergrössern">';
 }
 
-/* Dreht die aktuell in der Featured-Preview gezeigte Datei um X° und
-   aktualisiert alle Vorschauen. Das rotierte Bild wird auch beim OCR-Call
-   verwendet, also nutzt Claude die vom User korrigierte Orientierung. */
+/* Legacy-Wrapper — die alten Namen bleiben um Aufrufer nicht zu brechen */
+function renderFeaturedPreview(){ renderPreviewCol(); }
+
+/* Dreht die aktuell im Preview gezeigte Datei um X° und aktualisiert alles.
+   Das rotierte Bild wird auch beim OCR-Call verwendet. */
 async function rotateFirstFile(degrees){
-  var f = files[0];
+  var f = files[_activePreviewIdx];
   if(!f) return;
   var srcUrl = f.previewUrl || f.url;
   var img = new Image();
@@ -5348,8 +5416,7 @@ async function rotateFirstFile(degrees){
   f.ocrBlob = newBlob;
   f.renderStatus = 'ready';
   renderThumbs();
-  renderFeaturedPreview();
-  renderS2Preview();
+  renderPreviewCol();
 }
 window.__rpRotate = rotateFirstFile;
 
@@ -5432,45 +5499,48 @@ function scan(){
       zeilen = ERKANNT.map(function(r){ return Object.assign({},r); });
       b.textContent='Erneut auslesen'; b.disabled=false;
       unlock($('rpS2'));
-      renderS2Preview();
+      collapseUploadCard();
+      renderPreviewCol();
       $('rpS2').scrollIntoView({behavior:'smooth',block:'start'});
     },900);
   }
 }
 
-/* Rendert eine Vorschau des ersten hochgeladenen Belegs in Karte 2,
-   damit der User schon vor der GAV-Wahl sehen kann, was hochgeladen wurde.
-   Klick öffnet Vollansicht via Lightbox. */
-function renderS2Preview(){
-  var container = $('rpS2Preview');
-  var inner = $('rpS2PreviewInner');
-  if(!container || !inner) return;
-  if(!files.length){
-    container.hidden = true;
-    inner.innerHTML = '';
-    return;
+/* Karte 1 nach dem Scan zusammenklappen: nur noch eine einzeilige
+   Status-Zeile im Header, Body-Inhalt versteckt. Klick auf den Header
+   klappt wieder auf (falls User nochmal Datei ändern will). */
+function collapseUploadCard(){
+  var card = document.querySelector('#view-rapport .rp-card');  // erste Karte
+  if(!card) return;
+  card.classList.add('rp-card-collapsed');
+  var head = card.querySelector('.rp-card-head');
+  if(!head) return;
+  // Info-Zeile mit Dateiname(n) einfügen falls noch nicht da
+  var info = card.querySelector('.rp-card-collapsed-info');
+  if(!info){
+    info = document.createElement('div');
+    info.className = 'rp-card-collapsed-info';
+    head.appendChild(info);
   }
-  container.hidden = false;
-  var f = files[0];  // erste Datei
-  // Wenn ein PDF gerendert wurde, zeige das PNG statt Icon-Kachel.
-  // Der User sieht damit das gleiche Bild, das Claude sieht.
-  var previewSrc = f.previewUrl || f.url;
-  if(f.type === 'pdf' && f.renderStatus !== 'ready'){
-    // Rendering noch nicht fertig oder fehlgeschlagen — Icon-Kachel als Fallback
-    inner.innerHTML =
-      '<div style="text-align:center;padding:20px;color:var(--rp-dark)">' +
-        '<div style="font-size:48px;line-height:1">📄</div>' +
-        '<div style="margin-top:12px;font-size:12px;font-weight:600;word-break:break-word">' + esc(f.name) + '</div>' +
-        '<div style="margin-top:8px;font-size:11px;color:var(--rp-grey)">' + esc(f.size) + '</div>' +
-        '<div style="margin-top:14px;padding:6px 12px;background:var(--rp-lime-dark);color:var(--rp-white);' +
-          'border-radius:3px;font-size:11px;display:inline-block">↗ In neuem Tab öffnen</div>' +
-      '</div>';
-    inner.onclick = function(){ window.open(f.url, '_blank'); };
-  } else {
-    inner.innerHTML = '<img src="'+previewSrc+'" alt="'+esc(f.name)+'">';
-    inner.onclick = function(){ window.__rpLightbox(previewSrc); };
-  }
+  info.innerHTML = '<b>' + files.length + '</b> Datei' + (files.length !== 1 ? 'en' : '') +
+    ' hochgeladen · ' + esc(files[0].name) + (files.length > 1 ? ' + …' : '');
+  // Klick-Handler zum Wieder-Aufklappen
+  head.onclick = function(){ expandUploadCard(); };
 }
+
+function expandUploadCard(){
+  var card = document.querySelector('#view-rapport .rp-card');
+  if(!card) return;
+  card.classList.remove('rp-card-collapsed');
+  var head = card.querySelector('.rp-card-head');
+  if(head) head.onclick = null;
+  var info = card.querySelector('.rp-card-collapsed-info');
+  if(info) info.remove();
+}
+
+/* Legacy-Alias: früher gab's eine kleine Preview in Karte 2. Die ist jetzt
+   im sticky Panel rechts, deshalb ruft der Alias einfach renderPreviewCol. */
+function renderS2Preview(){ renderPreviewCol(); }
 
 /* API-Key managen: beim ersten Klick fragen, danach in localStorage */
 function getAnthropicKey(){
@@ -6037,6 +6107,18 @@ async function scanWithClaude(){
       '   \n' +
       '   Erst wenn du wirklich nirgends einen plausiblen Kundenamen findest: firma = "".\n\n' +
 
+      '8. UNPRODUKTIVE STUNDEN (Ferien, Krankheit, Feiertag, Arzt, Ausbildung, Militär, unbezahlte Absenz) — KEINE ARBEITSZEIT:\n' +
+      '   Viele Rapporte haben eine SEPARATE Sektion für nicht-produktive Zeit — z.B. Zeilen "Ferienbezug", "Krankheit", "Feiertage", "Arzt/Zahnarzt/Therapie", "Ausbildung/Schule", "Militär/Zivilschutz", "Unbezahlte Absenz", "Berufsunfall", "Nichtberufsunfall". Diese Stunden sind KEINE produktive Arbeitszeit.\n' +
+      '   \n' +
+      '   Wenn ein Tag Stunden in einer UNPRODUKTIVEN Zeile hat (z.B. Mo 20. hat 8.00 in "Ferienbezug"):\n' +
+      '   → Extrahiere eine Zeile mit: absent=true, ist=0, kst="", typ=<typ>\n' +
+      '   → typ ist einer von: "ferien", "krankheit", "feiertag", "arzt", "ausbildung", "militaer", "absenz", "unfall"\n' +
+      '   → Und: erzeuge KEINE Buchung für den produktiven Bereich dieses Tages. Auch wenn dort optisch ein Wert zu sehen scheint (z.B. ein "x" oder Kreuz), das ist meist ein Marker "kein Eintrag", nicht ein Stundenwert. Ein Kreuz "x" wird oft fälschlich als "8.25" o.ä. gelesen — das ist FALSCH.\n' +
+      '   \n' +
+      '   Prüfe: das Total der produktiven Zeile pro Tag (z.B. "Total produktive Stunden" oder "Total Lohnstunden") sagt dir, welche Tage tatsächlich gearbeitet wurden. Wenn Total-produktiv am Mo = 0/leer, dann ist Mo KEIN Arbeitstag — egal was Claude in der Zeile drüber zu sehen glaubt.\n' +
+      '   \n' +
+      '   Beispiel: Mo hat "x" in "Dolphin 415" (produktiv) und 8.00 in "Ferienbezug" (unproduktiv) → {datum:"20.04.2026",tag:"Mo",absent:true,ist:0,kst:"",typ:"ferien"}\n\n' +
+
       'Antworte AUSSCHLIESSLICH mit einem gültigen JSON-Objekt in genau diesem Format, ohne Erklärungen, ohne Markdown-Code-Fences:\n' +
       '{\n' +
       '  "mitarbeiter": {"vorname": "Jonathan Pharel", "nachname": "Ngama"},\n' +
@@ -6044,7 +6126,8 @@ async function scanWithClaude(){
       '  "zeitraumVon": "09.08.' + aktuellesJahr + '",\n' +
       '  "zeitraumBis": "15.08.' + aktuellesJahr + '",\n' +
       '  "zeilen": [\n' +
-      '    {"datum":"10.08.' + aktuellesJahr + '","tag":"Mo","kst":"261245","ist":8.75,"kstFlag":null,"istFlag":null,"beleg":"' + belegKurz + '"}\n' +
+      '    {"datum":"10.08.' + aktuellesJahr + '","tag":"Mo","kst":"261245","ist":8.75,"kstFlag":null,"istFlag":null,"beleg":"' + belegKurz + '"},\n' +
+      '    {"datum":"11.08.' + aktuellesJahr + '","tag":"Di","absent":true,"ist":0,"kst":"","typ":"ferien","beleg":"' + belegKurz + '"}\n' +
       '  ]\n' +
       '}\n\n' +
       'REGELN FÜR DATUM UND JAHR:\n' +
@@ -6165,7 +6248,10 @@ async function scanWithClaude(){
         kstFlag: r.kstFlag || null,
         ist: typeof r.ist === 'number' ? r.ist : parseFloat(String(r.ist).replace(',','.')) || 0,
         istFlag: r.istFlag || null,
-        beleg: r.beleg || belegKurz
+        beleg: r.beleg || belegKurz,
+        // Neu: absent/typ für Ferien/Krankheit/etc. Bei fehlenden Feldern fallen zurück
+        absent: r.absent === true,
+        typ: r.typ ? String(r.typ).toLowerCase() : null
       };
     });
 
@@ -6306,7 +6392,8 @@ async function scanWithClaude(){
     b.textContent = 'Erneut auslesen';
     b.disabled = false;
     unlock($('rpS2'));
-    renderS2Preview();
+    collapseUploadCard();
+    renderPreviewCol();
     $('rpS2').scrollIntoView({behavior:'smooth',block:'start'});
 
   } catch(e){
@@ -6333,51 +6420,29 @@ function belegBaseName(name){
 function showBeleg(belegName){
   if(!belegName) return;
   currentBeleg = belegName;
-  var viewer = $('rpBelegViewer');
 
-  var file = null;
-
-  // Priorität 1: exakter Name-Match (ohne Extension, case-insensitive)
-  file = files.find(function(f){
+  var fileIdx = -1;
+  // Priorität 1: exakter Name-Match
+  fileIdx = files.findIndex(function(f){
     return belegBaseName(f.name).toLowerCase() === String(belegName).toLowerCase();
   });
-
-  // Priorität 2: bei genau EINER hochgeladenen Datei → immer diese nehmen
-  if(!file && files.length === 1){
-    file = files[0];
-  }
-
-  // Priorität 3: partieller Match (Datei-Name enthält Beleg-Name oder umgekehrt)
-  if(!file){
+  // Priorität 2: bei genau EINER Datei → immer die
+  if(fileIdx < 0 && files.length === 1) fileIdx = 0;
+  // Priorität 3: partieller Match
+  if(fileIdx < 0){
     var bnLow = String(belegName).toLowerCase();
-    file = files.find(function(f){
+    fileIdx = files.findIndex(function(f){
       var fnLow = belegBaseName(f.name).toLowerCase();
       return fnLow.indexOf(bnLow) >= 0 || bnLow.indexOf(fnLow) >= 0;
     });
   }
 
-  if(!file){
-    viewer.innerHTML = '<div class="rp-beleg-empty">Beleg <b>'+esc(belegName)+
-      '</b> nicht in den hochgeladenen Dateien gefunden.<br><small>Der OCR-Prozess hat den Namen anders gesetzt als die Datei heisst.</small></div>';
-  } else if(file.type === 'pdf'){
-    // Wenn wir das PDF schon als PNG haben, das anzeigen (perfekte Orientation,
-    // lesbare Grösse). Sonst Fallback zu iframe mit dem originalen PDF.
-    if(file.renderStatus === 'ready' && file.previewUrl){
-      viewer.innerHTML = '<div class="rp-beleg-info">'+esc(file.name)+' · '+
-        '<a href="'+file.url+'" target="_blank" style="color:inherit;text-decoration:underline">Original-PDF öffnen</a></div>'+
-        '<img src="'+file.previewUrl+'" alt="'+esc(file.name)+'" onclick="__rpLightbox(this.src)">';
-    } else {
-      viewer.innerHTML = '<div class="rp-beleg-info">'+esc(file.name)+' · '+
-        '<a href="'+file.url+'" target="_blank" style="color:inherit;text-decoration:underline">in neuem Tab öffnen</a></div>'+
-        '<iframe src="'+file.url+'#view=Fit&toolbar=1" title="'+esc(file.name)+'"></iframe>';
-    }
-  } else {
-    viewer.innerHTML = '<div class="rp-beleg-info">'+esc(file.name)+' · Klick zum Vergrössern</div>'+
-      '<img src="'+file.url+'" alt="'+esc(file.name)+'" onclick="__rpLightbox(this.src)">';
+  // Sticky Panel rechts auf den passenden Beleg umschalten
+  if(fileIdx >= 0){
+    setActivePreview(fileIdx);
   }
-
-  // Tabs updaten
-  renderBelegTabs();
+  // Bei mehreren Belegen ggf. Tab-Leiste updaten (falls noch verwendet)
+  if(typeof renderBelegTabs === 'function') renderBelegTabs();
 
   // Zeilen-Highlight aktualisieren
   Array.prototype.forEach.call(document.querySelectorAll('#rpTbody tr'), function(tr){
@@ -6489,10 +6554,14 @@ function renderTable(){
   }
   if(headerEl){
     if(window.__rpZeitraum){
-      var frei = zeilen.filter(function(r){ return r.absent; }).length;
-      var arbeit = zeilen.length - frei;
+      var freiOhneTyp = zeilen.filter(function(r){ return r.absent && !r.typ; }).length;
+      var mitTyp = zeilen.filter(function(r){ return r.absent && r.typ; }).length;
+      var arbeit = zeilen.filter(function(r){ return !r.absent; }).length;
+      var teile = [arbeit + ' Buchungen'];
+      if(freiOhneTyp) teile.push(freiOhneTyp + ' freie Tage');
+      if(mitTyp) teile.push(mitTyp + ' Absenzen (Ferien/Krank/etc.)');
       headerEl.innerHTML = '<b>Zeitraum:</b> ' + esc(window.__rpZeitraum.von) + ' – ' + esc(window.__rpZeitraum.bis) +
-        ' &nbsp;·&nbsp; <span style="color:var(--rp-grey)">' + arbeit + ' Buchungen, ' + frei + ' freie Tage</span>';
+        ' &nbsp;·&nbsp; <span style="color:var(--rp-grey)">' + teile.join(', ') + '</span>';
       headerEl.hidden = false;
     } else {
       headerEl.hidden = true;
@@ -6513,15 +6582,29 @@ function renderTable(){
   }
 
   $('rpTbody').innerHTML = zeilen.map(function(r,i){
-    // Frei-Tage: keine Inputs für kst/ist, ausgegraut, mit "frei"-Label
+    // Frei-Tage: keine Inputs für kst/ist, ausgegraut, mit Label je nach Grund
     if(r.absent){
       var cls = 'rp-row-absent';
       var isoDate = r.datum.slice(6,10)+'-'+r.datum.slice(3,5)+'-'+r.datum.slice(0,2);
       if(isWeekend(isoDate)) cls += ' rp-row-weekend';
+      // Label: typ hat Vorrang (Ferien/Krankheit/etc.), sonst Wochenende oder Frei
+      var typLabels = {
+        ferien: '🌴 Ferien', krankheit: '🤒 Krankheit', feiertag: '🎉 Feiertag',
+        arzt: '🩺 Arzt/Therapie', ausbildung: '🎓 Ausbildung',
+        militaer: '🎖️ Militär/ZS', absenz: '⏸ Absenz', unfall: '🚑 Unfall'
+      };
+      var label;
+      if(r.typ && typLabels[r.typ]){
+        label = typLabels[r.typ];
+      } else if(isWeekend(isoDate)){
+        label = 'Wochenende';
+      } else {
+        label = '—';
+      }
       return '<tr class="'+cls+'" data-i="'+i+'">'+
         '<td>'+renderDatumCell(r, i)+'</td>'+
         '<td>'+esc(r.tag)+'</td>'+
-        '<td style="color:var(--rp-grey);font-style:italic">' + (isWeekend(isoDate) ? 'Wochenende' : '—') + '</td>'+
+        '<td style="color:var(--rp-grey);font-style:italic">' + label + '</td>'+
         '<td class="rp-num" id="rpSoll'+i+'">—</td>'+
         '<td class="rp-num" style="color:var(--rp-grey)">0.00</td>'+
         '<td class="rp-num" id="rpDiff'+i+'">—</td>'+
