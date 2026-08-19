@@ -936,7 +936,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.8.2</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.9.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -3553,6 +3553,8 @@ const einsatzDashState = {
   rows: [],          // geparste Einsatzlisten-Zeilen
   fileName: null,
   bm: { rows: [], fileName: null },   // Margen-/Ertragsdaten (BM-Export)
+  bet: { rows: [], fileName: null },  // Beteiligungen: Anstellungsnummer → Recruiter-Anteile
+  kb: { rows: [], fileName: null },   // KickBack: Debitor (Kunden-Nr) → Rückvergütungs-%
   bmF: { von: "", bis: "", kunde: "", recruiter: "" },  // Filter Marge-Tab
   customerId: null,  // gewählter Kunde (cache.customers id)
   stichtag: null,    // ISO yyyy-mm-dd — Default heute
@@ -3831,6 +3833,101 @@ async function uploadBmCsv(input) {
   input.value = "";
 }
 
+/* Multi-Upload: bis zu 4 CSVs aufs Mal, Typ-Erkennung über die Header.
+   Erkannt werden: Einsatzliste, Margen-Export, Beteiligungen, KickBack. */
+async function uploadDashFiles(input) {
+  const files = Array.from(input.files || []);
+  if (!files.length) return;
+  const loaded = [];
+  for (const file of files) {
+    try {
+      const text = await file.text();
+      const parsed = parseCsvRows(text);
+      const h = parsed.headers;
+      if (h.includes("Placement Nr") && h.includes("Margenstufe")) {
+        einsatzDashState.bm.rows = parsed.rows.map(bmNorm).filter(b => b.placement);
+        einsatzDashState.bm.fileName = file.name;
+        einsatzDashState.bmF = { von:"", bis:"", kunde:"", recruiter:"" };
+        loaded.push("Margen (" + einsatzDashState.bm.rows.length + " Pos.)");
+      } else if (h.includes("Anstellungsnummer") && h.includes("Beteiligung")) {
+        einsatzDashState.bet.rows = parsed.rows
+          .map(r => ({
+            nr: (r["Anstellungsnummer"]||"").trim(),
+            recruiter: (r["Recruiter"]||"").trim(),
+            anteil: bmParseNumber(r["Beteiligung"])
+          }))
+          .filter(b => b.nr && b.recruiter);
+        einsatzDashState.bet.fileName = file.name;
+        loaded.push("Beteiligungen (" + einsatzDashState.bet.rows.length + ")");
+      } else if (h.includes("Debitor") && h.includes("Kickback")) {
+        einsatzDashState.kb.rows = parsed.rows
+          .map(r => ({
+            debitor: (r["Debitor"]||"").trim(),
+            von: edToIso(r["Gültig von"]) || (r["Gültig von"]||"").trim() || "0000-01-01",
+            bis: edToIso(r["Gültig bis"]) || (r["Gültig bis"]||"").trim() || "9999-12-31",
+            pct: bmParseNumber(r["Kickback"])
+          }))
+          .filter(k => k.debitor && k.pct);
+        einsatzDashState.kb.fileName = file.name;
+        loaded.push("Kickback (" + einsatzDashState.kb.rows.length + ")");
+      } else if (h.includes("Eintrittsdatum") && h.includes("GAV")) {
+        einsatzDashState.rows = parsed.rows;
+        einsatzDashState.fileName = file.name;
+        einsatzDashState.f = { von:"", bis:"", gav:"", berater:"", gs:"", kunde:"", suche:"" };
+        loaded.push("Einsatzliste (" + parsed.rows.length + ")");
+      } else {
+        toast("Unbekanntes Format: " + file.name, true);
+      }
+    } catch (e) {
+      toast("Fehler bei " + file.name + ": " + e.message, true);
+    }
+  }
+  if (loaded.length) {
+    render();
+    toast("Geladen: " + loaded.join(" · "));
+  }
+  input.value = "";
+}
+
+/* Beteiligungen zu einer Anstellungs-/Placement-Nummer.
+   Fallback: keine Beteiligungs-Daten → leeres Array (Aufrufer entscheidet). */
+function betFor(nr) {
+  return einsatzDashState.bet.rows.filter(b => b.nr === nr);
+}
+
+/* Kickback-Satz (%) für Kunden-Nummer + Leistungsperiode ("2026-01").
+   Periode zählt, wenn ihr Monatsanfang in der Gültigkeit liegt. */
+function kbRateFor(kundenNr, periode) {
+  if (!kundenNr) return 0;
+  const pIso = periode + "-01";
+  const hit = einsatzDashState.kb.rows.find(k => k.debitor === kundenNr && k.von <= pIso && k.bis >= pIso);
+  return hit ? hit.pct : 0;
+}
+
+/* Kunden-Nummer eines Placements über die Einsatzliste (Brücke) */
+function bmKundenNr(placementNr) {
+  const e = bmLookupEinsatz(placementNr);
+  return e ? (e["Kunden-Nummer"]||"").trim() : "";
+}
+
+/* Kickback-Total über gefilterte BM-Rows: pro Placement×Periode Umsatz × Satz */
+function bmKickbackTotal(rows) {
+  if (!einsatzDashState.kb.rows.length || !einsatzDashState.rows.length) return 0;
+  const perPP = {};
+  rows.forEach(b => {
+    if (!b.bh || b.art !== "Rate") return;
+    const key = b.placement + "|" + b.periode;
+    perPP[key] = (perPP[key]||0) + b.total;
+  });
+  let kb = 0;
+  Object.entries(perPP).forEach(([key, umsatz]) => {
+    const [pl, per] = key.split("|");
+    const rate = kbRateFor(bmKundenNr(pl), per);
+    if (rate) kb += umsatz * rate / 100;
+  });
+  return kb;
+}
+
 /* Filter des Marge-Tabs anwenden (Periode als String-Vergleich "2026-01") */
 function bmFilteredRows() {
   const f = einsatzDashState.bmF;
@@ -3891,7 +3988,7 @@ function bmRenderContent() {
         <div style="font-size:40px;margin-bottom:12px">💰</div>
         <div style="font-size:15px;margin-bottom:8px;color:var(--text)">Noch keine Margen-Daten geladen</div>
         <div style="font-size:12px;line-height:1.7">
-          Lade oben den Margen-Export (CSV) hoch — die Datei mit Placement Nr,<br>
+          Lade oben die CSV-Dateien hoch (mehrere aufs Mal möglich):<br>Margen-Export, optional Beteiligungen und KickBack.<br>
           Rate/Salary-Positionen, Buchhaltungsrelevanz und Margenstufen.<br>
           Daraus berechne ich Umsatz, Lohn, Sozialleistungen und Bruttomarge.
         </div>
@@ -3941,25 +4038,53 @@ function bmRenderContent() {
       </div>`;
   }
 
-  // ---- Margen-Treppe: Umsatz → −Lohn → −Sozialleistungen → Bruttomarge ----
-  const wf = [
-    ["Umsatz", agg.umsatz, "#6FC3DF"],
-    ["− Lohn", -agg.lohn, "#95A5A6"],
-    ["− Sozialleistungen", -agg.sozial, "#95A5A6"],
-    ["Bruttomarge", agg.marge, agg.marge >= 0 ? "var(--accent)" : "var(--danger)"]
+  // ---- Margen-Wasserfall (SVG): schwebende Stufen mit Verbindungslinien ----
+  // Kickback (Kunden-Rückvergütung) als eigene Stufe, sofern Daten + Brücke vorhanden
+  const kickback = bmKickbackTotal(rows);
+  const margeNachKb = agg.marge - kickback;
+
+  const wfSteps = [
+    { label: "Umsatz", from: 0, to: agg.umsatz, col: "#6FC3DF", pillar: true },
+    { label: "Lohn", from: agg.umsatz, to: agg.umsatz - agg.lohn, col: "#95A5A6" },
+    { label: "Sozial-\nleistungen", from: agg.umsatz - agg.lohn, to: agg.umsatz - agg.lohn - agg.sozial, col: "#95A5A6" },
+    ...(kickback > 0 ? [{ label: "Kickback", from: agg.marge, to: margeNachKb, col: "#F5A623" }] : []),
+    { label: "Bruttomarge", from: 0, to: margeNachKb, col: margeNachKb >= 0 ? "var(--accent)" : "var(--danger)", pillar: true, bold: true }
   ];
-  const wfMax = Math.max(1, ...wf.map(([,v]) => Math.abs(v)));
+  const wfW = 460, wfH = 250, wfPadT = 34, wfPadB = 44, wfPadX = 14;
+  const wfMaxV = Math.max(1, agg.umsatz, Math.abs(margeNachKb));
+  const wfMinV = Math.min(0, margeNachKb);
+  const wfScale = (wfH - wfPadT - wfPadB) / (wfMaxV - wfMinV);
+  const wfY = v => wfPadT + (wfMaxV - v) * wfScale;
+  const colW = (wfW - 2*wfPadX) / wfSteps.length;
+  const barW = Math.min(64, colW * 0.62);
+
+  const wfSvg = wfSteps.map((s, i) => {
+    const cx = wfPadX + i*colW + colW/2;
+    const yTop = Math.min(wfY(s.from), wfY(s.to));
+    const h = Math.max(2, Math.abs(wfY(s.from) - wfY(s.to)));
+    const delta = s.to - s.from;
+    const valTxt = s.pillar ? bmChf(s.to) : bmChf(delta);
+    // Verbindungslinie zum nächsten Balken (auf Höhe des End-Werts)
+    const connector = (i < wfSteps.length - 1)
+      ? `<line x1="${(cx + barW/2).toFixed(1)}" y1="${wfY(s.to).toFixed(1)}" x2="${(cx + colW - barW/2).toFixed(1)}" y2="${wfY(s.to).toFixed(1)}" stroke="var(--text-faint)" stroke-width="1" stroke-dasharray="3,3"/>`
+      : "";
+    const labelLines = s.label.split("\n").map((line, li) =>
+      `<tspan x="${cx.toFixed(1)}" dy="${li===0?0:11}">${escape(line)}</tspan>`).join("");
+    return `
+      <rect x="${(cx - barW/2).toFixed(1)}" y="${yTop.toFixed(1)}" width="${barW}" height="${h.toFixed(1)}" fill="${s.col}" rx="3"/>
+      <text x="${cx.toFixed(1)}" y="${(yTop - 7).toFixed(1)}" text-anchor="middle" fill="${s.bold ? s.col : "var(--text-dim)"}" font-size="10" ${s.bold ? 'font-weight="700"' : ''}>${valTxt}</text>
+      <text x="${cx.toFixed(1)}" y="${wfH - 26}" text-anchor="middle" fill="var(--text-dim)" font-size="10">${labelLines}</text>
+      ${connector}`;
+  }).join("");
+
   const waterfall = `
     <div class="ed-card">
-      <div class="ed-card-title">Margen-Treppe</div>
-      ${wf.map(([label, v, col]) => `
-        <div class="ed-gav-row">
-          <div class="ed-gav-name" title="${escape(label)}">${escape(label)}</div>
-          <div class="ed-gav-bar-wrap">
-            <div class="ed-gav-bar" style="width:${(Math.abs(v)/wfMax*100).toFixed(0)}%;background:${col}"></div>
-          </div>
-          <div class="ed-gav-n" style="min-width:74px;font-size:11px">${bmChf(v)}</div>
-        </div>`).join("")}
+      <div class="ed-card-title">Margen-Treppe${kickback > 0 ? ` <span style="color:var(--text-faint);font-weight:400">(inkl. Kickback)</span>` : ""}</div>
+      <svg viewBox="0 0 ${wfW} ${wfH}" style="width:100%;height:auto" preserveAspectRatio="xMidYMid meet">
+        <line x1="${wfPadX}" y1="${wfY(0).toFixed(1)}" x2="${wfW-wfPadX}" y2="${wfY(0).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
+        ${wfSvg}
+      </svg>
+      ${kickback > 0 ? `<div style="font-size:11px;color:var(--text-faint);margin-top:6px">Kickback: ${bmChf(kickback)} Kunden-Rückvergütung (via Kunden-Nr aus Einsatzliste)</div>` : ""}
     </div>`;
 
   // ---- Placement-Tabelle (verknüpft mit Einsatzliste, falls geladen) ----
@@ -4003,6 +4128,43 @@ function bmRenderContent() {
         </tbody>
       </table></div>
     </div>`;
+
+  // ---- Pro Recruiter (Beteiligungs-gewichtet): Marge + Einsätze anteilig ----
+  let recruiterCard = "";
+  if (einsatzDashState.bet.rows.length) {
+    const perRec = {};  // recruiter → {marge, umsatz, einsaetze}
+    byPlacement.forEach(([pl, a]) => {
+      const kbPl = 0;  // Kickback fliesst hier nicht placement-genau ein (Gesamtsicht oben)
+      const bets = betFor(pl);
+      if (bets.length) {
+        bets.forEach(b => {
+          const o = perRec[b.recruiter] = perRec[b.recruiter] || { marge:0, umsatz:0, einsaetze:0 };
+          o.marge += a.marge * b.anteil;
+          o.umsatz += a.umsatz * b.anteil;
+          o.einsaetze += b.anteil;
+        });
+      } else {
+        const o = perRec["(ohne Beteiligung)"] = perRec["(ohne Beteiligung)"] || { marge:0, umsatz:0, einsaetze:0 };
+        o.marge += a.marge; o.umsatz += a.umsatz; o.einsaetze += 1;
+      }
+    });
+    const recEntries = Object.entries(perRec).sort((a,b) => b[1].marge - a[1].marge);
+    const recMax = Math.max(1, ...recEntries.map(([,o]) => Math.abs(o.marge)));
+    recruiterCard = `
+      <div class="ed-card">
+        <div class="ed-card-title">Bruttomarge pro Recruiter <span style="color:var(--text-faint);font-weight:400">(Beteiligungs-gewichtet)</span></div>
+        ${recEntries.map(([rec, o], i) => `
+          <div class="ed-gav-row" style="grid-template-columns:minmax(0,1.1fr) 2fr 150px">
+            <div class="ed-gav-name" title="${escape(rec)}">${escape(rec)}</div>
+            <div class="ed-gav-bar-wrap">
+              <div class="ed-gav-bar" style="width:${(Math.abs(o.marge)/recMax*100).toFixed(0)}%;background:${o.marge >= 0 ? ED_COLORS[i % ED_COLORS.length] : "var(--danger)"}"></div>
+            </div>
+            <div class="ed-gav-n" style="min-width:150px;font-size:11px;text-align:right">
+              ${bmChf(o.marge)} · ${o.einsaetze.toLocaleString("de-CH",{maximumFractionDigits:1})} Einsätze
+            </div>
+          </div>`).join("")}
+      </div>`;
+  }
 
   // ---- Monats-Tabelle ----
   const monthTable = `
@@ -4079,7 +4241,8 @@ function bmRenderContent() {
       ${kpi("💵", bmChf(agg.umsatz), "Umsatz", byMonth.length + " Monate", "")}
       ${kpi("👷", bmChf(agg.lohn), "Lohn", "", "")}
       ${kpi("🏦", bmChf(agg.sozial), "Sozialleistungen", "", "")}
-      ${kpi("💰", bmChf(agg.marge), "Bruttomarge", bmPct(agg.margep), agg.marge >= 0 ? "ed-kpi-accent" : "ed-kpi-danger")}
+      ${kickback > 0 ? kpi("↩️", bmChf(kickback), "Kickback", "Kunden-Rückvergütung", "ed-kpi-warn") : ""}
+      ${kpi("💰", bmChf(margeNachKb), "Bruttomarge" + (kickback > 0 ? " (nach Kickback)" : ""), bmPct(agg.umsatz ? margeNachKb/agg.umsatz*100 : 0), margeNachKb >= 0 ? "ed-kpi-accent" : "ed-kpi-danger")}
       ${kpi("📄", byPlacement.length, "Placements", "", "")}
     </div>
 
@@ -4090,7 +4253,8 @@ function bmRenderContent() {
 
     <div class="ed-two-col">
       ${waterfall}
-      ${placementTable}
+      ${recruiterCard || placementTable}
+      ${recruiterCard ? placementTable.replace('<div class="ed-card">','<div class="ed-card" style="grid-column:1/-1">') : ""}
       ${monthChart}
     </div>
 
@@ -4172,6 +4336,8 @@ function resetEinsatzDash() {
   einsatzDashState.rows = [];
   einsatzDashState.fileName = null;
   einsatzDashState.bm = { rows: [], fileName: null };
+  einsatzDashState.bet = { rows: [], fileName: null };
+  einsatzDashState.kb = { rows: [], fileName: null };
   einsatzDashState.bmF = { von:"", bis:"", kunde:"", recruiter:"" };
   einsatzDashState.tab = "einsaetze";
   einsatzDashState.f = { von:"", bis:"", gav:"", berater:"", gs:"", kunde:"", suche:"" };
@@ -4256,10 +4422,8 @@ function renderEinsatzDash(el) {
     <div style="display:inline-flex;gap:8px;align-items:center;font-size:12px;color:var(--text-dim);flex-wrap:wrap">
       ${activeCust.length ? `<select onchange="einsatzDashState.customerId=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:3px;font-family:inherit;font-size:12px;min-width:200px">${custOptions}</select>` : ""}
     </div>
-    <input type="file" id="einsatzdash-file" accept=".csv,.txt" style="display:none" onchange="uploadEinsatzDashCsv(this)">
-    <input type="file" id="einsatzdash-bm-file" accept=".csv,.txt" style="display:none" onchange="uploadBmCsv(this)">
-    <button class="btn btn-primary btn-sm" onclick="document.getElementById('einsatzdash-file').click()" style="margin-left:12px">📥 Einsatzliste</button>
-    <button class="btn btn-primary btn-sm" onclick="document.getElementById('einsatzdash-bm-file').click()" style="margin-left:6px">📥 Margen-Daten</button>
+    <input type="file" id="einsatzdash-files" accept=".csv,.txt" multiple style="display:none" onchange="uploadDashFiles(this)">
+    <button class="btn btn-primary btn-sm" onclick="document.getElementById('einsatzdash-files').click()" style="margin-left:12px">📥 CSV-Dateien hochladen</button>
     ${hasData || hasBm ? `<button class="btn btn-sm" onclick="resetEinsatzDash()" style="margin-left:6px">✕ Zurücksetzen</button>` : ""}
   `;
 
@@ -4681,6 +4845,42 @@ function renderEinsatzDash(el) {
         </div>
         ${barHtml}
       </div>
+
+      ${(() => {
+        // Einsätze pro Recruiter, Beteiligungs-gewichtet (0.5/0.5-Splits zählen anteilig)
+        if (!einsatzDashState.bet.rows.length) return "";
+        const perRec = {};
+        let ohneBet = 0;
+        aktivRows.forEach(r => {
+          const nr = (r["Einsatz-Nummer"]||"").trim();
+          const bets = betFor(nr);
+          if (bets.length) bets.forEach(b => perRec[b.recruiter] = (perRec[b.recruiter]||0) + b.anteil);
+          else ohneBet++;
+        });
+        const entries = Object.entries(perRec).sort((a,b) => b[1]-a[1]);
+        if (!entries.length) {
+          return `<div class="ed-card" style="grid-column:1/-1">
+            <div class="ed-card-title">Einsätze pro Recruiter</div>
+            <div style="color:var(--text-faint);font-size:12px;padding:8px 0">
+              Beteiligungs-Datei geladen (${einsatzDashState.bet.rows.length} Einträge), aber keine der
+              Anstellungsnummern passt zu den aktiven Einsätzen am Stichtag — prüfe, ob Einsatzliste
+              und Beteiligungen zum gleichen Zeitraum/Bestand gehören.
+            </div>
+          </div>`;
+        }
+        const mx = Math.max(1, ...entries.map(([,n]) => n));
+        return `<div class="ed-card" style="grid-column:1/-1">
+          <div class="ed-card-title">Einsätze pro Recruiter <span style="color:var(--text-faint);font-weight:400">(aktive am Stichtag, Beteiligungs-gewichtet${ohneBet ? ", " + ohneBet + " ohne Beteiligungs-Eintrag" : ""})</span></div>
+          ${entries.map(([rec, n], i) => `
+            <div class="ed-gav-row">
+              <div class="ed-gav-name" title="${escape(rec)}">${escape(rec)}</div>
+              <div class="ed-gav-bar-wrap">
+                <div class="ed-gav-bar" style="width:${(n/mx*100).toFixed(0)}%;background:${ED_COLORS[i % ED_COLORS.length]}"></div>
+              </div>
+              <div class="ed-gav-n">${n.toLocaleString("de-CH",{maximumFractionDigits:1})}</div>
+            </div>`).join("")}
+        </div>`;
+      })()}
 
       ${chartHtml}
     </div>
