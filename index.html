@@ -864,7 +864,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.14.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.15.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -3504,12 +3504,38 @@ const ED_COLORS = ["#B8E986","#6FC3DF","#F5A623","#BD7DE8","#FF6B6B","#4ECDC4","
 
 /* Analysierbare Dimensionen — zentral definiert, überall wiederverwendet
    (Kuchendiagramm, Balken-Vergleich, Verlaufs-Chart-Split) */
+/* Alter am (globalen) Stichtag aus dem Geburtsdatum; null wenn keines da.
+   Nutzt einsatzDashState.stichtag, damit die BVG-Stufe als Dimension
+   ohne Zusatz-Parameter funktioniert. */
+function edAlter(r) {
+  const geb = edToIso(r["Geburtsdatum"]);
+  if (!geb) return null;
+  const st = einsatzDashState.stichtag || new Date().toISOString().slice(0,10);
+  let alter = parseInt(st.slice(0,4)) - parseInt(geb.slice(0,4));
+  if (st.slice(5) < geb.slice(5)) alter--;  // Geburtstag dieses Jahr noch nicht gehabt
+  return alter;
+}
+
+/* BVG-Altersstufe (Altersgutschriften nach Art. 16 BVG) */
+function edBvgStufe(r) {
+  const a = edAlter(r);
+  if (a === null) return "";
+  if (a < 25) return "unter 25";
+  if (a <= 34) return "25–34 (7%)";
+  if (a <= 44) return "35–44 (10%)";
+  if (a <= 54) return "45–54 (15%)";
+  if (a <= 65) return "55–65 (18%)";
+  return "über 65";
+}
+
 const ED_DIMS = [
   { key:"gav",       label:"GAV",             get:r => (r["GAV"]||"").trim().replace("Personalverleih ","PV ") },
   { key:"kunde",     label:"Kunde",           get:r => (r["Kunde"]||"").trim() },
   { key:"berater",   label:"Berater",         get:r => edBerater(r) },
   { key:"gs",        label:"Geschäftsstelle", get:r => (r["Verantwortliche Geschäftsstelle"]||"").trim() },
   { key:"funktion",  label:"Funktion",        get:r => (r["Einsatz als"]||"").trim() },
+  { key:"geschlecht", label:"Frau/Mann",      get:r => (r["Geschlecht"]||"").trim() },
+  { key:"bvg",       label:"BVG-Stufe",       get:r => edBvgStufe(r) },
   { key:"bewilligung", label:"Bewilligung",   get:r => (r["Aufenthaltsbewilligung"]||"").trim() }
 ];
 
@@ -4195,6 +4221,29 @@ function bmRenderContent() {
       const [bestG, bA] = sorted[0];
       const [worstG, wA] = sorted[sorted.length-1];
       bmInsights.push(`📋 Margenstärkster GAV: <strong>${escape(bestG)}</strong> mit ${bmPct(bA.margep)} (${bmChf(bA.marge)} auf ${bmChf(bA.umsatz)} Umsatz) — Schlusslicht ist <strong>${escape(worstG)}</strong> mit ${bmPct(wA.margep)}.`);
+    }
+  }
+
+  // ---- Frau/Mann + BVG-Altersstufe (via Verknüpfung mit der Einsatzliste) ----
+  if (hasEinsatzData) {
+    const byGeschlecht = bmGroupBy(rows, b => {
+      const e = bmLookupEinsatz(b.placement);
+      return e ? (e["Geschlecht"]||"").trim() : "";
+    }).filter(([k, a]) => k && k !== "(leer)" && a.umsatz > 0);
+    if (byGeschlecht.length >= 2) {
+      const parts = byGeschlecht.slice().sort((a,b) => b[1].margep - a[1].margep)
+        .map(([g, a]) => `<strong>${escape(g)}</strong> ${bmPct(a.margep)} (${bmChf(a.marge)})`);
+      bmInsights.push(`🚻 Marge nach Geschlecht: ${parts.join(" · ")}.`);
+    }
+    const byBvg = bmGroupBy(rows, b => {
+      const e = bmLookupEinsatz(b.placement);
+      return e ? edBvgStufe(e) : "";
+    }).filter(([k, a]) => k && k !== "(leer)" && a.umsatz > 0);
+    if (byBvg.length >= 2) {
+      const sorted = byBvg.slice().sort((a,b) => b[1].margep - a[1].margep);
+      const [bestB, bA] = sorted[0];
+      const [worstB, wA] = sorted[sorted.length-1];
+      bmInsights.push(`🎂 Beste Marge in der BVG-Stufe <strong>${escape(bestB)}</strong> (${bmPct(bA.margep)}) — am tiefsten bei <strong>${escape(worstB)}</strong> (${bmPct(wA.margep)}). Achtung: höhere Altersgutschriften drücken die Marge der Ü55 direkt.`);
     }
   }
 
@@ -4986,6 +5035,15 @@ function renderEinsatzDash(el) {
       ${kpi("📉", austritteNext7.length, "Austritte nächste 7 Tage", "", austritteNext7.length > 0 ? "ed-kpi-warn" : "")}
       ${kpi("🆕", eintritteLast7.length, "Eintritte letzte 7 Tage", "", "")}
       ${kpi("📋", uniqueGav, "GAVs im Einsatz", "", "")}
+      ${(() => {
+        // Ø Einsatzdauer der aktiven (laufende zählen bis Stichtag) — nur Normalansicht,
+        // im Zeitraum-Modus gibt es die Kachel bereits oben
+        if (zeitraumMode) return "";
+        const dauern = aktivRows.map(r => edDauer(r, stichtag)).filter(d => d !== null);
+        if (!dauern.length) return "";
+        const avg = dauern.reduce((s,v)=>s+v,0)/dauern.length;
+        return kpi("⏱", avg.toLocaleString("de-CH",{maximumFractionDigits:0}) + " Tage", "Ø Einsatzdauer", "aktive, bisherige Dauer", "");
+      })()}
       ${kpi("🛂", ablaufBewilligung.length, "Bewilligungen laufen ab", "in 60 Tagen", ablaufBewilligung.length > 0 ? "ed-kpi-danger" : "")}
     </div>
 
