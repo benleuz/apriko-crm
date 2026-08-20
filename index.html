@@ -878,7 +878,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.20.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.21.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -3506,6 +3506,7 @@ const einsatzDashState = {
   barDim: "funktion",// Dimension des Balken-Vergleichs
   chartSplit: "",    // Verlaufs-Chart aufteilen nach Dimension ("" = Gesamt)
   showAllRows: false,// Tabelle: auch kommende/beendete zeigen
+  showFullTable: false, // grosse Tabellen: alle Zeilen statt der ersten 300
   sort: { col: "", dir: 1 },  // Tabellen-Sortierung (Klick auf Spaltenkopf)
   f: {               // Filterleiste Einsätze-Tab
     von: "", bis: "",       // Zeitraum (Einsatz überlappt diesen Bereich)
@@ -3621,14 +3622,21 @@ const CH_PLZ_RANGES = [
   [6000,6299,"LU"],[6300,6349,"ZG"],[6400,6459,"SZ"],[6500,6999,"TI"],
   [7000,7999,"GR"],[8000,8199,"ZH"],[8300,8499,"ZH"],[8600,8749,"ZH"],[8810,8831,"ZH"],[8846,8851,"ZH"],[8900,8999,"ZH"]
 ];
+const _ktCache = new Map();
 function edKanton(r) {
   const plzRaw = (r["PLZ"]||"").trim() || (r["Kunde PLZ"]||"").trim();
+  if (!plzRaw) return "";
+  let kt = _ktCache.get(plzRaw);
+  if (kt !== undefined) return kt;
   const plz = parseInt(plzRaw, 10);
-  if (!plz || isNaN(plz)) return "";
-  for (const [von, bis, kt] of CH_PLZ_RANGES) {
-    if (plz >= von && plz <= bis) return kt;
+  kt = "";
+  if (plz && !isNaN(plz)) {
+    for (const [von, bis, k] of CH_PLZ_RANGES) {
+      if (plz >= von && plz <= bis) { kt = k; break; }
+    }
   }
-  return "";
+  _ktCache.set(plzRaw, kt);
+  return kt;
 }
 
 /* Schweiz-Karte als Choropleth über die aktiven Einsätze.
@@ -3791,12 +3799,22 @@ function edPreset(name) {
    berechnet — deterministisch, sofort, ohne API-Kosten.
    =========================================================== */
 
+/* ISO-Datum → Tage seit Epoche, mit Memo-Cache (spart Date-Objekte in Schleifen) */
+const _epochDayCache = new Map();
+function edEpochDay(iso) {
+  let v = _epochDayCache.get(iso);
+  if (v !== undefined) return v;
+  v = Date.UTC(+iso.slice(0,4), +iso.slice(5,7) - 1, +iso.slice(8,10)) / 86400000;
+  _epochDayCache.set(iso, v);
+  return v;
+}
+
 /* Einsatzdauer in Tagen: Austritt−Eintritt; laufende zählen bis Stichtag */
 function edDauer(row, stichtagIso) {
   const von = edToIso(row["Eintrittsdatum"]);
   if (!von) return null;
   const bis = edToIso(row["Austrittsdatum"]) || stichtagIso;
-  const d = (new Date(bis) - new Date(von)) / (24*3600*1000);
+  const d = edEpochDay(bis) - edEpochDay(von);
   return d >= 0 ? d + 1 : null;  // inklusiv: 1 Tag Einsatz = 1
 }
 
@@ -3971,6 +3989,7 @@ async function uploadDashFiles(input) {
      Bestand; jedes WEITERE gleichen Typs wird angehängt (z.B. Daten.csv +
      Daten_25.csv fürs Vorjahr, Beteiligungen.csv + Beteiligungen_25.csv).
      Ein späterer, neuer Upload-Vorgang beginnt wieder frisch. */
+  edInvalidateIndexes();
   const seen = { bm: false, bet: false, kb: false };
   for (const file of files) {
     try {
@@ -4050,10 +4069,23 @@ async function uploadDashFiles(input) {
   input.value = "";
 }
 
-/* Beteiligungen zu einer Anstellungs-/Placement-Nummer.
-   Fallback: keine Beteiligungs-Daten → leeres Array (Aufrufer entscheidet). */
+/* Performance-Indizes: einmalig lazy aufgebaut, bei jedem Daten-Upload
+   oder Reset invalidiert (edInvalidateIndexes). Ohne sie werden die
+   Lookups in Gruppierungs-Schleifen quadratisch. */
+let _einsatzIdx = null;   // Einsatz-Nummer → Einsatzlisten-Zeile
+let _betIdx = null;       // Anstellungsnummer → [Beteiligungen]
+function edInvalidateIndexes() { _einsatzIdx = null; _betIdx = null; }
+
+/* Beteiligungen zu einer Anstellungs-/Placement-Nummer (O(1) via Index). */
 function betFor(nr) {
-  return einsatzDashState.bet.rows.filter(b => b.nr === nr);
+  if (_betIdx === null) {
+    _betIdx = new Map();
+    einsatzDashState.bet.rows.forEach(b => {
+      const arr = _betIdx.get(b.nr);
+      if (arr) arr.push(b); else _betIdx.set(b.nr, [b]);
+    });
+  }
+  return _betIdx.get(nr) || [];
 }
 
 /* Kickback-Satz (%) für Kunden-Nummer + Leistungsperiode ("2026-01").
@@ -4167,9 +4199,19 @@ function bmGroupBy(rows, keyFn) {
   return Object.entries(groups).map(([k, g]) => [k, bmAgg(g)]);
 }
 
-/* Einsatzlisten-Zeile zu einem Placement finden (Verknüpfung der zwei Files) */
+/* Einsatzlisten-Zeile zu einem Placement (O(1) via Index) */
 function bmLookupEinsatz(placementNr) {
-  return einsatzDashState.rows.find(r => (r["Einsatz-Nummer"]||"").trim() === placementNr) || null;
+  if (_einsatzIdx === null) {
+    _einsatzIdx = new Map();
+    einsatzDashState.rows.forEach(r => {
+      const nr = (r["Einsatz-Nummer"]||"").trim();
+      if (nr && !_einsatzIdx.has(nr)) _einsatzIdx.set(nr, r);
+    });
+  }
+  return bmLookupEinsatzIdx(placementNr);
+}
+function bmLookupEinsatzIdx(placementNr) {
+  return _einsatzIdx.get(placementNr) || null;
 }
 
 const bmChf = v => "CHF " + v.toLocaleString("de-CH", {minimumFractionDigits:0, maximumFractionDigits:0});
@@ -4204,6 +4246,8 @@ function bmStdProTag(rows, keyFn) {
     stdPP[key] = (stdPP[key] || 0) + b.menge;
   });
   // 2. Pro Placement×Periode: Werktage im (geschnittenen) Monat + Gruppe
+  const sampleByPl = new Map();
+  rows.forEach(b => { if (!sampleByPl.has(b.placement)) sampleByPl.set(b.placement, b); });
   const groups = {};
   Object.entries(stdPP).forEach(([key, std]) => {
     if (std <= 0) return;
@@ -4222,7 +4266,7 @@ function bmStdProTag(rows, keyFn) {
     }
     const tage = bmWerktage(von, bis);
     if (tage <= 0) return;
-    const sample = rows.find(b => b.placement === pl);
+    const sample = sampleByPl.get(pl);
     const g = sample ? (keyFn(sample) || "") : "";
     if (!g) return;
     const o = groups[g] = groups[g] || { std: 0, tage: 0 };
@@ -4401,11 +4445,14 @@ function bmRenderContent() {
 
   // Im Stunden-Modus: ausgeglichene Einsätze (Differenz 0) ausblenden — nur die
   // Abweichungen sind interessant
-  const plRows = std ? byPlacement.filter(([,a]) => Math.abs(a.marge) >= 0.01) : byPlacement;
-  const plHidden = byPlacement.length - plRows.length;
+  const plRowsAll = std ? byPlacement.filter(([,a]) => Math.abs(a.marge) >= 0.01) : byPlacement;
+  const plHidden = byPlacement.length - plRowsAll.length;
+  const PL_LIMIT = 300;
+  const plRows = einsatzDashState.showFullTable ? plRowsAll : plRowsAll.slice(0, PL_LIMIT);
+  const plCut = plRowsAll.length - plRows.length;
   const placementTable = `
     <div class="ed-card">
-      <div class="ed-card-title">Pro Einsatz <span style="color:var(--text-faint);font-weight:400">(${plRows.length}${plHidden > 0 ? " mit Differenz, " + plHidden + " ausgeglichene ausgeblendet" : " Einsätze"}${hasEinsatzData ? ", verknüpft mit Einsatzliste" : ""})</span></div>
+      <div class="ed-card-title">Pro Einsatz <span style="color:var(--text-faint);font-weight:400">(${plRowsAll.length}${plHidden > 0 ? " mit Differenz, " + plHidden + " ausgeglichene ausgeblendet" : " Einsätze"}${hasEinsatzData ? ", verknüpft mit Einsatzliste" : ""})</span></div>
       <div class="table-wrap"><table>
         <thead><tr>
           <th>Einsatz-Nr</th><th>Mitarbeiter</th><th>Kunde</th>
@@ -4434,6 +4481,9 @@ function bmRenderContent() {
           }).join("")}
         </tbody>
       </table></div>
+      ${plCut > 0 ? `<div style="text-align:center;padding:10px">
+        <button class="ed-dim-chip" onclick="einsatzDashState.showFullTable=true;render()">+ ${plCut} weitere Zeilen anzeigen</button>
+      </div>` : ""}
     </div>`;
 
   // ---- Pro Recruiter (Beteiligungs-gewichtet): Marge + Einsätze anteilig ----
@@ -4782,10 +4832,17 @@ function bmRenderContent() {
 }
 
 /* Datum eines CSV-Felds als ISO (yyyy-mm-dd) oder null */
+/* Memo-Cache: Datumsstrings wiederholen sich in grossen Listen massiv —
+   das Parsing (Date-Objekt + Formatierung) läuft pro String nur EINMAL. */
+const _edIsoCache = new Map();
 function edToIso(s) {
+  if (!s) return null;
+  let v = _edIsoCache.get(s);
+  if (v !== undefined) return v;
   const d = parseSwissDate(s);
-  if (!d) return null;
-  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+  v = d ? (d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0")) : null;
+  _edIsoCache.set(s, v);
+  return v;
 }
 
 function edFormatIso(iso) {
@@ -4838,6 +4895,7 @@ async function uploadEinsatzDashCsv(input) {
       toast("CSV ist leer oder konnte nicht gelesen werden", true);
       return;
     }
+    edInvalidateIndexes();
     einsatzDashState.rows = parsed.rows;
     einsatzDashState.fileName = file.name;
     // Hinweis: dieser Legacy-Pfad ersetzt die Hauptliste direkt;
@@ -4853,6 +4911,7 @@ async function uploadEinsatzDashCsv(input) {
 
 function resetEinsatzDash() {
   if (!confirm("Dashboard zurücksetzen? Einsatzliste UND Margen-Daten werden verworfen.")) return;
+  edInvalidateIndexes();
   einsatzDashState.rows = [];
   einsatzDashState.fileName = null;
   einsatzDashState.prevRows = [];
@@ -4906,6 +4965,7 @@ function edDominantYear(rows) {
 /* Neue Einsatzliste einsortieren: die mit dem neueren dominanten Jahr wird
    Hauptliste, die ältere automatisch Vorjahr. Gleiches Jahr → ersetzen. */
 function edAssignEinsatzliste(rows, fileName) {
+  edInvalidateIndexes();
   const s = einsatzDashState;
   const newYear = edDominantYear(rows);
   const curYear = s.rows.length ? edDominantYear(s.rows) : null;
@@ -5201,6 +5261,54 @@ function renderEinsatzDash(el) {
     const weekly = (f.von || f.bis) ? spanDays > 70 : true;
     if (weekly && (f.von || f.bis)) chartWindowLabel += ", wöchentlich (Montage)";
 
+    /* Performance: statt pro Messpunkt über alle Zeilen zu filtern, werden
+       die Einsatz-Intervalle EINMAL als Zahlen (Tage seit Epoche) extrahiert —
+       pro Punkt bleiben dann reine Integer-Vergleiche. */
+    const mkIntervals = (rs) => {
+      const von = new Float64Array(rs.length), bis = new Float64Array(rs.length);
+      let n = 0;
+      rs.forEach(r => {
+        const v = edToIso(r["Eintrittsdatum"]);
+        if (!v) return;
+        const b = edToIso(r["Austrittsdatum"]);
+        von[n] = edEpochDay(v);
+        bis[n] = b ? edEpochDay(b) : Infinity;
+        n++;
+      });
+      return { von, bis, n };
+    };
+    const countActive = (iv, day) => {
+      let c = 0;
+      for (let i = 0; i < iv.n; i++) if (iv.von[i] <= day && iv.bis[i] >= day) c++;
+      return c;
+    };
+    /* Serien mit exakten Pro-Zeilen-Gewichten: Standard-Serien haben Gewicht 1,
+       die Beteiligungs-gewichtete Berater-Serie das anteilige Gewicht (0.5 etc.).
+       s.count([r]) liefert genau dieses Einzel-Gewicht. */
+    const mkWeighted = (rs, s) => {
+      const von = new Float64Array(rs.length), bis = new Float64Array(rs.length), w = new Float64Array(rs.length);
+      let n = 0;
+      rs.forEach(r => {
+        const g = s.count([r]);
+        if (g <= 0) return;
+        const v = edToIso(r["Eintrittsdatum"]);
+        if (!v) return;
+        const b = edToIso(r["Austrittsdatum"]);
+        von[n] = edEpochDay(v);
+        bis[n] = b ? edEpochDay(b) : Infinity;
+        w[n] = g;
+        n++;
+      });
+      return { von, bis, w, n };
+    };
+    const sumActive = (iv, day) => {
+      let c = 0;
+      for (let i = 0; i < iv.n; i++) if (iv.von[i] <= day && iv.bis[i] >= day) c += iv.w[i];
+      return c;
+    };
+    const seriesIv = seriesDefs.map(s => mkWeighted(rows, s));
+    const prevIv = hasPrev ? mkIntervals(prevRows) : null;
+
     let d = new Date(start + "T00:00:00");
     if (weekly) {
       // Auf den nächsten Montag vorrücken, damit jeder Messpunkt ein Montag ist
@@ -5210,12 +5318,12 @@ function renderEinsatzDash(el) {
     const endD = new Date(end + "T00:00:00");
     while (d <= endD) {
       const iso = d.toISOString().slice(0,10);
-      const active = rows.filter(r => edActiveOn(r, iso));
+      const day = edEpochDay(iso);
       chartDays.push({
         iso,
-        counts: seriesDefs.map(s => s.count(active)),
+        counts: seriesIv.map(iv => sumActive(iv, day)),
         // Vorjahres-Wert: gleicher Kalendertag −1 Jahr auf der Vorjahres-Liste
-        prev: hasPrev ? prevRows.filter(r => edActiveOn(r, edShiftYearIso(iso, -1))).length : null
+        prev: hasPrev ? countActive(prevIv, edEpochDay(edShiftYearIso(iso, -1))) : null
       });
       d.setDate(d.getDate() + (weekly ? 7 : 1));
     }
@@ -5399,6 +5507,11 @@ function renderEinsatzDash(el) {
     return (edToIso(a["Eintrittsdatum"])||"").localeCompare(edToIso(b["Eintrittsdatum"])||"");
   });
   const hiddenCount = rows.length - aktivRows.length;
+  // Grosse Tabellen bremsen den Browser (innerHTML-Parsing) — initial nur 300 Zeilen
+  const TABLE_LIMIT = 300;
+  const showAllTableRows = einsatzDashState.showFullTable;
+  const tableRowsShown = showAllTableRows ? tableRows : tableRows.slice(0, TABLE_LIMIT);
+  const tableCut = tableRows.length - tableRowsShown.length;
 
   const statusBadge = (s) => {
     const map = {
@@ -5600,7 +5713,7 @@ function renderEinsatzDash(el) {
         </tr></thead>`;
       })()}
         <tbody>
-          ${tableRows.map(r => {
+          ${tableRowsShown.map(r => {
             const s = edStatus(r, stichtag);
             return `<tr style="${s==='beendet' ? 'opacity:0.5' : ''}">
               ${showAll ? `<td>${statusBadge(s)}</td>` : ""}
@@ -5615,6 +5728,9 @@ function renderEinsatzDash(el) {
           }).join("")}
         </tbody>
       </table></div>
+      ${tableCut > 0 ? `<div style="text-align:center;padding:10px">
+        <button class="ed-dim-chip" onclick="einsatzDashState.showFullTable=true;render()">+ ${tableCut} weitere Zeilen anzeigen</button>
+      </div>` : ""}
     </div>
   `;
 
