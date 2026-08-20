@@ -814,6 +814,20 @@
   /* Zeitraum-Presets in der Filterleiste */
   .ed-preset-row{display:flex;gap:4px}
 
+  /* Schweiz-Karte */
+  .ed-map-wrap{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
+  .ed-map-wrap svg polygon{transition:fill .15s}
+  .ed-map-wrap svg polygon:hover{stroke:var(--accent);stroke-width:2}
+  .ed-map-detail{width:250px;flex-shrink:0;background:var(--bg);border:1px solid var(--border);
+    border-radius:6px;padding:14px;font-size:12px}
+  .ed-map-stat{display:flex;justify-content:space-between;padding:5px 0;
+    border-bottom:1px solid var(--border);color:var(--text-dim)}
+  .ed-map-stat strong{color:var(--text)}
+  .ed-map-list{padding:8px 0 2px;color:var(--text-dim)}
+  .ed-map-list > span{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-faint)}
+  .ed-map-list > div{display:flex;justify-content:space-between;padding:3px 0;font-size:11.5px}
+  .ed-map-list em{font-style:normal;color:var(--text);font-weight:600}
+
   /* Zeitraum-Hinweis-Banner (bei aktivem Von/Bis-Filter) */
   .ed-range-banner{background:rgba(184,233,134,0.07);border:1px solid var(--accent);border-radius:6px;
     padding:9px 14px;margin-bottom:14px;font-size:12px;color:var(--text-dim);line-height:1.5}
@@ -864,7 +878,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.19.1</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.20.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -3485,6 +3499,7 @@ const einsatzDashState = {
   bmF: { von: "", bis: "", kunde: "", recruiter: "", ma: "" },  // Filter Marge-Tab
   bmDim: "kunde",    // Dimension der Margen-Vergleichs-Karte im Marge-Tab
   bmMode: "chf",     // Marge-Tab-Modus: "chf" (Umsatz/Marge) | "std" (produzierte Stunden)
+  mapKanton: "",     // ausgewählter Kanton in der Schweiz-Karte ("" = keiner)
   customerId: null,  // gewählter Kunde (cache.customers id)
   stichtag: null,    // ISO yyyy-mm-dd — Default heute
   pieDim: "gav",     // Dimension des Kuchendiagramms
@@ -3579,6 +3594,121 @@ function edDist(rows, dimKey, maxGroups) {
 /* Zahlformat für (evtl. gebrochene) Einsatz-Zählungen: 12 / 11.5 */
 function edFmtCount(n) {
   return n.toLocaleString("de-CH", { maximumFractionDigits: 1 });
+}
+
+/* ===========================================================
+   SCHWEIZ-KARTE: stilisierte Kantons-Polygone (Voronoi über die
+   Hauptorte, auf die Landesgrenze geclippt, statisch generiert).
+   Koordinaten in einem 920×575-SVG-Raum, Proportionen nach LV03.
+   =========================================================== */
+const CH_MAP = {"AG":{"p":["396,175 419,74 473,61 481,112 497,122 501,152 482,171 462,164 400,182 396,175"],"c":[449,117]},"AI":{"p":["679,156 685,125 733,113 742,135 679,156"],"c":[712,130]},"AR":{"p":["649,111 672,98 685,125 679,140 649,111"],"c":[669,118]},"BE":{"p":["228,180 260,172 276,154 313,160 326,196 357,168 396,175 400,184 372,253 462,358 450,367 430,402 336,410 314,386 324,363 302,290 272,251 252,246 228,180"],"c":[338,271]},"BL":{"p":["324,101 363,74 385,86 419,74 402,136 365,120 338,125 324,101"],"c":[369,110]},"BS":{"p":["287,63 348,65 363,74 324,101 287,63"],"c":[327,87]},"FR":{"p":["186,338 218,275 252,246 272,251 302,290 324,363 314,386 266,393 186,338"],"c":[254,314]},"GE":{"p":["16,476 47,403 109,468 47,491 26,491 16,476"],"c":[55,436]},"GL":{"p":["593,261 600,250 605,195 662,181 655,222 682,270 674,296 617,318 593,261"],"c":[632,236]},"GR":{"p":["609,362 617,318 673,296 682,270 655,222 663,182 681,190 720,234 767,226 837,257 915,309 905,351 863,387 728,460 709,476 683,397 609,362"],"c":[762,335]},"JU":{"p":["202,169 224,143 239,112 229,91 255,70 287,63 324,101 329,116 280,140 276,154 260,172 228,180 202,169"],"c":[268,128]},"LU":{"p":["371,253 400,182 462,164 482,171 507,217 469,239 451,236 430,255 388,268 371,253"],"c":[445,199]},"NE":{"p":["136,263 202,169 228,180 252,246 218,275 213,291 200,303 136,263"],"c":[205,213]},"NW":{"p":["469,239 507,217 516,220 533,252 500,297 469,239"],"c":[502,274]},"OW":{"p":["388,268 430,255 451,236 469,239 500,297 474,355 462,358 389,277 388,268"],"c":[460,326]},"SG":{"p":["581,176 612,115 649,111 679,140 679,156 742,135 733,185 767,226 720,234 682,190 662,181 605,195 581,176","672,98 681,83 697,86 728,101 733,113 685,125 672,98"],"c":[662,166]},"SH":{"p":["503,46 541,23 572,18 594,40 573,69 525,64 503,46"],"c":[550,43]},"SO":{"p":["276,154 280,140 329,116 338,125 365,119 402,137 396,175 357,168 326,196 313,160 276,154"],"c":[347,157]},"SZ":{"p":["516,220 557,178 581,176 605,195 600,250 593,261 533,252 516,220"],"c":[566,207]},"TG":{"p":["573,69 594,40 629,65 681,83 672,98 649,111 617,118 593,105 573,69"],"c":[619,76]},"TI":{"p":["499,491 538,397 582,391 609,362 683,397 709,476 645,554 619,564 593,543 572,512 499,491"],"c":[609,437]},"UR":{"p":["474,355 489,314 533,252 593,261 617,318 609,362 582,391 538,397 474,355"],"c":[547,337]},"VD":{"p":["47,403 136,263 200,303 187,341 266,393 252,414 158,428 140,460 109,468 47,403"],"c":[148,367]},"VS":{"p":["140,460 158,428 252,414 266,393 314,386 336,410 429,402 450,367 474,355 538,397 499,491 452,517 406,533 250,497 161,455 140,460"],"c":[335,442]},"ZG":{"p":["482,171 501,152 540,157 557,178 516,220 507,217 482,171"],"c":[517,197]},"ZH":{"p":["473,61 503,46 525,64 573,69 593,105 612,115 581,176 557,178 540,157 501,152 497,122 481,112 473,61"],"c":[540,109]}};
+
+/* PLZ → Kanton (Bereichs-Näherung; Spezialbereiche VOR den groben Blöcken).
+   Deckt die Standard-Zuordnung ab — Grenzorte können abweichen. */
+const CH_PLZ_RANGES = [
+  [6060,6078,"OW"],[6370,6390,"NW"],[6460,6493,"UR"],[6410,6410,"SZ"],
+  [8750,8784,"GL"],[9050,9058,"AI"],[9100,9112,"AR"],[9037,9043,"AR"],
+  [6535,6565,"GR"],[6710,6721,"GR"],[7710,7710,"GR"],
+  [2500,2560,"BE"],[2570,2577,"BE"],[2735,2748,"BE"],[4900,4955,"BE"],
+  [1290,1299,"VD"],[1660,1667,"FR"],[1580,1589,"FR"],[1470,1489,"FR"],
+  [1870,1899,"VS"],[3900,3999,"VS"],[4310,4335,"AG"],[4800,4856,"AG"],[5000,5999,"AG"],
+  [8200,8262,"SH"],[8500,8599,"TG"],[8264,8280,"TG"],[9220,9226,"TG"],[9320,9327,"TG"],[9500,9565,"TG"],
+  [8640,8640,"SZ"],[8800,8809,"ZH"],[8832,8845,"SZ"],[8852,8858,"SZ"],[8862,8863,"SZ"],
+  [8866,8868,"GL"],[8872,8888,"SG"],[8890,8898,"SG"],[9000,9999,"SG"],
+  [1000,1199,"VD"],[1200,1289,"GE"],[1300,1599,"VD"],[1600,1799,"FR"],[1800,1869,"VD"],[1900,1999,"VS"],
+  [2000,2499,"NE"],[2561,2569,"BE"],[2600,2699,"BE"],[2700,2999,"JU"],
+  [3000,3899,"BE"],[4000,4099,"BS"],[4100,4499,"BL"],[4500,4799,"SO"],
+  [6000,6299,"LU"],[6300,6349,"ZG"],[6400,6459,"SZ"],[6500,6999,"TI"],
+  [7000,7999,"GR"],[8000,8199,"ZH"],[8300,8499,"ZH"],[8600,8749,"ZH"],[8810,8831,"ZH"],[8846,8851,"ZH"],[8900,8999,"ZH"]
+];
+function edKanton(r) {
+  const plzRaw = (r["PLZ"]||"").trim() || (r["Kunde PLZ"]||"").trim();
+  const plz = parseInt(plzRaw, 10);
+  if (!plz || isNaN(plz)) return "";
+  for (const [von, bis, kt] of CH_PLZ_RANGES) {
+    if (plz >= von && plz <= bis) return kt;
+  }
+  return "";
+}
+
+/* Schweiz-Karte als Choropleth über die aktiven Einsätze.
+   Klick auf Kanton → Detail-Panel; Klick auf gewählten Kanton = abwählen. */
+function edMapCard(aktivRows, stichtag) {
+  const perKt = {};
+  let ohnePlz = 0;
+  aktivRows.forEach(r => {
+    const kt = edKanton(r);
+    if (kt) (perKt[kt] = perKt[kt] || []).push(r);
+    else ohnePlz++;
+  });
+  const belegt = Object.keys(perKt).length;
+  if (!belegt) return "";   // keine PLZ-Daten → Karte weglassen
+  const maxN = Math.max(1, ...Object.values(perKt).map(a => a.length));
+  const sel = einsatzDashState.mapKanton;
+
+  const polys = Object.keys(CH_MAP).map(kt => {
+    const n = (perKt[kt]||[]).length;
+    const t = n / maxN;
+    // Farbskala: dunkel → Lime (Akzent), Ausgewählter mit hellem Rand
+    const fill = n === 0 ? "#20261f" : `rgba(184,233,134,${(0.15 + t*0.75).toFixed(2)})`;
+    const isSel = kt === sel;
+    const shapes = CH_MAP[kt].p.map(pts =>
+      `<polygon points="${pts}" fill="${fill}" stroke="${isSel ? "#fff" : "var(--bg)"}" stroke-width="${isSel ? 2.5 : 1.2}" style="cursor:${n ? "pointer" : "default"}" onclick="edMapClick('${kt}')"><title>${kt}: ${n} aktive Einsätze</title></polygon>`).join("");
+    const [cx, cy] = CH_MAP[kt].c;
+    const label = `<text x="${cx}" y="${cy}" text-anchor="middle" pointer-events="none" fill="${n ? (t > 0.55 ? "#1a1a1a" : "var(--text)") : "var(--text-faint)"}" font-size="15" font-weight="${n ? 600 : 400}">${kt}</text>` +
+      (n ? `<text x="${cx}" y="${cy+16}" text-anchor="middle" pointer-events="none" fill="${t > 0.55 ? "#1a1a1a" : "var(--text-dim)"}" font-size="12">${n}</text>` : "");
+    return shapes + label;
+  }).join("");
+
+  // Detail-Panel für den ausgewählten Kanton
+  let detail = "";
+  if (sel && perKt[sel]) {
+    const rows = perKt[sel];
+    const margen = rows.map(r => (r["Marge"]||"").trim()).filter(Boolean).map(parsePct);
+    const mAvg = margen.length ? margen.reduce((s,v)=>s+v,0)/margen.length : null;
+    const isPct = rows.some(r => (r["Marge"]||"").includes("%"));
+    const fakt = rows.map(r => {
+      const t = parsePct((r["Tarif"]||"").trim()), l = parsePct((r["Stundenlohn"]||"").trim());
+      return (t>0 && l>0) ? t/l : null;
+    }).filter(v => v !== null);
+    const fAvg = fakt.length ? fakt.reduce((s,v)=>s+v,0)/fakt.length : null;
+    const gavTop = edDist(rows, "gav", 3);
+    const funkTop = edDist(rows, "funktion", 3);
+    const kundenN = new Set(rows.map(r => (r["Kunde"]||"").trim()).filter(Boolean)).size;
+    const dauern = rows.map(r => edDauer(r, stichtag)).filter(d => d !== null);
+    const dAvg = dauern.length ? dauern.reduce((s,v)=>s+v,0)/dauern.length : null;
+    detail = `
+      <div class="ed-map-detail">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <strong style="font-size:15px">Kanton ${escape(sel)}</strong>
+          <button class="ed-dim-chip" onclick="edMapClick('${sel}')">✕ schliessen</button>
+        </div>
+        <div class="ed-map-stat"><span>Aktive Einsätze</span><strong>${rows.length}</strong></div>
+        ${kundenN ? `<div class="ed-map-stat"><span>Kunden</span><strong>${kundenN}</strong></div>` : ""}
+        ${mAvg !== null ? `<div class="ed-map-stat"><span>Ø Marge</span><strong style="color:var(--accent)">${mAvg.toLocaleString("de-CH",{maximumFractionDigits:1})}${isPct?"%":""}</strong></div>` : ""}
+        ${fAvg !== null ? `<div class="ed-map-stat"><span>Ø Faktor</span><strong>${fAvg.toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}</strong></div>` : ""}
+        ${dAvg !== null ? `<div class="ed-map-stat"><span>Ø Einsatzdauer</span><strong>${dAvg.toLocaleString("de-CH",{maximumFractionDigits:0})} Tage</strong></div>` : ""}
+        ${gavTop.length ? `<div class="ed-map-list"><span>Top GAV</span>${gavTop.map(([g,n]) => `<div>${escape(g)} <em>${edFmtCount(n)}</em></div>`).join("")}</div>` : ""}
+        ${funkTop.length && funkTop[0][0] !== "(leer)" ? `<div class="ed-map-list"><span>Top Funktionen</span>${funkTop.map(([g,n]) => `<div>${escape(g)} <em>${edFmtCount(n)}</em></div>`).join("")}</div>` : ""}
+      </div>`;
+  }
+
+  return `
+    <div class="ed-card" style="grid-column:1/-1">
+      <div class="ed-card-head">
+        <div class="ed-card-title">Einsätze nach Kanton <span style="color:var(--text-faint);font-weight:400">(aktive am Stichtag, via PLZ${ohnePlz ? ", " + ohnePlz + " ohne PLZ" : ""})</span></div>
+        ${sel ? "" : `<span style="font-size:11px;color:var(--text-faint)">Kanton anklicken für Details</span>`}
+      </div>
+      <div class="ed-map-wrap">
+        <svg viewBox="-8 -8 936 590" style="flex:1;min-width:0;height:auto" preserveAspectRatio="xMidYMid meet">${polys}</svg>
+        ${detail}
+      </div>
+    </div>`;
+}
+
+function edMapClick(kt) {
+  einsatzDashState.mapKanton = einsatzDashState.mapKanton === kt ? "" : kt;
+  render();
 }
 
 /* Tabellen-Sortierung: Klick auf Spaltenkopf, zweiter Klick dreht die Richtung */
@@ -5191,15 +5321,20 @@ function renderEinsatzDash(el) {
   const barDim = availDims.some(d => d.key === einsatzDashState.barDim) ? einsatzDashState.barDim : (availDims[0]?.key || "gav");
   const barEntries = edDist(aktivRows, barDim, 10);
   const barMax = barEntries.length ? barEntries[0][1] : 1;
-  // Ø-Marge pro Gruppe (aus der Marge-Spalte, wenn befüllt) als Zusatz-Label
+  // Ø-Marge pro Gruppe (aus der Marge-Spalte, wenn befüllt) als Zusatz-Label.
+  // "Andere" bekommt den Ø über alle Rest-Zeilen, damit die Zeile nicht aus
+  // der Reihe tanzt (Layout + fehlender Wert).
+  const barTopNames = barEntries.map(([g]) => g).filter(g => g !== "Andere");
+  const hatMarge = aktivRows.some(r => (r["Marge"]||"").trim());
   const barMargeFor = (() => {
-    const anyMarge = aktivRows.some(r => (r["Marge"]||"").trim());
-    if (!anyMarge) return () => null;
+    if (!hatMarge) return () => null;
     const isPct = aktivRows.some(r => (r["Marge"]||"").includes("%"));
     const get = edDim(barDim).get;
     return (g) => {
-      const vals = aktivRows.filter(r => (get(r)||"(leer)") === g)
-        .map(r => (r["Marge"]||"").trim()).filter(Boolean).map(parsePct);
+      const inGroup = g === "Andere"
+        ? aktivRows.filter(r => !barTopNames.includes(get(r)||"(leer)"))
+        : aktivRows.filter(r => (get(r)||"(leer)") === g);
+      const vals = inGroup.map(r => (r["Marge"]||"").trim()).filter(Boolean).map(parsePct);
       if (!vals.length) return null;
       const avg = vals.reduce((s,v)=>s+v,0)/vals.length;
       return "Ø " + avg.toLocaleString("de-CH",{maximumFractionDigits:1}) + (isPct ? "%" : "");
@@ -5208,12 +5343,12 @@ function renderEinsatzDash(el) {
   const barHtml = barEntries.length ? barEntries.map(([g, n], i) => {
     const m = barMargeFor(g);
     return `
-      <div class="ed-gav-row" ${m ? 'style="grid-template-columns:minmax(0,1fr) 2fr 110px"' : ""}>
+      <div class="ed-gav-row" ${hatMarge ? 'style="grid-template-columns:minmax(0,1fr) 2fr 110px"' : ""}>
         <div class="ed-gav-name" title="${escape(g)}">${escape(g)}</div>
         <div class="ed-gav-bar-wrap">
           <div class="ed-gav-bar" style="width:${(n/barMax*100).toFixed(0)}%;background:${ED_COLORS[i % ED_COLORS.length]}"></div>
         </div>
-        <div class="ed-gav-n" ${m ? 'style="min-width:110px;text-align:right;font-size:11px"' : ""}>${edFmtCount(n)}${m ? ` <span style="color:var(--accent)">· ${m}</span>` : ""}</div>
+        <div class="ed-gav-n" ${hatMarge ? 'style="min-width:110px;text-align:right;font-size:11px"' : ""}>${edFmtCount(n)}${m ? ` <span style="color:var(--accent)">· ${m}</span>` : ""}</div>
       </div>`;
   }).join("")
     : `<div style="color:var(--text-faint);font-size:12px;padding:12px 0">Keine aktiven Einsätze am Stichtag</div>`;
@@ -5430,6 +5565,8 @@ function renderEinsatzDash(el) {
             </div>`).join("")}
         </div>`;
       })()}
+
+      ${edMapCard(aktivRows, stichtag)}
 
       ${chartHtml}
     </div>
