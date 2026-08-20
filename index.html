@@ -864,7 +864,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.19.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.19.1</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -3837,28 +3837,52 @@ async function uploadDashFiles(input) {
   const files = Array.from(input.files || []);
   if (!files.length) return;
   const loaded = [];
+  /* Merge-Regel: Das ERSTE File eines Typs in diesem Upload-Vorgang ersetzt den
+     Bestand; jedes WEITERE gleichen Typs wird angehängt (z.B. Daten.csv +
+     Daten_25.csv fürs Vorjahr, Beteiligungen.csv + Beteiligungen_25.csv).
+     Ein späterer, neuer Upload-Vorgang beginnt wieder frisch. */
+  const seen = { bm: false, bet: false, kb: false };
   for (const file of files) {
     try {
       const text = await file.text();
       const parsed = parseCsvRows(text);
       const h = parsed.headers;
       if (h.includes("Placement Nr") && h.includes("Margenstufe")) {
-        einsatzDashState.bm.rows = parsed.rows.map(bmNorm).filter(b => b.placement);
-        einsatzDashState.bm.fileName = file.name;
-        einsatzDashState.bmF = { von:"", bis:"", kunde:"", recruiter:"", ma:"" };
-        loaded.push("Margen (" + einsatzDashState.bm.rows.length + " Pos.)");
+        const neu = parsed.rows.map(bmNorm).filter(b => b.placement);
+        if (seen.bm) {
+          einsatzDashState.bm.rows = einsatzDashState.bm.rows.concat(neu);
+          einsatzDashState.bm.fileName += " + " + file.name;
+        } else {
+          einsatzDashState.bm.rows = neu;
+          einsatzDashState.bm.fileName = file.name;
+          einsatzDashState.bmF = { von:"", bis:"", kunde:"", recruiter:"", ma:"" };
+          seen.bm = true;
+        }
+        loaded.push("Margen (" + neu.length + " Pos.)");
       } else if (h.includes("Anstellungsnummer") && h.includes("Beteiligung")) {
-        einsatzDashState.bet.rows = parsed.rows
+        const neu = parsed.rows
           .map(r => ({
             nr: (r["Anstellungsnummer"]||"").trim(),
             recruiter: (r["Recruiter"]||"").trim(),
             anteil: bmParseNumber(r["Beteiligung"])
           }))
           .filter(b => b.nr && b.recruiter);
-        einsatzDashState.bet.fileName = file.name;
-        loaded.push("Beteiligungen (" + einsatzDashState.bet.rows.length + ")");
+        if (seen.bet) {
+          // Duplikat-Schutz: Anstellungsnummern, die schon aus einem früheren File
+          // stammen, werden komplett übersprungen — sonst summieren Anteile > 1.
+          const vorhandene = new Set(einsatzDashState.bet.rows.map(b => b.nr));
+          const frisch = neu.filter(b => !vorhandene.has(b.nr));
+          einsatzDashState.bet.rows = einsatzDashState.bet.rows.concat(frisch);
+          einsatzDashState.bet.fileName += " + " + file.name;
+          loaded.push("Beteiligungen (" + frisch.length + (frisch.length < neu.length ? ", " + (neu.length - frisch.length) + " Duplikate übersprungen" : "") + ")");
+        } else {
+          einsatzDashState.bet.rows = neu;
+          einsatzDashState.bet.fileName = file.name;
+          seen.bet = true;
+          loaded.push("Beteiligungen (" + neu.length + ")");
+        }
       } else if (h.includes("Debitor") && h.includes("Kickback")) {
-        einsatzDashState.kb.rows = parsed.rows
+        const neu = parsed.rows
           .map(r => ({
             debitor: (r["Debitor"]||"").trim(),
             von: edToIso(r["Gültig von"]) || (r["Gültig von"]||"").trim() || "0000-01-01",
@@ -3866,8 +3890,20 @@ async function uploadDashFiles(input) {
             pct: bmParseNumber(r["Kickback"])
           }))
           .filter(k => k.debitor && k.pct);
-        einsatzDashState.kb.fileName = file.name;
-        loaded.push("Kickback (" + einsatzDashState.kb.rows.length + ")");
+        if (seen.kb) {
+          // Identische Regeln (Debitor + Gültigkeit) nicht doppelt aufnehmen
+          const key = k => k.debitor + "|" + k.von + "|" + k.bis;
+          const vorhandene = new Set(einsatzDashState.kb.rows.map(key));
+          const frisch = neu.filter(k => !vorhandene.has(key(k)));
+          einsatzDashState.kb.rows = einsatzDashState.kb.rows.concat(frisch);
+          einsatzDashState.kb.fileName += " + " + file.name;
+          loaded.push("Kickback (" + frisch.length + ")");
+        } else {
+          einsatzDashState.kb.rows = neu;
+          einsatzDashState.kb.fileName = file.name;
+          seen.kb = true;
+          loaded.push("Kickback (" + neu.length + ")");
+        }
       } else if (h.includes("Eintrittsdatum") && h.includes("GAV")) {
         loaded.push(edAssignEinsatzliste(parsed.rows, file.name));
       } else {
