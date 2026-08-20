@@ -864,7 +864,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.17.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.18.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -3800,6 +3800,7 @@ function bmNorm(r) {
     name:      (r["Name"]||"").trim(),
     total:     bmParseNumber(r["Total"]),
     menge:     bmParseNumber(r["Menge"]),
+    pct:       bmParseNumber(r["Prozentsatz"]),
     bh:        (r["Buchhaltungsrelevant"]||"").trim() === "Ja",
     level:     (r["Margenstufe"]||"").trim(),         // Level 1|2|3
     // Festvermittlung: eigener Ertrag ohne Lohnkosten — darf die
@@ -3945,10 +3946,13 @@ function bmAgg(rows) {
   let kundenStd = 0, kandidatenStd = 0;
   rows.forEach(b => {
     // Produzierte Stunden: Kunden-Sicht = Rate "Stundentarif" (verrechnet),
-    // Kandidaten-Sicht = Salary "Stundenlohn" (bezahlt) — unabhängig vom BH-Flag,
-    // denn die Stunden-Menge ist auch auf informativen Zeilen korrekt.
-    if (b.art === "Rate"   && b.name === "Stundentarif") kundenStd += b.menge;
-    if (b.art === "Salary" && b.name === "Stundenlohn")  kandidatenStd += b.menge;
+    // Kandidaten-Sicht = Salary "Stundenlohn" (bezahlt) — unabhängig vom BH-Flag.
+    // WICHTIG: nur Normalstunden (Prozentsatz 1). Überzeit- und Zuschlags-Zeilen
+    // (eigene Namen oder Prozentsatz ≠ 1, z.B. 0.5/0.8) sind keine zusätzlichen
+    // physischen Stunden und würden die Zählung verfälschen.
+    const istNormalstunde = b.pct === 1 || b.pct === 0;  // 0 = Prozentsatz-Feld leer
+    if (istNormalstunde && b.art === "Rate"   && b.name === "Stundentarif") kundenStd += b.menge;
+    if (istNormalstunde && b.art === "Salary" && b.name === "Stundenlohn")  kandidatenStd += b.menge;
     if (!b.bh) return;
     if (b.art === "Rate") { if (b.fest) fest += b.total; else umsatz += b.total; }
     else if (b.art === "Salary") {
@@ -4004,6 +4008,65 @@ function bmLookupEinsatz(placementNr) {
 
 const bmChf = v => "CHF " + v.toLocaleString("de-CH", {minimumFractionDigits:0, maximumFractionDigits:0});
 const bmPct = v => v.toLocaleString("de-CH", {minimumFractionDigits:1, maximumFractionDigits:1}) + "%";
+
+/* Werktage (Mo–Fr) zwischen zwei ISO-Daten, inklusiv */
+function bmWerktage(vonIso, bisIso) {
+  if (!vonIso || !bisIso || vonIso > bisIso) return 0;
+  let n = 0;
+  const d = new Date(vonIso + "T00:00:00");
+  const end = new Date(bisIso + "T00:00:00");
+  while (d <= end) {
+    const dow = d.getDay();
+    if (dow >= 1 && dow <= 5) n++;
+    d.setDate(d.getDate() + 1);
+  }
+  return n;
+}
+
+/* Verrechnete Normalstunden pro Arbeitstag, gruppiert nach keyFn(bmRow).
+   Werktage = Mo–Fr des jeweiligen Perioden-Monats, geschnitten mit dem
+   Einsatzzeitraum aus der Einsatzliste (falls verknüpft) — so zählen
+   Teilmonate bei Ein-/Austritt nicht voll.
+   Rückgabe: [[gruppe, stdProTag, werktage, stunden], ...] absteigend. */
+function bmStdProTag(rows, keyFn) {
+  // 1. Stunden pro Placement×Periode
+  const stdPP = {};
+  rows.forEach(b => {
+    const normal = b.pct === 1 || b.pct === 0;
+    if (!(normal && b.art === "Rate" && b.name === "Stundentarif")) return;
+    const key = b.placement + "|" + b.periode;
+    stdPP[key] = (stdPP[key] || 0) + b.menge;
+  });
+  // 2. Pro Placement×Periode: Werktage im (geschnittenen) Monat + Gruppe
+  const groups = {};
+  Object.entries(stdPP).forEach(([key, std]) => {
+    if (std <= 0) return;
+    const [pl, per] = key.split("|");
+    const mStart = per + "-01";
+    const y = parseInt(per.slice(0,4)), m = parseInt(per.slice(5,7));
+    const mEnd = new Date(y, m, 0);
+    const mEndIso = mEnd.getFullYear() + "-" + String(mEnd.getMonth()+1).padStart(2,"0") + "-" + String(mEnd.getDate()).padStart(2,"0");
+    let von = mStart, bis = mEndIso;
+    const e = bmLookupEinsatz(pl);
+    if (e) {
+      const eVon = edToIso(e["Eintrittsdatum"]);
+      const eBis = edToIso(e["Austrittsdatum"]);
+      if (eVon && eVon > von) von = eVon;
+      if (eBis && eBis < bis) bis = eBis;
+    }
+    const tage = bmWerktage(von, bis);
+    if (tage <= 0) return;
+    const sample = rows.find(b => b.placement === pl);
+    const g = sample ? (keyFn(sample) || "") : "";
+    if (!g) return;
+    const o = groups[g] = groups[g] || { std: 0, tage: 0 };
+    o.std += std; o.tage += tage;
+  });
+  return Object.entries(groups)
+    .filter(([, o]) => o.tage >= 15)   // zu kleine Basis = kein Muster
+    .map(([g, o]) => [g, o.std / o.tage, o.tage, o.std])
+    .sort((a, b) => b[1] - a[1]);
+}
 
 /* Kompletter Inhalt des Marge-Tabs (wird von renderEinsatzDash eingebettet) */
 function bmRenderContent() {
@@ -4133,9 +4196,13 @@ function bmRenderContent() {
     if (!placementMeta[b.placement]) placementMeta[b.placement] = { kunde: b.kunde, ma: b.ma, recruiter: b.recruiter };
   });
 
+  // Im Stunden-Modus: ausgeglichene Einsätze (Differenz 0) ausblenden — nur die
+  // Abweichungen sind interessant
+  const plRows = std ? byPlacement.filter(([,a]) => Math.abs(a.marge) >= 0.01) : byPlacement;
+  const plHidden = byPlacement.length - plRows.length;
   const placementTable = `
     <div class="ed-card">
-      <div class="ed-card-title">Pro Einsatz <span style="color:var(--text-faint);font-weight:400">(${byPlacement.length} Einsätze${hasEinsatzData ? ", verknüpft mit Einsatzliste" : ""})</span></div>
+      <div class="ed-card-title">Pro Einsatz <span style="color:var(--text-faint);font-weight:400">(${plRows.length}${plHidden > 0 ? " mit Differenz, " + plHidden + " ausgeglichene ausgeblendet" : " Einsätze"}${hasEinsatzData ? ", verknüpft mit Einsatzliste" : ""})</span></div>
       <div class="table-wrap"><table>
         <thead><tr>
           <th>Einsatz-Nr</th><th>Mitarbeiter</th><th>Kunde</th>
@@ -4145,7 +4212,7 @@ function bmRenderContent() {
           <th style="text-align:right">${std ? "Differenz" : "Bruttomarge"}</th><th style="text-align:right">${std ? "Quote %" : "Marge %"}</th>
         </tr></thead>
         <tbody>
-          ${byPlacement.map(([pl, a]) => {
+          ${plRows.map(([pl, a]) => {
             const meta = placementMeta[pl] || {};
             const einsatz = hasEinsatzData ? bmLookupEinsatz(pl) : null;
             const gav = einsatz ? (einsatz["GAV"]||"—").replace("Personalverleih ","PV ") : null;
@@ -4296,6 +4363,33 @@ function bmRenderContent() {
     if (byKundeStd.length >= 2) {
       const top = byKundeStd.slice().sort((a,b) => b[1].umsatz - a[1].umsatz)[0];
       bmInsights.push(`🏭 Die meisten Stunden produzierst du bei <strong>${escape(top[0])}</strong>: ${bmVal(top[1].umsatz)} verrechnet.`);
+    }
+    // Produktivität: verrechnete Stunden pro Arbeitstag, nach GAV / Kunde / Funktion
+    const fmtRate = v => v.toLocaleString("de-CH", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    if (hasEinsatzData) {
+      const proTagGav = bmStdProTag(rows, b => {
+        const e = bmLookupEinsatz(b.placement);
+        return e ? (e["GAV"]||"").trim().replace("Personalverleih ","PV ") : "";
+      });
+      if (proTagGav.length >= 2) {
+        const [bG, bR, bT] = proTagGav[0];
+        const [wG, wR] = proTagGav[proTagGav.length-1];
+        bmInsights.push(`🏗 Am meisten Stunden pro Arbeitstag produzierst du im <strong>${escape(bG)}</strong>: Ø ${fmtRate(bR)} h/Tag (${bT} Werktage) — im <strong>${escape(wG)}</strong> nur Ø ${fmtRate(wR)} h/Tag. Werte deutlich unter 8 deuten auf Teilpensen oder Ausfälle.`);
+      }
+      const proTagFunk = bmStdProTag(rows, b => {
+        const e = bmLookupEinsatz(b.placement);
+        return e ? (e["Einsatz als"]||"").trim() : "";
+      });
+      if (proTagFunk.length >= 2) {
+        const [bF, bR2] = proTagFunk[0];
+        bmInsights.push(`🔧 Produktivste Funktion: <strong>${escape(bF)}</strong> mit Ø ${fmtRate(bR2)} verrechneten Stunden pro Arbeitstag.`);
+      }
+    }
+    const proTagKunde = bmStdProTag(rows, b => b.kunde);
+    if (proTagKunde.length >= 2) {
+      const [bK, bRk] = proTagKunde[0];
+      const [wK, wRk] = proTagKunde[proTagKunde.length-1];
+      bmInsights.push(`🏢 Pro Arbeitstag am meisten Stunden beim Kunden <strong>${escape(bK)}</strong> (Ø ${fmtRate(bRk)} h/Tag) — am wenigsten bei <strong>${escape(wK)}</strong> (Ø ${fmtRate(wRk)} h/Tag).`);
     }
   } else {
 
