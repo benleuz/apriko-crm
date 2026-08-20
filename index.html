@@ -878,7 +878,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.21.1</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.22.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -3499,7 +3499,8 @@ const einsatzDashState = {
   bmF: { von: "", bis: "", kunde: "", recruiter: "", ma: "" },  // Filter Marge-Tab
   bmDim: "kunde",    // Dimension der Margen-Vergleichs-Karte im Marge-Tab
   bmMode: "chf",     // Marge-Tab-Modus: "chf" (Umsatz/Marge) | "std" (produzierte Stunden)
-  mapKanton: "",     // ausgewählter Kanton in der Schweiz-Karte ("" = keiner)
+  mapKanton: "",     // ausgewählter Kanton in der Schweiz-Karte (Einsätze-Tab)
+  bmMapKanton: "",   // ausgewählter Kanton in der Marge-Tab-Karte
   customerId: null,  // gewählter Kunde (cache.customers id)
   stichtag: null,    // ISO yyyy-mm-dd — Default heute
   pieDim: "gav",     // Dimension des Kuchendiagramms
@@ -4278,6 +4279,149 @@ function bmStdProTag(rows, keyFn) {
     .sort((a, b) => b[1] - a[1]);
 }
 
+/* Schweiz-Karte im Marge-Tab: Kanton via Placement→Einsatzliste→PLZ.
+   Färbung: CHF-Modus nach Bruttomarge, Stunden-Modus nach Kundenstunden. */
+function bmMapCard(rows, std) {
+  if (!einsatzDashState.rows.length) return "";  // Brücke zur Einsatzliste nötig
+  const perKt = {};
+  rows.forEach(b => {
+    const e = bmLookupEinsatz(b.placement);
+    if (!e) return;
+    const kt = edKanton(e);
+    if (kt) (perKt[kt] = perKt[kt] || []).push(b);
+  });
+  const kts = Object.keys(perKt);
+  if (!kts.length) return "";
+  const aggs = {};
+  kts.forEach(kt => aggs[kt] = bmView(bmAgg(perKt[kt])));
+  const valOf = a => std ? a.umsatz : a.marge;
+  const maxV = Math.max(1, ...kts.map(kt => Math.abs(valOf(aggs[kt]))));
+  const sel = einsatzDashState.bmMapKanton;
+
+  const polys = Object.keys(CH_MAP).map(kt => {
+    const a = aggs[kt];
+    const v = a ? valOf(a) : 0;
+    const t = Math.abs(v) / maxV;
+    const fill = !a ? "#20261f"
+      : v < 0 ? `rgba(255,107,107,${(0.25 + t*0.6).toFixed(2)})`
+      : `rgba(184,233,134,${(0.15 + t*0.75).toFixed(2)})`;
+    const isSel = kt === sel;
+    const shapes = CH_MAP[kt].p.map(pts =>
+      `<polygon points="${pts}" fill="${fill}" stroke="${isSel ? "#fff" : "var(--bg)"}" stroke-width="${isSel ? 2.5 : 1.2}" style="cursor:${a ? "pointer" : "default"}" onclick="bmMapClick('${kt}')"><title>${kt}: ${a ? bmVal(v) : "—"}</title></polygon>`).join("");
+    const [cx, cy] = CH_MAP[kt].c;
+    const dark = a && t > 0.55 && v >= 0;
+    const label = `<text x="${cx}" y="${cy}" text-anchor="middle" pointer-events="none" fill="${a ? (dark ? "#1a1a1a" : "var(--text)") : "var(--text-faint)"}" font-size="15" font-weight="${a ? 600 : 400}">${kt}</text>`;
+    return shapes + label;
+  }).join("");
+
+  let detail = "";
+  if (sel && aggs[sel]) {
+    const a = aggs[sel];
+    const nPl = new Set(perKt[sel].map(b => b.placement)).size;
+    detail = `
+      <div class="ed-map-detail">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <strong style="font-size:15px">Kanton ${escape(sel)}</strong>
+          <button class="ed-dim-chip" onclick="bmMapClick('${sel}')">✕ schliessen</button>
+        </div>
+        <div class="ed-map-stat"><span>Einsätze</span><strong>${nPl}</strong></div>
+        <div class="ed-map-stat"><span>${std ? "Kundenstunden" : "Umsatz"}</span><strong>${bmVal(a.umsatz)}</strong></div>
+        <div class="ed-map-stat"><span>${std ? "Kandidatenstunden" : "Lohn"}</span><strong>${bmVal(a.lohn)}</strong></div>
+        ${std ? "" : `<div class="ed-map-stat"><span>Sozialleistungen</span><strong>${bmVal(a.sozial)}</strong></div>`}
+        <div class="ed-map-stat"><span>${std ? "Differenz" : "Bruttomarge"}</span><strong style="color:${a.marge >= 0 ? "var(--accent)" : "var(--danger)"}">${bmVal(a.marge)}</strong></div>
+        <div class="ed-map-stat"><span>${std ? "Quote" : "Marge %"}</span><strong>${bmPct(a.margep)}</strong></div>
+      </div>`;
+  }
+
+  return `
+    <div class="ed-card" style="grid-column:1/-1">
+      <div class="ed-card-head">
+        <div class="ed-card-title">${std ? "Stunden" : "Bruttomarge"} nach Kanton <span style="color:var(--text-faint);font-weight:400">(via Einsatzliste)</span></div>
+        ${sel ? "" : `<span style="font-size:11px;color:var(--text-faint)">Kanton anklicken für Details</span>`}
+      </div>
+      <div class="ed-map-wrap">
+        <svg viewBox="-8 -8 936 606" style="flex:1;min-width:0;height:auto" preserveAspectRatio="xMidYMid meet">${polys}</svg>
+        ${detail}
+      </div>
+    </div>`;
+}
+function bmMapClick(kt) {
+  einsatzDashState.bmMapKanton = einsatzDashState.bmMapKanton === kt ? "" : kt;
+  render();
+}
+
+/* Sweet-Spot-Bubble-Chart pro GAV: X = Ø Laufzeit (Monate), Y = Marge %,
+   Bubble-Fläche = verrechnete Stunden. Der Verleiher-Idealfall — lange
+   Einsätze bei hoher Marge mit viel Volumen — liegt oben rechts, gross. */
+function bmSweetSpotCard(rows) {
+  if (!einsatzDashState.rows.length) return { html: "", best: null };
+  // Pro Placement: GAV (Lookup), Monate (distinct Perioden), agg
+  const perPl = {};
+  rows.forEach(b => {
+    const o = perPl[b.placement] = perPl[b.placement] || { rows: [], monate: new Set() };
+    o.rows.push(b); o.monate.add(b.periode);
+  });
+  const perGav = {};
+  Object.entries(perPl).forEach(([pl, o]) => {
+    const e = bmLookupEinsatz(pl);
+    if (!e) return;
+    const gav = (e["GAV"]||"").trim().replace("Personalverleih ","PV ");
+    if (!gav) return;
+    const g = perGav[gav] = perGav[gav] || { rows: [], monate: 0, n: 0 };
+    g.rows = g.rows.concat(o.rows); g.monate += o.monate.size; g.n++;
+  });
+  const pts = Object.entries(perGav).map(([gav, g]) => {
+    const a = bmAgg(g.rows);
+    return { gav, dauer: g.monate / g.n, margep: a.margep, std: a.kundenStd, marge: a.marge, n: g.n };
+  }).filter(p => p.std > 0 && p.n >= 1);
+  if (pts.length < 2) return { html: "", best: null };
+
+  const W = 900, H = 340, PAD = 52;
+  const xMin = 0, xMax = Math.max(...pts.map(p => p.dauer)) * 1.15;
+  const yMin = Math.min(0, ...pts.map(p => p.margep)) - 2;
+  const yMax = Math.max(...pts.map(p => p.margep)) * 1.2 + 2;
+  const stdMax = Math.max(...pts.map(p => p.std));
+  const X = v => PAD + (v - xMin) / (xMax - xMin) * (W - 2*PAD);
+  const Y = v => H - PAD - (v - yMin) / (yMax - yMin) * (H - 2*PAD);
+  const R = v => 8 + Math.sqrt(v / stdMax) * 30;
+
+  // Sweet-Spot-Score: Produkt der normierten Grössen; Gewinner markieren
+  const norm = (v, arr) => { const mx = Math.max(...arr); return mx ? v / mx : 0; };
+  pts.forEach(p => p.score = norm(p.dauer, pts.map(q=>q.dauer)) * norm(Math.max(0,p.margep), pts.map(q=>Math.max(0,q.margep))) * norm(p.std, pts.map(q=>q.std)));
+  const best = pts.slice().sort((a,b) => b.score - a.score)[0];
+
+  const medX = X(pts.map(p=>p.dauer).sort((a,b)=>a-b)[Math.floor(pts.length/2)]);
+  const medY = Y(pts.map(p=>p.margep).sort((a,b)=>a-b)[Math.floor(pts.length/2)]);
+
+  const bubbles = pts.slice().sort((a,b) => b.std - a.std).map((p, i) => {
+    const isBest = p === best;
+    const col = p.margep >= 0 ? ED_COLORS[i % ED_COLORS.length] : "var(--danger)";
+    return `
+      <circle cx="${X(p.dauer).toFixed(1)}" cy="${Y(p.margep).toFixed(1)}" r="${R(p.std).toFixed(1)}"
+        fill="${col}" opacity="0.55" stroke="${isBest ? "#fff" : col}" stroke-width="${isBest ? 2.5 : 1}">
+        <title>${escape(p.gav)}: Ø ${p.dauer.toFixed(1)} Mte · ${bmPct(p.margep)} · ${Math.round(p.std).toLocaleString("de-CH")} h · ${p.n} Einsätze</title>
+      </circle>
+      <text x="${X(p.dauer).toFixed(1)}" y="${(Y(p.margep) - R(p.std) - 5).toFixed(1)}" text-anchor="middle" fill="var(--text-dim)" font-size="10">${escape(p.gav.length > 26 ? p.gav.slice(0,24) + "…" : p.gav)}</text>`;
+  }).join("");
+
+  const html = `
+    <div class="ed-card" style="grid-column:1/-1">
+      <div class="ed-card-title">🎯 Sweet-Spot pro GAV <span style="color:var(--text-faint);font-weight:400">(Laufzeit × Marge × Stunden — oben rechts + gross = ideal)</span></div>
+      <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" preserveAspectRatio="xMidYMid meet">
+        <rect x="${medX.toFixed(1)}" y="${PAD-8}" width="${(W-PAD-medX).toFixed(1)}" height="${(medY-PAD+8).toFixed(1)}" fill="var(--accent)" opacity="0.05"/>
+        <line x1="${medX.toFixed(1)}" y1="${PAD-8}" x2="${medX.toFixed(1)}" y2="${H-PAD}" stroke="var(--border)" stroke-dasharray="4,4"/>
+        <line x1="${PAD}" y1="${medY.toFixed(1)}" x2="${W-PAD}" y2="${medY.toFixed(1)}" stroke="var(--border)" stroke-dasharray="4,4"/>
+        <text x="${W-PAD-6}" y="${PAD+6}" text-anchor="end" fill="var(--accent)" font-size="11" opacity="0.7">Sweet Spot</text>
+        <line x1="${PAD}" y1="${H-PAD}" x2="${W-PAD}" y2="${H-PAD}" stroke="var(--text-faint)"/>
+        <line x1="${PAD}" y1="${PAD-8}" x2="${PAD}" y2="${H-PAD}" stroke="var(--text-faint)"/>
+        <text x="${W/2}" y="${H-12}" text-anchor="middle" fill="var(--text-faint)" font-size="11">Ø Laufzeit pro Einsatz (Monate) →</text>
+        <text x="14" y="${H/2}" text-anchor="middle" fill="var(--text-faint)" font-size="11" transform="rotate(-90 14 ${H/2})">Bruttomarge % →</text>
+        ${bubbles}
+      </svg>
+    </div>`;
+  return { html, best };
+}
+
 /* Kompletter Inhalt des Marge-Tabs (wird von renderEinsatzDash eingebettet) */
 function bmRenderContent() {
   if (!einsatzDashState.bm.rows.length) {
@@ -4569,6 +4713,10 @@ function bmRenderContent() {
       </div>`;
   }
 
+  // ---- Schweiz-Karte + Sweet-Spot (beide via Einsatzlisten-Verknüpfung) ----
+  const bmMap = bmMapCard(rows, std);
+  const sweet = bmSweetSpotCard(rows);
+
   // ---- Monats-Tabelle ----
   const monthTable = `
     <div class="ed-card" style="margin-top:16px">
@@ -4608,6 +4756,11 @@ function bmRenderContent() {
       const pct = (key - keyPrev) / Math.abs(keyPrev) * 100;
       bmInsights.push(`📅 ${label} ${pct >= 0 ? "<strong>" + pct.toFixed(0) + "% über</strong>" : "<strong>" + Math.abs(pct).toFixed(0) + "% unter</strong>"} Vorjahr: ${bmVal(key)} vs. ${bmVal(keyPrev)} (gleiche Monate, ${escape(bmCurYear)} vs. ${parseInt(bmCurYear)-1}).`);
     }
+  }
+
+  if (sweet.best) {
+    const b = sweet.best;
+    bmInsights.push(`🎯 Dein Sweet-Spot-GAV ist <strong>${escape(b.gav)}</strong>: Ø ${b.dauer.toFixed(1)} Monate Laufzeit bei ${bmPct(b.margep)} Marge und ${Math.round(b.std).toLocaleString("de-CH")} verrechneten Stunden — lange Einsätze, gute Marge, viel Volumen. Mehr davon.`);
   }
 
   if (std) {
@@ -4823,6 +4976,8 @@ function bmRenderContent() {
       ${waterfall}
       ${recruiterCard || placementTable}
       ${bmDimCard}
+      ${sweet.html}
+      ${bmMap}
       ${recruiterCard ? placementTable.replace('<div class="ed-card">','<div class="ed-card" style="grid-column:1/-1">') : ""}
       ${monthChart}
     </div>
