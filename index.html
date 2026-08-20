@@ -864,7 +864,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.18.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.19.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -4084,10 +4084,33 @@ function bmRenderContent() {
   }
 
   const f = einsatzDashState.bmF;
-  const rows = bmFilteredRows();
+  const rowsAll = bmFilteredRows();
   const mode = einsatzDashState.bmMode;          // "chf" | "std"
   const std = mode === "std";
+
+  // ---- Vorjahres-Erkennung: enthalten die (gefilterten) Daten mehrere Jahre? ----
+  // Dann: Anzeige = aktuellstes Jahr, Vorjahr = Vergleichsschicht — und zwar nur
+  // über die GLEICHEN Monate (Jan–Jul 2026 vs. Jan–Jul 2025, nicht volles 2025).
+  const bmYears = [...new Set(rowsAll.map(b => b.periode.slice(0,4)).filter(Boolean))].sort();
+  const hasPrevBm = bmYears.length >= 2;
+  let rows = rowsAll, bmPrevRows = [];
+  let bmCurYear = bmYears[bmYears.length-1] || "";
+  if (hasPrevBm) {
+    rows = rowsAll.filter(b => b.periode.startsWith(bmCurYear));
+    const curMonths = new Set(rows.map(b => b.periode.slice(5,7)));
+    const prevYear = String(parseInt(bmCurYear) - 1);
+    bmPrevRows = rowsAll.filter(b => b.periode.startsWith(prevYear) && curMonths.has(b.periode.slice(5,7)));
+  }
   const agg = bmView(bmAgg(rows));
+  const aggPrev = hasPrevBm ? bmView(bmAgg(bmPrevRows)) : null;
+  /* VJ-Delta-Sub für KPI-Kacheln */
+  const bmVjSub = (cur, prev) => {
+    if (!hasPrevBm || aggPrev === null) return null;
+    if (!prev) return "VJ: " + bmVal(0);
+    const pct = (cur - prev) / Math.abs(prev) * 100;
+    const col = pct >= 0 ? "var(--accent)" : "var(--danger)";
+    return `VJ: ${bmVal(prev)} · <span style="color:${col}">${pct >= 0 ? "+" : ""}${pct.toFixed(0)}%</span>`;
+  };
 
   // Filter-Optionen
   const perioden = [...new Set(einsatzDashState.bm.rows.map(b => b.periode))].sort();
@@ -4108,6 +4131,11 @@ function bmRenderContent() {
     const groupW = (W - 2*PAD) / byMonth.length;
     const barW = Math.min(28, groupW * 0.32);
     const y = v => H - PAD - Math.max(0, v) * (H - 2*PAD) / maxV;
+    // Vorjahres-Werte pro Monat (MM) für die gestrichelte Vergleichslinie
+    const prevByMonth = {};
+    if (hasPrevBm) {
+      bmGroupBy(bmPrevRows, b => b.periode.slice(5,7)).forEach(([mm, a]) => prevByMonth[mm] = bmView(a).umsatz);
+    }
     const bars = byMonth.map(([m, a], i) => {
       const gx = PAD + i*groupW + groupW/2;
       const kosten = a.lohn + a.sozial;
@@ -4121,12 +4149,21 @@ function bmRenderContent() {
     monthChart = `
       <div class="ed-card" style="grid-column:1/-1">
         <div class="ed-card-title">${std ? "Kunden- vs. Kandidatenstunden pro Monat" : "Umsatz vs. Kosten pro Monat"} <span style="color:var(--text-faint);font-weight:400">(Label = ${std ? "Differenz" : "Bruttomarge"})</span></div>
-        <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" preserveAspectRatio="xMidYMid meet">${bars}</svg>
+        <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" preserveAspectRatio="xMidYMid meet">${bars}${hasPrevBm ? (() => {
+          const pts = byMonth.map(([m], i) => {
+            const v = prevByMonth[m.slice(5,7)];
+            if (v === undefined) return null;
+            const gx = PAD + i*groupW + groupW/2;
+            return gx.toFixed(1) + "," + y(v).toFixed(1);
+          }).filter(Boolean);
+          return pts.length > 1 ? `<polyline points="${pts.join(" ")}" fill="none" stroke="var(--text-faint)" stroke-width="1.5" stroke-dasharray="5,4"/>` : "";
+        })() : ""}</svg>
         <div class="ed-legend">
           <span class="ed-legend-item"><span class="ed-legend-dot" style="background:#6FC3DF"></span>${std ? "Kundenstunden (verrechnet)" : "Umsatz (Rate)"}</span>
           <span class="ed-legend-item"><span class="ed-legend-dot" style="background:#95A5A6"></span>${std ? "Kandidatenstunden (bezahlt)" : "Lohn + Sozialleistungen"}</span>
           <span class="ed-legend-item"><span class="ed-legend-dot" style="background:var(--accent)"></span>${std ? "Differenz positiv" : "Bruttomarge positiv"}</span>
           <span class="ed-legend-item"><span class="ed-legend-dot" style="background:var(--danger)"></span>${std ? "Differenz negativ" : "Bruttomarge negativ"}</span>
+          ${hasPrevBm ? `<span class="ed-legend-item"><span style="display:inline-block;width:16px;border-top:2px dashed var(--text-faint)"></span>Vorjahr (${std ? "Kundenstunden" : "Umsatz"}, gleiche Monate)</span>` : ""}
         </div>
       </div>`;
   }
@@ -4347,6 +4384,16 @@ function bmRenderContent() {
   // ---- Margen-Insights ----
   const bmInsights = [];
 
+  if (hasPrevBm && aggPrev && aggPrev.umsatz > 0) {
+    const key = std ? agg.umsatz : agg.marge;
+    const keyPrev = std ? aggPrev.umsatz : aggPrev.marge;
+    const label = std ? "Kundenstunden" : "Bruttomarge";
+    if (keyPrev) {
+      const pct = (key - keyPrev) / Math.abs(keyPrev) * 100;
+      bmInsights.push(`📅 ${label} ${pct >= 0 ? "<strong>" + pct.toFixed(0) + "% über</strong>" : "<strong>" + Math.abs(pct).toFixed(0) + "% unter</strong>"} Vorjahr: ${bmVal(key)} vs. ${bmVal(keyPrev)} (gleiche Monate, ${escape(bmCurYear)} vs. ${parseInt(bmCurYear)-1}).`);
+    }
+  }
+
   if (std) {
     // ---- Stunden-Modus: Verrechnungsquote + auffällige Monate ----
     if (agg.lohn > 0) {
@@ -4534,20 +4581,20 @@ function bmRenderContent() {
           <option value="">Alle</option>${mkOpts(mas, f.ma)}</select></label>` : ""}
       ${activeF ? `<button class="ed-clear-btn" onclick="einsatzDashState.bmF={von:'',bis:'',kunde:'',recruiter:'',ma:''};render()">✕ Filter löschen</button>` : ""}
       <div style="flex:1;text-align:right;font-size:11px;color:var(--text-faint);align-self:center">
-        ${escape(einsatzDashState.bm.fileName||"")} · ${einsatzDashState.bm.rows.length} Positionen
+        ${escape(einsatzDashState.bm.fileName||"")} · ${einsatzDashState.bm.rows.length} Positionen${hasPrevBm ? ` · <span style="color:var(--accent)">Anzeige ${escape(bmCurYear)}, Vorjahr als Vergleich</span>` : ""}
       </div>
     </div>
 
     <!-- Margen-KPIs -->
     <div class="ed-kpi-grid">
-      ${kpi("💵", bmVal(agg.umsatz), std ? "Kundenstunden" : "Umsatz Verleih", std ? "verrechnet (Stundentarif)" : byMonth.length + " Monate", "")}
+      ${kpi("💵", bmVal(agg.umsatz), std ? "Kundenstunden" : "Umsatz Verleih", bmVjSub(agg.umsatz, aggPrev ? aggPrev.umsatz : 0) || (std ? "verrechnet (Stundentarif)" : byMonth.length + " Monate"), "")}
       ${agg.fest > 0 ? kpi("🤝", bmVal(agg.fest), "Festvermittlungen", "eigener Ertrag, ohne Lohnkosten", "ed-kpi-accent") : ""}
       ${kpi("👷", bmVal(agg.lohn), std ? "Kandidatenstunden" : "Lohn", std ? "bezahlt (Stundenlohn)" : (agg.lohn > 0 ? "Faktor " + (agg.umsatz/agg.lohn).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2}) : ""), "")}
       ${std ? "" : kpi("🏦", bmVal(agg.sozial), "Sozialleistungen", "", "")}
       ${kickback > 0 ? kpi("↩️", bmVal(kickback), "Kickback", "Kunden-Rückvergütung", "ed-kpi-warn") : ""}
       ${std
         ? kpi("⚖️", bmVal(agg.marge), "Differenz", "Verrechnungsquote " + bmPct(agg.margep), agg.marge >= 0 ? "ed-kpi-accent" : "ed-kpi-danger")
-        : kpi("💰", bmVal(margeNachKb), "Bruttomarge" + (kickback > 0 ? " (nach Kickback)" : ""), bmPct(agg.umsatz ? margeNachKb/agg.umsatz*100 : 0), margeNachKb >= 0 ? "ed-kpi-accent" : "ed-kpi-danger")}
+        : kpi("💰", bmVal(margeNachKb), "Bruttomarge" + (kickback > 0 ? " (nach Kickback)" : ""), (bmVjSub(margeNachKb, aggPrev ? aggPrev.marge : 0) ? bmVjSub(margeNachKb, aggPrev ? aggPrev.marge : 0) + " · " : "") + bmPct(agg.umsatz ? margeNachKb/agg.umsatz*100 : 0), margeNachKb >= 0 ? "ed-kpi-accent" : "ed-kpi-danger")}
       ${kpi("📄", byPlacement.length, "Einsätze", "", "")}
     </div>
 
