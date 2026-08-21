@@ -814,6 +814,15 @@
   /* Zeitraum-Presets in der Filterleiste */
   .ed-preset-row{display:flex;gap:4px}
 
+  /* Budget-Tabelle */
+  .icon-btn{background:none;border:none;color:var(--text-dim);cursor:pointer;
+    font-size:13px;padding:2px 5px;border-radius:3px}
+  .icon-btn:hover{color:var(--text);background:var(--bg-hover)}
+  .bud-in{background:var(--bg);border:1px solid var(--border);color:var(--text);
+    padding:3px 5px;border-radius:3px;font-family:var(--font-mono);font-size:11px;text-align:right}
+  .bud-in:focus{border-color:var(--accent);outline:none}
+  .bud-in-m{width:62px}
+
   /* Schweiz-Karte */
   .ed-map-wrap{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
   .ed-map-wrap svg polygon{transition:fill .15s}
@@ -864,6 +873,7 @@
       <button data-view="customers"><span class="ic">★</span> Kunden</button>
       <button data-view="revenue"><span class="ic">⌗</span> Umsätze</button>
       <button data-view="stats"><span class="ic">∑</span> Statistiken</button>
+      <button data-view="budget"><span class="ic">▣</span> Budget</button>
       <button data-view="bpocheck"><span class="ic">☑</span> BPO Checkliste</button>
       <button data-view="einsatzdash"><span class="ic">📊</span> Kundendashboard</button>
       <button data-view="rapport"><span class="ic">▤</span> Rapport</button>
@@ -878,7 +888,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.22.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.23.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -1239,7 +1249,7 @@ let currentView = "dashboard";
    Berechtigungssystem
    =========================================================== */
 const SUPER_ADMIN_EMAIL = "benjamin@apriko.com";  // hat immer volle Rechte
-const ALL_VIEWS = ["dashboard","pipeline","customers","revenue","stats","bpocheck","einsatzdash","rapport","companies","contacts","tasks","profiles"];
+const ALL_VIEWS = ["dashboard","pipeline","customers","revenue","stats","budget","bpocheck","einsatzdash","rapport","companies","contacts","tasks","profiles"];
 
 /* Views die IMMER für alle eingeloggten User zugänglich sind,
    unabhängig von AllowedViews im UserProfile. */
@@ -1576,7 +1586,7 @@ function bindNav() {
 function render() {
   const titles = {
     dashboard: "Dashboard", pipeline: "Pipeline",
-    customers: "Kunden", revenue: "Umsätze", stats: "Statistiken",
+    customers: "Kunden", revenue: "Umsätze", stats: "Statistiken", budget: "Budget",
     bpocheck: "BPO Checkliste", einsatzdash: "Kundendashboard",
     rapport: "Rapport",
     companies: "Firmen", contacts: "Kontakte", tasks: "Aufgaben",
@@ -1627,12 +1637,333 @@ function render() {
   else if (currentView === "customers") renderCustomers(content);
   else if (currentView === "revenue") renderRevenue(content);
   else if (currentView === "stats") renderStats(content);
+  else if (currentView === "budget") renderBudget(content);
   else if (currentView === "bpocheck") renderBpoCheck(content);
   else if (currentView === "einsatzdash") renderEinsatzDash(content);
   else if (currentView === "companies") renderCompanies(content);
   else if (currentView === "contacts") renderContacts(content);
   else if (currentView === "tasks") renderTasks(content);
   else if (currentView === "profiles") renderProfiles(content);
+}
+
+/* ===========================================================
+   BUDGET-MODUL
+   Planjahr-Budget pro Firma (Kunde ODER Lead/Firma) und Typ:
+   - SaaS: Lizenzen × Preis/Monat  →  12 Monatswerte
+   - BPO:  Jahres-Aussenumsatz × Satz% / 12  →  12 Monatswerte
+   Formel füllt die Monate, jede Zelle bleibt einzeln überschreibbar.
+   Persistenz: SharePoint-Liste "Budget" (Spalten werden bei Bedarf
+   automatisch via Graph angelegt).
+   =========================================================== */
+const BUDGET_MONTH_FIELDS = ["M01","M02","M03","M04","M05","M06","M07","M08","M09","M10","M11","M12"];
+let _budgetColsEnsured = false;
+
+/* Fehlende Spalten der Budget-Liste automatisch anlegen */
+async function ensureBudgetColumns() {
+  if (_budgetColsEnsured) return;
+  const data = await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/columns`);
+  const have = new Set(data.value.map(c => c.name));
+  const wanted = [
+    { name: "BYear",   number: {} },
+    { name: "RefType", text: {} },
+    { name: "RefId",   number: {} },
+    { name: "BType",   text: {} },
+    { name: "Lic",     number: {} },
+    { name: "Price",   number: {} },
+    { name: "ExtRev",  number: {} },
+    { name: "Rate",    number: {} },
+    ...BUDGET_MONTH_FIELDS.map(m => ({ name: m, number: {} }))
+  ];
+  for (const col of wanted) {
+    if (have.has(col.name)) continue;
+    await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/columns`, {
+      method: "POST",
+      body: JSON.stringify(col)
+    });
+  }
+  _budgetColsEnsured = true;
+}
+
+/* Firma zu einer Budget-Zeile auflösen */
+function budgetRefName(b) {
+  if (b.RefType === "customer") {
+    const c = cache.customers.find(x => x.id == b.RefId);
+    return c ? c.Title : "(Kunde #" + b.RefId + ")";
+  }
+  const co = cache.companies.find(x => x.id == b.RefId);
+  return co ? co.Title : "(Firma #" + b.RefId + ")";
+}
+
+/* Monats-Formelwert je Typ */
+function budgetFormulaMonth(b) {
+  if (b.BType === "SaaS") return (parseFloat(b.Lic) || 0) * (parseFloat(b.Price) || 0);
+  return (parseFloat(b.ExtRev) || 0) * (parseFloat(b.Rate) || 0) / 100 / 12;
+}
+
+/* Vorschlagswerte aus den Ist-Daten (Revenue-Modul) */
+function budgetSuggest(refType, refId, btype) {
+  const out = { Lic: 0, Price: 0, ExtRev: 0, Rate: 0 };
+  if (refType !== "customer") return out;
+  const c = cache.customers.find(x => x.id == refId);
+  if (!c) return out;
+  const recs = cache.monthlyrevenue
+    .filter(r => r.CustomerId == refId)
+    .sort((a,b) => (b.Year - a.Year) || (b.Month - a.Month));
+  if (btype === "SaaS") {
+    const withLic = recs.find(r => (parseInt(r.Licenses) || 0) > 0);
+    out.Lic = withLic ? parseInt(withLic.Licenses) : 0;
+    out.Price = getPriceForMonth(c, filters.budgetYear, 1) || parseFloat(c.PricePerLicense) || 0;
+  } else {
+    out.Rate = parseFloat(c.BPORate) || 0;
+    const withExt = recs.filter(r => (parseFloat(r.ExternalRevenue) || 0) > 0);
+    if (withExt.length) {
+      if (c.BPOYtd) {
+        // YTD: letzter Stand ist bereits kumuliert → auf 12 Monate hochrechnen
+        const latest = withExt[0];
+        const ext = parseFloat(latest.ExternalRevenue) || 0;
+        out.ExtRev = latest.Month > 0 ? Math.round(ext / latest.Month * 12) : ext;
+      } else {
+        // Monatswerte: Ø der erfassten Monate × 12
+        const avg = withExt.reduce((s,r) => s + (parseFloat(r.ExternalRevenue) || 0), 0) / withExt.length;
+        out.ExtRev = Math.round(avg * 12);
+      }
+    }
+  }
+  return out;
+}
+
+/* Neue Budget-Zeile anlegen (mit Formel-Füllung der Monate) */
+async function budgetCreate(refType, refId, btype) {
+  const year = filters.budgetYear;
+  const dupe = cache.budget.find(b => b.BYear == year && b.RefType === refType && b.RefId == refId && b.BType === btype);
+  if (dupe) { toast("Diese Position existiert im " + year + " bereits.", true); return; }
+  try {
+    showLoading("Budget-Position wird angelegt …", "");
+    await ensureBudgetColumns();
+    const s = budgetSuggest(refType, refId, btype);
+    const name = refType === "customer"
+      ? (cache.customers.find(x => x.id == refId)?.Title || refId)
+      : (cache.companies.find(x => x.id == refId)?.Title || refId);
+    const fields = {
+      Title: name + " · " + btype + " " + year,
+      BYear: year, RefType: refType, RefId: parseInt(refId), BType: btype,
+      Lic: s.Lic, Price: s.Price, ExtRev: s.ExtRev, Rate: s.Rate
+    };
+    const m = btype === "SaaS"
+      ? (s.Lic * s.Price)
+      : (s.ExtRev * s.Rate / 100 / 12);
+    BUDGET_MONTH_FIELDS.forEach(f => fields[f] = Math.round(m));
+    await createItem("Budget", fields);
+    await reload("Budget");
+    hideLoading();
+    render();
+  } catch (e) {
+    hideLoading();
+    toast("Fehler: " + e.message, true);
+  }
+}
+
+/* Parameter geändert → speichern + alle 12 Monate nach Formel neu füllen */
+async function budgetParamChange(id, field, value) {
+  const b = cache.budget.find(x => x.id == id);
+  if (!b) return;
+  b[field] = value;
+  const m = Math.round(budgetFormulaMonth(b));
+  const fields = { [field]: parseFloat(value) || 0 };
+  BUDGET_MONTH_FIELDS.forEach(f => { fields[f] = m; b[f] = m; });
+  try {
+    await updateItem("Budget", id, fields);
+    render();
+  } catch (e) { toast("Fehler: " + e.message, true); }
+}
+
+/* Einzelne Monatszelle überschrieben */
+async function budgetCellChange(id, field, value) {
+  const b = cache.budget.find(x => x.id == id);
+  if (!b) return;
+  const v = Math.round(parseFloat(value) || 0);
+  b[field] = v;
+  try {
+    await updateItem("Budget", id, { [field]: v });
+    render();  // Summen aktualisieren
+  } catch (e) { toast("Fehler: " + e.message, true); }
+}
+
+/* Zeile auf Formelwerte zurücksetzen */
+async function budgetRefill(id) {
+  const b = cache.budget.find(x => x.id == id);
+  if (!b) return;
+  if (!confirm("Alle 12 Monatswerte dieser Zeile auf den Formelwert zurücksetzen? Manuelle Anpassungen gehen verloren.")) return;
+  const m = Math.round(budgetFormulaMonth(b));
+  const fields = {};
+  BUDGET_MONTH_FIELDS.forEach(f => { fields[f] = m; b[f] = m; });
+  try {
+    await updateItem("Budget", id, fields);
+    render();
+  } catch (e) { toast("Fehler: " + e.message, true); }
+}
+
+async function budgetDelete(id) {
+  const b = cache.budget.find(x => x.id == id);
+  if (!b) return;
+  if (!confirm("Budget-Position \"" + budgetRefName(b) + " · " + b.BType + "\" löschen?")) return;
+  try {
+    await deleteItem("Budget", id);
+    await reload("Budget");
+    render();
+  } catch (e) { toast("Fehler: " + e.message, true); }
+}
+
+/* Alle aktiven Kunden gemäss Segment übernehmen (nur fehlende) */
+async function budgetTakeoverActive() {
+  const year = filters.budgetYear;
+  const active = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv");
+  const jobs = [];
+  active.forEach(c => {
+    const want = [];
+    if (segmentChargesSaaS(c.Segment)) want.push("SaaS");
+    if (segmentNeedsBPO(c.Segment)) want.push("BPO");
+    if (!want.length) want.push(c.Segment === "BPO inkl. SaaS" ? "BPO" : "SaaS");
+    want.forEach(t => {
+      const exists = cache.budget.find(b => b.BYear == year && b.RefType === "customer" && b.RefId == c.id && b.BType === t);
+      if (!exists) jobs.push({ id: c.id, t });
+    });
+  });
+  if (!jobs.length) { toast("Alle aktiven Kunden sind für " + year + " bereits erfasst."); return; }
+  if (!confirm(jobs.length + " Budget-Positionen für aktive Kunden anlegen (mit Vorschlagswerten aus den Ist-Zahlen)?")) return;
+  try {
+    showLoading("Budget wird befüllt …", jobs.length + " Positionen");
+    await ensureBudgetColumns();
+    for (const j of jobs) {
+      const s = budgetSuggest("customer", j.id, j.t);
+      const c = cache.customers.find(x => x.id == j.id);
+      const fields = {
+        Title: (c?.Title || j.id) + " · " + j.t + " " + year,
+        BYear: year, RefType: "customer", RefId: parseInt(j.id), BType: j.t,
+        Lic: s.Lic, Price: s.Price, ExtRev: s.ExtRev, Rate: s.Rate
+      };
+      const m = j.t === "SaaS" ? (s.Lic * s.Price) : (s.ExtRev * s.Rate / 100 / 12);
+      BUDGET_MONTH_FIELDS.forEach(f => fields[f] = Math.round(m));
+      await createItem("Budget", fields);
+    }
+    await reload("Budget");
+    hideLoading();
+    toast(jobs.length + " Positionen angelegt");
+    render();
+  } catch (e) {
+    hideLoading();
+    toast("Fehler: " + e.message, true);
+  }
+}
+
+/* Modal: beliebige Firma/Lead hinzufügen */
+function budgetAddModal() {
+  const activeC = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv");
+  const otherC = cache.customers.filter(c => (c.Status || "Aktiv") !== "Aktiv");
+  const custIds = new Set(cache.customers.map(c => String(c.CompanyId || "")));
+  const leads = cache.companies.filter(co => !custIds.has(String(co.id)));
+  const opt = (val, label) => `<option value="${val}">${escape(label)}</option>`;
+  const body = `
+    <div class="field">
+      <label>Firma / Lead</label>
+      <select id="bud-ref">
+        <optgroup label="Aktive Kunden">${activeC.map(c => opt("customer|" + c.id, c.Title)).join("")}</optgroup>
+        ${otherC.length ? `<optgroup label="Weitere Kunden">${otherC.map(c => opt("customer|" + c.id, c.Title + " (" + (c.Status||"") + ")")).join("")}</optgroup>` : ""}
+        ${leads.length ? `<optgroup label="Firmen / Leads">${leads.map(co => opt("company|" + co.id, co.Title)).join("")}</optgroup>` : ""}
+      </select>
+    </div>
+    <div class="field">
+      <label>Typ</label>
+      <select id="bud-type">
+        <option value="SaaS">SaaS (Lizenzen × Preis)</option>
+        <option value="BPO">BPO (Aussenumsatz × Satz)</option>
+      </select>
+    </div>
+    <div style="font-size:11px;color:var(--text-faint)">Bei Kunden werden Lizenzen, Preis, Aussenumsatz und Satz aus den Ist-Zahlen vorgeschlagen — alles bleibt überschreibbar.</div>`;
+  showModal("Budget-Position hinzufügen", body, [
+    `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
+    `<button class="btn btn-primary" onclick="budgetAddFromModal()">Anlegen</button>`
+  ]);
+}
+function budgetAddFromModal() {
+  const [refType, refId] = document.getElementById("bud-ref").value.split("|");
+  const btype = document.getElementById("bud-type").value;
+  closeModal();
+  budgetCreate(refType, refId, btype);
+}
+
+function renderBudget(el) {
+  const year = filters.budgetYear;
+  const rows = cache.budget
+    .filter(b => b.BYear == year)
+    .sort((a,b) => budgetRefName(a).localeCompare(budgetRefName(b)) || (a.BType||"").localeCompare(b.BType||""));
+
+  const num = v => parseFloat(v) || 0;
+  const rowTotal = b => BUDGET_MONTH_FIELDS.reduce((s,f) => s + num(b[f]), 0);
+  const sumSaaS = rows.filter(b => b.BType === "SaaS").reduce((s,b) => s + rowTotal(b), 0);
+  const sumBPO  = rows.filter(b => b.BType === "BPO").reduce((s,b) => s + rowTotal(b), 0);
+  const monthSums = BUDGET_MONTH_FIELDS.map(f => rows.reduce((s,b) => s + num(b[f]), 0));
+
+  const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
+    .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
+
+  const paramCell = b => b.BType === "SaaS"
+    ? `<span style="white-space:nowrap"><input class="bud-in" style="width:44px" value="${num(b.Lic)}" onchange="budgetParamChange(${b.id},'Lic',this.value)" title="Lizenzen"> ×
+       <input class="bud-in" style="width:64px" value="${num(b.Price)}" onchange="budgetParamChange(${b.id},'Price',this.value)" title="Preis pro Lizenz/Monat"></span>`
+    : `<span style="white-space:nowrap"><input class="bud-in" style="width:86px" value="${num(b.ExtRev)}" onchange="budgetParamChange(${b.id},'ExtRev',this.value)" title="Aussenumsatz pro Jahr"> ×
+       <input class="bud-in" style="width:44px" value="${num(b.Rate)}" onchange="budgetParamChange(${b.id},'Rate',this.value)" title="Satz %">%</span>`;
+
+  el.innerHTML = `
+    <div style="display:flex;gap:12px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
+      <label style="color:var(--text-dim);font-size:12px">Planjahr:</label>
+      <select onchange="filters.budgetYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${yearOpts}</select>
+      <button class="btn btn-sm" onclick="budgetTakeoverActive()">Aktive Kunden übernehmen</button>
+      <button class="btn btn-sm btn-primary" onclick="budgetAddModal()">+ Position</button>
+      <div style="margin-left:auto;display:flex;gap:20px;font-size:12px;flex-wrap:wrap">
+        <div><span style="color:var(--text-dim)">SaaS:</span> <span style="font-family:var(--font-mono);color:var(--accent)">CHF ${fmtCHFShort(sumSaaS)}</span></div>
+        <div><span style="color:var(--text-dim)">BPO:</span> <span style="font-family:var(--font-mono);color:var(--accent-2)">CHF ${fmtCHFShort(sumBPO)}</span></div>
+        <div><span style="color:var(--text-dim)">Budget ${year}:</span> <span style="font-family:var(--font-mono);font-weight:600">CHF ${fmtCHFShort(sumSaaS + sumBPO)}</span></div>
+      </div>
+    </div>
+    ${rows.length === 0 ? `
+      <div style="text-align:center;padding:60px 20px;color:var(--text-dim)">
+        <div style="font-size:40px;margin-bottom:12px">▣</div>
+        <div style="margin-bottom:16px">Noch keine Budget-Positionen für ${year}.</div>
+        <button class="btn btn-primary" onclick="budgetTakeoverActive()">Aktive Kunden mit Ist-Werten übernehmen</button>
+        <span style="margin:0 8px;color:var(--text-faint)">oder</span>
+        <button class="btn" onclick="budgetAddModal()">Einzelne Position anlegen</button>
+      </div>` : `
+    <div class="table-wrap"><table style="min-width:1380px">
+      <thead><tr>
+        <th style="min-width:160px">Firma</th>
+        <th>Typ</th>
+        <th style="min-width:150px">Parameter</th>
+        ${MONTH_NAMES.map(m => `<th style="text-align:right">${m.slice(0,3)}</th>`).join("")}
+        <th style="text-align:right">Total</th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+        ${rows.map(b => `
+          <tr>
+            <td title="${escape(budgetRefName(b))}">${escape(budgetRefName(b))}${b.RefType === "company" ? ` <span style="font-size:10px;color:var(--text-faint)">(Lead)</span>` : ""}</td>
+            <td><span style="color:${b.BType === "SaaS" ? "var(--accent)" : "var(--accent-2)"};font-weight:600;font-size:11px">${b.BType}</span></td>
+            <td>${paramCell(b)}</td>
+            ${BUDGET_MONTH_FIELDS.map(f => `<td style="text-align:right"><input class="bud-in bud-in-m" value="${num(b[f])}" onchange="budgetCellChange(${b.id},'${f}',this.value)"></td>`).join("")}
+            <td style="text-align:right;font-family:var(--font-mono);font-weight:600">${fmtCHFShort(rowTotal(b))}</td>
+            <td style="white-space:nowrap">
+              <button class="icon-btn" onclick="budgetRefill(${b.id})" title="Monate auf Formelwert zurücksetzen">↻</button>
+              <button class="icon-btn" onclick="budgetDelete(${b.id})" title="Löschen">✕</button>
+            </td>
+          </tr>`).join("")}
+        <tr style="border-top:2px solid var(--border)">
+          <td colspan="3" style="font-weight:600">Total ${year}</td>
+          ${monthSums.map(s => `<td style="text-align:right;font-family:var(--font-mono);font-weight:600">${fmtCHFShort(s)}</td>`).join("")}
+          <td style="text-align:right;font-family:var(--font-mono);font-weight:700;color:var(--accent)">${fmtCHFShort(sumSaaS + sumBPO)}</td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table></div>`}
+  `;
 }
 
 /* ---------- Dashboard ---------- */
@@ -7204,6 +7535,7 @@ function isMine(owner) {
 
 // Filter-State (in-memory, pro Session)
 const filters = {
+  budgetYear: new Date().getFullYear() + 1,   // Budget-Modul: Planjahr
   tasksScope: "mine",
   dashboardTasksScope: "mine",
   revenueMode: "month",       // "month" oder "customer"
