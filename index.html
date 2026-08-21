@@ -888,7 +888,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.23.3</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.23.4</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -1427,10 +1427,24 @@ async function bootstrap() {
       listIds[l.displayName] = l.id;
     }
   }
-  const required = ["Companies", "Contacts", "Deals", "Activities", "Customers", "MonthlyRevenue", "Budget"];
+  const required = ["Companies", "Contacts", "Deals", "Activities", "Customers", "MonthlyRevenue"];
   const missing = required.filter(r => !listIds[r]);
   if (missing.length) {
     throw new Error("Fehlende Listen auf SharePoint: " + missing.join(", ") + ". Siehe SETUP.md.");
+  }
+  // Budget-Liste: wird bei Bedarf automatisch angelegt (braucht nur das Title-Feld)
+  if (!listIds["Budget"]) {
+    try {
+      const created = await graph(`/sites/${siteId}/lists`, {
+        method: "POST",
+        body: JSON.stringify({ displayName: "Budget", list: { template: "genericList" } })
+      });
+      listIds["Budget"] = created.id;
+      console.log("Budget-Liste automatisch angelegt:", created.id);
+    } catch (e) {
+      console.error("Budget-Liste konnte nicht angelegt werden:", e);
+      // App startet trotzdem — der Budget-Tab zeigt den Fehler an
+    }
   }
   // UserProfiles ist optional — wenn nicht vorhanden, greift nur Super-Admin
   if (!listIds.UserProfiles) {
@@ -1507,7 +1521,7 @@ async function startApp() {
     cache.activities = await loadList("Activities");
     cache.customers = await loadList("Customers");
     cache.monthlyrevenue = await loadList("MonthlyRevenue");
-    cache.budget = await loadList("Budget");
+    cache.budget = listIds["Budget"] ? await loadList("Budget") : [];
 
     applyPermissionsToNav();
     bindNav();
@@ -1746,6 +1760,7 @@ async function budgetCreate(refType, refId, btype) {
   const dupe = budgetRows().find(b => b.BYear == year && b.RefType === refType && b.RefId == refId && b.BType === btype);
   if (dupe) { toast("Diese Position existiert im " + year + " bereits.", true); return; }
   budgetLastError = "";
+  if (!listIds["Budget"]) { budgetLastError = "Budget-Liste fehlt und konnte nicht angelegt werden — 🔧 Diagnose ausführen oder Liste 'Budget' manuell auf der Site anlegen (leere Liste reicht)."; render(); return; }
   try {
     showLoading("Budget-Position wird angelegt …", "");
     const s = budgetSuggest(refType, refId, btype);
@@ -1831,6 +1846,7 @@ async function budgetTakeoverActive() {
     });
   });
   if (!jobs.length) { toast("Alle aktiven Kunden sind für " + year + " bereits erfasst."); return; }
+  if (!listIds["Budget"]) { budgetLastError = "Budget-Liste fehlt und konnte nicht angelegt werden — 🔧 Diagnose ausführen oder Liste 'Budget' manuell auf der Site anlegen (leere Liste reicht)."; render(); return; }
   if (!confirm(jobs.length + " Budget-Positionen für aktive Kunden anlegen (mit Vorschlagswerten aus den Ist-Zahlen)?")) return;
   budgetLastError = "";
   try {
@@ -1868,9 +1884,23 @@ async function budgetDiag() {
     render();
   };
   render();
-  // 1: Liste bekannt?
-  if (!listIds["Budget"]) { log(false, "Budget-Liste im Site gefunden", "listIds enthält keinen Eintrag 'Budget' — Liste fehlt oder heisst anders"); return; }
-  log(true, "Budget-Liste im Site gefunden", "ID: " + listIds["Budget"]);
+  // 1: Liste bekannt? Wenn nicht: anlegen versuchen
+  if (!listIds["Budget"]) {
+    log(false, "Budget-Liste im Site gefunden", "wird jetzt automatisch angelegt …");
+    try {
+      const created = await graph(`/sites/${siteId}/lists`, {
+        method: "POST",
+        body: JSON.stringify({ displayName: "Budget", list: { template: "genericList" } })
+      });
+      listIds["Budget"] = created.id;
+      log(true, "Budget-Liste angelegt", "ID: " + created.id);
+    } catch (e) {
+      log(false, "Budget-Liste anlegen", e.message + " — Alternativ manuell: Site → Neu → Liste → 'Budget' (leere Liste reicht).");
+      return;
+    }
+  } else {
+    log(true, "Budget-Liste im Site gefunden", "ID: " + listIds["Budget"]);
+  }
   // 2: Liste lesbar?
   try {
     const items = await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/items?$top=1`);
