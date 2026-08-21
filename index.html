@@ -899,7 +899,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.28.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.28.1</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -1749,6 +1749,19 @@ async function budgetSave(b) {
   if (raw) raw.Title = budgetSerialize(b);
 }
 
+/* Nach einem Tabellen-Rebuild den Fokus wiederherstellen: render() ersetzt
+   das komplette DOM — ohne Restore "fällt" der per Tab gesetzte Fokus aus
+   dem nächsten Feld. Alle Budget-Inputs tragen dafür eindeutige IDs. */
+function budgetRenderKeepFocus() {
+  const ae = document.activeElement;
+  const aid = ae && ae.id;
+  render();
+  if (aid && aid.indexOf("bud-") === 0) {
+    const el = document.getElementById(aid);
+    if (el) { el.focus(); if (el.select) try { el.select(); } catch (e) {} }
+  }
+}
+
 /* Kompakte Zahlen-Darstellung für Parameter: 4'000'000 → "4.0 Mio",
    334'500 → "335k"; beim Fokus erscheint der Rohwert zum Editieren. */
 function budFmtParam(v) {
@@ -1826,12 +1839,17 @@ async function budgetSaisonChange(i, value) {
   if (v > maxV) v = maxV;
   s[next] = Math.round((maxV - v) * 10) / 10;
   s[i] = v;
+  const aid = document.activeElement && document.activeElement.id;
   try {
     budgetShowLoading("Saisonkurve wird gespeichert …", "");
     await budgetSaisonSave(s);
     await budgetRedistributeBPO(s);
     budgetHideLoading();
     render();
+    if (aid && aid.indexOf("bud-") === 0) {
+      const el = document.getElementById(aid);
+      if (el) { el.focus(); try { el.select(); } catch (e2) {} }
+    }
   } catch (e) {
     budgetHideLoading();
     budgetLastError = e.message; render();
@@ -1976,9 +1994,9 @@ async function budgetParamChange(id, field, value) {
   b[field] = parseFloat(value) || 0;
   const mw = budgetFormulaMonths(b);
   BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
+  budgetRenderKeepFocus();
   try {
     await budgetSave(b);
-    render();
   } catch (e) { budgetLastError = e.message; toast("Fehler: " + e.message, true); render(); }
 }
 
@@ -1988,9 +2006,11 @@ async function budgetCellChange(id, field, value) {
   if (!b) return;
   const v = parseFloat(value) || 0;
   b[field] = b.BType === "BPOStd" ? Math.round(v * 10) / 10 : Math.round(v);
+  // Sofort rendern (Summen/CHF-Subs aus dem Cache) und den Tab-Fokus erhalten;
+  // der SharePoint-Save läuft im Hintergrund
+  budgetRenderKeepFocus();
   try {
     await budgetSave(b);
-    render();  // Summen aktualisieren
   } catch (e) { budgetLastError = e.message; toast("Fehler: " + e.message, true); render(); }
 }
 
@@ -2163,13 +2183,13 @@ function renderBudget(el) {
   const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
 
-  const extRevInput = b => `<input class="bud-in" style="width:58px" value="${budFmtParam(b.ExtRev)}" onfocus="this.value='${num(b.ExtRev)}'" onblur="if(this.value=='${num(b.ExtRev)}')this.value='${budFmtParam(b.ExtRev)}'" onchange="budgetParamChange(${b.id},'ExtRev',budParseParam(this.value))" title="Aussenumsatz pro Jahr: ${num(b.ExtRev).toLocaleString("de-CH")} — Eingabe auch als '4.2 Mio' oder '500k' möglich">`;
+  const extRevInput = b => `<input id="bud-p-${b.id}-ExtRev" class="bud-in" style="width:58px" value="${budFmtParam(b.ExtRev)}" onfocus="this.value='${num(b.ExtRev)}'" onblur="if(this.value=='${num(b.ExtRev)}')this.value='${budFmtParam(b.ExtRev)}'" onchange="budgetParamChange(${b.id},'ExtRev',budParseParam(this.value))" title="Aussenumsatz pro Jahr: ${num(b.ExtRev).toLocaleString("de-CH")} — Eingabe auch als '4.2 Mio' oder '500k' möglich">`;
   const paramCell = b => {
     const wrap = inner => `<span style="white-space:nowrap;font-size:10px;color:var(--text-faint)">${inner}</span>`;
-    if (b.BType === "SaaS") return wrap(`<input class="bud-in" style="width:34px" value="${num(b.Lic)}" onchange="budgetParamChange(${b.id},'Lic',this.value)" title="Lizenzen">×<input class="bud-in" style="width:52px" value="${num(b.Price)}" onchange="budgetParamChange(${b.id},'Price',this.value)" title="Preis pro Lizenz/Monat">`);
-    if (b.BType === "BPOStd") return wrap(`<input class="bud-in" style="width:48px" value="${num(b.Rate)}" onchange="budgetParamChange(${b.id},'Rate',this.value)" title="Stundensatz CHF/h — Monatszellen = Stunden">/h`);
+    if (b.BType === "SaaS") return wrap(`<input id="bud-p-${b.id}-Lic" class="bud-in" style="width:34px" value="${num(b.Lic)}" onchange="budgetParamChange(${b.id},'Lic',this.value)" title="Lizenzen">×<input id="bud-p-${b.id}-Price" class="bud-in" style="width:52px" value="${num(b.Price)}" onchange="budgetParamChange(${b.id},'Price',this.value)" title="Preis pro Lizenz/Monat">`);
+    if (b.BType === "BPOStd") return wrap(`<input id="bud-p-${b.id}-Rate" class="bud-in" style="width:48px" value="${num(b.Rate)}" onchange="budgetParamChange(${b.id},'Rate',this.value)" title="Stundensatz CHF/h — Monatszellen = Stunden">/h`);
     // BPO + SaaSPct: Aussenumsatz × Satz%
-    return wrap(`${extRevInput(b)}×<input class="bud-in" style="width:36px" value="${num(b.Rate)}" onchange="budgetParamChange(${b.id},'Rate',this.value)" title="Satz %">%`);
+    return wrap(`${extRevInput(b)}×<input id="bud-p-${b.id}-Rate" class="bud-in" style="width:36px" value="${num(b.Rate)}" onchange="budgetParamChange(${b.id},'Rate',this.value)" title="Satz %">%`);
   };
   const typLabel = { SaaS: ["SaaS", "var(--accent)"], SaaSPct: ["SaaS %", "var(--accent)"],
                      BPO: ["BPO", "var(--accent-2)"], BPOStd: ["BPO h", "var(--accent-2)"] };
@@ -2223,7 +2243,7 @@ function renderBudget(el) {
           <td colspan="3" style="color:var(--text-faint);font-size:10px">BPO-Saison % <span title="Anteil des Jahres-Honorars pro Monat. Änderung gleicht beim Folgemonat aus (Summe bleibt 100) und verteilt alle BPO-Zeilen neu.">ⓘ</span></td>
           ${s.map((p, i) => `
             <td style="text-align:right">
-              <input class="bud-in bud-in-m" style="color:var(--accent-2)" value="${p}" onchange="budgetSaisonChange(${i},this.value)" title="${MONTH_NAMES[i]}: ${p}% — Änderung gleicht bei ${MONTH_NAMES[(i+1)%12]} aus">
+              <input id="bud-s-${i}" class="bud-in bud-in-m" style="color:var(--accent-2)" value="${p}" onchange="budgetSaisonChange(${i},this.value)" title="${MONTH_NAMES[i]}: ${p}% — Änderung gleicht bei ${MONTH_NAMES[(i+1)%12]} aus">
               <div class="bud-saison-bar"><div style="width:${(p/maxP*100).toFixed(0)}%"></div></div>
             </td>`).join("")}
           <td style="text-align:right;font-family:var(--font-mono);font-size:10px;color:${Math.abs(sum-100) < 0.05 ? "var(--accent)" : "var(--danger)"}">${sum}%</td>
@@ -2237,7 +2257,7 @@ function renderBudget(el) {
             <td title="${escape(budgetRefName(b))}" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escape(budgetRefName(b))}${b.RefType === "company" ? ` <span style="font-size:9px;color:var(--text-faint)">(Lead)</span>` : ""}</td>
             <td>${typCell(b)}</td>
             <td>${paramCell(b)}</td>
-            ${BUDGET_MONTH_FIELDS.map(f => `<td style="text-align:right"><input class="bud-in bud-in-m" ${b.BType === "BPOStd" ? `style="color:var(--accent-2)" title="${num(b[f])} h × ${num(b.Rate)} = CHF ${Math.round(budgetChfOf(b, b[f])).toLocaleString("de-CH")}"` : ""} value="${num(b[f])}" onchange="budgetCellChange(${b.id},'${f}',this.value)">${b.BType === "BPOStd" ? `<div style="font-size:8.5px;color:var(--text-faint);text-align:right;padding-right:4px">${Math.round(budgetChfOf(b, b[f])).toLocaleString("de-CH")}</div>` : ""}</td>`).join("")}
+            ${BUDGET_MONTH_FIELDS.map(f => `<td style="text-align:right"><input id="bud-c-${b.id}-${f}" class="bud-in bud-in-m" ${b.BType === "BPOStd" ? `style="color:var(--accent-2)" title="${num(b[f])} h × ${num(b.Rate)} = CHF ${Math.round(budgetChfOf(b, b[f])).toLocaleString("de-CH")}"` : ""} value="${num(b[f])}" onchange="budgetCellChange(${b.id},'${f}',this.value)">${b.BType === "BPOStd" ? `<div style="font-size:8.5px;color:var(--text-faint);text-align:right;padding-right:4px">${Math.round(budgetChfOf(b, b[f])).toLocaleString("de-CH")}</div>` : ""}</td>`).join("")}
             <td style="text-align:right;font-family:var(--font-mono);font-weight:600">${fmtCHFShort(rowTotal(b))}${b.BType === "BPOStd" ? `<div style="font-size:8.5px;color:var(--text-faint);font-weight:400">${rowHours(b).toLocaleString("de-CH")} h</div>` : ""}</td>
             <td style="white-space:nowrap">
               <button class="icon-btn" onclick="budgetRefill(${b.id})" title="Monate auf Formelwert zurücksetzen">↻</button>
