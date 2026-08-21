@@ -906,7 +906,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.31.2</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.32.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -991,6 +991,7 @@
                   <select id="rpBranche">
                     <option value="bau" selected>Bauhauptgewerbe</option>
                     <option value="elektro">Elektrogewerbe (LGAV)</option>
+                    <option value="gebaeude">Gebäudetechnik (suissetec)</option>
                     <option value="maler">Malergewerbe (LMV Maler/Gipser)</option>
                     <option value="pvl">Kein vorrangiger GAV</option>
                   </select></div>
@@ -1767,13 +1768,20 @@ async function budgetSave(b) {
    das komplette DOM — ohne Restore "fällt" der per Tab gesetzte Fokus aus
    dem nächsten Feld. Alle Budget-Inputs tragen dafür eindeutige IDs. */
 function budgetRenderKeepFocus() {
-  const ae = document.activeElement;
-  const aid = ae && ae.id;
-  render();
-  if (aid && aid.indexOf("bud-") === 0) {
-    const el = document.getElementById(aid);
-    if (el) { el.focus(); if (el.select) try { el.select(); } catch (e) {} }
-  }
+  // WICHTIG: change feuert VOR dem Fokuswechsel (Tab). Sofortiges Rendern
+  // würde das verlassene Feld als activeElement sehen und den User dorthin
+  // ZURÜCK setzen — die nächste Eingabe landet dann im falschen Feld.
+  // setTimeout(0) lässt den Browser den Fokuswechsel erst abschliessen;
+  // danach wird das echte Ziel-Feld restauriert.
+  setTimeout(() => {
+    const ae = document.activeElement;
+    const aid = ae && ae.id;
+    render();
+    if (aid && aid.indexOf("bud-") === 0) {
+      const el = document.getElementById(aid);
+      if (el) { el.focus(); if (el.select) try { el.select(); } catch (e) {} }
+    }
+  }, 0);
 }
 
 /* Kompakte Zahlen-Darstellung für Parameter: 4'000'000 → "4.0 Mio",
@@ -1894,12 +1902,12 @@ async function budgetSaisonChange(i, value) {
   if (v > maxV) v = maxV;
   s[next] = Math.round((maxV - v) * 10) / 10;
   s[i] = v;
-  const aid = document.activeElement && document.activeElement.id;
   try {
     budgetShowLoading("Saisonkurve wird gespeichert …", "");
     await budgetSaisonSave(s);
     await budgetRedistributeBPO(s);
     budgetHideLoading();
+    const aid = document.activeElement && document.activeElement.id;
     render();
     if (aid && aid.indexOf("bud-") === 0) {
       const el = document.getElementById(aid);
@@ -2274,7 +2282,11 @@ function renderBudget(el) {
   const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
 
-  const extRevInput = b => `<input id="bud-p-${b.id}-ExtRev" class="bud-in bud-p1" value="${budFmtParam(b.ExtRev)}" onfocus="this.value='${num(b.ExtRev)}'" onblur="if(this.value=='${num(b.ExtRev)}')this.value='${budFmtParam(b.ExtRev)}'" onchange="budgetParamChange(${b.id},'ExtRev',budParseParam(this.value))" title="Aussenumsatz pro Jahr: ${num(b.ExtRev).toLocaleString("de-CH")} — Eingabe auch als '4.2 Mio' oder '500k' möglich">`;
+  /* Kein programmatischer value-Tausch in onfocus/onblur — das unterdrückte
+     in bestimmten Abläufen das change-Event (erste Eingabe wurde "gefressen").
+     Stattdessen: Kurzform anzeigen, beim Fokus alles markieren, Eingabe
+     überschreibt; der Parser versteht "2000000" wie "2.0 Mio". */
+  const extRevInput = b => `<input id="bud-p-${b.id}-ExtRev" class="bud-in bud-p1" value="${budFmtParam(b.ExtRev)}" onfocus="this.select()" onchange="budgetParamChange(${b.id},'ExtRev',budParseParam(this.value))" title="Aussenumsatz pro Jahr: ${num(b.ExtRev).toLocaleString("de-CH")} — Eingabe auch als '4.2 Mio', '500k' oder '2000000' möglich">`;
   /* Einheitliches Raster [Wert1][×][Wert2][Suffix] — Zweitwerte (Preis, Satz,
      Stundensatz) und Suffixe fluchten über alle Modelle hinweg */
   const paramCell = b => {
@@ -8196,6 +8208,21 @@ var GAV = {
     kantone: ['ZH','BE','LU','UR','SZ','OW','NW','GL','ZG','FR','SO','BS','BL','SH','AR','AI','SG','GR','AG','TG','TI','VD','VS','NE','GE','JU'],
     quelle: 'LGAV EIT.swiss / Unia 2024-2027 · schweizweit gültig'
   },
+  gebaeude: {
+    name: 'GAV Gebäudetechnikbranche (suissetec)',
+    modell: 'Wochenarbeitszeit 40 h (Jahressoll 2088 h inkl. Ferien/Feiertage)',
+    sollTag: 8.00,           // 40h / 5 Tage (Mo–Fr, Art. 25)
+    sollHerkunft: 'Art. 25 GAV Gebäudetechnik 2025–2028 · 40 h/Woche · 5-Tage-Woche',
+    zuschlagAb: 45,          // Zwei-Töpfe-System (Art. 28): Topf A 40–45 h ohne Zuschlag
+    zuschlagSatz: 25,        // Topf B >45 h: 25% Zuschlag (Zeit oder Geld)
+    konto: 'Topf A (40–45 h/Wo): zuschlagsfrei, max. 120 h per 31.12., Überzahl mit 25%; Topf B (>45 h/Wo): 25% Zuschlag, Auszahlung monatlich bzw. per Jahresende',
+    zulage: 0,               // Keine Baustellenzulage wie im Bauhauptgewerbe
+    zulageAb: null,
+    mittag: 17.00,           // CHF Mittagsentschädigung auswärts (ab 2025 von 15 auf 17 erhöht)
+    // AVE ganze Schweiz AUSSER GE, VD, VS (dort eigene Verträge)
+    kantone: ['ZH','BE','LU','UR','SZ','OW','NW','GL','ZG','FR','SO','BS','BL','SH','AR','AI','SG','GR','AG','TG','TI','NE','JU'],
+    quelle: 'GAV Gebäudetechnikbranche 2025–2028 · suissetec/Unia/Syna · AVE ohne GE/VD/VS'
+  },
   maler: {
     name: 'LMV Maler- und Gipsergewerbe',
     modell: 'Wochenarbeitszeit 40 h (Jahressoll ~2088 h)',
@@ -8223,6 +8250,10 @@ function suggestGavFromFirma(firma){
 
   // Maler/Gipser
   if(/\b(maler|gipser|stukkateur|malerei|farb-|verputz)/i.test(f)) return 'maler';
+
+  // Gebäudetechnik (HLKS: Heizung/Lüftung/Klima/Sanitär/Spenglerei) — vor
+  // Elektro prüfen, da spezifischer als das generische "installations"
+  if(/\b(sanit[aä]r|heizung|l[uü]ftung|klima|spengler|haustechnik|geb[aä]udetechnik|hlk)/i.test(f)) return 'gebaeude';
 
   // Elektro
   if(/\b(elektro|elektriker|installations?|telecom|selmoni|starkstrom)/i.test(f)) return 'elektro';
