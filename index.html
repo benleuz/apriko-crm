@@ -825,6 +825,11 @@
   .bud-in:hover{border-color:var(--border)}
   .bud-in:focus{border-color:var(--accent);outline:none;background:var(--bg)}
   .bud-in-m{width:52px}
+  .bud-typ{background:transparent;border:1px solid transparent;font-weight:600;font-size:10px;
+    font-family:inherit;padding:1px 2px;border-radius:3px;cursor:pointer;appearance:none;-webkit-appearance:none}
+  .bud-typ:hover{border-color:var(--border)}
+  .bud-typ:focus{border-color:var(--accent);outline:none}
+  .bud-typ option{background:var(--bg-card);color:var(--text)}
   .bud-saison-row td{border-bottom:2px solid var(--border) !important;padding-bottom:4px !important}
   .bud-saison-bar{height:3px;background:var(--bg);border-radius:2px;margin:1px 3px 0 auto;width:52px;overflow:hidden}
   .bud-saison-bar > div{height:100%;background:var(--accent-2);border-radius:2px}
@@ -894,7 +899,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.27.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.28.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -1908,7 +1913,8 @@ function budgetSuggest(refType, refId, btype) {
       out.Hours = Math.round(sum / withHrs.length * 10) / 10;
     }
   } else {
-    out.Rate = parseFloat(c.BPORate) || 0;
+    // BPO: Satz aus dem Kundenstamm; SaaSPct: eigener Satz (manuell, z.B. 0.35)
+    out.Rate = btype === "BPO" ? (parseFloat(c.BPORate) || 0) : 0;
     let withExt = recs.filter(r => (parseFloat(r.ExternalRevenue) || 0) > 0);
     if (withExt.length) {
       // Nur das JÜNGSTE Jahr mit Daten verwenden — ältere Jahre würden die
@@ -1985,6 +1991,33 @@ async function budgetCellChange(id, field, value) {
   try {
     await budgetSave(b);
     render();  // Summen aktualisieren
+  } catch (e) { budgetLastError = e.message; toast("Fehler: " + e.message, true); render(); }
+}
+
+/* Modell einer bestehenden Zeile wechseln (Dropdown in der Typ-Spalte).
+   Parameter und Monate werden für den neuen Typ neu vorgeschlagen/berechnet;
+   bei ExtRev-basierten Wechseln (BPO ↔ SaaS %) bleibt der Aussenumsatz stehen. */
+async function budgetTypeChange(id, newType) {
+  const b = budgetRows().find(x => x.id == id);
+  if (!b || b.BType === newType) return;
+  const dupe = budgetRows().find(x => x.id != id && x.BYear == b.BYear &&
+    x.RefType === b.RefType && x.RefId == b.RefId && x.BType === newType);
+  if (dupe) { toast("Für diese Firma existiert bereits eine " + newType + "-Position im " + b.BYear + ".", true); render(); return; }
+  const s = budgetSuggest(b.RefType, b.RefId, newType);
+  const oldExt = parseFloat(b.ExtRev) || 0;
+  b.BType = newType;
+  b.Lic = s.Lic; b.Price = s.Price;
+  b.ExtRev = s.ExtRev || oldExt;   // Umsatzbasis behalten, wenn Suggest nichts liefert
+  b.Rate = s.Rate;
+  if (newType === "BPOStd") {
+    BUDGET_MONTH_FIELDS.forEach(f => b[f] = s.Hours || 0);
+  } else {
+    const mw = budgetFormulaMonths(b);
+    BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
+  }
+  try {
+    await budgetSave(b);
+    render();
   } catch (e) { budgetLastError = e.message; toast("Fehler: " + e.message, true); render(); }
 }
 
@@ -2140,6 +2173,12 @@ function renderBudget(el) {
   };
   const typLabel = { SaaS: ["SaaS", "var(--accent)"], SaaSPct: ["SaaS %", "var(--accent)"],
                      BPO: ["BPO", "var(--accent-2)"], BPOStd: ["BPO h", "var(--accent-2)"] };
+  const typCell = b => `
+    <select class="bud-typ" style="color:${(typLabel[b.BType]||typLabel.SaaS)[1]}"
+      onchange="budgetTypeChange(${b.id}, this.value)"
+      title="Modell wechseln — Parameter und Monate werden für das neue Modell neu vorgeschlagen">
+      ${Object.keys(typLabel).map(t => `<option value="${t}" ${t === b.BType ? "selected" : ""}>${typLabel[t][0]}</option>`).join("")}
+    </select>`;
 
   el.innerHTML = `
     ${budgetLastError ? `
@@ -2196,7 +2235,7 @@ function renderBudget(el) {
         ${rows.map(b => `
           <tr>
             <td title="${escape(budgetRefName(b))}" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escape(budgetRefName(b))}${b.RefType === "company" ? ` <span style="font-size:9px;color:var(--text-faint)">(Lead)</span>` : ""}</td>
-            <td><span style="color:${(typLabel[b.BType]||typLabel.SaaS)[1]};font-weight:600;font-size:10px">${(typLabel[b.BType]||[b.BType])[0]}</span></td>
+            <td>${typCell(b)}</td>
             <td>${paramCell(b)}</td>
             ${BUDGET_MONTH_FIELDS.map(f => `<td style="text-align:right"><input class="bud-in bud-in-m" ${b.BType === "BPOStd" ? `style="color:var(--accent-2)" title="${num(b[f])} h × ${num(b.Rate)} = CHF ${Math.round(budgetChfOf(b, b[f])).toLocaleString("de-CH")}"` : ""} value="${num(b[f])}" onchange="budgetCellChange(${b.id},'${f}',this.value)">${b.BType === "BPOStd" ? `<div style="font-size:8.5px;color:var(--text-faint);text-align:right;padding-right:4px">${Math.round(budgetChfOf(b, b[f])).toLocaleString("de-CH")}</div>` : ""}</td>`).join("")}
             <td style="text-align:right;font-family:var(--font-mono);font-weight:600">${fmtCHFShort(rowTotal(b))}${b.BType === "BPOStd" ? `<div style="font-size:8.5px;color:var(--text-faint);font-weight:400">${rowHours(b).toLocaleString("de-CH")} h</div>` : ""}</td>
