@@ -888,7 +888,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.23.1</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.23.3</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -1656,54 +1656,40 @@ function render() {
    automatisch via Graph angelegt).
    =========================================================== */
 const BUDGET_MONTH_FIELDS = ["M01","M02","M03","M04","M05","M06","M07","M08","M09","M10","M11","M12"];
-let _budgetColsEnsured = false;
 let budgetLastError = "";   // persistente Fehleranzeige im Budget-View
 
-/* Fehlende Spalten der Budget-Liste automatisch anlegen.
-   Robust: einzelne Fehler werden gesammelt, am Ende wird per GET verifiziert,
-   dass wirklich alle Spalten existieren — sonst klare Fehlermeldung. */
-async function ensureBudgetColumns(progress) {
-  if (_budgetColsEnsured) return;
-  const listCols = async () => {
-    const data = await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/columns?$top=200`);
-    return new Set(data.value.map(c => c.name));
-  };
-  let have = await listCols();
-  const wanted = [
-    { name: "BYear",   number: {} },
-    { name: "RefType", text: {} },
-    { name: "RefId",   number: {} },
-    { name: "BType",   text: {} },
-    { name: "Lic",     number: {} },
-    { name: "Price",   number: {} },
-    { name: "ExtRev",  number: {} },
-    { name: "Rate",    number: {} },
-    ...BUDGET_MONTH_FIELDS.map(m => ({ name: m, number: {} }))
-  ];
-  const errors = [];
-  let i = 0;
-  for (const col of wanted) {
-    i++;
-    if (have.has(col.name)) continue;
-    if (progress) progress(`Spalte ${col.name} wird angelegt … (${i}/${wanted.length})`);
-    try {
-      await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/columns`, {
-        method: "POST",
-        body: JSON.stringify(col)
-      });
-    } catch (e) {
-      errors.push(col.name + ": " + e.message);
-    }
-  }
-  // Verifikation: sind jetzt alle da?
-  have = await listCols();
-  const missing = wanted.map(c => c.name).filter(n => !have.has(n));
-  if (missing.length) {
-    throw new Error("Budget-Spalten konnten nicht angelegt werden: " + missing.join(", ") +
-      (errors.length ? " — Details: " + errors.join(" | ") : "") +
-      " — Alternativ die Spalten manuell in der SharePoint-Liste 'Budget' anlegen (Typ Zahl, ausser RefType/BType als Text).");
-  }
-  _budgetColsEnsured = true;
+/* SPEICHERFORMAT: Jede Budget-Zeile ist ein SharePoint-Item, dessen Title ein
+   kompaktes JSON trägt: {y,rt,ri,t,lic,pr,er,ra,m:[12 Werte]}.
+   Warum: Title existiert in JEDER Liste — keine Spalten-Anlage, keine
+   Schema-Rechte nötig. Item-Schreiben funktioniert nachweislich (Kunden,
+   Deals etc. nutzen denselben Weg). */
+function budgetParse(item) {
+  if (!item || !item.Title || item.Title[0] !== "{") return null;
+  try {
+    const d = JSON.parse(item.Title);
+    const b = { id: item.id, BYear: d.y, RefType: d.rt, RefId: d.ri, BType: d.t,
+      Lic: d.lic || 0, Price: d.pr || 0, ExtRev: d.er || 0, Rate: d.ra || 0 };
+    (d.m || []).forEach((v, i) => b[BUDGET_MONTH_FIELDS[i]] = v || 0);
+    BUDGET_MONTH_FIELDS.forEach(f => { if (b[f] === undefined) b[f] = 0; });
+    return b;
+  } catch (e) { return null; }
+}
+function budgetSerialize(b) {
+  return JSON.stringify({
+    y: b.BYear, rt: b.RefType, ri: b.RefId, t: b.BType,
+    lic: parseFloat(b.Lic) || 0, pr: parseFloat(b.Price) || 0,
+    er: parseFloat(b.ExtRev) || 0, ra: parseFloat(b.Rate) || 0,
+    m: BUDGET_MONTH_FIELDS.map(f => Math.round(parseFloat(b[f]) || 0))
+  });
+}
+/* Geparste Budget-Zeilen (ungültige/fremde Items werden ignoriert) */
+function budgetRows() {
+  return cache.budget.map(budgetParse).filter(Boolean);
+}
+async function budgetSave(b) {
+  await updateItem("Budget", b.id, { Title: budgetSerialize(b) });
+  const raw = cache.budget.find(x => x.id == b.id);
+  if (raw) raw.Title = budgetSerialize(b);
 }
 
 /* Firma zu einer Budget-Zeile auflösen */
@@ -1757,26 +1743,17 @@ function budgetSuggest(refType, refId, btype) {
 /* Neue Budget-Zeile anlegen (mit Formel-Füllung der Monate) */
 async function budgetCreate(refType, refId, btype) {
   const year = filters.budgetYear;
-  const dupe = cache.budget.find(b => b.BYear == year && b.RefType === refType && b.RefId == refId && b.BType === btype);
+  const dupe = budgetRows().find(b => b.BYear == year && b.RefType === refType && b.RefId == refId && b.BType === btype);
   if (dupe) { toast("Diese Position existiert im " + year + " bereits.", true); return; }
   budgetLastError = "";
   try {
     showLoading("Budget-Position wird angelegt …", "");
-    await ensureBudgetColumns(sub => showLoading("Budget-Position wird angelegt …", sub));
     const s = budgetSuggest(refType, refId, btype);
-    const name = refType === "customer"
-      ? (cache.customers.find(x => x.id == refId)?.Title || refId)
-      : (cache.companies.find(x => x.id == refId)?.Title || refId);
-    const fields = {
-      Title: name + " · " + btype + " " + year,
-      BYear: year, RefType: refType, RefId: parseInt(refId), BType: btype,
-      Lic: s.Lic, Price: s.Price, ExtRev: s.ExtRev, Rate: s.Rate
-    };
-    const m = btype === "SaaS"
-      ? (s.Lic * s.Price)
-      : (s.ExtRev * s.Rate / 100 / 12);
-    BUDGET_MONTH_FIELDS.forEach(f => fields[f] = Math.round(m));
-    await createItem("Budget", fields);
+    const b = { BYear: year, RefType: refType, RefId: parseInt(refId), BType: btype,
+      Lic: s.Lic, Price: s.Price, ExtRev: s.ExtRev, Rate: s.Rate };
+    const m = Math.round(btype === "SaaS" ? (s.Lic * s.Price) : (s.ExtRev * s.Rate / 100 / 12));
+    BUDGET_MONTH_FIELDS.forEach(f => b[f] = m);
+    await createItem("Budget", { Title: budgetSerialize(b) });
     await reload("Budget");
     hideLoading();
     render();
@@ -1791,59 +1768,57 @@ async function budgetCreate(refType, refId, btype) {
 
 /* Parameter geändert → speichern + alle 12 Monate nach Formel neu füllen */
 async function budgetParamChange(id, field, value) {
-  const b = cache.budget.find(x => x.id == id);
+  const b = budgetRows().find(x => x.id == id);
   if (!b) return;
-  b[field] = value;
+  b[field] = parseFloat(value) || 0;
   const m = Math.round(budgetFormulaMonth(b));
-  const fields = { [field]: parseFloat(value) || 0 };
-  BUDGET_MONTH_FIELDS.forEach(f => { fields[f] = m; b[f] = m; });
+  BUDGET_MONTH_FIELDS.forEach(f => b[f] = m);
   try {
-    await updateItem("Budget", id, fields);
+    await budgetSave(b);
     render();
-  } catch (e) { toast("Fehler: " + e.message, true); }
+  } catch (e) { budgetLastError = e.message; toast("Fehler: " + e.message, true); render(); }
 }
 
 /* Einzelne Monatszelle überschrieben */
 async function budgetCellChange(id, field, value) {
-  const b = cache.budget.find(x => x.id == id);
+  const b = budgetRows().find(x => x.id == id);
   if (!b) return;
-  const v = Math.round(parseFloat(value) || 0);
-  b[field] = v;
+  b[field] = Math.round(parseFloat(value) || 0);
   try {
-    await updateItem("Budget", id, { [field]: v });
+    await budgetSave(b);
     render();  // Summen aktualisieren
-  } catch (e) { toast("Fehler: " + e.message, true); }
+  } catch (e) { budgetLastError = e.message; toast("Fehler: " + e.message, true); render(); }
 }
 
 /* Zeile auf Formelwerte zurücksetzen */
 async function budgetRefill(id) {
-  const b = cache.budget.find(x => x.id == id);
+  const b = budgetRows().find(x => x.id == id);
   if (!b) return;
   if (!confirm("Alle 12 Monatswerte dieser Zeile auf den Formelwert zurücksetzen? Manuelle Anpassungen gehen verloren.")) return;
   const m = Math.round(budgetFormulaMonth(b));
-  const fields = {};
-  BUDGET_MONTH_FIELDS.forEach(f => { fields[f] = m; b[f] = m; });
+  BUDGET_MONTH_FIELDS.forEach(f => b[f] = m);
   try {
-    await updateItem("Budget", id, fields);
+    await budgetSave(b);
     render();
-  } catch (e) { toast("Fehler: " + e.message, true); }
+  } catch (e) { budgetLastError = e.message; toast("Fehler: " + e.message, true); render(); }
 }
 
 async function budgetDelete(id) {
-  const b = cache.budget.find(x => x.id == id);
+  const b = budgetRows().find(x => x.id == id);
   if (!b) return;
   if (!confirm("Budget-Position \"" + budgetRefName(b) + " · " + b.BType + "\" löschen?")) return;
   try {
     await deleteItem("Budget", id);
     await reload("Budget");
     render();
-  } catch (e) { toast("Fehler: " + e.message, true); }
+  } catch (e) { budgetLastError = e.message; toast("Fehler: " + e.message, true); render(); }
 }
 
 /* Alle aktiven Kunden gemäss Segment übernehmen (nur fehlende) */
 async function budgetTakeoverActive() {
   const year = filters.budgetYear;
   const active = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv");
+  const existing = budgetRows();
   const jobs = [];
   active.forEach(c => {
     const want = [];
@@ -1851,7 +1826,7 @@ async function budgetTakeoverActive() {
     if (segmentNeedsBPO(c.Segment)) want.push("BPO");
     if (!want.length) want.push(c.Segment === "BPO inkl. SaaS" ? "BPO" : "SaaS");
     want.forEach(t => {
-      const exists = cache.budget.find(b => b.BYear == year && b.RefType === "customer" && b.RefId == c.id && b.BType === t);
+      const exists = existing.find(b => b.BYear == year && b.RefType === "customer" && b.RefId == c.id && b.BType === t);
       if (!exists) jobs.push({ id: c.id, t });
     });
   });
@@ -1859,22 +1834,16 @@ async function budgetTakeoverActive() {
   if (!confirm(jobs.length + " Budget-Positionen für aktive Kunden anlegen (mit Vorschlagswerten aus den Ist-Zahlen)?")) return;
   budgetLastError = "";
   try {
-    showLoading("Budget wird befüllt …", "Spalten werden geprüft …");
-    await ensureBudgetColumns(sub => showLoading("Budget wird befüllt …", sub));
     let done = 0;
     for (const j of jobs) {
       done++;
       showLoading("Budget wird befüllt …", "Position " + done + "/" + jobs.length);
       const s = budgetSuggest("customer", j.id, j.t);
-      const c = cache.customers.find(x => x.id == j.id);
-      const fields = {
-        Title: (c?.Title || j.id) + " · " + j.t + " " + year,
-        BYear: year, RefType: "customer", RefId: parseInt(j.id), BType: j.t,
-        Lic: s.Lic, Price: s.Price, ExtRev: s.ExtRev, Rate: s.Rate
-      };
-      const m = j.t === "SaaS" ? (s.Lic * s.Price) : (s.ExtRev * s.Rate / 100 / 12);
-      BUDGET_MONTH_FIELDS.forEach(f => fields[f] = Math.round(m));
-      await createItem("Budget", fields);
+      const b = { BYear: year, RefType: "customer", RefId: parseInt(j.id), BType: j.t,
+        Lic: s.Lic, Price: s.Price, ExtRev: s.ExtRev, Rate: s.Rate };
+      const m = Math.round(j.t === "SaaS" ? (s.Lic * s.Price) : (s.ExtRev * s.Rate / 100 / 12));
+      BUDGET_MONTH_FIELDS.forEach(f => b[f] = m);
+      await createItem("Budget", { Title: budgetSerialize(b) });
     }
     await reload("Budget");
     hideLoading();
@@ -1887,6 +1856,36 @@ async function budgetTakeoverActive() {
     toast("Fehler beim Budget-Anlegen — Details im Budget-Tab", true);
     render();
   }
+}
+
+/* Eingebaute Diagnose: testet jeden Schritt einzeln und protokolliert
+   das Ergebnis sichtbar im Budget-View — für Remote-Fehlersuche. */
+let budgetDiagLog = null;
+async function budgetDiag() {
+  budgetDiagLog = [];
+  const log = (ok, label, detail) => {
+    budgetDiagLog.push({ ok, label, detail: detail || "" });
+    render();
+  };
+  render();
+  // 1: Liste bekannt?
+  if (!listIds["Budget"]) { log(false, "Budget-Liste im Site gefunden", "listIds enthält keinen Eintrag 'Budget' — Liste fehlt oder heisst anders"); return; }
+  log(true, "Budget-Liste im Site gefunden", "ID: " + listIds["Budget"]);
+  // 2: Liste lesbar?
+  try {
+    const items = await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/items?$top=1`);
+    log(true, "Liste lesbar", (items.value ? items.value.length : 0) + " Item(s) im Test-Read");
+  } catch (e) { log(false, "Liste lesbar", e.message); return; }
+  // 3: Item schreiben? (das ist alles, was das Budget seit v1.23.3 braucht)
+  try {
+    const it = await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/items`, {
+      method: "POST", body: JSON.stringify({ fields: { Title: "DIAG-TEST — bitte löschen" } })
+    });
+    log(true, "Item schreiben (einzige benötigte Berechtigung)", "Test-Item erstellt und wieder gelöscht");
+    try { await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/items/${it.id}`, { method: "DELETE" }); } catch (e) {}
+  } catch (e) { log(false, "Item schreiben", e.message); }
+  budgetDiagLog.push({ ok: true, label: "Diagnose abgeschlossen", detail: "" });
+  render();
 }
 
 /* Modal: beliebige Firma/Lead hinzufügen */
@@ -1925,9 +1924,22 @@ function budgetAddFromModal() {
   budgetCreate(refType, refId, btype);
 }
 
+window.addEventListener("unhandledrejection", ev => {
+  if (currentView === "budget") {
+    budgetLastError = "Unbehandelter Fehler: " + (ev.reason && ev.reason.message ? ev.reason.message : String(ev.reason));
+    try { hideLoading(); render(); } catch (e) {}
+  }
+});
+window.addEventListener("error", ev => {
+  if (currentView === "budget" && ev.message) {
+    budgetLastError = "JS-Fehler: " + ev.message + " (" + (ev.filename||"").split("/").pop() + ":" + ev.lineno + ")";
+    try { hideLoading(); render(); } catch (e) {}
+  }
+});
+
 function renderBudget(el) {
   const year = filters.budgetYear;
-  const rows = cache.budget
+  const rows = budgetRows()
     .filter(b => b.BYear == year)
     .sort((a,b) => budgetRefName(a).localeCompare(budgetRefName(b)) || (a.BType||"").localeCompare(b.BType||""));
 
@@ -1947,6 +1959,19 @@ function renderBudget(el) {
        <input class="bud-in" style="width:44px" value="${num(b.Rate)}" onchange="budgetParamChange(${b.id},'Rate',this.value)" title="Satz %">%</span>`;
 
   el.innerHTML = `
+    ${budgetDiagLog ? `
+      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:12px 14px;margin-bottom:14px;font-size:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <strong>🔧 Budget-Diagnose</strong>
+          <button class="btn btn-sm" onclick="budgetDiagLog=null;render()">Schliessen</button>
+        </div>
+        ${budgetDiagLog.map(l => `
+          <div style="margin-top:8px">
+            <span style="color:${l.ok ? "var(--accent)" : "var(--danger)"}">${l.ok ? "✓" : "✗"}</span>
+            <strong> ${escape(l.label)}</strong>
+            ${l.detail ? `<div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim);margin:3px 0 0 18px;word-break:break-all">${escape(l.detail)}</div>` : ""}
+          </div>`).join("")}
+      </div>` : ""}
     ${budgetLastError ? `
       <div style="background:rgba(255,107,107,0.1);border:1px solid var(--danger);border-radius:6px;padding:12px 14px;margin-bottom:14px;font-size:12px">
         <strong style="color:var(--danger)">Letzter Vorgang fehlgeschlagen:</strong>
@@ -1957,6 +1982,7 @@ function renderBudget(el) {
       <label style="color:var(--text-dim);font-size:12px">Planjahr:</label>
       <select onchange="filters.budgetYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${yearOpts}</select>
       <button class="btn btn-sm" onclick="budgetTakeoverActive()">Aktive Kunden übernehmen</button>
+      <button class="btn btn-sm" onclick="budgetDiag()" title="Testet Zugriff und Spalten der Budget-Liste Schritt für Schritt">🔧 Diagnose</button>
       <button class="btn btn-sm btn-primary" onclick="budgetAddModal()">+ Position</button>
       <div style="margin-left:auto;display:flex;gap:20px;font-size:12px;flex-wrap:wrap">
         <div><span style="color:var(--text-dim)">SaaS:</span> <span style="font-family:var(--font-mono);color:var(--accent)">CHF ${fmtCHFShort(sumSaaS)}</span></div>
