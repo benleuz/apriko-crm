@@ -888,7 +888,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.23.4</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.23.5</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -1672,6 +1672,33 @@ function render() {
 const BUDGET_MONTH_FIELDS = ["M01","M02","M03","M04","M05","M06","M07","M08","M09","M10","M11","M12"];
 let budgetLastError = "";   // persistente Fehleranzeige im Budget-View
 
+/* Eigene, autarke Loading-Helfer: das Budget-Modul referenziert bewusst
+   KEINE Funktionen aus anderen Modulen (ein "hideLoading is not defined"
+   aus dem Rapport-Bereich hat v1.23.x im Feld gekillt). */
+function budgetShowLoading(text, sub) {
+  try {
+    let el = document.getElementById("budLoadingOverlay");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "budLoadingOverlay";
+      el.className = "rp-loading-overlay";
+      el.innerHTML = '<div class="rp-loading-spinner"></div>' +
+        '<div class="rp-loading-text" id="budLoadingText"></div>' +
+        '<div class="rp-loading-sub" id="budLoadingSub"></div>';
+      document.body.appendChild(el);
+    }
+    document.getElementById("budLoadingText").textContent = text || "Wird verarbeitet …";
+    document.getElementById("budLoadingSub").textContent = sub || "";
+    el.style.display = "flex";
+  } catch (e) { /* Anzeige ist optional — nie den Vorgang killen */ }
+}
+function budgetHideLoading() {
+  try {
+    const el = document.getElementById("budLoadingOverlay");
+    if (el) el.style.display = "none";
+  } catch (e) {}
+}
+
 /* SPEICHERFORMAT: Jede Budget-Zeile ist ein SharePoint-Item, dessen Title ein
    kompaktes JSON trägt: {y,rt,ri,t,lic,pr,er,ra,m:[12 Werte]}.
    Warum: Title existiert in JEDER Liste — keine Spalten-Anlage, keine
@@ -1762,7 +1789,7 @@ async function budgetCreate(refType, refId, btype) {
   budgetLastError = "";
   if (!listIds["Budget"]) { budgetLastError = "Budget-Liste fehlt und konnte nicht angelegt werden — 🔧 Diagnose ausführen oder Liste 'Budget' manuell auf der Site anlegen (leere Liste reicht)."; render(); return; }
   try {
-    showLoading("Budget-Position wird angelegt …", "");
+    budgetShowLoading("Budget-Position wird angelegt …", "");
     const s = budgetSuggest(refType, refId, btype);
     const b = { BYear: year, RefType: refType, RefId: parseInt(refId), BType: btype,
       Lic: s.Lic, Price: s.Price, ExtRev: s.ExtRev, Rate: s.Rate };
@@ -1770,10 +1797,10 @@ async function budgetCreate(refType, refId, btype) {
     BUDGET_MONTH_FIELDS.forEach(f => b[f] = m);
     await createItem("Budget", { Title: budgetSerialize(b) });
     await reload("Budget");
-    hideLoading();
+    budgetHideLoading();
     render();
   } catch (e) {
-    hideLoading();
+    budgetHideLoading();
     budgetLastError = e.message;
     console.error("Budget:", e);
     toast("Fehler beim Budget-Anlegen — Details im Budget-Tab", true);
@@ -1853,7 +1880,7 @@ async function budgetTakeoverActive() {
     let done = 0;
     for (const j of jobs) {
       done++;
-      showLoading("Budget wird befüllt …", "Position " + done + "/" + jobs.length);
+      budgetShowLoading("Budget wird befüllt …", "Position " + done + "/" + jobs.length);
       const s = budgetSuggest("customer", j.id, j.t);
       const b = { BYear: year, RefType: "customer", RefId: parseInt(j.id), BType: j.t,
         Lic: s.Lic, Price: s.Price, ExtRev: s.ExtRev, Rate: s.Rate };
@@ -1862,11 +1889,11 @@ async function budgetTakeoverActive() {
       await createItem("Budget", { Title: budgetSerialize(b) });
     }
     await reload("Budget");
-    hideLoading();
+    budgetHideLoading();
     toast(jobs.length + " Positionen angelegt");
     render();
   } catch (e) {
-    hideLoading();
+    budgetHideLoading();
     budgetLastError = e.message;
     console.error("Budget:", e);
     toast("Fehler beim Budget-Anlegen — Details im Budget-Tab", true);
@@ -1914,7 +1941,16 @@ async function budgetDiag() {
     log(true, "Item schreiben (einzige benötigte Berechtigung)", "Test-Item erstellt und wieder gelöscht");
     try { await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/items/${it.id}`, { method: "DELETE" }); } catch (e) {}
   } catch (e) { log(false, "Item schreiben", e.message); }
-  budgetDiagLog.push({ ok: true, label: "Diagnose abgeschlossen", detail: "" });
+  // 4: Interne Funktions-Verfügbarkeit (Ursachen-Forschung: welche globalen
+  //    Symbole fehlen im Browser wirklich?)
+  let fnCheck = "";
+  try {
+    fnCheck = ["showLoading","hideLoading","toast","reload","scanWithClaude","renderPreviewCol"]
+      .map(n => { let t; try { t = eval("typeof " + n); } catch (e) { t = "err"; } return n + "=" + t; })
+      .join(", ");
+  } catch (e) { fnCheck = "Check fehlgeschlagen: " + e.message; }
+  budgetDiagLog.push({ ok: !fnCheck.includes("undefined"), label: "Funktions-Check (zur Analyse)", detail: fnCheck });
+  budgetDiagLog.push({ ok: true, label: "Diagnose abgeschlossen", detail: "App-Version: " + ((document.getElementById("app-version")||{}).textContent || "?") });
   render();
 }
 
@@ -1957,13 +1993,13 @@ function budgetAddFromModal() {
 window.addEventListener("unhandledrejection", ev => {
   if (currentView === "budget") {
     budgetLastError = "Unbehandelter Fehler: " + (ev.reason && ev.reason.message ? ev.reason.message : String(ev.reason));
-    try { hideLoading(); render(); } catch (e) {}
+    try { budgetHideLoading(); render(); } catch (e) {}
   }
 });
 window.addEventListener("error", ev => {
   if (currentView === "budget" && ev.message) {
     budgetLastError = "JS-Fehler: " + ev.message + " (" + (ev.filename||"").split("/").pop() + ":" + ev.lineno + ")";
-    try { hideLoading(); render(); } catch (e) {}
+    try { budgetHideLoading(); render(); } catch (e) {}
   }
 });
 
