@@ -906,7 +906,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.31.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.31.2</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -1268,6 +1268,17 @@ let currentView = "dashboard";
    =========================================================== */
 const SUPER_ADMIN_EMAIL = "benjamin@apriko.com";  // hat immer volle Rechte
 const ALL_VIEWS = ["dashboard","pipeline","customers","revenue","stats","budget","bpocheck","einsatzdash","rapport","companies","contacts","tasks","profiles"];
+/* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
+   Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
+   render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
+const VIEW_TITLES = {
+  dashboard: "Dashboard", pipeline: "Pipeline",
+  customers: "Kunden", revenue: "Umsätze", stats: "Statistiken", budget: "Budget",
+  bpocheck: "BPO Checkliste", einsatzdash: "Kundendashboard",
+  rapport: "Rapport",
+  companies: "Firmen", contacts: "Kontakte", tasks: "Aufgaben",
+  profiles: "Profile"
+};
 
 /* Views die IMMER für alle eingeloggten User zugänglich sind,
    unabhängig von AllowedViews im UserProfile. */
@@ -1616,14 +1627,7 @@ function bindNav() {
    Rendering
    =========================================================== */
 function render() {
-  const titles = {
-    dashboard: "Dashboard", pipeline: "Pipeline",
-    customers: "Kunden", revenue: "Umsätze", stats: "Statistiken", budget: "Budget",
-    bpocheck: "BPO Checkliste", einsatzdash: "Kundendashboard",
-    rapport: "Rapport",
-    companies: "Firmen", contacts: "Kontakte", tasks: "Aufgaben",
-    profiles: "Profile"
-  };
+  const titles = VIEW_TITLES;
 
   // Router-Guard: hat der User Zugriff auf diese View?
   // Profile ist ein Admin-only Bereich.
@@ -7256,19 +7260,12 @@ function lookupRelated(activity) {
 /* ---------- Profiles (Admin) ---------- */
 /* Verwaltet die UserProfiles-Liste: welche User dürfen was sehen? */
 
-const VIEW_LABELS_FOR_PROFILE = [
-  { key: "dashboard", label: "Dashboard" },
-  { key: "pipeline", label: "Pipeline" },
-  { key: "customers", label: "Kunden" },
-  { key: "revenue", label: "Umsätze" },
-  { key: "stats", label: "Statistiken" },
-  { key: "bpocheck", label: "BPO Checkliste" },
-  { key: "rapport", label: "Rapport" },
-  { key: "companies", label: "Firmen" },
-  { key: "contacts", label: "Kontakte" },
-  { key: "tasks", label: "Aufgaben" },
-  { key: "profiles", label: "Profile (Admin)" }
-];
+/* Automatisch aus ALL_VIEWS + VIEW_TITLES abgeleitet — neue Menüpunkte
+   erscheinen hier von selbst und können nicht mehr vergessen werden. */
+const VIEW_LABELS_FOR_PROFILE = ALL_VIEWS.map(key => ({
+  key,
+  label: key === "profiles" ? "Profile (Admin)" : (VIEW_TITLES[key] || key)
+}));
 
 function renderProfiles(el) {
   // Zusatz-Aktionen im Topbar
