@@ -888,7 +888,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.23.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.23.1</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -1657,12 +1657,18 @@ function render() {
    =========================================================== */
 const BUDGET_MONTH_FIELDS = ["M01","M02","M03","M04","M05","M06","M07","M08","M09","M10","M11","M12"];
 let _budgetColsEnsured = false;
+let budgetLastError = "";   // persistente Fehleranzeige im Budget-View
 
-/* Fehlende Spalten der Budget-Liste automatisch anlegen */
-async function ensureBudgetColumns() {
+/* Fehlende Spalten der Budget-Liste automatisch anlegen.
+   Robust: einzelne Fehler werden gesammelt, am Ende wird per GET verifiziert,
+   dass wirklich alle Spalten existieren — sonst klare Fehlermeldung. */
+async function ensureBudgetColumns(progress) {
   if (_budgetColsEnsured) return;
-  const data = await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/columns`);
-  const have = new Set(data.value.map(c => c.name));
+  const listCols = async () => {
+    const data = await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/columns?$top=200`);
+    return new Set(data.value.map(c => c.name));
+  };
+  let have = await listCols();
   const wanted = [
     { name: "BYear",   number: {} },
     { name: "RefType", text: {} },
@@ -1674,12 +1680,28 @@ async function ensureBudgetColumns() {
     { name: "Rate",    number: {} },
     ...BUDGET_MONTH_FIELDS.map(m => ({ name: m, number: {} }))
   ];
+  const errors = [];
+  let i = 0;
   for (const col of wanted) {
+    i++;
     if (have.has(col.name)) continue;
-    await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/columns`, {
-      method: "POST",
-      body: JSON.stringify(col)
-    });
+    if (progress) progress(`Spalte ${col.name} wird angelegt … (${i}/${wanted.length})`);
+    try {
+      await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/columns`, {
+        method: "POST",
+        body: JSON.stringify(col)
+      });
+    } catch (e) {
+      errors.push(col.name + ": " + e.message);
+    }
+  }
+  // Verifikation: sind jetzt alle da?
+  have = await listCols();
+  const missing = wanted.map(c => c.name).filter(n => !have.has(n));
+  if (missing.length) {
+    throw new Error("Budget-Spalten konnten nicht angelegt werden: " + missing.join(", ") +
+      (errors.length ? " — Details: " + errors.join(" | ") : "") +
+      " — Alternativ die Spalten manuell in der SharePoint-Liste 'Budget' anlegen (Typ Zahl, ausser RefType/BType als Text).");
   }
   _budgetColsEnsured = true;
 }
@@ -1737,9 +1759,10 @@ async function budgetCreate(refType, refId, btype) {
   const year = filters.budgetYear;
   const dupe = cache.budget.find(b => b.BYear == year && b.RefType === refType && b.RefId == refId && b.BType === btype);
   if (dupe) { toast("Diese Position existiert im " + year + " bereits.", true); return; }
+  budgetLastError = "";
   try {
     showLoading("Budget-Position wird angelegt …", "");
-    await ensureBudgetColumns();
+    await ensureBudgetColumns(sub => showLoading("Budget-Position wird angelegt …", sub));
     const s = budgetSuggest(refType, refId, btype);
     const name = refType === "customer"
       ? (cache.customers.find(x => x.id == refId)?.Title || refId)
@@ -1759,7 +1782,10 @@ async function budgetCreate(refType, refId, btype) {
     render();
   } catch (e) {
     hideLoading();
-    toast("Fehler: " + e.message, true);
+    budgetLastError = e.message;
+    console.error("Budget:", e);
+    toast("Fehler beim Budget-Anlegen — Details im Budget-Tab", true);
+    render();
   }
 }
 
@@ -1831,10 +1857,14 @@ async function budgetTakeoverActive() {
   });
   if (!jobs.length) { toast("Alle aktiven Kunden sind für " + year + " bereits erfasst."); return; }
   if (!confirm(jobs.length + " Budget-Positionen für aktive Kunden anlegen (mit Vorschlagswerten aus den Ist-Zahlen)?")) return;
+  budgetLastError = "";
   try {
-    showLoading("Budget wird befüllt …", jobs.length + " Positionen");
-    await ensureBudgetColumns();
+    showLoading("Budget wird befüllt …", "Spalten werden geprüft …");
+    await ensureBudgetColumns(sub => showLoading("Budget wird befüllt …", sub));
+    let done = 0;
     for (const j of jobs) {
+      done++;
+      showLoading("Budget wird befüllt …", "Position " + done + "/" + jobs.length);
       const s = budgetSuggest("customer", j.id, j.t);
       const c = cache.customers.find(x => x.id == j.id);
       const fields = {
@@ -1852,7 +1882,10 @@ async function budgetTakeoverActive() {
     render();
   } catch (e) {
     hideLoading();
-    toast("Fehler: " + e.message, true);
+    budgetLastError = e.message;
+    console.error("Budget:", e);
+    toast("Fehler beim Budget-Anlegen — Details im Budget-Tab", true);
+    render();
   }
 }
 
@@ -1914,6 +1947,12 @@ function renderBudget(el) {
        <input class="bud-in" style="width:44px" value="${num(b.Rate)}" onchange="budgetParamChange(${b.id},'Rate',this.value)" title="Satz %">%</span>`;
 
   el.innerHTML = `
+    ${budgetLastError ? `
+      <div style="background:rgba(255,107,107,0.1);border:1px solid var(--danger);border-radius:6px;padding:12px 14px;margin-bottom:14px;font-size:12px">
+        <strong style="color:var(--danger)">Letzter Vorgang fehlgeschlagen:</strong>
+        <div style="margin-top:6px;font-family:var(--font-mono);font-size:11px;word-break:break-all;color:var(--text-dim)">${escape(budgetLastError)}</div>
+        <button class="btn btn-sm" style="margin-top:8px" onclick="budgetLastError='';render()">Ausblenden</button>
+      </div>` : ""}
     <div style="display:flex;gap:12px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
       <label style="color:var(--text-dim);font-size:12px">Planjahr:</label>
       <select onchange="filters.budgetYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${yearOpts}</select>
