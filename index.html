@@ -825,6 +825,9 @@
   .bud-in:hover{border-color:var(--border)}
   .bud-in:focus{border-color:var(--accent);outline:none;background:var(--bg)}
   .bud-in-m{width:52px}
+  .bud-saison-row td{border-bottom:2px solid var(--border) !important;padding-bottom:4px !important}
+  .bud-saison-bar{height:3px;background:var(--bg);border-radius:2px;margin:1px 3px 0 auto;width:52px;overflow:hidden}
+  .bud-saison-bar > div{height:100%;background:var(--accent-2);border-radius:2px}
 
   /* Schweiz-Karte */
   .ed-map-wrap{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
@@ -891,7 +894,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.24.2</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.26.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -1711,6 +1714,7 @@ function budgetParse(item) {
   if (!item || !item.Title || item.Title[0] !== "{") return null;
   try {
     const d = JSON.parse(item.Title);
+    if (d.cfg) return null;   // Config-Items (z.B. Saisonkurve) sind keine Budget-Zeilen
     const b = { id: item.id, BYear: d.y, RefType: d.rt, RefId: d.ri, BType: d.t,
       Lic: d.lic || 0, Price: d.pr || 0, ExtRev: d.er || 0, Rate: d.ra || 0 };
     (d.m || []).forEach((v, i) => b[BUDGET_MONTH_FIELDS[i]] = v || 0);
@@ -1746,10 +1750,99 @@ function budgetRefName(b) {
   return co ? co.Title : "(Firma #" + b.RefId + ")";
 }
 
-/* Monats-Formelwert je Typ */
-function budgetFormulaMonth(b) {
-  if (b.BType === "SaaS") return (parseFloat(b.Lic) || 0) * (parseFloat(b.Price) || 0);
-  return (parseFloat(b.ExtRev) || 0) * (parseFloat(b.Rate) || 0) / 100 / 12;
+/* Saisonale Verteilung des BPO-Geschäfts (Anteil am Jahrestotal in %,
+   Standardkurve aus dem Ist-Verlauf; Summe = 100). SaaS bleibt linear.
+   Die Kurve ist im Budget-Tab editierbar und wird als Config-Item
+   ({"cfg":"saison","v":[...]}) in der Budget-Liste persistiert. */
+const BPO_SAISON_DEFAULT = [7.4, 7.2, 8.3, 8.2, 8.2, 8.9, 9.1, 8.6, 9.0, 9.1, 8.6, 7.4];
+
+function budgetSaisonItem() {
+  return cache.budget.find(x => {
+    if (!x.Title || x.Title[0] !== "{") return false;
+    try { return JSON.parse(x.Title).cfg === "saison"; } catch (e) { return false; }
+  });
+}
+function budgetSaison() {
+  const it = budgetSaisonItem();
+  if (it) {
+    try {
+      const v = JSON.parse(it.Title).v;
+      if (Array.isArray(v) && v.length === 12) return v.map(x => parseFloat(x) || 0);
+    } catch (e) {}
+  }
+  return BPO_SAISON_DEFAULT.slice();
+}
+async function budgetSaisonSave(arr) {
+  const title = JSON.stringify({ cfg: "saison", v: arr.map(v => Math.round(v * 10) / 10) });
+  const it = budgetSaisonItem();
+  if (it) {
+    await updateItem("Budget", it.id, { Title: title });
+    it.Title = title;
+  } else {
+    await createItem("Budget", { Title: title });
+    await reload("Budget");
+  }
+}
+
+/* %-Zelle geändert: Summe bleibt exakt 100 — die Differenz wird beim
+   FOLGEMONAT ausgeglichen (Dezember wrappt auf Januar). Der neue Wert wird
+   so begrenzt, dass der Folgemonat nicht negativ wird. Danach werden alle
+   BPO-Zeilen des Jahres nach der neuen Kurve neu verteilt (manuelle
+   Zellen-Overrides in BPO-Zeilen werden dabei überschrieben). */
+async function budgetSaisonChange(i, value) {
+  const s = budgetSaison();
+  const next = (i + 1) % 12;
+  let v = Math.max(0, Math.round((parseFloat(value) || 0) * 10) / 10);
+  const maxV = Math.round((s[i] + s[next]) * 10) / 10;
+  if (v > maxV) v = maxV;
+  s[next] = Math.round((maxV - v) * 10) / 10;
+  s[i] = v;
+  try {
+    budgetShowLoading("Saisonkurve wird gespeichert …", "");
+    await budgetSaisonSave(s);
+    await budgetRedistributeBPO(s);
+    budgetHideLoading();
+    render();
+  } catch (e) {
+    budgetHideLoading();
+    budgetLastError = e.message; render();
+  }
+}
+async function budgetSaisonReset() {
+  if (!confirm("Saisonkurve auf die Standardverteilung zurücksetzen und alle BPO-Zeilen neu verteilen?")) return;
+  try {
+    budgetShowLoading("Saisonkurve wird zurückgesetzt …", "");
+    await budgetSaisonSave(BPO_SAISON_DEFAULT.slice());
+    await budgetRedistributeBPO(BPO_SAISON_DEFAULT.slice());
+    budgetHideLoading();
+    render();
+  } catch (e) { budgetHideLoading(); budgetLastError = e.message; render(); }
+}
+/* Alle BPO-Zeilen des angezeigten Jahres nach der Kurve neu füllen */
+async function budgetRedistributeBPO(saison) {
+  const year = filters.budgetYear;
+  const rows = budgetRows().filter(b => b.BYear == year && b.BType === "BPO");
+  for (const b of rows) {
+    const mw = budgetFormulaMonths(b, saison);
+    BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
+    await budgetSave(b);
+  }
+}
+
+/* 12 Monats-Formelwerte je Typ. BPO: Jahreshonorar × Saisonanteil,
+   Dezember gleicht Rundungsdifferenzen aus, damit das Jahrestotal exakt
+   ExtRev × Satz ergibt. */
+function budgetFormulaMonths(b, saisonOverride) {
+  if (b.BType === "SaaS") {
+    const m = Math.round((parseFloat(b.Lic) || 0) * (parseFloat(b.Price) || 0));
+    return BUDGET_MONTH_FIELDS.map(() => m);
+  }
+  const saison = saisonOverride || budgetSaison();
+  const jahr = (parseFloat(b.ExtRev) || 0) * (parseFloat(b.Rate) || 0) / 100;
+  const werte = saison.map(p => Math.round(jahr * p / 100));
+  const summe11 = werte.slice(0, 11).reduce((s, v) => s + v, 0);
+  werte[11] = Math.round(jahr) - summe11;
+  return werte;
 }
 
 /* Vorschlagswerte aus den Ist-Daten (Revenue-Modul) */
@@ -1802,8 +1895,8 @@ async function budgetCreate(refType, refId, btype) {
     const s = budgetSuggest(refType, refId, btype);
     const b = { BYear: year, RefType: refType, RefId: parseInt(refId), BType: btype,
       Lic: s.Lic, Price: s.Price, ExtRev: s.ExtRev, Rate: s.Rate };
-    const m = Math.round(btype === "SaaS" ? (s.Lic * s.Price) : (s.ExtRev * s.Rate / 100 / 12));
-    BUDGET_MONTH_FIELDS.forEach(f => b[f] = m);
+    const mw = budgetFormulaMonths(b);
+    BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
     await createItem("Budget", { Title: budgetSerialize(b) });
     await reload("Budget");
     budgetHideLoading();
@@ -1822,8 +1915,8 @@ async function budgetParamChange(id, field, value) {
   const b = budgetRows().find(x => x.id == id);
   if (!b) return;
   b[field] = parseFloat(value) || 0;
-  const m = Math.round(budgetFormulaMonth(b));
-  BUDGET_MONTH_FIELDS.forEach(f => b[f] = m);
+  const mw = budgetFormulaMonths(b);
+  BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
   try {
     await budgetSave(b);
     render();
@@ -1846,8 +1939,8 @@ async function budgetRefill(id) {
   const b = budgetRows().find(x => x.id == id);
   if (!b) return;
   if (!confirm("Alle 12 Monatswerte dieser Zeile auf den Formelwert zurücksetzen? Manuelle Anpassungen gehen verloren.")) return;
-  const m = Math.round(budgetFormulaMonth(b));
-  BUDGET_MONTH_FIELDS.forEach(f => b[f] = m);
+  const mw = budgetFormulaMonths(b);
+  BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
   try {
     await budgetSave(b);
     render();
@@ -1893,8 +1986,8 @@ async function budgetTakeoverActive() {
       const s = budgetSuggest("customer", j.id, j.t);
       const b = { BYear: year, RefType: "customer", RefId: parseInt(j.id), BType: j.t,
         Lic: s.Lic, Price: s.Price, ExtRev: s.ExtRev, Rate: s.Rate };
-      const m = Math.round(j.t === "SaaS" ? (s.Lic * s.Price) : (s.ExtRev * s.Rate / 100 / 12));
-      BUDGET_MONTH_FIELDS.forEach(f => b[f] = m);
+      const mw = budgetFormulaMonths(b);
+      BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
       await createItem("Budget", { Title: budgetSerialize(b) });
     }
     await reload("Budget");
@@ -2012,7 +2105,23 @@ function renderBudget(el) {
         ${MONTH_NAMES.map(m => `<th style="text-align:right">${m.slice(0,3)}</th>`).join("")}
         <th style="text-align:right">Total</th>
         <th></th>
-      </tr></thead>
+      </tr>
+      ${(() => {
+        const s = budgetSaison();
+        const maxP = Math.max(...s, 0.1);
+        const sum = Math.round(s.reduce((a,v) => a+v, 0) * 10) / 10;
+        return `<tr class="bud-saison-row">
+          <td colspan="3" style="color:var(--text-faint);font-size:10px">BPO-Saison % <span title="Anteil des Jahres-Honorars pro Monat. Änderung gleicht beim Folgemonat aus (Summe bleibt 100) und verteilt alle BPO-Zeilen neu.">ⓘ</span></td>
+          ${s.map((p, i) => `
+            <td style="text-align:right">
+              <input class="bud-in bud-in-m" style="color:var(--accent-2)" value="${p}" onchange="budgetSaisonChange(${i},this.value)" title="${MONTH_NAMES[i]}: ${p}% — Änderung gleicht bei ${MONTH_NAMES[(i+1)%12]} aus">
+              <div class="bud-saison-bar"><div style="width:${(p/maxP*100).toFixed(0)}%"></div></div>
+            </td>`).join("")}
+          <td style="text-align:right;font-family:var(--font-mono);font-size:10px;color:${Math.abs(sum-100) < 0.05 ? "var(--accent)" : "var(--danger)"}">${sum}%</td>
+          <td><button class="icon-btn" onclick="budgetSaisonReset()" title="Standardkurve wiederherstellen">↺</button></td>
+        </tr>`;
+      })()}
+      </thead>
       <tbody>
         ${rows.map(b => `
           <tr>
