@@ -825,6 +825,15 @@
   .bud-in:hover{border-color:var(--border)}
   .bud-in:focus{border-color:var(--accent);outline:none;background:var(--bg)}
   .bud-in-m{width:52px}
+  .bud-p-grid{display:inline-flex;align-items:center;white-space:nowrap;
+    font-size:10px;color:var(--text-faint)}
+  .bud-p-c1{width:58px;text-align:right}
+  .bud-p-cx{width:12px;text-align:center}
+  .bud-p-c2{width:48px;text-align:right}
+  .bud-p-cs{width:16px;text-align:left;padding-left:2px}
+  .bud-p1{width:56px}
+  .bud-p2{width:46px}
+
   .bud-typ{background:transparent;border:1px solid transparent;font-weight:600;font-size:10px;
     font-family:inherit;padding:1px 2px;border-radius:3px;cursor:pointer;appearance:none;-webkit-appearance:none}
   .bud-typ:hover{border-color:var(--border)}
@@ -899,7 +908,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.30.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.30.2</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -2242,7 +2251,11 @@ function renderBudget(el) {
   const year = filters.budgetYear;
   const rows = budgetRows()
     .filter(b => b.BYear == year)
-    .sort((a,b) => budgetRefName(a).localeCompare(budgetRefName(b)) || (a.BType||"").localeCompare(b.BType||""));
+    .sort((a,b) =>
+      // Freitext-Leads (ohne echten Datensatz) immer zuunterst
+      ((a.RefType === "text") - (b.RefType === "text")) ||
+      budgetRefName(a).localeCompare(budgetRefName(b)) ||
+      (a.BType||"").localeCompare(b.BType||""));
 
   const num = v => parseFloat(v) || 0;
   // Zeilen-Total in CHF (Stunden-Zeilen: Σ Stunden × Satz)
@@ -2259,13 +2272,21 @@ function renderBudget(el) {
   const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
 
-  const extRevInput = b => `<input id="bud-p-${b.id}-ExtRev" class="bud-in" style="width:58px" value="${budFmtParam(b.ExtRev)}" onfocus="this.value='${num(b.ExtRev)}'" onblur="if(this.value=='${num(b.ExtRev)}')this.value='${budFmtParam(b.ExtRev)}'" onchange="budgetParamChange(${b.id},'ExtRev',budParseParam(this.value))" title="Aussenumsatz pro Jahr: ${num(b.ExtRev).toLocaleString("de-CH")} — Eingabe auch als '4.2 Mio' oder '500k' möglich">`;
+  const extRevInput = b => `<input id="bud-p-${b.id}-ExtRev" class="bud-in bud-p1" value="${budFmtParam(b.ExtRev)}" onfocus="this.value='${num(b.ExtRev)}'" onblur="if(this.value=='${num(b.ExtRev)}')this.value='${budFmtParam(b.ExtRev)}'" onchange="budgetParamChange(${b.id},'ExtRev',budParseParam(this.value))" title="Aussenumsatz pro Jahr: ${num(b.ExtRev).toLocaleString("de-CH")} — Eingabe auch als '4.2 Mio' oder '500k' möglich">`;
+  /* Einheitliches Raster [Wert1][×][Wert2][Suffix] — Zweitwerte (Preis, Satz,
+     Stundensatz) und Suffixe fluchten über alle Modelle hinweg */
   const paramCell = b => {
-    const wrap = inner => `<span style="white-space:nowrap;font-size:10px;color:var(--text-faint)">${inner}</span>`;
-    if (b.BType === "SaaS") return wrap(`<input id="bud-p-${b.id}-Lic" class="bud-in" style="width:34px" value="${num(b.Lic)}" onchange="budgetParamChange(${b.id},'Lic',this.value)" title="Lizenzen">×<input id="bud-p-${b.id}-Price" class="bud-in" style="width:52px" value="${num(b.Price)}" onchange="budgetParamChange(${b.id},'Price',this.value)" title="Preis pro Lizenz/Monat">`);
-    if (b.BType === "BPOStd") return wrap(`<input id="bud-p-${b.id}-Rate" class="bud-in" style="width:48px" value="${num(b.Rate)}" onchange="budgetParamChange(${b.id},'Rate',this.value)" title="Stundensatz CHF/h — Monatszellen = Stunden">/h`);
+    const grid = (w1, x, w2, suf) => `<span class="bud-p-grid"><span class="bud-p-c1">${w1}</span><span class="bud-p-cx">${x}</span><span class="bud-p-c2">${w2}</span><span class="bud-p-cs">${suf}</span></span>`;
+    if (b.BType === "SaaS") return grid(
+      `<input id="bud-p-${b.id}-Lic" class="bud-in bud-p1" value="${num(b.Lic)}" onchange="budgetParamChange(${b.id},'Lic',this.value)" title="Lizenzen">`, "×",
+      `<input id="bud-p-${b.id}-Price" class="bud-in bud-p2" value="${num(b.Price)}" onchange="budgetParamChange(${b.id},'Price',this.value)" title="Preis pro Lizenz/Monat">`, "");
+    if (b.BType === "BPOStd") return grid(
+      "", "",
+      `<input id="bud-p-${b.id}-Rate" class="bud-in bud-p2" value="${num(b.Rate)}" onchange="budgetParamChange(${b.id},'Rate',this.value)" title="Stundensatz CHF/h — Monatszellen = Stunden">`, "/h");
     // BPO + SaaSPct: Aussenumsatz × Satz%
-    return wrap(`${extRevInput(b)}×<input id="bud-p-${b.id}-Rate" class="bud-in" style="width:36px" value="${num(b.Rate)}" onchange="budgetParamChange(${b.id},'Rate',this.value)" title="Satz %">%`);
+    return grid(
+      extRevInput(b), "×",
+      `<input id="bud-p-${b.id}-Rate" class="bud-in bud-p2" value="${num(b.Rate)}" onchange="budgetParamChange(${b.id},'Rate',this.value)" title="Satz %">`, "%");
   };
   const typLabel = { SaaS: ["SaaS", "var(--accent)"], SaaSPct: ["SaaS %", "var(--accent)"],
                      BPO: ["BPO", "var(--accent-2)"], BPOStd: ["BPO h", "var(--accent-2)"] };
