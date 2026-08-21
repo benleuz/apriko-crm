@@ -840,8 +840,6 @@
   .bud-typ:focus{border-color:var(--accent);outline:none}
   .bud-typ option{background:var(--bg-card);color:var(--text)}
   .bud-saison-row td{border-bottom:2px solid var(--border) !important;padding-bottom:4px !important}
-  .bud-saison-bar{height:3px;background:var(--bg);border-radius:2px;margin:1px 3px 0 auto;width:52px;overflow:hidden}
-  .bud-saison-bar > div{height:100%;background:var(--accent-2);border-radius:2px}
 
   /* Schweiz-Karte */
   .ed-map-wrap{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
@@ -908,7 +906,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.30.2</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.31.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -2335,14 +2333,12 @@ function renderBudget(el) {
       </tr>
       ${(() => {
         const s = budgetSaison();
-        const maxP = Math.max(...s, 0.1);
         const sum = Math.round(s.reduce((a,v) => a+v, 0) * 10) / 10;
         return `<tr class="bud-saison-row">
           <td colspan="3" style="color:var(--text-faint);font-size:10px">BPO-Saison % <span title="Anteil des Jahres-Honorars pro Monat. Änderung gleicht beim Folgemonat aus (Summe bleibt 100) und verteilt alle BPO-Zeilen neu.">ⓘ</span></td>
           ${s.map((p, i) => `
             <td style="text-align:right">
               <input id="bud-s-${i}" class="bud-in bud-in-m" style="color:var(--accent-2)" value="${p}" onchange="budgetSaisonChange(${i},this.value)" title="${MONTH_NAMES[i]}: ${p}% — Änderung gleicht bei ${MONTH_NAMES[(i+1)%12]} aus">
-              <div class="bud-saison-bar"><div style="width:${(p/maxP*100).toFixed(0)}%"></div></div>
             </td>`).join("")}
           <td style="text-align:right;font-family:var(--font-mono);font-size:10px;color:${Math.abs(sum-100) < 0.05 ? "var(--accent)" : "var(--danger)"}">${sum}%</td>
           <td><button class="icon-btn" onclick="budgetSaisonReset()" title="Standardkurve wiederherstellen">↺</button></td>
@@ -2366,6 +2362,12 @@ function renderBudget(el) {
           <td colspan="3" style="color:var(--accent);font-size:11px">Zwischentotal SaaS</td>
           ${monthSumsSaaS.map(s => `<td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;color:var(--accent)">${fmtCHFShort(s)}</td>`).join("")}
           <td style="text-align:right;font-family:var(--font-mono);font-weight:600;color:var(--accent)">${fmtCHFShort(sumSaaS)}</td>
+          <td></td>
+        </tr>
+        <tr>
+          <td colspan="3" style="color:var(--text-dim);font-size:10.5px">ARR <span style="color:var(--text-faint)" title="Annualisierte SaaS-Run-Rate: Monats-SaaS × 12. Total = Stand Dezember (Jahresend-ARR).">ⓘ</span></td>
+          ${monthSumsSaaS.map(s => `<td style="text-align:right;font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">${fmtCHFShort(s * 12)}</td>`).join("")}
+          <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim)" title="ARR per Dezember ${year}">${fmtCHFShort(monthSumsSaaS[11] * 12)}</td>
           <td></td>
         </tr>
         <tr>
