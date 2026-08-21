@@ -814,14 +814,17 @@
   /* Zeitraum-Presets in der Filterleiste */
   .ed-preset-row{display:flex;gap:4px}
 
-  /* Budget-Tabelle */
+  /* Budget-Tabelle — kompakt, Excel-artig */
   .icon-btn{background:none;border:none;color:var(--text-dim);cursor:pointer;
-    font-size:13px;padding:2px 5px;border-radius:3px}
+    font-size:12px;padding:1px 4px;border-radius:3px}
   .icon-btn:hover{color:var(--text);background:var(--bg-hover)}
-  .bud-in{background:var(--bg);border:1px solid var(--border);color:var(--text);
-    padding:3px 5px;border-radius:3px;font-family:var(--font-mono);font-size:11px;text-align:right}
-  .bud-in:focus{border-color:var(--accent);outline:none}
-  .bud-in-m{width:62px}
+  .bud-table th{padding:5px 4px !important;font-size:10px}
+  .bud-table td{padding:1px 3px !important;font-size:11px;line-height:1.3}
+  .bud-in{background:transparent;border:1px solid transparent;color:var(--text);
+    padding:2px 3px;border-radius:3px;font-family:var(--font-mono);font-size:11px;text-align:right}
+  .bud-in:hover{border-color:var(--border)}
+  .bud-in:focus{border-color:var(--accent);outline:none;background:var(--bg)}
+  .bud-in-m{width:52px}
 
   /* Schweiz-Karte */
   .ed-map-wrap{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
@@ -888,7 +891,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.23.5</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.24.2</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -1764,17 +1767,23 @@ function budgetSuggest(refType, refId, btype) {
     out.Price = getPriceForMonth(c, filters.budgetYear, 1) || parseFloat(c.PricePerLicense) || 0;
   } else {
     out.Rate = parseFloat(c.BPORate) || 0;
-    const withExt = recs.filter(r => (parseFloat(r.ExternalRevenue) || 0) > 0);
+    let withExt = recs.filter(r => (parseFloat(r.ExternalRevenue) || 0) > 0);
     if (withExt.length) {
+      // Nur das JÜNGSTE Jahr mit Daten verwenden — ältere Jahre würden die
+      // aktuelle Run-Rate verwässern (recs sind absteigend sortiert)
+      const latestYear = withExt[0].Year;
+      withExt = withExt.filter(r => r.Year == latestYear);
       if (c.BPOYtd) {
-        // YTD: letzter Stand ist bereits kumuliert → auf 12 Monate hochrechnen
+        // YTD: letzter Stand ist bereits der kumulierte Jahresstand
+        // → ÷ Monatsnummer × 12 (z.B. 2 Mio per Juni → 4 Mio Jahr)
         const latest = withExt[0];
         const ext = parseFloat(latest.ExternalRevenue) || 0;
         out.ExtRev = latest.Month > 0 ? Math.round(ext / latest.Month * 12) : ext;
       } else {
-        // Monatswerte: Ø der erfassten Monate × 12
-        const avg = withExt.reduce((s,r) => s + (parseFloat(r.ExternalRevenue) || 0), 0) / withExt.length;
-        out.ExtRev = Math.round(avg * 12);
+        // Monatswerte: Summe ÷ Anzahl erfasster Monate × 12 (= Ø-Run-Rate);
+        // nicht erfasste Monate zählen nicht als Null
+        const sum = withExt.reduce((s,r) => s + (parseFloat(r.ExternalRevenue) || 0), 0);
+        out.ExtRev = Math.round(sum / withExt.length * 12);
       }
     }
   }
@@ -1901,59 +1910,6 @@ async function budgetTakeoverActive() {
   }
 }
 
-/* Eingebaute Diagnose: testet jeden Schritt einzeln und protokolliert
-   das Ergebnis sichtbar im Budget-View — für Remote-Fehlersuche. */
-let budgetDiagLog = null;
-async function budgetDiag() {
-  budgetDiagLog = [];
-  const log = (ok, label, detail) => {
-    budgetDiagLog.push({ ok, label, detail: detail || "" });
-    render();
-  };
-  render();
-  // 1: Liste bekannt? Wenn nicht: anlegen versuchen
-  if (!listIds["Budget"]) {
-    log(false, "Budget-Liste im Site gefunden", "wird jetzt automatisch angelegt …");
-    try {
-      const created = await graph(`/sites/${siteId}/lists`, {
-        method: "POST",
-        body: JSON.stringify({ displayName: "Budget", list: { template: "genericList" } })
-      });
-      listIds["Budget"] = created.id;
-      log(true, "Budget-Liste angelegt", "ID: " + created.id);
-    } catch (e) {
-      log(false, "Budget-Liste anlegen", e.message + " — Alternativ manuell: Site → Neu → Liste → 'Budget' (leere Liste reicht).");
-      return;
-    }
-  } else {
-    log(true, "Budget-Liste im Site gefunden", "ID: " + listIds["Budget"]);
-  }
-  // 2: Liste lesbar?
-  try {
-    const items = await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/items?$top=1`);
-    log(true, "Liste lesbar", (items.value ? items.value.length : 0) + " Item(s) im Test-Read");
-  } catch (e) { log(false, "Liste lesbar", e.message); return; }
-  // 3: Item schreiben? (das ist alles, was das Budget seit v1.23.3 braucht)
-  try {
-    const it = await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/items`, {
-      method: "POST", body: JSON.stringify({ fields: { Title: "DIAG-TEST — bitte löschen" } })
-    });
-    log(true, "Item schreiben (einzige benötigte Berechtigung)", "Test-Item erstellt und wieder gelöscht");
-    try { await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/items/${it.id}`, { method: "DELETE" }); } catch (e) {}
-  } catch (e) { log(false, "Item schreiben", e.message); }
-  // 4: Interne Funktions-Verfügbarkeit (Ursachen-Forschung: welche globalen
-  //    Symbole fehlen im Browser wirklich?)
-  let fnCheck = "";
-  try {
-    fnCheck = ["showLoading","hideLoading","toast","reload","scanWithClaude","renderPreviewCol"]
-      .map(n => { let t; try { t = eval("typeof " + n); } catch (e) { t = "err"; } return n + "=" + t; })
-      .join(", ");
-  } catch (e) { fnCheck = "Check fehlgeschlagen: " + e.message; }
-  budgetDiagLog.push({ ok: !fnCheck.includes("undefined"), label: "Funktions-Check (zur Analyse)", detail: fnCheck });
-  budgetDiagLog.push({ ok: true, label: "Diagnose abgeschlossen", detail: "App-Version: " + ((document.getElementById("app-version")||{}).textContent || "?") });
-  render();
-}
-
 /* Modal: beliebige Firma/Lead hinzufügen */
 function budgetAddModal() {
   const activeC = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv");
@@ -2019,25 +1975,10 @@ function renderBudget(el) {
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
 
   const paramCell = b => b.BType === "SaaS"
-    ? `<span style="white-space:nowrap"><input class="bud-in" style="width:44px" value="${num(b.Lic)}" onchange="budgetParamChange(${b.id},'Lic',this.value)" title="Lizenzen"> ×
-       <input class="bud-in" style="width:64px" value="${num(b.Price)}" onchange="budgetParamChange(${b.id},'Price',this.value)" title="Preis pro Lizenz/Monat"></span>`
-    : `<span style="white-space:nowrap"><input class="bud-in" style="width:86px" value="${num(b.ExtRev)}" onchange="budgetParamChange(${b.id},'ExtRev',this.value)" title="Aussenumsatz pro Jahr"> ×
-       <input class="bud-in" style="width:44px" value="${num(b.Rate)}" onchange="budgetParamChange(${b.id},'Rate',this.value)" title="Satz %">%</span>`;
+    ? `<span style="white-space:nowrap;font-size:10px;color:var(--text-faint)"><input class="bud-in" style="width:34px" value="${num(b.Lic)}" onchange="budgetParamChange(${b.id},'Lic',this.value)" title="Lizenzen">×<input class="bud-in" style="width:52px" value="${num(b.Price)}" onchange="budgetParamChange(${b.id},'Price',this.value)" title="Preis pro Lizenz/Monat"></span>`
+    : `<span style="white-space:nowrap;font-size:10px;color:var(--text-faint)"><input class="bud-in" style="width:70px" value="${num(b.ExtRev)}" onchange="budgetParamChange(${b.id},'ExtRev',this.value)" title="Aussenumsatz pro Jahr">×<input class="bud-in" style="width:36px" value="${num(b.Rate)}" onchange="budgetParamChange(${b.id},'Rate',this.value)" title="Satz %">%</span>`;
 
   el.innerHTML = `
-    ${budgetDiagLog ? `
-      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:12px 14px;margin-bottom:14px;font-size:12px">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <strong>🔧 Budget-Diagnose</strong>
-          <button class="btn btn-sm" onclick="budgetDiagLog=null;render()">Schliessen</button>
-        </div>
-        ${budgetDiagLog.map(l => `
-          <div style="margin-top:8px">
-            <span style="color:${l.ok ? "var(--accent)" : "var(--danger)"}">${l.ok ? "✓" : "✗"}</span>
-            <strong> ${escape(l.label)}</strong>
-            ${l.detail ? `<div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim);margin:3px 0 0 18px;word-break:break-all">${escape(l.detail)}</div>` : ""}
-          </div>`).join("")}
-      </div>` : ""}
     ${budgetLastError ? `
       <div style="background:rgba(255,107,107,0.1);border:1px solid var(--danger);border-radius:6px;padding:12px 14px;margin-bottom:14px;font-size:12px">
         <strong style="color:var(--danger)">Letzter Vorgang fehlgeschlagen:</strong>
@@ -2048,7 +1989,6 @@ function renderBudget(el) {
       <label style="color:var(--text-dim);font-size:12px">Planjahr:</label>
       <select onchange="filters.budgetYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${yearOpts}</select>
       <button class="btn btn-sm" onclick="budgetTakeoverActive()">Aktive Kunden übernehmen</button>
-      <button class="btn btn-sm" onclick="budgetDiag()" title="Testet Zugriff und Spalten der Budget-Liste Schritt für Schritt">🔧 Diagnose</button>
       <button class="btn btn-sm btn-primary" onclick="budgetAddModal()">+ Position</button>
       <div style="margin-left:auto;display:flex;gap:20px;font-size:12px;flex-wrap:wrap">
         <div><span style="color:var(--text-dim)">SaaS:</span> <span style="font-family:var(--font-mono);color:var(--accent)">CHF ${fmtCHFShort(sumSaaS)}</span></div>
@@ -2064,11 +2004,11 @@ function renderBudget(el) {
         <span style="margin:0 8px;color:var(--text-faint)">oder</span>
         <button class="btn" onclick="budgetAddModal()">Einzelne Position anlegen</button>
       </div>` : `
-    <div class="table-wrap"><table style="min-width:1380px">
+    <div class="table-wrap"><table class="bud-table" style="min-width:1150px">
       <thead><tr>
-        <th style="min-width:160px">Firma</th>
+        <th style="min-width:130px">Firma</th>
         <th>Typ</th>
-        <th style="min-width:150px">Parameter</th>
+        <th style="min-width:130px">Parameter</th>
         ${MONTH_NAMES.map(m => `<th style="text-align:right">${m.slice(0,3)}</th>`).join("")}
         <th style="text-align:right">Total</th>
         <th></th>
@@ -2076,8 +2016,8 @@ function renderBudget(el) {
       <tbody>
         ${rows.map(b => `
           <tr>
-            <td title="${escape(budgetRefName(b))}">${escape(budgetRefName(b))}${b.RefType === "company" ? ` <span style="font-size:10px;color:var(--text-faint)">(Lead)</span>` : ""}</td>
-            <td><span style="color:${b.BType === "SaaS" ? "var(--accent)" : "var(--accent-2)"};font-weight:600;font-size:11px">${b.BType}</span></td>
+            <td title="${escape(budgetRefName(b))}" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escape(budgetRefName(b))}${b.RefType === "company" ? ` <span style="font-size:9px;color:var(--text-faint)">(Lead)</span>` : ""}</td>
+            <td><span style="color:${b.BType === "SaaS" ? "var(--accent)" : "var(--accent-2)"};font-weight:600;font-size:10px">${b.BType}</span></td>
             <td>${paramCell(b)}</td>
             ${BUDGET_MONTH_FIELDS.map(f => `<td style="text-align:right"><input class="bud-in bud-in-m" value="${num(b[f])}" onchange="budgetCellChange(${b.id},'${f}',this.value)"></td>`).join("")}
             <td style="text-align:right;font-family:var(--font-mono);font-weight:600">${fmtCHFShort(rowTotal(b))}</td>
