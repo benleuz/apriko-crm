@@ -894,7 +894,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.26.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.27.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -1727,7 +1727,11 @@ function budgetSerialize(b) {
     y: b.BYear, rt: b.RefType, ri: b.RefId, t: b.BType,
     lic: parseFloat(b.Lic) || 0, pr: parseFloat(b.Price) || 0,
     er: parseFloat(b.ExtRev) || 0, ra: parseFloat(b.Rate) || 0,
-    m: BUDGET_MONTH_FIELDS.map(f => Math.round(parseFloat(b[f]) || 0))
+    m: BUDGET_MONTH_FIELDS.map(f => {
+      const v = parseFloat(b[f]) || 0;
+      // Stunden-Zeilen: 1 Dezimale erlauben (7.5 h), CHF-Zeilen: ganze Beträge
+      return b.BType === "BPOStd" ? Math.round(v * 10) / 10 : Math.round(v);
+    })
   });
 }
 /* Geparste Budget-Zeilen (ungültige/fremde Items werden ignoriert) */
@@ -1738,6 +1742,26 @@ async function budgetSave(b) {
   await updateItem("Budget", b.id, { Title: budgetSerialize(b) });
   const raw = cache.budget.find(x => x.id == b.id);
   if (raw) raw.Title = budgetSerialize(b);
+}
+
+/* Kompakte Zahlen-Darstellung für Parameter: 4'000'000 → "4.0 Mio",
+   334'500 → "335k"; beim Fokus erscheint der Rohwert zum Editieren. */
+function budFmtParam(v) {
+  v = parseFloat(v) || 0;
+  if (Math.abs(v) >= 1e6) {
+    const m = v / 1e6;
+    return (Math.round(m * 10) / 10).toLocaleString("de-CH", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + " Mio";
+  }
+  if (Math.abs(v) >= 1e4) return Math.round(v / 1000).toLocaleString("de-CH") + "k";
+  return String(v);
+}
+/* Eingaben wie "4.2 Mio", "4m", "500k", "4'000'000" → Zahl */
+function budParseParam(str) {
+  let s = String(str).trim().toLowerCase().replace(/['\u2019\s]/g, "").replace(",", ".");
+  let mult = 1;
+  if (/mio$|m$/.test(s)) { mult = 1e6; s = s.replace(/mio$|m$/, ""); }
+  else if (/k$/.test(s)) { mult = 1e3; s = s.replace(/k$/, ""); }
+  return (parseFloat(s) || 0) * mult;
 }
 
 /* Firma zu einer Budget-Zeile auflösen */
@@ -1821,7 +1845,7 @@ async function budgetSaisonReset() {
 /* Alle BPO-Zeilen des angezeigten Jahres nach der Kurve neu füllen */
 async function budgetRedistributeBPO(saison) {
   const year = filters.budgetYear;
-  const rows = budgetRows().filter(b => b.BYear == year && b.BType === "BPO");
+  const rows = budgetRows().filter(b => b.BYear == year && (b.BType === "BPO" || b.BType === "SaaSPct"));
   for (const b of rows) {
     const mw = budgetFormulaMonths(b, saison);
     BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
@@ -1837,6 +1861,13 @@ function budgetFormulaMonths(b, saisonOverride) {
     const m = Math.round((parseFloat(b.Lic) || 0) * (parseFloat(b.Price) || 0));
     return BUDGET_MONTH_FIELDS.map(() => m);
   }
+  if (b.BType === "BPOStd") {
+    // Stundensatz-Modell: die Monatswerte SIND Stunden und werden manuell
+    // gepflegt — die "Formel" lässt sie unverändert (Satz ändert nur die
+    // CHF-Bewertung, nicht die Stunden).
+    return BUDGET_MONTH_FIELDS.map(f => parseFloat(b[f]) || 0);
+  }
+  // BPO (prozentual) und SaaSPct (% vom Umsatz): saisonal verteilt
   const saison = saisonOverride || budgetSaison();
   const jahr = (parseFloat(b.ExtRev) || 0) * (parseFloat(b.Rate) || 0) / 100;
   const werte = saison.map(p => Math.round(jahr * p / 100));
@@ -1844,6 +1875,13 @@ function budgetFormulaMonths(b, saisonOverride) {
   werte[11] = Math.round(jahr) - summe11;
   return werte;
 }
+
+/* CHF-Wert einer Zeile für einen Monatswert (Stunden-Zeilen: h × Satz) */
+function budgetChfOf(b, v) {
+  return b.BType === "BPOStd" ? (parseFloat(v) || 0) * (parseFloat(b.Rate) || 0) : (parseFloat(v) || 0);
+}
+/* Zählt eine Zeile zur SaaS- oder BPO-Summe? */
+function budgetIsSaaS(b) { return b.BType === "SaaS" || b.BType === "SaaSPct"; }
 
 /* Vorschlagswerte aus den Ist-Daten (Revenue-Modul) */
 function budgetSuggest(refType, refId, btype) {
@@ -1858,6 +1896,17 @@ function budgetSuggest(refType, refId, btype) {
     const withLic = recs.find(r => (parseInt(r.Licenses) || 0) > 0);
     out.Lic = withLic ? parseInt(withLic.Licenses) : 0;
     out.Price = getPriceForMonth(c, filters.budgetYear, 1) || parseFloat(c.PricePerLicense) || 0;
+  } else if (btype === "BPOStd") {
+    // Stundensatz-Modell: Satz aus dem Kundenstamm, Stunden-Vorschlag =
+    // Ø der erfassten Monats-Stunden des jüngsten Jahres (kommt in alle Monate)
+    out.Rate = parseFloat(c.HourlyRate) || 0;
+    let withHrs = recs.filter(r => (parseFloat(r.Hours) || 0) > 0);
+    if (withHrs.length) {
+      const latestYear = withHrs[0].Year;
+      withHrs = withHrs.filter(r => r.Year == latestYear);
+      const sum = withHrs.reduce((s,r) => s + (parseFloat(r.Hours) || 0), 0);
+      out.Hours = Math.round(sum / withHrs.length * 10) / 10;
+    }
   } else {
     out.Rate = parseFloat(c.BPORate) || 0;
     let withExt = recs.filter(r => (parseFloat(r.ExternalRevenue) || 0) > 0);
@@ -1895,8 +1944,12 @@ async function budgetCreate(refType, refId, btype) {
     const s = budgetSuggest(refType, refId, btype);
     const b = { BYear: year, RefType: refType, RefId: parseInt(refId), BType: btype,
       Lic: s.Lic, Price: s.Price, ExtRev: s.ExtRev, Rate: s.Rate };
-    const mw = budgetFormulaMonths(b);
-    BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
+    if (btype === "BPOStd") {
+      BUDGET_MONTH_FIELDS.forEach(f => b[f] = s.Hours || 0);
+    } else {
+      const mw = budgetFormulaMonths(b);
+      BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
+    }
     await createItem("Budget", { Title: budgetSerialize(b) });
     await reload("Budget");
     budgetHideLoading();
@@ -1927,7 +1980,8 @@ async function budgetParamChange(id, field, value) {
 async function budgetCellChange(id, field, value) {
   const b = budgetRows().find(x => x.id == id);
   if (!b) return;
-  b[field] = Math.round(parseFloat(value) || 0);
+  const v = parseFloat(value) || 0;
+  b[field] = b.BType === "BPOStd" ? Math.round(v * 10) / 10 : Math.round(v);
   try {
     await budgetSave(b);
     render();  // Summen aktualisieren
@@ -1966,9 +2020,10 @@ async function budgetTakeoverActive() {
   const jobs = [];
   active.forEach(c => {
     const want = [];
+    const bpoTyp = (c.BPOModel === "Stundensatz") ? "BPOStd" : "BPO";
     if (segmentChargesSaaS(c.Segment)) want.push("SaaS");
-    if (segmentNeedsBPO(c.Segment)) want.push("BPO");
-    if (!want.length) want.push(c.Segment === "BPO inkl. SaaS" ? "BPO" : "SaaS");
+    if (segmentNeedsBPO(c.Segment)) want.push(bpoTyp);
+    if (!want.length) want.push(c.Segment === "BPO inkl. SaaS" ? bpoTyp : "SaaS");
     want.forEach(t => {
       const exists = existing.find(b => b.BYear == year && b.RefType === "customer" && b.RefId == c.id && b.BType === t);
       if (!exists) jobs.push({ id: c.id, t });
@@ -1986,8 +2041,12 @@ async function budgetTakeoverActive() {
       const s = budgetSuggest("customer", j.id, j.t);
       const b = { BYear: year, RefType: "customer", RefId: parseInt(j.id), BType: j.t,
         Lic: s.Lic, Price: s.Price, ExtRev: s.ExtRev, Rate: s.Rate };
-      const mw = budgetFormulaMonths(b);
-      BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
+      if (j.t === "BPOStd") {
+        BUDGET_MONTH_FIELDS.forEach(f => b[f] = s.Hours || 0);
+      } else {
+        const mw = budgetFormulaMonths(b);
+        BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
+      }
       await createItem("Budget", { Title: budgetSerialize(b) });
     }
     await reload("Budget");
@@ -2022,8 +2081,10 @@ function budgetAddModal() {
     <div class="field">
       <label>Typ</label>
       <select id="bud-type">
-        <option value="SaaS">SaaS (Lizenzen × Preis)</option>
-        <option value="BPO">BPO (Aussenumsatz × Satz)</option>
+        <option value="SaaS">SaaS — Lizenzen × Preis</option>
+        <option value="SaaSPct">SaaS — % vom Aussenumsatz</option>
+        <option value="BPO">BPO — Aussenumsatz × Satz %</option>
+        <option value="BPOStd">BPO — Stundensatz (Stunden pro Monat erfassen)</option>
       </select>
     </div>
     <div style="font-size:11px;color:var(--text-faint)">Bei Kunden werden Lizenzen, Preis, Aussenumsatz und Satz aus den Ist-Zahlen vorgeschlagen — alles bleibt überschreibbar.</div>`;
@@ -2059,17 +2120,26 @@ function renderBudget(el) {
     .sort((a,b) => budgetRefName(a).localeCompare(budgetRefName(b)) || (a.BType||"").localeCompare(b.BType||""));
 
   const num = v => parseFloat(v) || 0;
-  const rowTotal = b => BUDGET_MONTH_FIELDS.reduce((s,f) => s + num(b[f]), 0);
-  const sumSaaS = rows.filter(b => b.BType === "SaaS").reduce((s,b) => s + rowTotal(b), 0);
-  const sumBPO  = rows.filter(b => b.BType === "BPO").reduce((s,b) => s + rowTotal(b), 0);
-  const monthSums = BUDGET_MONTH_FIELDS.map(f => rows.reduce((s,b) => s + num(b[f]), 0));
+  // Zeilen-Total in CHF (Stunden-Zeilen: Σ Stunden × Satz)
+  const rowTotal = b => BUDGET_MONTH_FIELDS.reduce((s,f) => s + budgetChfOf(b, b[f]), 0);
+  const rowHours = b => BUDGET_MONTH_FIELDS.reduce((s,f) => s + num(b[f]), 0);
+  const sumSaaS = rows.filter(b => budgetIsSaaS(b)).reduce((s,b) => s + rowTotal(b), 0);
+  const sumBPO  = rows.filter(b => !budgetIsSaaS(b)).reduce((s,b) => s + rowTotal(b), 0);
+  const monthSums = BUDGET_MONTH_FIELDS.map(f => rows.reduce((s,b) => s + budgetChfOf(b, b[f]), 0));
 
   const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
 
-  const paramCell = b => b.BType === "SaaS"
-    ? `<span style="white-space:nowrap;font-size:10px;color:var(--text-faint)"><input class="bud-in" style="width:34px" value="${num(b.Lic)}" onchange="budgetParamChange(${b.id},'Lic',this.value)" title="Lizenzen">×<input class="bud-in" style="width:52px" value="${num(b.Price)}" onchange="budgetParamChange(${b.id},'Price',this.value)" title="Preis pro Lizenz/Monat"></span>`
-    : `<span style="white-space:nowrap;font-size:10px;color:var(--text-faint)"><input class="bud-in" style="width:70px" value="${num(b.ExtRev)}" onchange="budgetParamChange(${b.id},'ExtRev',this.value)" title="Aussenumsatz pro Jahr">×<input class="bud-in" style="width:36px" value="${num(b.Rate)}" onchange="budgetParamChange(${b.id},'Rate',this.value)" title="Satz %">%</span>`;
+  const extRevInput = b => `<input class="bud-in" style="width:58px" value="${budFmtParam(b.ExtRev)}" onfocus="this.value='${num(b.ExtRev)}'" onblur="if(this.value=='${num(b.ExtRev)}')this.value='${budFmtParam(b.ExtRev)}'" onchange="budgetParamChange(${b.id},'ExtRev',budParseParam(this.value))" title="Aussenumsatz pro Jahr: ${num(b.ExtRev).toLocaleString("de-CH")} — Eingabe auch als '4.2 Mio' oder '500k' möglich">`;
+  const paramCell = b => {
+    const wrap = inner => `<span style="white-space:nowrap;font-size:10px;color:var(--text-faint)">${inner}</span>`;
+    if (b.BType === "SaaS") return wrap(`<input class="bud-in" style="width:34px" value="${num(b.Lic)}" onchange="budgetParamChange(${b.id},'Lic',this.value)" title="Lizenzen">×<input class="bud-in" style="width:52px" value="${num(b.Price)}" onchange="budgetParamChange(${b.id},'Price',this.value)" title="Preis pro Lizenz/Monat">`);
+    if (b.BType === "BPOStd") return wrap(`<input class="bud-in" style="width:48px" value="${num(b.Rate)}" onchange="budgetParamChange(${b.id},'Rate',this.value)" title="Stundensatz CHF/h — Monatszellen = Stunden">/h`);
+    // BPO + SaaSPct: Aussenumsatz × Satz%
+    return wrap(`${extRevInput(b)}×<input class="bud-in" style="width:36px" value="${num(b.Rate)}" onchange="budgetParamChange(${b.id},'Rate',this.value)" title="Satz %">%`);
+  };
+  const typLabel = { SaaS: ["SaaS", "var(--accent)"], SaaSPct: ["SaaS %", "var(--accent)"],
+                     BPO: ["BPO", "var(--accent-2)"], BPOStd: ["BPO h", "var(--accent-2)"] };
 
   el.innerHTML = `
     ${budgetLastError ? `
@@ -2126,10 +2196,10 @@ function renderBudget(el) {
         ${rows.map(b => `
           <tr>
             <td title="${escape(budgetRefName(b))}" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escape(budgetRefName(b))}${b.RefType === "company" ? ` <span style="font-size:9px;color:var(--text-faint)">(Lead)</span>` : ""}</td>
-            <td><span style="color:${b.BType === "SaaS" ? "var(--accent)" : "var(--accent-2)"};font-weight:600;font-size:10px">${b.BType}</span></td>
+            <td><span style="color:${(typLabel[b.BType]||typLabel.SaaS)[1]};font-weight:600;font-size:10px">${(typLabel[b.BType]||[b.BType])[0]}</span></td>
             <td>${paramCell(b)}</td>
-            ${BUDGET_MONTH_FIELDS.map(f => `<td style="text-align:right"><input class="bud-in bud-in-m" value="${num(b[f])}" onchange="budgetCellChange(${b.id},'${f}',this.value)"></td>`).join("")}
-            <td style="text-align:right;font-family:var(--font-mono);font-weight:600">${fmtCHFShort(rowTotal(b))}</td>
+            ${BUDGET_MONTH_FIELDS.map(f => `<td style="text-align:right"><input class="bud-in bud-in-m" ${b.BType === "BPOStd" ? `style="color:var(--accent-2)" title="${num(b[f])} h × ${num(b.Rate)} = CHF ${Math.round(budgetChfOf(b, b[f])).toLocaleString("de-CH")}"` : ""} value="${num(b[f])}" onchange="budgetCellChange(${b.id},'${f}',this.value)">${b.BType === "BPOStd" ? `<div style="font-size:8.5px;color:var(--text-faint);text-align:right;padding-right:4px">${Math.round(budgetChfOf(b, b[f])).toLocaleString("de-CH")}</div>` : ""}</td>`).join("")}
+            <td style="text-align:right;font-family:var(--font-mono);font-weight:600">${fmtCHFShort(rowTotal(b))}${b.BType === "BPOStd" ? `<div style="font-size:8.5px;color:var(--text-faint);font-weight:400">${rowHours(b).toLocaleString("de-CH")} h</div>` : ""}</td>
             <td style="white-space:nowrap">
               <button class="icon-btn" onclick="budgetRefill(${b.id})" title="Monate auf Formelwert zurücksetzen">↻</button>
               <button class="icon-btn" onclick="budgetDelete(${b.id})" title="Löschen">✕</button>
