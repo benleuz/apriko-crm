@@ -947,7 +947,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.37.2</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.37.3</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -2806,7 +2806,7 @@ function fbParseBuchungen(sheets) {
 /* Gesellschaftsname aus dem Dateinamen ableiten */
 function fbGesFromFilename(name) {
   let s = name.replace(/\.(xlsx|csv|txt)$/i, "");
-  s = s.split(/bilanz|erfolgsrechnung|_er_|_er$/i)[0];
+  s = s.split(/bilanz|erfolgsrechnung|kontenbl|kontoausz|buchung|journal|_er_|_er$/i)[0];
   s = s.replace(/[_]+/g, " ").replace(/\s+/g, " ").trim();
   return s || name;
 }
@@ -2877,8 +2877,7 @@ async function fbMultiSelect(input) {
         const bn = Object.values(entry.parsedBuch).reduce((s, k) => s + k.buch.length, 0);
         entry.info = bn + " Buchungen auf " + kn + " Konten";
         if (!bn) { entry.art = "unbekannt"; entry.info = "Keine Buchungszeilen erkannt"; }
-      }
-      if (art === "er") {
+      } else if (art === "er") {
         entry.ges = fbGesFromFilename(f.name);
         const hatSoftware = rows.some(r => /^3\d{3}$/.test(String(r[0] || "")) && /software/i.test(String(r[1] || "")));
         entry.typ = (hatSoftware || /apriko/i.test(f.name)) ? "sw" : "bo";
