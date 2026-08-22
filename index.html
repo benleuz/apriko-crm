@@ -947,7 +947,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.36.2</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.37.1</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -2458,6 +2458,74 @@ function fbColIndex(ref) {   // "BC12" → Spaltenindex 0-basiert
   }
   return c - 1;
 }
+/* Alle Blattnamen + Inhalte (für Buchungs-Exporte mit mehreren Blättern) */
+async function fbReadXlsxAll(buf) {
+  const out = [];
+  try {
+    const wbXml = await fbUnzipEntry(buf, "xl/workbook.xml");
+    const relsXml = await fbUnzipEntry(buf, "xl/_rels/workbook.xml.rels");
+    const p = new DOMParser();
+    const rels = {};
+    if (relsXml) {
+      const relsDoc = p.parseFromString(relsXml, "application/xml");
+      for (const rel of relsDoc.getElementsByTagName("Relationship")) {
+        let t = rel.getAttribute("Target") || "";
+        rels[rel.getAttribute("Id")] = t.startsWith("/") ? t.slice(1) : "xl/" + t.replace(/^\.\//, "");
+      }
+    }
+    if (wbXml) {
+      const wbDoc = p.parseFromString(wbXml, "application/xml");
+      for (const sheet of wbDoc.getElementsByTagName("sheet")) {
+        const rid = sheet.getAttribute("r:id") || sheet.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id");
+        const target = rels[rid];
+        if (!target) continue;
+        const xml = await fbUnzipEntry(buf, target);
+        if (xml) out.push({ name: sheet.getAttribute("name") || "", xml });
+      }
+    }
+  } catch (e) { /* Fallback unten */ }
+  if (!out.length) {
+    const xml = await fbUnzipEntry(buf, "xl/worksheets/sheet1.xml");
+    if (xml) out.push({ name: "Sheet1", xml });
+  }
+  const ssXml = await fbUnzipEntry(buf, "xl/sharedStrings.xml");
+  const shared = [];
+  const p2 = new DOMParser();
+  if (ssXml) {
+    const ssDoc = p2.parseFromString(ssXml, "application/xml");
+    for (const si of ssDoc.getElementsByTagName("si")) {
+      let t = "";
+      for (const tn of si.getElementsByTagName("t")) t += tn.textContent;
+      shared.push(t);
+    }
+  }
+  return out.map(sh => ({ name: sh.name, rows: fbSheetRows(sh.xml, shared, p2) }));
+}
+function fbSheetRows(sheetXml, shared, parser) {
+  const doc = parser.parseFromString(sheetXml, "application/xml");
+  const rows = [];
+  for (const rowEl of doc.getElementsByTagName("row")) {
+    const arr = [];
+    for (const c of rowEl.getElementsByTagName("c")) {
+      const ref = c.getAttribute("r") || "";
+      const ci = ref ? fbColIndex(ref) : arr.length;
+      const t = c.getAttribute("t");
+      let v = "";
+      if (t === "inlineStr") {
+        const tn = c.getElementsByTagName("t")[0];
+        v = tn ? tn.textContent : "";
+      } else {
+        const vn = c.getElementsByTagName("v")[0];
+        v = vn ? vn.textContent : "";
+        if (t === "s") v = shared[parseInt(v)] ?? "";
+      }
+      arr[ci] = v;
+    }
+    rows.push(Array.from(arr, x => x === undefined ? "" : String(x)));
+  }
+  return rows;
+}
+
 async function fbReadXlsx(buf) {
   // Erstes Blatt über workbook.xml + rels auflösen (Fallback: sheet1.xml)
   let target = "xl/worksheets/sheet1.xml";
@@ -2516,6 +2584,27 @@ async function fbReadXlsx(buf) {
   }
   return rows;
 }
+/* Datei → alle Blätter [{name, rows}] (CSV = 1 Pseudo-Blatt) */
+function fbReadTableAll(file) {
+  return new Promise((resolve, reject) => {
+    if (/\.xlsx$/i.test(file.name)) {
+      const r = new FileReader();
+      r.onload = e => fbReadXlsxAll(e.target.result).then(resolve).catch(reject);
+      r.onerror = () => reject(new Error("Datei nicht lesbar"));
+      r.readAsArrayBuffer(file);
+    } else {
+      const r = new FileReader();
+      r.onload = e => {
+        const lines = String(e.target.result).replace(/^\uFEFF/, "").split(/\r?\n/).filter(l => l.trim());
+        const sep = (lines[0] || "").includes(";") ? ";" : ((lines[0] || "").includes("\t") ? "\t" : ",");
+        resolve([{ name: file.name, rows: lines.map(l => l.split(sep).map(s => s.trim().replace(/^"|"$/g, ""))) }]);
+      };
+      r.onerror = () => reject(new Error("Datei nicht lesbar"));
+      r.readAsText(file, "utf-8");
+    }
+  });
+}
+
 /* Datei (CSV/TXT/XLSX) → Zeilen als string[][] */
 function fbReadTable(file) {
   return new Promise((resolve, reject) => {
@@ -2614,6 +2703,106 @@ function fbParseBudgetOrig(rows) {
   });
   return Object.keys(out).length >= 5 ? out : null;
 }
+/* ---------- Buchungszeilen (Kontoauszüge) ---------- */
+function fbIsDateStr(v) { return /^\d{1,2}\.\d{1,2}\.\d{2,4}$/.test(String(v).trim()); }
+function fbSerialToDate(n) {
+  const d = new Date(Math.round((n - 25569) * 86400 * 1000));
+  const p = x => String(x).padStart(2, "0");
+  return p(d.getUTCDate()) + "." + p(d.getUTCMonth() + 1) + "." + String(d.getUTCFullYear()).slice(2);
+}
+function fbCellDate(v) {
+  const s = String(v ?? "").trim();
+  if (fbIsDateStr(s)) return s;
+  const n = parseFloat(s);
+  if (Number.isFinite(n) && n > 44000 && n < 48500 && /^\d+(\.\d+)?$/.test(s)) return fbSerialToDate(n);
+  return null;
+}
+/* Erkennt Kontoauszugs-/Buchungs-Blätter: viele Datumszeilen. */
+function fbLooksLikeBuchungen(sheets) {
+  let dates = 0;
+  sheets.forEach(sh => sh.rows.forEach(r => { if (r.some(v => fbCellDate(v))) dates++; }));
+  return dates >= 5;
+}
+/* Parst Kontoblatt-Struktur über alle Blätter:
+   - Abschnittsheader mit 4-stelliger Kontonummer (auch "6510 - Telefon" oder Nr in Sp. 2)
+   - Headerzeile mit "Soll"/"Haben" fixiert die Betragsspalten
+   - Buchungszeile = Zeile mit Datum; Text = längste Textzelle; Betrag = Soll − Haben
+   Rückgabe: { "6510": {bez, buch: [[datum, text, betrag], …]}, … } */
+/* Buchungswert-Konvention = bexio-ER-Saldo: v = Haben − Soll
+   (Ertrag positiv, Aufwand negativ; Summe der Buchungen ≈ ER-Saldo des Kontos).
+   bexio-Kontoauszüge: ein Blatt pro Konto, Kontonummer im Blattnamen
+   ("_6510_Telefon_Internet"), BelDatum als Excel-Zahl, Saldovortrag-Zeilen.
+   Nur Erfolgskonten (3xxx–8xxx) werden übernommen. */
+function fbParseBuchungen(sheets) {
+  const out = {};
+  sheets.forEach(sh => {
+    let kt = null, bez = "", sollCol = -1, habenCol = -1, saldoCol = -1, ktFixed = false;
+    // Kontonummer im Blattnamen ("_1020_ZKB_…", "6510 Telefon", "_6510_Telefon_Internet")
+    const mSheet = String(sh.name || "").match(/^_?(\d{4})[_\s.–-]*(.*)$/);
+    if (mSheet) {
+      kt = mSheet[1];
+      bez = (mSheet[2] || "").replace(/_+/g, " ").trim();
+      ktFixed = true;
+      if (!/^[3-8]/.test(kt)) return;   // Bestandes-/Abschlusskonten überspringen
+    }
+    sh.rows.forEach(r => {
+      const datum = (() => { for (const v of r) { const d = fbCellDate(v); if (d) return d; } return null; })();
+      if (!datum) {
+        if (!ktFixed) {
+          // Abschnittsheader (Kontoblatt-Format ohne Blatt-Konto)
+          for (let c = 0; c < Math.min(4, r.length); c++) {
+            const s = String(r[c] ?? "").trim();
+            if (!s) continue;
+            const m = s.match(/^(\d{4})\b\s*[-–·]?\s*(.*)$/);
+            if (m && !/^\d{5,}/.test(s)) { kt = m[1]; bez = m[2] || String(r[c + 1] ?? "").trim(); sollCol = -1; habenCol = -1; saldoCol = -1; }
+            break;
+          }
+        }
+        // Headerzeile: Soll/Haben/Saldo-Spalten fixieren
+        r.forEach((v, i) => {
+          const s = String(v ?? "").trim().toLowerCase();
+          if (s === "soll") sollCol = i;
+          if (s === "haben") habenCol = i;
+          if (s === "saldo") saldoCol = i;
+        });
+        return;
+      }
+      if (!kt || !/^[3-8]/.test(kt)) return;
+      // Buchungszeile
+      let text = "";
+      r.forEach(v => {
+        const s = String(v ?? "").trim();
+        if (s && !fbCellDate(s) && !/^[-0-9.,'\s]+$/.test(s) && s.length > text.length) text = s;
+      });
+      const num = i => {
+        const s = String(r[i] ?? "").replace(/['\u2019\s]/g, "").replace(",", ".");
+        const n = parseFloat(s);
+        return Number.isFinite(n) ? n : 0;
+      };
+      let betrag;
+      if (sollCol >= 0 || habenCol >= 0) {
+        betrag = (habenCol >= 0 ? num(habenCol) : 0) - (sollCol >= 0 ? num(sollCol) : 0);
+      } else {
+        // Fallback ohne Header: numerische Zellen (ohne Datums-/Kontospalten): [Soll, Haben, (Saldo)]
+        const nums = [];
+        r.forEach(v => {
+          const s = String(v ?? "").trim();
+          if (!s || fbCellDate(s)) return;
+          if (/^-?[0-9.,'\s]+$/.test(s) && !/^\d{4}$/.test(s)) {
+            const n = parseFloat(s.replace(/['\u2019\s]/g, "").replace(",", "."));
+            if (Number.isFinite(n)) nums.push(n);
+          }
+        });
+        betrag = nums.length >= 2 ? nums[1] - nums[0] : (nums.length === 1 ? -nums[0] : 0);
+      }
+      if (!betrag) return;   // reine Saldo-/Leerzeilen
+      if (!out[kt]) out[kt] = { bez, buch: [] };
+      out[kt].buch.push([datum, text.slice(0, 60), Math.round(betrag * 100) / 100]);
+    });
+  });
+  return out;
+}
+
 /* Gesellschaftsname aus dem Dateinamen ableiten */
 function fbGesFromFilename(name) {
   let s = name.replace(/\.(xlsx|csv|txt)$/i, "");
@@ -2622,7 +2811,43 @@ function fbGesFromFilename(name) {
   return s || name;
 }
 
-let fbPending = [];   // [{name, art, rows, ges, typ, info}]
+/* Mehrzeilige "Data"-Spalte in der Budget-Liste (für Buchungs-JSON) */
+let fbDataColOk = false;
+async function fbEnsureDataCol() {
+  if (fbDataColOk) return;
+  try {
+    await graph(`/sites/${siteId}/lists/${listIds.Budget}/columns`, {
+      method: "POST",
+      body: JSON.stringify({ name: "Data", text: { allowMultipleLines: true, textType: "plain" } })
+    });
+  } catch (e) {
+    if (!/nameAlreadyExists|already exists|409/i.test(e.message)) throw e;
+  }
+  fbDataColOk = true;
+}
+/* Buchungen pro Gesellschaft+Konto: Title-JSON + Data-Feld (JSON-Array) */
+async function fbSaveBuch(year, ges, kt, bez, buch, existingId) {
+  const title = JSON.stringify({ cfg: "bch", y: year, p: "H1", g: ges, kt, b: (bez || "").slice(0, 20), n: buch.length });
+  const data = JSON.stringify(buch);
+  if (existingId) {
+    await updateItem("Budget", existingId, { Title: title, Data: data });
+    const raw = cache.budget.find(x => x.id == existingId);
+    if (raw) { raw.Title = title; raw.Data = data; }
+  } else await createItem("Budget", { Title: title, Data: data });
+}
+function fbBuchAll(year) {   // Map "ges|kt" → {bez, buch:[[d,t,v],…]}
+  const out = {};
+  cache.budget.forEach(it => {
+    const d = fbParse(it, "bch");
+    if (!d || d.y != year) return;
+    try { out[d.g + "|" + d.kt] = { bez: d.b || "", buch: JSON.parse(it.Data || "[]") }; } catch (e) {}
+  });
+  return out;
+}
+let fbExpanded2 = {};   // "ges|kt" → true (aufgeklappte Konten, 3. Ebene)
+function fbToggle2(id) { fbExpanded2[id] = !fbExpanded2[id]; render(); }
+
+let fbPending = [];   // [{name, art, rows, sheets, ges, typ, info}]
 async function fbMultiSelect(input) {
   const files = [...(input.files || [])];
   input.value = "";
@@ -2630,9 +2855,18 @@ async function fbMultiSelect(input) {
   fbPending = [];
   for (const f of files) {
     try {
-      const rows = await fbReadTable(f);
-      const art = fbClassify(rows);
-      const entry = { name: f.name, art, rows };
+      const sheets = await fbReadTableAll(f);
+      const rows = sheets.length ? sheets[0].rows : [];
+      let art = fbLooksLikeBuchungen(sheets) ? "buchungen" : fbClassify(rows);
+      const entry = { name: f.name, art, rows, sheets };
+      if (art === "buchungen") {
+        entry.ges = fbGesFromFilename(f.name);
+        entry.parsedBuch = fbParseBuchungen(sheets);
+        const kn = Object.keys(entry.parsedBuch).length;
+        const bn = Object.values(entry.parsedBuch).reduce((s, k) => s + k.buch.length, 0);
+        entry.info = bn + " Buchungen auf " + kn + " Konten";
+        if (!bn) { entry.art = "unbekannt"; entry.info = "Keine Buchungszeilen erkannt"; }
+      }
       if (art === "er") {
         entry.ges = fbGesFromFilename(f.name);
         const hatSoftware = rows.some(r => /^3\d{3}$/.test(String(r[0] || "")) && /software/i.test(String(r[1] || "")));
@@ -2681,6 +2915,18 @@ async function fbMultiRun() {
           await fbSaveItem({ cfg: "fb", y: year, k: key, m }, existing[key]); n++;
         }
         meld.push(e.name + ": " + n + " Budget-Positionen");
+      } else if (e.art === "buchungen") {
+        const ges = (e.ges || "").trim();
+        if (!ges) { meld.push(e.name + ": übersprungen (keine Gesellschaft)"); continue; }
+        await fbEnsureDataCol();
+        const existing = {};
+        cache.budget.forEach(it => { const d = fbParse(it, "bch"); if (d && d.y == year && d.g === ges) existing[d.kt] = d.id; });
+        let n = 0, b = 0;
+        for (const [kt, obj] of Object.entries(e.parsedBuch)) {
+          await fbSaveBuch(year, ges, kt, obj.bez, obj.buch, existing[kt]);
+          n++; b += obj.buch.length;
+        }
+        meld.push(e.name + " → " + ges + ": " + b + " Buchungen (" + n + " Konten)");
       } else if (e.art === "er") {
         const ges = (e.ges || "").trim();
         if (!ges) { meld.push(e.name + ": übersprungen (keine Gesellschaft)"); continue; }
@@ -2769,17 +3015,32 @@ function renderBudgetVergleich(el) {
   const abwPct = key => vals.b[key] ? (abw(key) / Math.abs(vals.b[key]) * 100) : null;
   const hatBudget = Object.keys(bud).length > 0;
 
+  const buchMap = fbBuchAll(year);
+  const ncols = 6 + G.length;   // Position, Budget, je G, Konzern, Abw, Abw%, ✕
   const kontoRows = key => ist.filter(d => d.z === key)
     .sort((a,b) => (a.g + a.kt).localeCompare(b.g + b.kt))
-    .map(d => `
-      <tr class="fb-det">
-        <td style="padding-left:36px;color:var(--text-faint);font-size:10.5px">${escape(d.g)} · ${escape(d.kt)} ${escape(d.b || "")}</td>
+    .map(d => {
+      const bid = d.g + "|" + d.kt;
+      const hatBuch = !!(buchMap[bid] && buchMap[bid].buch.length);
+      const open = hatBuch && fbExpanded2[bid];
+      return `
+      <tr class="fb-det ${hatBuch ? "fb-pos" : ""}" ${hatBuch ? `onclick="event.stopPropagation();fbToggle2('${escape(bid)}')" title="Klicken: Buchungen ${open ? "zuklappen" : "anzeigen"}"` : ""}>
+        <td style="padding-left:36px;color:var(--text-faint);font-size:10.5px">${hatBuch ? `<span style="color:var(--accent);font-size:9px">${open ? "▼" : "▶"}</span> ` : ""}${escape(d.g)} · ${escape(d.kt)} ${escape(d.b || "")}${hatBuch ? ` <span style="opacity:0.6">(${buchMap[bid].buch.length})</span>` : ""}</td>
         <td></td>
         ${G.map(g => `<td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint)">${g === d.g ? fmt((parseFloat(d.v) || 0) * fkt(key)) : ""}</td>`).join("")}
         <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint)">${fmt((parseFloat(d.v) || 0) * fkt(key))}</td>
         <td></td><td></td>
-        <td><button class="icon-btn" onclick="fbIstDelete(${d.id})" title="Konto löschen">✕</button></td>
-      </tr>`).join("");
+        <td><button class="icon-btn" onclick="event.stopPropagation();fbIstDelete(${d.id})" title="Konto löschen">✕</button></td>
+      </tr>
+      ${open ? buchMap[bid].buch.map(b => `
+      <tr class="fb-buch">
+        <td colspan="${ncols}" style="padding:2px 8px 2px 58px;font-family:var(--font-mono);font-size:10px;color:var(--text-faint);border-bottom:1px dotted var(--border)">
+          <span style="display:inline-block;width:60px">${escape(b[0])}</span>
+          <span style="display:inline-block;min-width:280px">${escape(b[1])}</span>
+          <span style="display:inline-block;width:90px;text-align:right">${((b[2] || 0) * fkt(key)).toLocaleString("de-CH", { minimumFractionDigits: 2 })}</span>
+        </td>
+      </tr>`).join("") : ""}`;
+    }).join("");
 
   el.innerHTML = `
     ${budgetLastError ? `
@@ -2794,7 +3055,10 @@ function renderBudgetVergleich(el) {
         ${fbPending.map((e, i) => `
           <div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;flex-wrap:wrap">
             <span style="font-family:var(--font-mono);font-size:11px;min-width:220px">${escape(e.name)}</span>
-            <span style="color:${e.art === "unbekannt" ? "var(--danger)" : "var(--accent)"};min-width:120px">${e.art === "er" ? "Erfolgsrechnung" : e.art.startsWith("budget") ? "Konzern-Budget" : "Nicht erkannt"}</span>
+            <span style="color:${e.art === "unbekannt" ? "var(--danger)" : "var(--accent)"};min-width:120px">${e.art === "er" ? "Erfolgsrechnung" : e.art === "buchungen" ? "Buchungsdetails" : e.art.startsWith("budget") ? "Konzern-Budget" : "Nicht erkannt"}</span>
+            ${e.art === "buchungen" ? `
+              <input value="${escape(e.ges || "")}" onchange="fbPendingSet(${i},'ges',this.value)" placeholder="Gesellschaft"
+                style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;width:140px;font-size:11px">` : ""}
             ${e.art === "er" ? `
               <input value="${escape(e.ges || "")}" onchange="fbPendingSet(${i},'ges',this.value)" placeholder="Gesellschaft"
                 style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;width:140px;font-size:11px">
@@ -2819,10 +3083,14 @@ function renderBudgetVergleich(el) {
       </div>
       <span style="font-size:11px;color:var(--text-dim)">Ist H1 ÷ 6 = Ø-Monat</span>
       <div style="margin-left:auto;display:flex;gap:8px;align-items:center;font-size:11px">
-        <label class="btn btn-sm" title="Konzern-Budget und/oder bexio-ERs (XLSX oder CSV) — mehrere Dateien aufs Mal, Typ wird automatisch erkannt">⇪ Dateien importieren
+        <input id="fb-search" placeholder="Suche in Buchungen … (z.B. Swisscom)" value="${escape(filters.fbSearch || "")}"
+          oninput="filters.fbSearch=this.value;fbSearchRender()"
+          style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;width:220px;font-size:11px">
+        <label class="btn btn-sm" title="Konzern-Budget, bexio-ERs und Buchungsdetails (XLSX oder CSV) — mehrere Dateien aufs Mal, Typ wird automatisch erkannt">⇪ Dateien importieren
           <input type="file" accept=".csv,.txt,.xlsx" multiple style="display:none" onchange="fbMultiSelect(this)"></label>
       </div>
     </div>
+    <div id="fb-search-results">${fbSearchResultsHtml(year)}</div>
     ${!hatBudget && !ist.length ? `
       <div style="text-align:center;padding:50px 20px;color:var(--text-dim)">
         <div style="font-size:36px;margin-bottom:10px">▦</div>
@@ -2866,6 +3134,42 @@ function renderBudgetVergleich(el) {
 }
 
 /* Monatsansicht: Jan–Jun je Budget | Ist (H1÷6 linear) | Abw., plus H1-Block */
+/* Volltextsuche über alle Buchungsdetails — nur der Ergebnis-Container wird
+   neu gerendert, damit das Suchfeld den Fokus behält. */
+function fbSearchResultsHtml(year) {
+  const q = (filters.fbSearch || "").trim().toLowerCase();
+  if (q.length < 2) return "";
+  const buchMap = fbBuchAll(year);
+  const hits = [];
+  Object.entries(buchMap).forEach(([id, obj]) => {
+    const [g, kt] = id.split("|");
+    obj.buch.forEach(b => {
+      if (String(b[1] || "").toLowerCase().includes(q)) hits.push({ g, kt, bez: obj.bez, d: b[0], t: b[1], v: (b[2] || 0) * (kt.startsWith("3") ? 1 : -1) });
+    });
+  });
+  const sum = hits.reduce((s, h) => s + h.v, 0);
+  return `
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:14px">
+      <div style="font-size:12px;margin-bottom:8px"><strong>${hits.length}</strong> Buchung(en) zu «${escape(filters.fbSearch)}»
+        · Summe <span style="font-family:var(--font-mono)">${sum.toLocaleString("de-CH", { minimumFractionDigits: 2 })}</span></div>
+      ${hits.length ? `<div style="max-height:260px;overflow:auto">
+        ${hits.slice(0, 200).map(h => `
+          <div style="display:flex;gap:10px;font-size:10.5px;font-family:var(--font-mono);color:var(--text-dim);padding:2px 0;border-bottom:1px dotted var(--border)">
+            <span style="width:60px">${escape(h.d)}</span>
+            <span style="width:90px">${escape(h.g)}</span>
+            <span style="width:44px">${escape(h.kt)}</span>
+            <span style="flex:1">${escape(h.t)}</span>
+            <span style="width:90px;text-align:right">${h.v.toLocaleString("de-CH", { minimumFractionDigits: 2 })}</span>
+          </div>`).join("")}
+        ${hits.length > 200 ? `<div style="font-size:10px;color:var(--text-faint);padding-top:4px">… ${hits.length - 200} weitere</div>` : ""}
+      </div>` : `<div style="font-size:11px;color:var(--text-faint)">Keine Treffer.</div>`}
+    </div>`;
+}
+function fbSearchRender() {
+  const el = document.getElementById("fb-search-results");
+  if (el) el.innerHTML = fbSearchResultsHtml(filters.budgetYear);
+}
+
 function renderFbMonate(el, ctx) {
   const { year, bud, ist, G, vals, rowsOut, fkt } = ctx;
   const fmt = v => Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH");
