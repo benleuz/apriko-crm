@@ -947,7 +947,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.37.1</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.37.2</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -2815,15 +2815,26 @@ function fbGesFromFilename(name) {
 let fbDataColOk = false;
 async function fbEnsureDataCol() {
   if (fbDataColOk) return;
+  // 1. Existiert die Spalte schon? (Lesen geht mit Sites.ReadWrite)
+  try {
+    const cols = await graph(`/sites/${siteId}/lists/${listIds.Budget}/columns`);
+    if ((cols.value || []).some(c => c.name === "Data")) { fbDataColOk = true; return; }
+  } catch (e) { /* weiter zum Anlege-Versuch */ }
+  // 2. Anlegen versuchen (braucht Sites.Manage.All — kann 403 geben)
   try {
     await graph(`/sites/${siteId}/lists/${listIds.Budget}/columns`, {
       method: "POST",
       body: JSON.stringify({ name: "Data", text: { allowMultipleLines: true, textType: "plain" } })
     });
+    fbDataColOk = true;
   } catch (e) {
-    if (!/nameAlreadyExists|already exists|409/i.test(e.message)) throw e;
+    if (/nameAlreadyExists|already exists|409/i.test(e.message)) { fbDataColOk = true; return; }
+    if (/403|accessDenied/i.test(e.message)) {
+      throw new Error("Für Buchungsdetails fehlt in der Budget-Liste die Spalte 'Data', und die App darf sie nicht selbst anlegen (Graph 403 — Spalten anlegen braucht Sites.Manage.All). " +
+        "Einmalige Abhilfe von Hand (1 Minute): SharePoint-Site sales2 → Liste 'Budget' → '+ Spalte hinzufügen' → Typ 'Mehrere Textzeilen' → Name exakt: Data → Speichern. Danach den Import einfach nochmals starten.");
+    }
+    throw e;
   }
-  fbDataColOk = true;
 }
 /* Buchungen pro Gesellschaft+Konto: Title-JSON + Data-Feld (JSON-Array) */
 async function fbSaveBuch(year, ges, kt, bez, buch, existingId) {
@@ -2892,9 +2903,11 @@ function fbPendingSet(i, field, value) { if (fbPending[i]) fbPending[i][field] =
 async function fbMultiRun() {
   const year = filters.budgetYear;
   const meld = [];
+  const failed = [];
   try {
     budgetShowLoading("Import läuft …", fbPending.length + " Datei(en)");
     for (const e of fbPending) {
+      try {
       if (e.art === "budget_keys") {
         const existing = {};
         cache.budget.forEach(it => { const d = fbParse(it, "fb"); if (d && d.y == year) existing[d.k] = d.id; });
@@ -2947,8 +2960,13 @@ async function fbMultiRun() {
         meld.push(e.name + " → " + ges + ": " + n + " Konten" + (leer ? " (" + leer + " ohne Saldo)" : ""));
         if (!n && leer) budgetLastError = e.name + ": " + leer + " Konten gefunden, aber keines mit Saldo — bexio-Export ohne Beträge.";
       }
+      } catch (errFile) {
+        e.warn = errFile.message;
+        failed.push(e);
+        budgetLastError = e.name + ": " + errFile.message;
+      }
     }
-    fbPending = [];
+    fbPending = failed;   // Erfolgreiches verschwindet; Fehlgeschlagenes bleibt sichtbar
     await reload("Budget");
     budgetHideLoading();
     toast(meld.join(" · ") || "Nichts importiert");
@@ -3051,7 +3069,11 @@ function renderBudgetVergleich(el) {
       </div>` : ""}
     ${fbPending.length ? `
       <div style="background:var(--bg-card);border:1px solid var(--accent);border-radius:8px;padding:14px;margin-bottom:14px">
-        <div style="font-weight:600;margin-bottom:10px">Import-Vorschau — Jahr ${year}</div>
+        <div style="font-weight:600;margin-bottom:${window.fbPendingCollapsed ? 0 : 10}px;cursor:pointer;display:flex;justify-content:space-between" onclick="window.fbPendingCollapsed=!window.fbPendingCollapsed;render()">
+          <span>Import-Vorschau — Jahr ${year} (${fbPending.length} Datei${fbPending.length > 1 ? "en" : ""})</span>
+          <span style="color:var(--accent);font-size:11px">${window.fbPendingCollapsed ? "▶ aufklappen" : "▼ einklappen"}</span>
+        </div>
+        ${window.fbPendingCollapsed ? "" : `
         ${fbPending.map((e, i) => `
           <div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;flex-wrap:wrap">
             <span style="font-family:var(--font-mono);font-size:11px;min-width:220px">${escape(e.name)}</span>
@@ -3072,7 +3094,7 @@ function renderBudgetVergleich(el) {
         <div style="display:flex;gap:8px;margin-top:12px">
           <button class="btn btn-sm" onclick="fbMultiRun()">Import starten</button>
           <button class="btn btn-sm" style="background:none;border:1px solid var(--border)" onclick="fbPending=[];render()">Abbrechen</button>
-        </div>
+        </div>`}
       </div>` : ""}
     <div style="display:flex;gap:12px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
       <label style="color:var(--text-dim);font-size:12px">Jahr:</label>
