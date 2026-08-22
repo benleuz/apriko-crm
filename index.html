@@ -913,7 +913,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.34.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.34.1</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -2348,74 +2348,186 @@ async function fbSaveItem(obj, existingId) {
   else { await createItem("Budget", { Title: title }); }
 }
 
-/* Budget-CSV-Import: Key;Jan;…;Dez (Semikolon/Komma/Tab) */
-function fbImportBudget(input) {
+/* ---------- Minimaler XLSX-Leser (ohne Fremdbibliothek) ----------
+   XLSX = ZIP-Container mit XML. ZIP-Einträge werden über das Central
+   Directory gefunden und per DecompressionStream('deflate-raw') entpackt
+   (Chrome/Edge/Safari 16.4+). Liefert das erste Blatt als string[][]. */
+async function fbUnzipEntry(buf, name) {
+  const dv = new DataView(buf);
+  // End of Central Directory suchen (Signatur 0x06054b50, von hinten)
+  let eocd = -1;
+  for (let i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 65558); i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("Kein gültiges XLSX/ZIP");
+  let off = dv.getUint32(eocd + 16, true);
+  const count = dv.getUint16(eocd + 10, true);
+  for (let i = 0; i < count; i++) {
+    if (dv.getUint32(off, true) !== 0x02014b50) break;
+    const method = dv.getUint16(off + 10, true);
+    const csize = dv.getUint32(off + 20, true);
+    const nlen = dv.getUint16(off + 28, true);
+    const elen = dv.getUint16(off + 30, true);
+    const clen = dv.getUint16(off + 32, true);
+    const lho = dv.getUint32(off + 42, true);
+    const fname = new TextDecoder().decode(new Uint8Array(buf, off + 46, nlen));
+    if (fname === name) {
+      const lnlen = dv.getUint16(lho + 26, true);
+      const lelen = dv.getUint16(lho + 28, true);
+      const data = buf.slice(lho + 30 + lnlen + lelen, lho + 30 + lnlen + lelen + csize);
+      if (method === 0) return new TextDecoder().decode(data);
+      const ds = new DecompressionStream("deflate-raw");
+      const out = await new Response(new Blob([data]).stream().pipeThrough(ds)).arrayBuffer();
+      return new TextDecoder().decode(out);
+    }
+    off += 46 + nlen + elen + clen;
+  }
+  return null;
+}
+function fbColIndex(ref) {   // "BC12" → Spaltenindex 0-basiert
+  let c = 0;
+  for (const ch of ref) {
+    if (ch >= "A" && ch <= "Z") c = c * 26 + (ch.charCodeAt(0) - 64);
+    else break;
+  }
+  return c - 1;
+}
+async function fbReadXlsx(buf) {
+  // Erstes Blatt über workbook.xml + rels auflösen (Fallback: sheet1.xml)
+  let target = "xl/worksheets/sheet1.xml";
+  try {
+    const wbXml = await fbUnzipEntry(buf, "xl/workbook.xml");
+    const relsXml = await fbUnzipEntry(buf, "xl/_rels/workbook.xml.rels");
+    if (wbXml && relsXml) {
+      const p = new DOMParser();
+      const wbDoc = p.parseFromString(wbXml, "application/xml");
+      const sheet = wbDoc.getElementsByTagName("sheet")[0];
+      const rid = sheet && (sheet.getAttribute("r:id") || sheet.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id"));
+      if (rid) {
+        const relsDoc = p.parseFromString(relsXml, "application/xml");
+        for (const rel of relsDoc.getElementsByTagName("Relationship")) {
+          if (rel.getAttribute("Id") === rid) {
+            let t = rel.getAttribute("Target");
+            target = t.startsWith("/") ? t.slice(1) : "xl/" + t.replace(/^\.\//, "");
+          }
+        }
+      }
+    }
+  } catch (e) { /* Fallback bleibt */ }
+  const sheetXml = await fbUnzipEntry(buf, target);
+  if (!sheetXml) throw new Error("Kein Tabellenblatt im XLSX gefunden");
+  const ssXml = await fbUnzipEntry(buf, "xl/sharedStrings.xml");
+  const p = new DOMParser();
+  const shared = [];
+  if (ssXml) {
+    const ssDoc = p.parseFromString(ssXml, "application/xml");
+    for (const si of ssDoc.getElementsByTagName("si")) {
+      let t = "";
+      for (const tn of si.getElementsByTagName("t")) t += tn.textContent;
+      shared.push(t);
+    }
+  }
+  const doc = p.parseFromString(sheetXml, "application/xml");
+  const rows = [];
+  for (const rowEl of doc.getElementsByTagName("row")) {
+    const arr = [];
+    for (const c of rowEl.getElementsByTagName("c")) {
+      const ref = c.getAttribute("r") || "";
+      const ci = ref ? fbColIndex(ref) : arr.length;
+      const t = c.getAttribute("t");
+      let v = "";
+      if (t === "inlineStr") {
+        const tn = c.getElementsByTagName("t")[0];
+        v = tn ? tn.textContent : "";
+      } else {
+        const vn = c.getElementsByTagName("v")[0];
+        v = vn ? vn.textContent : "";
+        if (t === "s") v = shared[parseInt(v)] ?? "";
+      }
+      arr[ci] = v;
+    }
+    rows.push(Array.from(arr, x => x === undefined ? "" : String(x)));
+  }
+  return rows;
+}
+/* Datei (CSV/TXT/XLSX) → Zeilen als string[][] */
+function fbReadTable(file) {
+  return new Promise((resolve, reject) => {
+    if (/\.xlsx$/i.test(file.name)) {
+      const r = new FileReader();
+      r.onload = e => fbReadXlsx(e.target.result).then(resolve).catch(reject);
+      r.onerror = () => reject(new Error("Datei nicht lesbar"));
+      r.readAsArrayBuffer(file);
+    } else {
+      const r = new FileReader();
+      r.onload = e => {
+        const lines = String(e.target.result).replace(/^\uFEFF/, "").split(/\r?\n/).filter(l => l.trim());
+        const sep = (lines[0] || "").includes(";") ? ";" : ((lines[0] || "").includes("\t") ? "\t" : ",");
+        resolve(lines.map(l => l.split(sep).map(s => s.trim().replace(/^"|"$/g, ""))));
+      };
+      r.onerror = () => reject(new Error("Datei nicht lesbar"));
+      r.readAsText(file, "utf-8");
+    }
+  });
+}
+
+/* Budget-Import: Key;Jan;…;Dez — CSV oder XLSX */
+async function fbImportBudget(input) {
   const file = input.files && input.files[0]; if (!file) return;
   const year = filters.budgetYear;
-  const reader = new FileReader();
-  reader.onload = async e => {
-    try {
-      budgetShowLoading("Budget wird importiert …", "");
-      const lines = String(e.target.result).replace(/^\uFEFF/, "").split(/\r?\n/).filter(l => l.trim());
-      const sep = lines[0].includes(";") ? ";" : (lines[0].includes("\t") ? "\t" : ",");
-      let n = 0;
-      const existing = {};
-      cache.budget.forEach(it => { const d = fbParse(it, "fb"); if (d && d.y == year) existing[d.k] = d.id; });
-      for (const line of lines) {
-        const parts = line.split(sep).map(s => s.trim());
-        const key = parts[0];
-        if (!FB_LABELS[key]) continue;
-        const m = parts.slice(1, 13).map(v => Math.round(parseFloat(String(v).replace(/['\u2019]/g, "").replace(",", ".")) || 0));
-        while (m.length < 12) m.push(0);
-        await fbSaveItem({ cfg: "fb", y: year, k: key, m }, existing[key]);
-        n++;
-      }
-      await reload("Budget");
-      budgetHideLoading();
-      toast(n + " Budget-Positionen importiert");
-      render();
-    } catch (err) { budgetHideLoading(); budgetLastError = err.message; render(); }
-  };
-  reader.readAsText(file, "utf-8");
   input.value = "";
+  try {
+    budgetShowLoading("Budget wird importiert …", file.name);
+    const rows = await fbReadTable(file);
+    let n = 0;
+    const existing = {};
+    cache.budget.forEach(it => { const d = fbParse(it, "fb"); if (d && d.y == year) existing[d.k] = d.id; });
+    for (const parts of rows) {
+      const key = String(parts[0] || "").trim();
+      if (!FB_LABELS[key]) continue;
+      const m = parts.slice(1, 13).map(v => Math.round(parseFloat(String(v).replace(/['\u2019]/g, "").replace(",", ".")) || 0));
+      while (m.length < 12) m.push(0);
+      await fbSaveItem({ cfg: "fb", y: year, k: key, m }, existing[key]);
+      n++;
+    }
+    await reload("Budget");
+    budgetHideLoading();
+    toast(n + " Budget-Positionen importiert");
+    render();
+  } catch (err) { budgetHideLoading(); budgetLastError = err.message; render(); }
 }
 
 /* Ist-CSV-Import: bexio-ER-Export (Nummer;Bezeichnung;Saldo…) */
-function fbImportIst(input) {
+async function fbImportIst(input) {
   const file = input.files && input.files[0]; if (!file) return;
   const ges = (document.getElementById("fb-ges").value || "").trim();
   const istSW = document.getElementById("fb-ges-typ").value === "sw";
   if (!ges) { toast("Bitte zuerst den Namen der Gesellschaft eintragen.", true); input.value = ""; return; }
   const year = filters.budgetYear;
-  const reader = new FileReader();
-  reader.onload = async e => {
-    try {
-      budgetShowLoading("ER wird importiert …", ges);
-      const lines = String(e.target.result).replace(/^\uFEFF/, "").split(/\r?\n/).filter(l => l.trim());
-      const sep = (lines[0] || "").includes(";") ? ";" : (lines[0].includes("\t") ? "\t" : ",");
-      const existing = {};
-      cache.budget.forEach(it => { const d = fbParse(it, "ist"); if (d && d.y == year && d.g === ges) existing[d.kt] = d.id; });
-      let n = 0, leer = 0;
-      for (const line of lines) {
-        const p = line.split(sep).map(s => s.trim().replace(/^"|"$/g, ""));
-        const nr = p[0];
-        if (!/^\d{4}$/.test(nr)) continue;   // nur Einzelkonten
-        const bez = (p[1] || "").slice(0, 24);
-        const rawV = (p[2] || "").replace(/['\u2019\s]/g, "").replace(",", ".");
-        const v = parseFloat(rawV);
-        if (!rawV || isNaN(v)) { leer++; continue; }
-        await fbSaveItem({ cfg: "ist", y: year, p: "H1", g: ges, kt: nr, b: bez,
-          v: Math.round(v * 100) / 100, z: fbZuordnung(nr, istSW) }, existing[nr]);
-        n++;
-      }
-      await reload("Budget");
-      budgetHideLoading();
-      toast(n + " Konten importiert (" + ges + ")" + (leer ? " — " + leer + " ohne Saldo übersprungen" : ""));
-      render();
-    } catch (err) { budgetHideLoading(); budgetLastError = err.message; render(); }
-  };
-  reader.readAsText(file, "utf-8");
   input.value = "";
+  try {
+    budgetShowLoading("ER wird importiert …", ges + " · " + file.name);
+    const rows = await fbReadTable(file);
+    const existing = {};
+    cache.budget.forEach(it => { const d = fbParse(it, "ist"); if (d && d.y == year && d.g === ges) existing[d.kt] = d.id; });
+    let n = 0, leer = 0;
+    for (const p of rows) {
+      const nr = String(p[0] || "").trim();
+      if (!/^\d{4}$/.test(nr)) continue;   // nur Einzelkonten
+      const bez = String(p[1] || "").slice(0, 24);
+      const rawV = String(p[2] ?? "").replace(/['\u2019\s]/g, "").replace(",", ".");
+      const v = parseFloat(rawV);
+      if (!rawV || isNaN(v)) { leer++; continue; }
+      await fbSaveItem({ cfg: "ist", y: year, p: "H1", g: ges, kt: nr, b: bez,
+        v: Math.round(v * 100) / 100, z: fbZuordnung(nr, istSW) }, existing[nr]);
+      n++;
+    }
+    await reload("Budget");
+    budgetHideLoading();
+    toast(n + " Konten importiert (" + ges + ")" + (leer ? " — " + leer + " Konten ohne Saldo übersprungen" : ""));
+    if (!n && leer) { budgetLastError = "Import '" + file.name + "': " + leer + " Konten gefunden, aber KEINES mit Saldo — der Export enthält keine Beträge (bexio: Auswertung inkl. Saldo-Spalte exportieren)."; }
+    render();
+  } catch (err) { budgetHideLoading(); budgetLastError = err.message; render(); }
 }
 
 async function fbIstChange(id, field, value) {
@@ -2513,14 +2625,14 @@ function renderBudgetVergleich(el) {
       </div>
       <span style="font-size:11px;color:var(--text-dim)">Ist H1 ÷ 6 = Ø-Monat</span>
       <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:11px">
-        <label class="btn btn-sm" title="CSV: Key;Jan;…;Dez">Budget-CSV
-          <input type="file" accept=".csv,.txt" style="display:none" onchange="fbImportBudget(this)"></label>
+        <label class="btn btn-sm" title="CSV oder XLSX: Key;Jan;…;Dez">Budget-Import
+          <input type="file" accept=".csv,.txt,.xlsx" style="display:none" onchange="fbImportBudget(this)"></label>
         <input id="fb-ges" placeholder="Gesellschaft, z.B. Apriko AG" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;width:150px;font-size:11px">
         <select id="fb-ges-typ" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:5px 6px;border-radius:4px;font-size:11px">
           <option value="sw">Software</option><option value="bo">Backoffice</option>
         </select>
-        <label class="btn btn-sm" title="bexio-ER-Export als CSV (Nummer;Bezeichnung;Saldo)">ER-CSV
-          <input type="file" accept=".csv,.txt" style="display:none" onchange="fbImportIst(this)"></label>
+        <label class="btn btn-sm" title="bexio-ER-Export als XLSX oder CSV (Nummer / Bezeichnung / Saldo)">ER-Import
+          <input type="file" accept=".csv,.txt,.xlsx" style="display:none" onchange="fbImportIst(this)"></label>
       </div>
     </div>
     ${!hatBudget && !ist.length ? `
