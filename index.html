@@ -825,6 +825,13 @@
   .bud-in:hover{border-color:var(--border)}
   .bud-in:focus{border-color:var(--accent);outline:none;background:var(--bg)}
   .bud-in-m{width:52px}
+  .bud-tabs{display:flex;gap:2px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:2px}
+  .bud-tab{background:none;border:none;color:var(--text-dim);padding:5px 12px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:12px}
+  .bud-tab.active{background:var(--bg-hover);color:var(--text);font-weight:600}
+  .fb-pos{cursor:pointer}
+  .fb-pos:hover td{background:var(--bg-hover)}
+  .fb-det td{border-bottom:1px dotted var(--border) !important}
+
   .bud-p-grid{display:inline-flex;align-items:center;white-space:nowrap;
     font-size:10px;color:var(--text-faint)}
   .bud-p-c1{width:58px;text-align:right}
@@ -906,7 +913,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.32.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.34.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -2244,6 +2251,82 @@ function budgetAddFromModal() {
   }
 }
 
+/* ===========================================================
+   BUDGET VS. IST (Finanz-Vergleich Konzern)
+   Budget-ER-Struktur als Hauptgliederung; Ist = ER-Salden der
+   Gesellschaften (bexio-Konvention: Ertrag +, Aufwand −), pro
+   Position aufklappbar bis auf Kontoebene.
+   Persistenz (Title-JSON in Budget-Liste):
+     {"cfg":"fb","y":2026,"k":"SW_Ertrag","m":[12]}          Budget-Position
+     {"cfg":"ist","y":2026,"p":"H1","g":"Apriko AG","kt":"3400","b":"…","v":-123,"z":"SW_Lohn"}
+   =========================================================== */
+const FB_LABELS = {
+  SW_Ertrag:"Softwareertrag", SW_Erloesmind:"Erlösminderungen Software",
+  BO_Ertrag:"Ertrag Backoffice", BO_Erloesmind:"Erlösminderungen Backoffice",
+  SW_EinkaufDL:"Einkauf bezogene DL Software", BO_EinkaufDL:"Einkauf bezogene DL Backoffice",
+  SW_Lohn:"Lohnaufwand Software", SW_SV:"Sozialversicherungen Software", SW_UebrPA:"Übriger Personalaufwand Software",
+  BO_Lohn:"Lohnaufwand Backoffice", BO_SV:"Sozialversicherungen Backoffice", BO_UebrPA:"Übriger Personalaufwand Backoffice",
+  G_Raum:"Raumaufwand", G_URE:"Unterhalt, Reparaturen, Ersatz", G_Fahrzeug:"Fahrzeug- und Transportaufwand",
+  G_Versich:"Sachversicherungen, Abgaben, Gebühren", G_Energie:"Energie- und Entsorgungsaufwand",
+  G_VerwIT:"Verwaltungs- und Informatikaufwand", G_Werbung:"Werbe- und Repräsentationsaufwand",
+  G_Sonstig:"Sonstiger betrieblicher Aufwand", G_Abschr:"Abschreibungen",
+  G_Finanz:"Finanzaufwand und Finanzertrag", G_Steuern:"Steueraufwand"
+};
+/* Aufwand-Positionen: bexio-Wert wird für die Anzeige ×(−1) gedreht */
+const FB_AUFWAND = new Set(["SW_EinkaufDL","BO_EinkaufDL","SW_Lohn","SW_SV","SW_UebrPA","BO_Lohn","BO_SV","BO_UebrPA",
+  "G_Raum","G_URE","G_Fahrzeug","G_Versich","G_Energie","G_VerwIT","G_Werbung","G_Sonstig","G_Abschr","G_Finanz","G_Steuern"]);
+/* Render-Plan: Detailzeilen, Zwischensummen (sum über letzte n Details) und Rechenzeilen */
+const FB_PLAN = [
+  ["d","SW_Ertrag",1], ["d","SW_Erloesmind",1], ["s2","DLSW","Dienstleistungserlöse Software"],
+  ["d","BO_Ertrag",1], ["d","BO_Erloesmind",1], ["s2","DLBO","Dienstleistungserlöse Backoffice"],
+  ["d","SW_EinkaufDL",0], ["d","BO_EinkaufDL",0],
+  ["d","SW_Lohn",1], ["d","SW_SV",1], ["d","SW_UebrPA",1], ["s3","PASW","Personalaufwand Software"],
+  ["d","BO_Lohn",1], ["d","BO_SV",1], ["d","BO_UebrPA",1], ["s3","PABO","Personalaufwand Backoffice"],
+  ["c","BESW","Bruttoertrag Software", r => r.DLSW - r.SW_EinkaufDL - r.PASW],
+  ["c","BEBO","Bruttoertrag Backoffice", r => r.DLBO - r.BO_EinkaufDL - r.PABO],
+  ["c","BETOT","Bruttoertrag TOTAL", r => r.BESW + r.BEBO],
+  ["d","G_Raum",1], ["d","G_URE",1], ["d","G_Fahrzeug",1], ["d","G_Versich",1],
+  ["d","G_Energie",1], ["d","G_VerwIT",1], ["d","G_Werbung",1], ["d","G_Sonstig",1],
+  ["s8","BETRIEB","Betriebsaufwand"],
+  ["c","EBITDA","EBITDA", r => r.BETOT - r.BETRIEB],
+  ["d","G_Abschr",0],
+  ["c","EBIT","EBIT", r => r.EBITDA - r.G_Abschr],
+  ["d","G_Finanz",0],
+  ["c","EBT","EBT", r => r.EBIT - r.G_Finanz],
+  ["d","G_Steuern",0],
+  ["c","RESULT","Halbjahresgewinn / (-verlust)", r => r.EBT - r.G_Steuern]
+];
+/* Auto-Zuordnung Konto → Budget-Key (Software-Gesellschaft vs. Backoffice) */
+function fbZuordnung(nr, istSoftware) {
+  nr = String(nr); const m2 = nr.slice(0, 2);
+  if (nr.startsWith("34")) return istSoftware ? "SW_Ertrag" : "BO_Ertrag";
+  if (nr.startsWith("38") || nr.startsWith("39")) return istSoftware ? "SW_Erloesmind" : "BO_Erloesmind";
+  if (nr.startsWith("44")) return istSoftware ? "SW_EinkaufDL" : "BO_EinkaufDL";
+  if (m2 === "50") return istSoftware ? "SW_Lohn" : "BO_Lohn";
+  if (m2 === "57") return istSoftware ? "SW_SV" : "BO_SV";
+  if (m2 === "58" || m2 === "59") return istSoftware ? "SW_UebrPA" : "BO_UebrPA";
+  const map = { "60":"G_Raum","61":"G_URE","62":"G_Fahrzeug","63":"G_Versich","64":"G_Energie",
+    "65":"G_VerwIT","66":"G_Werbung","68":"G_Abschr","69":"G_Finanz","89":"G_Steuern" };
+  return map[m2] || "G_Sonstig";
+}
+function fbParse(item, want) {
+  if (!item || !item.Title || item.Title[0] !== "{") return null;
+  try { const d = JSON.parse(item.Title); return d.cfg === want ? { id: item.id, ...d } : null; } catch (e) { return null; }
+}
+function fbBudget(year) {   // key → [12]
+  const out = {};
+  cache.budget.forEach(it => {
+    const d = fbParse(it, "fb");
+    if (d && d.y == year) out[d.k] = (d.m || []).map(v => parseFloat(v) || 0);
+  });
+  return out;
+}
+function fbIst(year) {      // Liste der Ist-Konten (H1)
+  return cache.budget.map(it => fbParse(it, "ist")).filter(d => d && d.y == year);
+}
+let fbExpanded = {};        // key → true (aufgeklappte Positionen)
+let fbGesellschaften = [];  // aus Ist-Daten abgeleitet
+
 window.addEventListener("unhandledrejection", ev => {
   if (currentView === "budget") {
     budgetLastError = "Unbehandelter Fehler: " + (ev.reason && ev.reason.message ? ev.reason.message : String(ev.reason));
@@ -2257,7 +2340,319 @@ window.addEventListener("error", ev => {
   }
 });
 
+/* ---------- Budget vs. Ist: Ansicht ---------- */
+async function fbSaveItem(obj, existingId) {
+  const title = JSON.stringify(obj);
+  if (existingId) { await updateItem("Budget", existingId, { Title: title });
+    const raw = cache.budget.find(x => x.id == existingId); if (raw) raw.Title = title; }
+  else { await createItem("Budget", { Title: title }); }
+}
+
+/* Budget-CSV-Import: Key;Jan;…;Dez (Semikolon/Komma/Tab) */
+function fbImportBudget(input) {
+  const file = input.files && input.files[0]; if (!file) return;
+  const year = filters.budgetYear;
+  const reader = new FileReader();
+  reader.onload = async e => {
+    try {
+      budgetShowLoading("Budget wird importiert …", "");
+      const lines = String(e.target.result).replace(/^\uFEFF/, "").split(/\r?\n/).filter(l => l.trim());
+      const sep = lines[0].includes(";") ? ";" : (lines[0].includes("\t") ? "\t" : ",");
+      let n = 0;
+      const existing = {};
+      cache.budget.forEach(it => { const d = fbParse(it, "fb"); if (d && d.y == year) existing[d.k] = d.id; });
+      for (const line of lines) {
+        const parts = line.split(sep).map(s => s.trim());
+        const key = parts[0];
+        if (!FB_LABELS[key]) continue;
+        const m = parts.slice(1, 13).map(v => Math.round(parseFloat(String(v).replace(/['\u2019]/g, "").replace(",", ".")) || 0));
+        while (m.length < 12) m.push(0);
+        await fbSaveItem({ cfg: "fb", y: year, k: key, m }, existing[key]);
+        n++;
+      }
+      await reload("Budget");
+      budgetHideLoading();
+      toast(n + " Budget-Positionen importiert");
+      render();
+    } catch (err) { budgetHideLoading(); budgetLastError = err.message; render(); }
+  };
+  reader.readAsText(file, "utf-8");
+  input.value = "";
+}
+
+/* Ist-CSV-Import: bexio-ER-Export (Nummer;Bezeichnung;Saldo…) */
+function fbImportIst(input) {
+  const file = input.files && input.files[0]; if (!file) return;
+  const ges = (document.getElementById("fb-ges").value || "").trim();
+  const istSW = document.getElementById("fb-ges-typ").value === "sw";
+  if (!ges) { toast("Bitte zuerst den Namen der Gesellschaft eintragen.", true); input.value = ""; return; }
+  const year = filters.budgetYear;
+  const reader = new FileReader();
+  reader.onload = async e => {
+    try {
+      budgetShowLoading("ER wird importiert …", ges);
+      const lines = String(e.target.result).replace(/^\uFEFF/, "").split(/\r?\n/).filter(l => l.trim());
+      const sep = (lines[0] || "").includes(";") ? ";" : (lines[0].includes("\t") ? "\t" : ",");
+      const existing = {};
+      cache.budget.forEach(it => { const d = fbParse(it, "ist"); if (d && d.y == year && d.g === ges) existing[d.kt] = d.id; });
+      let n = 0, leer = 0;
+      for (const line of lines) {
+        const p = line.split(sep).map(s => s.trim().replace(/^"|"$/g, ""));
+        const nr = p[0];
+        if (!/^\d{4}$/.test(nr)) continue;   // nur Einzelkonten
+        const bez = (p[1] || "").slice(0, 24);
+        const rawV = (p[2] || "").replace(/['\u2019\s]/g, "").replace(",", ".");
+        const v = parseFloat(rawV);
+        if (!rawV || isNaN(v)) { leer++; continue; }
+        await fbSaveItem({ cfg: "ist", y: year, p: "H1", g: ges, kt: nr, b: bez,
+          v: Math.round(v * 100) / 100, z: fbZuordnung(nr, istSW) }, existing[nr]);
+        n++;
+      }
+      await reload("Budget");
+      budgetHideLoading();
+      toast(n + " Konten importiert (" + ges + ")" + (leer ? " — " + leer + " ohne Saldo übersprungen" : ""));
+      render();
+    } catch (err) { budgetHideLoading(); budgetLastError = err.message; render(); }
+  };
+  reader.readAsText(file, "utf-8");
+  input.value = "";
+}
+
+async function fbIstChange(id, field, value) {
+  const raw = cache.budget.find(x => x.id == id); if (!raw) return;
+  const d = fbParse(raw, "ist"); if (!d) return;
+  if (field === "v") d.v = parseFloat(String(value).replace(/['\u2019]/g, "").replace(",", ".")) || 0;
+  else d[field] = value;
+  delete d.id;
+  try { const t = JSON.stringify({ cfg: "ist", ...d }); raw.Title = t;
+    budgetRenderKeepFocus();
+    await updateItem("Budget", id, { Title: t });
+  } catch (e) { budgetLastError = e.message; render(); }
+}
+async function fbIstDelete(id) {
+  if (!confirm("Konto-Zeile löschen?")) return;
+  try { await deleteItem("Budget", id); await reload("Budget"); render(); }
+  catch (e) { budgetLastError = e.message; render(); }
+}
+function fbToggle(key) { fbExpanded[key] = !fbExpanded[key]; render(); }
+
+/* Rechnet die komplette ER-Struktur (Details, Zwischensummen, EBITDA-Kette)
+   für eine gegebene Detail-Wert-Funktion detailVal(key) → Zahl. */
+function fbCompute(detailVal) {
+  const out = {};
+  let pend = [];
+  FB_PLAN.forEach(row => {
+    const art = row[0];
+    if (art === "d") { const k = row[1]; out[k] = detailVal(k); pend.push(k); }
+    else if (art[0] === "s") {
+      const n = parseInt(art.slice(1));
+      out[row[1]] = pend.slice(-n).reduce((s,k) => s + out[k], 0); pend = [];
+    } else out[row[1]] = row[3](out);
+  });
+  return out;
+}
+
+function renderBudgetVergleich(el) {
+  const year = filters.budgetYear;
+  const bud = fbBudget(year);
+  const ist = fbIst(year);
+  fbGesellschaften = [...new Set(ist.map(d => d.g))].sort();
+  const G = fbGesellschaften;
+  const budH1 = k => (bud[k] || []).slice(0, 6).reduce((s,v) => s + v, 0);
+  const fkt = k => FB_AUFWAND.has(k) ? -1 : 1;
+  const istVal = (k, g) => ist.filter(d => d.z === k && d.g === g).reduce((s,d) => s + (parseFloat(d.v) || 0), 0) * fkt(k);
+
+  if (!filters.fbView) filters.fbView = "h1";
+  // Zeilen-Metadaten + Struktur-Berechnung (Budget + je Gesellschaft + Konzern)
+  const rowsOut = FB_PLAN.map(row => row[0] === "d"
+    ? { art: "d", key: row[1], label: FB_LABELS[row[1]], indent: row[2] }
+    : { art: row[0][0] === "s" ? "s" : "c", key: row[1], label: row[2] });
+  const vals = {
+    b: fbCompute(budH1),
+    g: G.map(g => fbCompute(k => istVal(k, g))),
+    tot: fbCompute(k => G.reduce((s, g) => s + istVal(k, g), 0))
+  };
+  if (filters.fbView === "monate") { renderFbMonate(el, { year, bud, ist, G, vals, rowsOut, fkt }); return; }
+
+  const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
+    .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
+  const fmt = v => Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH");
+  const abw = key => vals.tot[key] - vals.b[key];
+  const abwPct = key => vals.b[key] ? (abw(key) / Math.abs(vals.b[key]) * 100) : null;
+  const hatBudget = Object.keys(bud).length > 0;
+
+  const kontoRows = key => ist.filter(d => d.z === key)
+    .sort((a,b) => (a.g + a.kt).localeCompare(b.g + b.kt))
+    .map(d => `
+      <tr class="fb-det">
+        <td style="padding-left:36px;color:var(--text-faint);font-size:10.5px">${escape(d.g)} · ${escape(d.kt)} ${escape(d.b || "")}</td>
+        <td></td>
+        ${G.map(g => `<td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint)">${g === d.g ? fmt((parseFloat(d.v) || 0) * fkt(key)) : ""}</td>`).join("")}
+        <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint)">${fmt((parseFloat(d.v) || 0) * fkt(key))}</td>
+        <td></td><td></td>
+        <td><button class="icon-btn" onclick="fbIstDelete(${d.id})" title="Konto löschen">✕</button></td>
+      </tr>`).join("");
+
+  el.innerHTML = `
+    ${budgetLastError ? `
+      <div style="background:rgba(255,107,107,0.1);border:1px solid var(--danger);border-radius:6px;padding:12px 14px;margin-bottom:14px;font-size:12px">
+        <strong style="color:var(--danger)">Letzter Vorgang fehlgeschlagen:</strong>
+        <div style="margin-top:6px;font-family:var(--font-mono);font-size:11px;word-break:break-all;color:var(--text-dim)">${escape(budgetLastError)}</div>
+        <button class="btn btn-sm" style="margin-top:8px" onclick="budgetLastError='';render()">Ausblenden</button>
+      </div>` : ""}
+    <div style="display:flex;gap:12px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+      <div class="bud-tabs">
+        <button class="bud-tab" onclick="filters.budgetTab='kunden';render()">Umsatzbudget</button>
+        <button class="bud-tab active" onclick="filters.budgetTab='vgl';render()">Budget vs. Ist</button>
+      </div>
+      <label style="color:var(--text-dim);font-size:12px">Jahr:</label>
+      <select onchange="filters.budgetYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${yearOpts}</select>
+      <div class="bud-tabs">
+        <button class="bud-tab active" onclick="filters.fbView='h1';render()">Übersicht H1</button>
+        <button class="bud-tab" onclick="filters.fbView='monate';render()">Monate</button>
+      </div>
+      <span style="font-size:11px;color:var(--text-dim)">Ist H1 ÷ 6 = Ø-Monat</span>
+      <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:11px">
+        <label class="btn btn-sm" title="CSV: Key;Jan;…;Dez">Budget-CSV
+          <input type="file" accept=".csv,.txt" style="display:none" onchange="fbImportBudget(this)"></label>
+        <input id="fb-ges" placeholder="Gesellschaft, z.B. Apriko AG" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;width:150px;font-size:11px">
+        <select id="fb-ges-typ" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:5px 6px;border-radius:4px;font-size:11px">
+          <option value="sw">Software</option><option value="bo">Backoffice</option>
+        </select>
+        <label class="btn btn-sm" title="bexio-ER-Export als CSV (Nummer;Bezeichnung;Saldo)">ER-CSV
+          <input type="file" accept=".csv,.txt" style="display:none" onchange="fbImportIst(this)"></label>
+      </div>
+    </div>
+    ${!hatBudget && !ist.length ? `
+      <div style="text-align:center;padding:50px 20px;color:var(--text-dim)">
+        <div style="font-size:36px;margin-bottom:10px">▦</div>
+        <div style="max-width:480px;margin:0 auto 6px">Noch keine Daten für ${year}. Zuerst das <strong>Konzern-Budget</strong> als CSV importieren (Format: Key;Jan;…;Dez), dann pro Gesellschaft die <strong>ER als CSV</strong> (bexio-Export: Nummer;Bezeichnung;Saldo).</div>
+        <div style="font-size:11px;color:var(--text-faint)">Vorzeichen wie bexio: Ertrag positiv, Aufwand negativ — die Ansicht dreht automatisch auf Budget-Logik.</div>
+      </div>` : `
+    <div class="table-wrap"><table class="bud-table" style="min-width:900px">
+      <thead><tr>
+        <th style="min-width:280px">Position</th>
+        <th style="text-align:right">Budget H1</th>
+        ${G.map(g => `<th style="text-align:right">Ist ${escape(g)}</th>`).join("")}
+        <th style="text-align:right">Ist Konzern</th>
+        <th style="text-align:right">Abw. CHF</th>
+        <th style="text-align:right">Abw. %</th>
+        <th style="width:26px"></th>
+      </tr></thead>
+      <tbody>
+        ${rowsOut.map(row => {
+          const k = row.key;
+          const hatKonten = row.art === "d" && ist.some(d => d.z === k);
+          const bold = row.art !== "d";
+          const style = bold ? "font-weight:600" : "";
+          const bg = row.art === "c" ? "background:var(--bg-hover)" : "";
+          const a = abw(k); const ap = abwPct(k);
+          return `
+          <tr style="${bg}" ${hatKonten ? `class="fb-pos" onclick="fbToggle('${k}')" title="Klicken: Konten ${fbExpanded[k] ? "zuklappen" : "aufklappen"}"` : ""}>
+            <td style="${style};padding-left:${(row.indent || 0) * 18 + 4}px">${hatKonten ? `<span style="color:var(--accent);font-size:10px">${fbExpanded[k] ? "▼" : "▶"}</span> ` : ""}${escape(row.label)}</td>
+            <td style="text-align:right;font-family:var(--font-mono);${style}">${fmt(vals.b[k])}</td>
+            ${G.map((g, i) => `<td style="text-align:right;font-family:var(--font-mono);${style}">${fmt(vals.g[i][k])}</td>`).join("")}
+            <td style="text-align:right;font-family:var(--font-mono);${style}">${fmt(vals.tot[k])}</td>
+            <td style="text-align:right;font-family:var(--font-mono);${style};color:${a > 0 ? "var(--accent)" : a < 0 ? "var(--danger)" : "inherit"}">${fmt(a)}</td>
+            <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim)">${ap === null ? "" : (ap > 0 ? "+" : "") + ap.toFixed(1) + "%"}</td>
+            <td></td>
+          </tr>
+          ${hatKonten && fbExpanded[k] ? kontoRows(k) : ""}`;
+        }).join("")}
+      </tbody>
+    </table></div>
+    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">Positive Abweichung = besser als Budget (mehr Ertrag bzw. Ergebnis). Aufwandzeilen sind aus der bexio-Konvention gedreht. Konten pro Position per Klick aufklappbar; ✕ löscht eine Konto-Zeile.</div>`}
+  `;
+}
+
+/* Monatsansicht: Jan–Jun je Budget | Ist (H1÷6 linear) | Abw., plus H1-Block */
+function renderFbMonate(el, ctx) {
+  const { year, bud, ist, G, vals, rowsOut, fkt } = ctx;
+  const fmt = v => Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH");
+  const budMonat = m => fbCompute(k => (bud[k] || [])[m] || 0);
+  const budM = [0,1,2,3,4,5].map(budMonat);
+  const istM = {}; Object.keys(vals.tot).forEach(k => istM[k] = vals.tot[k] / 6);
+  const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
+    .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
+  const MK = ["Jan","Feb","Mär","Apr","Mai","Jun"];
+
+  const kontoRows = key => ist.filter(d => d.z === key)
+    .sort((a,b) => (a.g + a.kt).localeCompare(b.g + b.kt))
+    .map(d => {
+      const mv = (parseFloat(d.v) || 0) * fkt(key) / 6;
+      return `
+      <tr class="fb-det">
+        <td style="padding-left:36px;color:var(--text-faint);font-size:10px">${escape(d.g)} · ${escape(d.kt)} ${escape(d.b || "")}</td>
+        ${MK.map(() => `<td></td><td style="text-align:right;font-family:var(--font-mono);font-size:10px;color:var(--text-faint)">${fmt(mv)}</td><td></td>`).join("")}
+        <td></td><td style="text-align:right;font-family:var(--font-mono);font-size:10px;color:var(--text-faint)">${fmt(mv * 6)}</td><td></td>
+      </tr>`;
+    }).join("");
+
+  el.innerHTML = `
+    ${budgetLastError ? `
+      <div style="background:rgba(255,107,107,0.1);border:1px solid var(--danger);border-radius:6px;padding:12px 14px;margin-bottom:14px;font-size:12px">
+        <strong style="color:var(--danger)">Letzter Vorgang fehlgeschlagen:</strong>
+        <div style="margin-top:6px;font-family:var(--font-mono);font-size:11px;word-break:break-all;color:var(--text-dim)">${escape(budgetLastError)}</div>
+        <button class="btn btn-sm" style="margin-top:8px" onclick="budgetLastError='';render()">Ausblenden</button>
+      </div>` : ""}
+    <div style="display:flex;gap:12px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+      <div class="bud-tabs">
+        <button class="bud-tab" onclick="filters.budgetTab='kunden';render()">Umsatzbudget</button>
+        <button class="bud-tab active" onclick="filters.budgetTab='vgl';render()">Budget vs. Ist</button>
+      </div>
+      <label style="color:var(--text-dim);font-size:12px">Jahr:</label>
+      <select onchange="filters.budgetYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${yearOpts}</select>
+      <div class="bud-tabs">
+        <button class="bud-tab" onclick="filters.fbView='h1';render()">Übersicht H1</button>
+        <button class="bud-tab active" onclick="filters.fbView='monate';render()">Monate</button>
+      </div>
+      <span style="font-size:11px;color:var(--text-dim)">Ist = ER-Saldo H1 linear ÷ 6</span>
+    </div>
+    <div class="table-wrap"><table class="bud-table" style="min-width:1500px">
+      <thead>
+        <tr>
+          <th style="min-width:210px" rowspan="2">Position</th>
+          ${MK.map((m, i) => `<th colspan="3" style="text-align:center;${i % 2 ? "background:var(--bg-hover)" : ""}">${m}</th>`).join("")}
+          <th colspan="3" style="text-align:center;border-left:2px solid var(--border)">H1 Total</th>
+        </tr>
+        <tr>
+          ${MK.map((m, i) => ["B","I","Δ"].map(s => `<th style="text-align:right;font-size:9px;${i % 2 ? "background:var(--bg-hover)" : ""}" title="${s === "B" ? "Budget" : s === "I" ? "Ist" : "Abweichung"}">${s}</th>`).join("")).join("")}
+          ${["Budget","Ist","Δ"].map((s, j) => `<th style="text-align:right;font-size:9px;${j === 0 ? "border-left:2px solid var(--border)" : ""}">${s}</th>`).join("")}
+        </tr>
+      </thead>
+      <tbody>
+        ${rowsOut.map(row => {
+          const k = row.key;
+          const hatKonten = row.art === "d" && ist.some(d => d.z === k);
+          const bold = row.art !== "d";
+          const style = bold ? "font-weight:600;" : "";
+          const bg = row.art === "c" ? "background:var(--bg-hover)" : "";
+          const bH1 = vals.b[k], iH1 = vals.tot[k], aH1 = iH1 - bH1;
+          return `
+          <tr style="${bg}" ${hatKonten ? `class="fb-pos" onclick="fbToggle('${k}')"` : ""}>
+            <td style="${style}padding-left:${(row.indent || 0) * 14 + 4}px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px" title="${escape(row.label)}">${hatKonten ? `<span style="color:var(--accent);font-size:9px">${fbExpanded[k] ? "▼" : "▶"}</span> ` : ""}${escape(row.label)}</td>
+            ${budM.map((bm, i) => {
+              const b = bm[k], istV = istM[k], a = istV - b;
+              const zebra = i % 2 ? "background:var(--bg-hover);" : "";
+              return `<td style="text-align:right;font-family:var(--font-mono);font-size:10px;${zebra}${style}">${fmt(b)}</td>
+                <td style="text-align:right;font-family:var(--font-mono);font-size:10px;${zebra}${style}">${fmt(istV)}</td>
+                <td style="text-align:right;font-family:var(--font-mono);font-size:10px;${zebra}color:${a > 0.5 ? "var(--accent)" : a < -0.5 ? "var(--danger)" : "var(--text-faint)"}">${fmt(a)}</td>`;
+            }).join("")}
+            <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;border-left:2px solid var(--border);${style}">${fmt(bH1)}</td>
+            <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;${style}">${fmt(iH1)}</td>
+            <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;color:${aH1 > 0.5 ? "var(--accent)" : aH1 < -0.5 ? "var(--danger)" : "var(--text-faint)"};${style}">${fmt(aH1)}</td>
+          </tr>
+          ${hatKonten && fbExpanded[k] ? kontoRows(k) : ""}`;
+        }).join("")}
+      </tbody>
+    </table></div>
+    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">B = Budget (Monatswerte aus dem Konzern-Budget) · I = Ist (H1-Saldo linear ÷ 6, daher in allen Monaten gleich) · Δ = Ist − Budget. Sobald echte Monatsabschlüsse importiert werden, ersetzt der Monatswert die Gleichverteilung.</div>
+  `;
+}
+
 function renderBudget(el) {
+  if (!filters.budgetTab) filters.budgetTab = "kunden";
+  if (filters.budgetTab === "vgl") { renderBudgetVergleich(el); return; }
   const year = filters.budgetYear;
   const rows = budgetRows()
     .filter(b => b.BYear == year)
@@ -2319,6 +2714,10 @@ function renderBudget(el) {
         <button class="btn btn-sm" style="margin-top:8px" onclick="budgetLastError='';render()">Ausblenden</button>
       </div>` : ""}
     <div style="display:flex;gap:12px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
+      <div class="bud-tabs">
+        <button class="bud-tab active" onclick="filters.budgetTab='kunden';render()">Umsatzbudget</button>
+        <button class="bud-tab" onclick="filters.budgetTab='vgl';render()">Budget vs. Ist</button>
+      </div>
       <label style="color:var(--text-dim);font-size:12px">Planjahr:</label>
       <select onchange="filters.budgetYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${yearOpts}</select>
       <button class="btn btn-sm" onclick="budgetTakeoverActive()">Aktive Kunden übernehmen</button>
