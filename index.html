@@ -947,7 +947,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.37.3</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.37.4</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -2813,25 +2813,34 @@ function fbGesFromFilename(name) {
 
 /* Mehrzeilige "Data"-Spalte in der Budget-Liste (für Buchungs-JSON) */
 let fbDataColOk = false;
+function fbDataField() { try { return localStorage.getItem("fbDataField") || "Data"; } catch (e) { return "Data"; } }
 async function fbEnsureDataCol() {
   if (fbDataColOk) return;
-  // 1. Existiert die Spalte schon? (Lesen geht mit Sites.ReadWrite)
+  let colNames = null;
+  // 1. Existiert die Spalte schon? Match auf internen Namen ODER Anzeigenamen.
   try {
     const cols = await graph(`/sites/${siteId}/lists/${listIds.Budget}/columns`);
-    if ((cols.value || []).some(c => c.name === "Data")) { fbDataColOk = true; return; }
-  } catch (e) { /* weiter zum Anlege-Versuch */ }
+    colNames = (cols.value || []).map(c => c.name + (c.displayName && c.displayName !== c.name ? " (" + c.displayName + ")" : ""));
+    const hit = (cols.value || []).find(c => c.name === "Data" || c.displayName === "Data");
+    if (hit) {
+      try { localStorage.setItem("fbDataField", hit.name); } catch (e) {}
+      fbDataColOk = true; return;
+    }
+  } catch (e) { /* Spalten nicht lesbar — weiter zum Anlege-Versuch */ }
   // 2. Anlegen versuchen (braucht Sites.Manage.All — kann 403 geben)
   try {
     await graph(`/sites/${siteId}/lists/${listIds.Budget}/columns`, {
       method: "POST",
       body: JSON.stringify({ name: "Data", text: { allowMultipleLines: true, textType: "plain" } })
     });
+    try { localStorage.setItem("fbDataField", "Data"); } catch (e) {}
     fbDataColOk = true;
   } catch (e) {
     if (/nameAlreadyExists|already exists|409/i.test(e.message)) { fbDataColOk = true; return; }
     if (/403|accessDenied/i.test(e.message)) {
-      throw new Error("Für Buchungsdetails fehlt in der Budget-Liste die Spalte 'Data', und die App darf sie nicht selbst anlegen (Graph 403 — Spalten anlegen braucht Sites.Manage.All). " +
-        "Einmalige Abhilfe von Hand (1 Minute): SharePoint-Site sales2 → Liste 'Budget' → '+ Spalte hinzufügen' → Typ 'Mehrere Textzeilen' → Name exakt: Data → Speichern. Danach den Import einfach nochmals starten.");
+      throw new Error("Die Spalte 'Data' (Typ 'Mehrere Textzeilen') existiert in der Budget-Liste noch nicht, und die App darf sie nicht selbst anlegen (Graph 403 — bräuchte Sites.Manage.All). " +
+        (colNames ? "Aktuell vorhandene Spalten: " + colNames.join(", ") + ". " : "") +
+        "Bitte einmalig von Hand anlegen: SharePoint-Site sales2 → Liste 'Budget' → '+ Spalte hinzufügen' → Typ 'Mehrere Textzeilen' → Name exakt: Data → Speichern. Danach den Import nochmals starten.");
     }
     throw e;
   }
@@ -2840,18 +2849,19 @@ async function fbEnsureDataCol() {
 async function fbSaveBuch(year, ges, kt, bez, buch, existingId) {
   const title = JSON.stringify({ cfg: "bch", y: year, p: "H1", g: ges, kt, b: (bez || "").slice(0, 20), n: buch.length });
   const data = JSON.stringify(buch);
+  const fld = fbDataField();
   if (existingId) {
-    await updateItem("Budget", existingId, { Title: title, Data: data });
+    await updateItem("Budget", existingId, { Title: title, [fld]: data });
     const raw = cache.budget.find(x => x.id == existingId);
-    if (raw) { raw.Title = title; raw.Data = data; }
-  } else await createItem("Budget", { Title: title, Data: data });
+    if (raw) { raw.Title = title; raw[fld] = data; }
+  } else await createItem("Budget", { Title: title, [fld]: data });
 }
 function fbBuchAll(year) {   // Map "ges|kt" → {bez, buch:[[d,t,v],…]}
   const out = {};
   cache.budget.forEach(it => {
     const d = fbParse(it, "bch");
     if (!d || d.y != year) return;
-    try { out[d.g + "|" + d.kt] = { bez: d.b || "", buch: JSON.parse(it.Data || "[]") }; } catch (e) {}
+    try { out[d.g + "|" + d.kt] = { bez: d.b || "", buch: JSON.parse(it[fbDataField()] || it.Data || "[]") }; } catch (e) {}
   });
   return out;
 }
