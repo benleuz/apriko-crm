@@ -956,7 +956,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.42.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.42.1</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -3282,7 +3282,7 @@ function renderBudgetVergleich(el) {
           const hatKonten = row.art === "d" && ist.some(d => srcOf(k).includes(d.z));
           const bold = row.art !== "d";
           const style = bold ? "font-weight:600" : "";
-          const rowCls = row.art === "s" ? "fb-sum" : row.art === "c" ? (k === "EBITDA" ? "fb-calc fb-result" : "fb-calc") : "";
+          const rowCls = row.art === "s" ? "fb-sum" : row.art === "c" ? (k === "EBITDA" || k === "DLTOT" ? "fb-calc fb-result" : "fb-calc") : "";
           const a = abw(k); const ap = abwPct(k);
           const note = fbNotes(year)[k];
           return `
@@ -3364,7 +3364,7 @@ function renderFbMgmt(el, ctx) {
     ["Ertrag Apriko Lizenzen", b.SW_Ertrag, t.SW_Ertrag, "ertrag", ""],
     ["Ertrag Apriko BPO", b.BO_Ertrag, t.BO_Ertrag, "ertrag", ""],
     ["./. Hosting/Software Kosten", erloesmind("b"), erloesmind("i"), "ertrag", ""],
-    ["Total Ertrag", totalErtrag.b, totalErtrag.i, "ertrag", "fb-calc"],
+    ["Total Ertrag", totalErtrag.b, totalErtrag.i, "ertrag", "fb-calc fb-result"],
     null,
     ["Total Lohnaufwand", lohnTot.b, lohnTot.i, "aufwand", "fb-calc"],
     null,
@@ -3475,7 +3475,7 @@ function renderFbMonate(el, ctx) {
           const hatKonten = row.art === "d" && ist.some(d => srcOf(k).includes(d.z));
           const bold = row.art !== "d";
           const style = bold ? "font-weight:600;" : "";
-          const rowCls = row.art === "s" ? "fb-sum" : row.art === "c" ? (k === "EBITDA" ? "fb-calc fb-result" : "fb-calc") : "";
+          const rowCls = row.art === "s" ? "fb-sum" : row.art === "c" ? (k === "EBITDA" || k === "DLTOT" ? "fb-calc fb-result" : "fb-calc") : "";
           const bH1 = vals.b[k], iH1 = vals.tot[k], aH1 = iH1 - bH1;
           return `
           <tr class="${rowCls}${hatKonten ? " fb-pos" : ""}" ${hatKonten ? `onclick="fbToggle('${k}')"` : ""}>
