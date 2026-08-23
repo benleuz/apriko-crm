@@ -956,7 +956,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.40.3</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.41.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -2343,6 +2343,7 @@ const FB_LABELS = {
 };
 /* Aufwand-Positionen: bexio-Wert wird für die Anzeige ×(−1) gedreht */
 const FB_AUFWAND = new Set(["SW_EinkaufDL","BO_EinkaufDL","SW_Lohn","SW_SV","SW_UebrPA","BO_Lohn","BO_SV","BO_UebrPA",
+  "EINK","P_Lohn","P_SV","P_UebrPA",
   "G_Raum","G_URE","G_Fahrzeug","G_Versich","G_Energie","G_VerwIT","G_Werbung","G_Sonstig","G_Abschr","G_Finanz","G_Steuern"]);
 /* Render-Plan im Stil des Konzern-Budgets: Blocktotal ("g") ZUERST,
    darunter eingerückt die Details ("d"); "c" = Rechenzeilen (EBITDA-Kette). */
@@ -2352,15 +2353,12 @@ const FB_PLAN = [
   ["g","DLBO","Dienstleistungserlöse BPO",["BO_Ertrag","BO_Erloesmind"]],
   ["d","BO_Ertrag",1], ["d","BO_Erloesmind",1],
   ["c","DLTOT","Total Ertrag", r => r.DLSW + r.DLBO],
-  ["g","EINK","Einkauf bezogene Dienstleistungen",["SW_EinkaufDL","BO_EinkaufDL"]],
-  ["d","SW_EinkaufDL",1], ["d","BO_EinkaufDL",1],
-  ["g","PASW","Personalaufwand Apriko",["SW_Lohn","SW_SV","SW_UebrPA"]],
-  ["d","SW_Lohn",1], ["d","SW_SV",1], ["d","SW_UebrPA",1],
-  ["g","PABO","Personalaufwand Maverix",["BO_Lohn","BO_SV","BO_UebrPA"]],
-  ["d","BO_Lohn",1], ["d","BO_SV",1], ["d","BO_UebrPA",1],
-  ["c","BESW","Bruttoertrag Lizenzen", r => r.DLSW - r.SW_EinkaufDL - r.PASW],
-  ["c","BEBO","Bruttoertrag BPO", r => r.DLBO - r.BO_EinkaufDL - r.PABO],
-  ["c","BETOT","Bruttoertrag TOTAL", r => r.BESW + r.BEBO],
+  ["d2","EINK","Einkauf bezogene Dienstleistungen",["SW_EinkaufDL","BO_EinkaufDL"],0],
+  ["g","PA","Personalaufwand",["P_Lohn","P_SV","P_UebrPA"]],
+  ["d2","P_Lohn","Lohnaufwand",["SW_Lohn","BO_Lohn"],1],
+  ["d2","P_SV","Sozialversicherungen",["SW_SV","BO_SV"],1],
+  ["d2","P_UebrPA","Übriger Personalaufwand",["SW_UebrPA","BO_UebrPA"],1],
+  ["c","BETOT","Bruttoertrag TOTAL", r => r.DLTOT - r.EINK - r.PA],
   ["g","BETRIEB","Betriebsaufwand",["G_Raum","G_URE","G_Fahrzeug","G_Versich","G_Energie","G_VerwIT","G_Werbung","G_Sonstig"]],
   ["d","G_Raum",1], ["d","G_URE",1], ["d","G_Fahrzeug",1], ["d","G_Versich",1],
   ["d","G_Energie",1], ["d","G_VerwIT",1], ["d","G_Werbung",1], ["d","G_Sonstig",1],
@@ -2372,15 +2370,23 @@ const FB_PLAN = [
   ["d","G_Steuern",0],
   ["c","RESULT","Halbjahresgewinn / (-verlust)", r => r.EBT - r.G_Steuern]
 ];
-/* Auto-Zuordnung Konto → Budget-Key (Software-Gesellschaft vs. Backoffice) */
-function fbZuordnung(nr, istSoftware) {
+/* Quell-Keys kombinierter Zeilen (für Konten-Aufklappen und SUMIFS) */
+const FB_SRC = {};
+FB_PLAN.forEach(r => { if (r[0] === "d2") FB_SRC[r[1]] = r[3]; });
+/* Auto-Zuordnung Konto → Budget-Key.
+   Geschäftslogik: Beide Erlösströme laufen über die Apriko AG —
+   Konto 3400 = BPO, 3410 (und übrige 34xx) = SaaS/Lizenzen.
+   Personal & Einkauf ÜBER KREUZ: maverix-Löhne = SaaS (SW_*),
+   Apriko-Löhne = BPO (BO_*). istApriko = Flag "Apriko" im Import. */
+function fbZuordnung(nr, istApriko) {
   nr = String(nr); const m2 = nr.slice(0, 2);
-  if (nr.startsWith("34")) return istSoftware ? "SW_Ertrag" : "BO_Ertrag";
-  if (nr.startsWith("38") || nr.startsWith("39")) return istSoftware ? "SW_Erloesmind" : "BO_Erloesmind";
-  if (nr.startsWith("44")) return istSoftware ? "SW_EinkaufDL" : "BO_EinkaufDL";
-  if (m2 === "50") return istSoftware ? "SW_Lohn" : "BO_Lohn";
-  if (m2 === "57") return istSoftware ? "SW_SV" : "BO_SV";
-  if (m2 === "58" || m2 === "59") return istSoftware ? "SW_UebrPA" : "BO_UebrPA";
+  if (nr === "3400") return "BO_Ertrag";                 // BPO-Ertrag (Apriko AG)
+  if (nr.startsWith("34")) return "SW_Ertrag";           // 3410 & Co: SaaS/Lizenzen
+  if (nr.startsWith("38") || nr.startsWith("39")) return istApriko ? "SW_Erloesmind" : "BO_Erloesmind";
+  if (nr.startsWith("44")) return istApriko ? "BO_EinkaufDL" : "SW_EinkaufDL";
+  if (m2 === "50") return istApriko ? "BO_Lohn" : "SW_Lohn";
+  if (m2 === "57") return istApriko ? "BO_SV" : "SW_SV";
+  if (m2 === "58" || m2 === "59") return istApriko ? "BO_UebrPA" : "SW_UebrPA";
   const map = { "60":"G_Raum","61":"G_URE","62":"G_Fahrzeug","63":"G_Versich","64":"G_Energie",
     "65":"G_VerwIT","66":"G_Werbung","68":"G_Abschr","69":"G_Finanz","89":"G_Steuern" };
   return map[m2] || "G_Sonstig";
@@ -2973,8 +2979,9 @@ async function fbMultiSelect(input) {
         if (!bn) { entry.art = "unbekannt"; entry.info = "Keine Buchungszeilen erkannt"; }
       } else if (art === "er") {
         entry.ges = fbGesFromFilename(f.name);
-        const hatSoftware = rows.some(r => /^3\d{3}$/.test(String(r[0] || "")) && /software/i.test(String(r[1] || "")));
-        entry.typ = (hatSoftware || /apriko/i.test(f.name)) ? "sw" : "bo";
+        // Flag = Gesellschaft: "sw" steht für Apriko AG, "bo" für maverix ag
+        const hatErtraege = rows.some(r => /^3\d{3}$/.test(String(r[0] || "")));
+        entry.typ = (/apriko/i.test(f.name) || hatErtraege) ? "sw" : "bo";
         entry.info = rows.filter(r => /^\d{4}$/.test(String(r[0] || ""))).length + " Konten";
         const mitSaldo = rows.filter(r => /^\d{4}$/.test(String(r[0] || "")) && String(r[2] ?? "").trim() !== "").length;
         if (!mitSaldo) entry.warn = "keine Salden in Spalte 3!";
@@ -3092,7 +3099,7 @@ function fbToggle(key) { fbExpanded[key] = !fbExpanded[key]; render(); }
 /* Ampel-Farbe für Abweichungen: Bei Aufwandzeilen ist Überschreitung schlecht
    (<10% orange, ≥10% rot; Unterschreitung grün), bei Ertrags-/Ergebniszeilen
    umgekehrt. Rückgabe: CSS-Farbwert. */
-const FB_AUFWAND_ZEILEN = new Set(["EINK", "PASW", "PABO", "BETRIEB"]);
+const FB_AUFWAND_ZEILEN = new Set(["EINK", "PA", "BETRIEB"]);
 function fbAbwColor(key, abw, budget) {
   if (Math.abs(abw) < 0.5) return "var(--text-faint)";
   const aufwand = FB_AUFWAND.has(key) || FB_AUFWAND_ZEILEN.has(key);
@@ -3106,7 +3113,10 @@ function fbAbwColor(key, abw, budget) {
    für eine gegebene Detail-Wert-Funktion detailVal(key) → Zahl. */
 function fbCompute(detailVal) {
   const out = {};
-  FB_PLAN.forEach(row => { if (row[0] === "d") out[row[1]] = detailVal(row[1]); });
+  FB_PLAN.forEach(row => {
+    if (row[0] === "d") out[row[1]] = detailVal(row[1]);
+    else if (row[0] === "d2") out[row[1]] = row[3].reduce((s, k) => s + detailVal(k), 0);
+  });
   FB_PLAN.forEach(row => {
     if (row[0] === "g") out[row[1]] = row[3].reduce((s, k) => s + out[k], 0);
     else if (row[0] === "c") out[row[1]] = row[3](out);
@@ -3120,15 +3130,16 @@ function renderBudgetVergleich(el) {
   const ist = fbIst(year);
   fbGesellschaften = [...new Set(ist.map(d => d.g))].sort();
   const G = fbGesellschaften;
-  const budH1 = k => (bud[k] || []).slice(0, 6).reduce((s,v) => s + v, 0);
+  const budH1 = k => (FB_SRC[k] || [k]).reduce((sum, kk) => sum + (bud[kk] || []).slice(0, 6).reduce((s,v) => s + v, 0), 0);
   const fkt = k => FB_AUFWAND.has(k) ? -1 : 1;
   const istVal = (k, g) => ist.filter(d => d.z === k && d.g === g).reduce((s,d) => s + (parseFloat(d.v) || 0), 0) * fkt(k);
 
   if (!filters.fbView) filters.fbView = "h1";
   // Zeilen-Metadaten + Struktur-Berechnung (Budget + je Gesellschaft + Konzern)
-  const rowsOut = FB_PLAN.map(row => row[0] === "d"
-    ? { art: "d", key: row[1], label: FB_LABELS[row[1]], indent: row[2] }
-    : { art: row[0] === "g" ? "s" : "c", key: row[1], label: row[2] });
+  const rowsOut = FB_PLAN.map(row =>
+    row[0] === "d"  ? { art: "d", key: row[1], label: FB_LABELS[row[1]], indent: row[2] } :
+    row[0] === "d2" ? { art: "d", key: row[1], label: row[2], indent: row[4] || 0 } :
+    { art: row[0] === "g" ? "s" : "c", key: row[1], label: row[2] });
   const vals = {
     b: fbCompute(budH1),
     g: G.map(g => fbCompute(k => istVal(k, g))),
@@ -3146,7 +3157,8 @@ function renderBudgetVergleich(el) {
 
   const buchMap = fbBuchAll(year);
   const ncols = 6 + G.length;   // Position, Budget, je G, Konzern, Abw, Abw%, ✕
-  const kontoRows = key => ist.filter(d => d.z === key)
+  const srcOf = key => FB_SRC[key] || [key];
+  const kontoRows = key => ist.filter(d => srcOf(key).includes(d.z))
     .sort((a,b) => (a.g + a.kt).localeCompare(b.g + b.kt))
     .map(d => {
       const bid = d.g + "|" + d.kt;
@@ -3244,7 +3256,7 @@ function renderBudgetVergleich(el) {
       <tbody>
         ${rowsOut.map(row => {
           const k = row.key;
-          const hatKonten = row.art === "d" && ist.some(d => d.z === k);
+          const hatKonten = row.art === "d" && ist.some(d => srcOf(k).includes(d.z));
           const bold = row.art !== "d";
           const style = bold ? "font-weight:600" : "";
           const rowCls = row.art === "s" ? "fb-sum" : row.art === "c" ? (k === "EBITDA" ? "fb-calc fb-result" : "fb-calc") : "";
@@ -3318,7 +3330,7 @@ function renderFbMgmt(el, ctx) {
   const b = vals.b, t = vals.tot;
   const erloesmind = k => ({ b: b.SW_Erloesmind + b.BO_Erloesmind, i: t.SW_Erloesmind + t.BO_Erloesmind })[k];
   const totalErtrag = { b: b.DLTOT - b.EINK, i: t.DLTOT - t.EINK };
-  const lohnTot = { b: b.PASW + b.PABO, i: t.PASW + t.PABO };
+  const lohnTot = { b: b.PA, i: t.PA };
   const opex = { b: b.BETRIEB, i: t.BETRIEB };
   const ebitda = { b: totalErtrag.b - lohnTot.b - opex.b, i: totalErtrag.i - lohnTot.i - opex.i };
   // Zeilen: [label, budget|null, ist, ampelKey ("aufwand"/"ertrag"/null), klasse]
@@ -3329,8 +3341,6 @@ function renderFbMgmt(el, ctx) {
     ["./. Einkauf bezogene Dienstleistungen", b.EINK, t.EINK, "aufwand", ""],
     ["Total Ertrag", totalErtrag.b, totalErtrag.i, "ertrag", "fb-calc"],
     null,
-    ["Lohnaufwand Apriko", b.PASW, t.PASW, "aufwand", ""],
-    ["Lohnaufwand Maverix", b.PABO, t.PABO, "aufwand", ""],
     ["Total Lohnaufwand", lohnTot.b, lohnTot.i, "aufwand", "fb-calc"],
     null,
     ["Total Opex", opex.b, opex.i, "aufwand", "fb-calc"],
@@ -3378,7 +3388,7 @@ function renderFbMgmt(el, ctx) {
         }).join("")}
       </tbody>
     </table></div>
-    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">Lizenzen = Erlösstrom Software, BPO = Erlösstrom Backoffice (je mit eigenem Budget). Lohnaufwand = kompletter Personalaufwand je Gesellschaft (Löhne, Sozialversicherungen, übriger PA); Total Opex = Betriebsaufwand. Total Ertrag − Lohnaufwand − Opex = EBITDA.</div>
+    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">Lizenzen = Erlösstrom Software, BPO = Erlösstrom Backoffice (je mit eigenem Budget). Total Lohnaufwand = Personalaufwand beider Gesellschaften (Löhne, Sozialversicherungen, übriger PA); Total Opex = Betriebsaufwand. Total Ertrag − Lohnaufwand − Opex = EBITDA. Details pro Gesellschaft: Hauptansicht → Personalaufwand aufklappen.</div>
   `;
 }
 
@@ -3392,7 +3402,8 @@ function renderFbMonate(el, ctx) {
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
   const MK = ["Jan","Feb","Mär","Apr","Mai","Jun"];
 
-  const kontoRows = key => ist.filter(d => d.z === key)
+  const srcOf = key => FB_SRC[key] || [key];
+  const kontoRows = key => ist.filter(d => srcOf(key).includes(d.z))
     .sort((a,b) => (a.g + a.kt).localeCompare(b.g + b.kt))
     .map(d => {
       const mv = (parseFloat(d.v) || 0) * fkt(key) / 6;
@@ -3436,7 +3447,7 @@ function renderFbMonate(el, ctx) {
       <tbody>
         ${rowsOut.map(row => {
           const k = row.key;
-          const hatKonten = row.art === "d" && ist.some(d => d.z === k);
+          const hatKonten = row.art === "d" && ist.some(d => srcOf(k).includes(d.z));
           const bold = row.art !== "d";
           const style = bold ? "font-weight:600;" : "";
           const rowCls = row.art === "s" ? "fb-sum" : row.art === "c" ? (k === "EBITDA" ? "fb-calc fb-result" : "fb-calc") : "";
