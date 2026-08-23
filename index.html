@@ -956,7 +956,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.40.1</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.40.3</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -2330,9 +2330,9 @@ function budgetAddFromModal() {
      {"cfg":"ist","y":2026,"p":"H1","g":"Apriko AG","kt":"3400","b":"…","v":-123,"z":"SW_Lohn"}
    =========================================================== */
 const FB_LABELS = {
-  SW_Ertrag:"Ertrag Apriko", SW_Erloesmind:"Erlösminderungen",
-  BO_Ertrag:"Ertrag Maverix", BO_Erloesmind:"Erlösminderungen",
-  SW_EinkaufDL:"Einkauf DL Apriko", BO_EinkaufDL:"Einkauf DL Maverix",
+  SW_Ertrag:"Ertrag Lizenzen", SW_Erloesmind:"Erlösminderungen",
+  BO_Ertrag:"Ertrag BPO", BO_Erloesmind:"Erlösminderungen",
+  SW_EinkaufDL:"Einkauf DL Lizenzen", BO_EinkaufDL:"Einkauf DL BPO",
   SW_Lohn:"Lohnaufwand", SW_SV:"Sozialversicherungen", SW_UebrPA:"Übriger Personalaufwand",
   BO_Lohn:"Lohnaufwand", BO_SV:"Sozialversicherungen", BO_UebrPA:"Übriger Personalaufwand",
   G_Raum:"Raumaufwand", G_URE:"Unterhalt, Reparaturen, Ersatz", G_Fahrzeug:"Fahrzeug- und Transportaufwand",
@@ -2347,9 +2347,9 @@ const FB_AUFWAND = new Set(["SW_EinkaufDL","BO_EinkaufDL","SW_Lohn","SW_SV","SW_
 /* Render-Plan im Stil des Konzern-Budgets: Blocktotal ("g") ZUERST,
    darunter eingerückt die Details ("d"); "c" = Rechenzeilen (EBITDA-Kette). */
 const FB_PLAN = [
-  ["g","DLSW","Dienstleistungserlöse Apriko",["SW_Ertrag","SW_Erloesmind"]],
+  ["g","DLSW","Dienstleistungserlöse Lizenzen",["SW_Ertrag","SW_Erloesmind"]],
   ["d","SW_Ertrag",1], ["d","SW_Erloesmind",1],
-  ["g","DLBO","Dienstleistungserlöse Maverix",["BO_Ertrag","BO_Erloesmind"]],
+  ["g","DLBO","Dienstleistungserlöse BPO",["BO_Ertrag","BO_Erloesmind"]],
   ["d","BO_Ertrag",1], ["d","BO_Erloesmind",1],
   ["c","DLTOT","Total Ertrag", r => r.DLSW + r.DLBO],
   ["g","EINK","Einkauf bezogene Dienstleistungen",["SW_EinkaufDL","BO_EinkaufDL"]],
@@ -2358,8 +2358,8 @@ const FB_PLAN = [
   ["d","SW_Lohn",1], ["d","SW_SV",1], ["d","SW_UebrPA",1],
   ["g","PABO","Personalaufwand Maverix",["BO_Lohn","BO_SV","BO_UebrPA"]],
   ["d","BO_Lohn",1], ["d","BO_SV",1], ["d","BO_UebrPA",1],
-  ["c","BESW","Bruttoertrag Apriko", r => r.DLSW - r.SW_EinkaufDL - r.PASW],
-  ["c","BEBO","Bruttoertrag Maverix", r => r.DLBO - r.BO_EinkaufDL - r.PABO],
+  ["c","BESW","Bruttoertrag Lizenzen", r => r.DLSW - r.SW_EinkaufDL - r.PASW],
+  ["c","BEBO","Bruttoertrag BPO", r => r.DLBO - r.BO_EinkaufDL - r.PABO],
   ["c","BETOT","Bruttoertrag TOTAL", r => r.BESW + r.BEBO],
   ["g","BETRIEB","Betriebsaufwand",["G_Raum","G_URE","G_Fahrzeug","G_Versich","G_Energie","G_VerwIT","G_Werbung","G_Sonstig"]],
   ["d","G_Raum",1], ["d","G_URE",1], ["d","G_Fahrzeug",1], ["d","G_Versich",1],
@@ -3314,11 +3314,7 @@ function renderFbMgmt(el, ctx) {
   const fmt = v => Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH");
   const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
-  // Lizenzen/BPO-Split des Apriko-Ertrags über die Konto-Bezeichnungen
-  const swKonten = ist.filter(d => d.z === "SW_Ertrag");
-  const istLiz = swKonten.filter(d => /lizenz|saas|software/i.test(d.b || "")).reduce((s, d) => s + (parseFloat(d.v) || 0), 0);
-  const istSwTotal = vals.tot.SW_Ertrag;
-  const istBpo = istSwTotal - istLiz;
+  // Zwei Erlösströme: Software = Lizenzen, Backoffice = BPO (je mit eigenem Budget)
   const b = vals.b, t = vals.tot;
   const erloesmind = k => ({ b: b.SW_Erloesmind + b.BO_Erloesmind, i: t.SW_Erloesmind + t.BO_Erloesmind })[k];
   const totalErtrag = { b: b.DLTOT - b.EINK, i: t.DLTOT - t.EINK };
@@ -3327,9 +3323,8 @@ function renderFbMgmt(el, ctx) {
   const ebitda = { b: totalErtrag.b - lohnTot.b - opex.b, i: totalErtrag.i - lohnTot.i - opex.i };
   // Zeilen: [label, budget|null, ist, ampelKey ("aufwand"/"ertrag"/null), klasse]
   const Z = [
-    ["Ertrag Apriko Lizenzen", null, istLiz, "ertrag", ""],
-    ["Ertrag Apriko BPO", null, istBpo, "ertrag", ""],
-    ["Ertrag Maverix", b.BO_Ertrag, t.BO_Ertrag, "ertrag", ""],
+    ["Ertrag Apriko Lizenzen", b.SW_Ertrag, t.SW_Ertrag, "ertrag", ""],
+    ["Ertrag Apriko BPO", b.BO_Ertrag, t.BO_Ertrag, "ertrag", ""],
     ["./. Erlösminderungen", erloesmind("b"), erloesmind("i"), "ertrag", ""],
     ["./. Einkauf bezogene Dienstleistungen", b.EINK, t.EINK, "aufwand", ""],
     ["Total Ertrag", totalErtrag.b, totalErtrag.i, "ertrag", "fb-calc"],
@@ -3383,7 +3378,7 @@ function renderFbMgmt(el, ctx) {
         }).join("")}
       </tbody>
     </table></div>
-    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">Lizenzen/BPO nach Konto-Bezeichnung der Apriko-Ertragskonten aufgeteilt (Budget kennt diese Trennung nicht). Lohnaufwand = kompletter Personalaufwand je Gesellschaft (Löhne, Sozialversicherungen, übriger PA); Total Opex = Betriebsaufwand. Total Ertrag − Lohnaufwand − Opex = EBITDA.</div>
+    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">Lizenzen = Erlösstrom Software, BPO = Erlösstrom Backoffice (je mit eigenem Budget). Lohnaufwand = kompletter Personalaufwand je Gesellschaft (Löhne, Sozialversicherungen, übriger PA); Total Opex = Betriebsaufwand. Total Ertrag − Lohnaufwand − Opex = EBITDA.</div>
   `;
 }
 
