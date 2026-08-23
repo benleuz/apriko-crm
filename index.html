@@ -836,6 +836,15 @@
   .bud-tabs{display:flex;gap:2px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:2px}
   .bud-tab{background:none;border:none;color:var(--text-dim);padding:5px 12px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:12px}
   .bud-tab.active{background:var(--bg-hover);color:var(--text);font-weight:600}
+  /* Hierarchie Budgetvergleich: Blocktotale und Kennzahlen-Zeilen */
+  .fb-sum td{background:color-mix(in srgb, var(--accent) 7%, transparent);
+    border-top:1px solid var(--border);font-weight:600;padding-top:8px;padding-bottom:7px}
+  .fb-sum td:first-child{border-left:3px solid var(--accent)}
+  .fb-calc td{background:var(--bg-hover);border-top:1px solid var(--border);font-weight:700}
+  .fb-calc td:first-child{border-left:3px solid var(--text-dim)}
+  .fb-result td{border-top:3px double var(--accent);background:color-mix(in srgb, var(--accent) 12%, transparent);
+    font-size:12.5px;padding-top:9px;padding-bottom:9px}
+  .fb-result td:first-child{border-left:3px solid var(--accent)}
   .fb-pos{cursor:pointer}
   .fb-pos:hover td{background:var(--bg-hover)}
   .fb-det td{border-bottom:1px dotted var(--border) !important}
@@ -947,7 +956,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.38.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.38.3</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -2321,9 +2330,9 @@ function budgetAddFromModal() {
      {"cfg":"ist","y":2026,"p":"H1","g":"Apriko AG","kt":"3400","b":"…","v":-123,"z":"SW_Lohn"}
    =========================================================== */
 const FB_LABELS = {
-  SW_Ertrag:"Softwareertrag", SW_Erloesmind:"Erlösminderungen",
-  BO_Ertrag:"Ertrag Backoffice", BO_Erloesmind:"Erlösminderungen",
-  SW_EinkaufDL:"Einkauf DL Software", BO_EinkaufDL:"Einkauf DL Backoffice",
+  SW_Ertrag:"Ertrag Apriko", SW_Erloesmind:"Erlösminderungen",
+  BO_Ertrag:"Ertrag Maverix", BO_Erloesmind:"Erlösminderungen",
+  SW_EinkaufDL:"Einkauf DL Apriko", BO_EinkaufDL:"Einkauf DL Maverix",
   SW_Lohn:"Lohnaufwand", SW_SV:"Sozialversicherungen", SW_UebrPA:"Übriger Personalaufwand",
   BO_Lohn:"Lohnaufwand", BO_SV:"Sozialversicherungen", BO_UebrPA:"Übriger Personalaufwand",
   G_Raum:"Raumaufwand", G_URE:"Unterhalt, Reparaturen, Ersatz", G_Fahrzeug:"Fahrzeug- und Transportaufwand",
@@ -2338,18 +2347,18 @@ const FB_AUFWAND = new Set(["SW_EinkaufDL","BO_EinkaufDL","SW_Lohn","SW_SV","SW_
 /* Render-Plan im Stil des Konzern-Budgets: Blocktotal ("g") ZUERST,
    darunter eingerückt die Details ("d"); "c" = Rechenzeilen (EBITDA-Kette). */
 const FB_PLAN = [
-  ["g","DLSW","Dienstleistungserlöse Software",["SW_Ertrag","SW_Erloesmind"]],
+  ["g","DLSW","Dienstleistungserlöse Apriko",["SW_Ertrag","SW_Erloesmind"]],
   ["d","SW_Ertrag",1], ["d","SW_Erloesmind",1],
-  ["g","DLBO","Dienstleistungserlöse Backoffice",["BO_Ertrag","BO_Erloesmind"]],
+  ["g","DLBO","Dienstleistungserlöse Maverix",["BO_Ertrag","BO_Erloesmind"]],
   ["d","BO_Ertrag",1], ["d","BO_Erloesmind",1],
   ["g","EINK","Einkauf bezogene Dienstleistungen",["SW_EinkaufDL","BO_EinkaufDL"]],
   ["d","SW_EinkaufDL",1], ["d","BO_EinkaufDL",1],
-  ["g","PASW","Personalaufwand Software",["SW_Lohn","SW_SV","SW_UebrPA"]],
+  ["g","PASW","Personalaufwand Apriko",["SW_Lohn","SW_SV","SW_UebrPA"]],
   ["d","SW_Lohn",1], ["d","SW_SV",1], ["d","SW_UebrPA",1],
-  ["g","PABO","Personalaufwand Backoffice",["BO_Lohn","BO_SV","BO_UebrPA"]],
+  ["g","PABO","Personalaufwand Maverix",["BO_Lohn","BO_SV","BO_UebrPA"]],
   ["d","BO_Lohn",1], ["d","BO_SV",1], ["d","BO_UebrPA",1],
-  ["c","BESW","Bruttoertrag Software", r => r.DLSW - r.SW_EinkaufDL - r.PASW],
-  ["c","BEBO","Bruttoertrag Backoffice", r => r.DLBO - r.BO_EinkaufDL - r.PABO],
+  ["c","BESW","Bruttoertrag Apriko", r => r.DLSW - r.SW_EinkaufDL - r.PASW],
+  ["c","BEBO","Bruttoertrag Maverix", r => r.DLBO - r.BO_EinkaufDL - r.PABO],
   ["c","BETOT","Bruttoertrag TOTAL", r => r.BESW + r.BEBO],
   ["g","BETRIEB","Betriebsaufwand",["G_Raum","G_URE","G_Fahrzeug","G_Versich","G_Energie","G_VerwIT","G_Werbung","G_Sonstig"]],
   ["d","G_Raum",1], ["d","G_URE",1], ["d","G_Fahrzeug",1], ["d","G_Versich",1],
@@ -2998,6 +3007,19 @@ async function fbIstDelete(id) {
 }
 function fbToggle(key) { fbExpanded[key] = !fbExpanded[key]; render(); }
 
+/* Ampel-Farbe für Abweichungen: Bei Aufwandzeilen ist Überschreitung schlecht
+   (<10% orange, ≥10% rot; Unterschreitung grün), bei Ertrags-/Ergebniszeilen
+   umgekehrt. Rückgabe: CSS-Farbwert. */
+const FB_AUFWAND_ZEILEN = new Set(["EINK", "PASW", "PABO", "BETRIEB"]);
+function fbAbwColor(key, abw, budget) {
+  if (Math.abs(abw) < 0.5) return "var(--text-faint)";
+  const aufwand = FB_AUFWAND.has(key) || FB_AUFWAND_ZEILEN.has(key);
+  const schlecht = aufwand ? abw > 0 : abw < 0;   // Aufwand über Budget bzw. Ertrag unter Budget
+  if (!schlecht) return "var(--accent)";
+  if (!budget) return "var(--danger)";            // Überschreitung ohne Budgetbasis
+  return Math.abs(abw) / Math.abs(budget) < 0.10 ? "var(--warn)" : "var(--danger)";
+}
+
 /* Rechnet die komplette ER-Struktur (Details, Zwischensummen, EBITDA-Kette)
    für eine gegebene Detail-Wert-Funktion detailVal(key) → Zahl. */
 function fbCompute(detailVal) {
@@ -3141,16 +3163,16 @@ function renderBudgetVergleich(el) {
           const hatKonten = row.art === "d" && ist.some(d => d.z === k);
           const bold = row.art !== "d";
           const style = bold ? "font-weight:600" : "";
-          const bg = row.art === "c" ? "background:var(--bg-hover)" : "";
+          const rowCls = row.art === "s" ? "fb-sum" : row.art === "c" ? (k === "RESULT" ? "fb-calc fb-result" : "fb-calc") : "";
           const a = abw(k); const ap = abwPct(k);
           return `
-          <tr style="${bg}" ${hatKonten ? `class="fb-pos" onclick="fbToggle('${k}')" title="Klicken: Konten ${fbExpanded[k] ? "zuklappen" : "aufklappen"}"` : ""}>
+          <tr class="${rowCls}${hatKonten ? " fb-pos" : ""}" ${hatKonten ? `onclick="fbToggle('${k}')" title="Klicken: Konten ${fbExpanded[k] ? "zuklappen" : "aufklappen"}"` : ""}>
             <td style="${style};padding-left:${(row.indent || 0) * 18 + 4}px">${hatKonten ? `<span style="color:var(--accent);font-size:10px">${fbExpanded[k] ? "▼" : "▶"}</span> ` : ""}${escape(row.label)}</td>
             <td style="text-align:right;font-family:var(--font-mono);${style}">${fmt(vals.b[k])}</td>
             ${G.map((g, i) => `<td style="text-align:right;font-family:var(--font-mono);${style}">${fmt(vals.g[i][k])}</td>`).join("")}
             <td style="text-align:right;font-family:var(--font-mono);${style}">${fmt(vals.tot[k])}</td>
-            <td style="text-align:right;font-family:var(--font-mono);${style};color:${a > 0 ? "var(--accent)" : a < 0 ? "var(--danger)" : "inherit"}">${fmt(a)}</td>
-            <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim)">${ap === null ? "" : (ap > 0 ? "+" : "") + ap.toFixed(1) + "%"}</td>
+            <td style="text-align:right;font-family:var(--font-mono);${style};color:${fbAbwColor(k, a, vals.b[k])}">${fmt(a)}</td>
+            <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;color:${fbAbwColor(k, a, vals.b[k])}">${ap === null ? "" : (ap > 0 ? "+" : "") + ap.toFixed(1) + "%"}</td>
             <td></td>
           </tr>
           ${hatKonten && fbExpanded[k] ? kontoRows(k) : ""}`;
@@ -3254,21 +3276,21 @@ function renderFbMonate(el, ctx) {
           const hatKonten = row.art === "d" && ist.some(d => d.z === k);
           const bold = row.art !== "d";
           const style = bold ? "font-weight:600;" : "";
-          const bg = row.art === "c" ? "background:var(--bg-hover)" : "";
+          const rowCls = row.art === "s" ? "fb-sum" : row.art === "c" ? (k === "RESULT" ? "fb-calc fb-result" : "fb-calc") : "";
           const bH1 = vals.b[k], iH1 = vals.tot[k], aH1 = iH1 - bH1;
           return `
-          <tr style="${bg}" ${hatKonten ? `class="fb-pos" onclick="fbToggle('${k}')"` : ""}>
+          <tr class="${rowCls}${hatKonten ? " fb-pos" : ""}" ${hatKonten ? `onclick="fbToggle('${k}')"` : ""}>
             <td style="${style}padding-left:${(row.indent || 0) * 14 + 4}px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px" title="${escape(row.label)}">${hatKonten ? `<span style="color:var(--accent);font-size:9px">${fbExpanded[k] ? "▼" : "▶"}</span> ` : ""}${escape(row.label)}</td>
             ${budM.map((bm, i) => {
               const b = bm[k], istV = istM[k], a = istV - b;
-              const zebra = i % 2 ? "background:var(--bg-hover);" : "";
+              const zebra = (i % 2 && !bold) ? "background:var(--bg-hover);" : "";
               return `<td style="text-align:right;font-family:var(--font-mono);font-size:10px;${zebra}${style}">${fmt(b)}</td>
                 <td style="text-align:right;font-family:var(--font-mono);font-size:10px;${zebra}${style}">${fmt(istV)}</td>
-                <td style="text-align:right;font-family:var(--font-mono);font-size:10px;${zebra}color:${a > 0.5 ? "var(--accent)" : a < -0.5 ? "var(--danger)" : "var(--text-faint)"}">${fmt(a)}</td>`;
+                <td style="text-align:right;font-family:var(--font-mono);font-size:10px;${zebra}color:${fbAbwColor(k, a, b)}">${fmt(a)}</td>`;
             }).join("")}
             <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;border-left:2px solid var(--border);${style}">${fmt(bH1)}</td>
             <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;${style}">${fmt(iH1)}</td>
-            <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;color:${aH1 > 0.5 ? "var(--accent)" : aH1 < -0.5 ? "var(--danger)" : "var(--text-faint)"};${style}">${fmt(aH1)}</td>
+            <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;color:${fbAbwColor(k, aH1, bH1)};${style}">${fmt(aH1)}</td>
           </tr>
           ${hatKonten && fbExpanded[k] ? kontoRows(k) : ""}`;
         }).join("")}
