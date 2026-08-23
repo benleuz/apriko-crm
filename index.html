@@ -956,7 +956,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.38.3</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.38.4</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -2351,6 +2351,7 @@ const FB_PLAN = [
   ["d","SW_Ertrag",1], ["d","SW_Erloesmind",1],
   ["g","DLBO","Dienstleistungserlöse Maverix",["BO_Ertrag","BO_Erloesmind"]],
   ["d","BO_Ertrag",1], ["d","BO_Erloesmind",1],
+  ["c","DLTOT","Total Ertrag", r => r.DLSW + r.DLBO],
   ["g","EINK","Einkauf bezogene Dienstleistungen",["SW_EinkaufDL","BO_EinkaufDL"]],
   ["d","SW_EinkaufDL",1], ["d","BO_EinkaufDL",1],
   ["g","PASW","Personalaufwand Apriko",["SW_Lohn","SW_SV","SW_UebrPA"]],
