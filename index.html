@@ -956,7 +956,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.41.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.42.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -2330,8 +2330,8 @@ function budgetAddFromModal() {
      {"cfg":"ist","y":2026,"p":"H1","g":"Apriko AG","kt":"3400","b":"…","v":-123,"z":"SW_Lohn"}
    =========================================================== */
 const FB_LABELS = {
-  SW_Ertrag:"Ertrag Lizenzen", SW_Erloesmind:"Erlösminderungen",
-  BO_Ertrag:"Ertrag BPO", BO_Erloesmind:"Erlösminderungen",
+  SW_Ertrag:"Ertrag Lizenzen", SW_Erloesmind:"Hosting/Software Kosten",
+  BO_Ertrag:"Ertrag BPO", BO_Erloesmind:"Hosting/Software Kosten",
   SW_EinkaufDL:"Einkauf DL Lizenzen", BO_EinkaufDL:"Einkauf DL BPO",
   SW_Lohn:"Lohnaufwand", SW_SV:"Sozialversicherungen", SW_UebrPA:"Übriger Personalaufwand",
   BO_Lohn:"Lohnaufwand", BO_SV:"Sozialversicherungen", BO_UebrPA:"Übriger Personalaufwand",
@@ -2353,12 +2353,11 @@ const FB_PLAN = [
   ["g","DLBO","Dienstleistungserlöse BPO",["BO_Ertrag","BO_Erloesmind"]],
   ["d","BO_Ertrag",1], ["d","BO_Erloesmind",1],
   ["c","DLTOT","Total Ertrag", r => r.DLSW + r.DLBO],
-  ["d2","EINK","Einkauf bezogene Dienstleistungen",["SW_EinkaufDL","BO_EinkaufDL"],0],
   ["g","PA","Personalaufwand",["P_Lohn","P_SV","P_UebrPA"]],
   ["d2","P_Lohn","Lohnaufwand",["SW_Lohn","BO_Lohn"],1],
   ["d2","P_SV","Sozialversicherungen",["SW_SV","BO_SV"],1],
   ["d2","P_UebrPA","Übriger Personalaufwand",["SW_UebrPA","BO_UebrPA"],1],
-  ["c","BETOT","Bruttoertrag TOTAL", r => r.DLTOT - r.EINK - r.PA],
+  ["c","BETOT","Bruttoertrag TOTAL", r => r.DLTOT - r.PA],
   ["g","BETRIEB","Betriebsaufwand",["G_Raum","G_URE","G_Fahrzeug","G_Versich","G_Energie","G_VerwIT","G_Werbung","G_Sonstig"]],
   ["d","G_Raum",1], ["d","G_URE",1], ["d","G_Fahrzeug",1], ["d","G_Versich",1],
   ["d","G_Energie",1], ["d","G_VerwIT",1], ["d","G_Werbung",1], ["d","G_Sonstig",1],
@@ -2383,7 +2382,7 @@ function fbZuordnung(nr, istApriko) {
   if (nr === "3400") return "BO_Ertrag";                 // BPO-Ertrag (Apriko AG)
   if (nr.startsWith("34")) return "SW_Ertrag";           // 3410 & Co: SaaS/Lizenzen
   if (nr.startsWith("38") || nr.startsWith("39")) return istApriko ? "SW_Erloesmind" : "BO_Erloesmind";
-  if (nr.startsWith("44")) return istApriko ? "BO_EinkaufDL" : "SW_EinkaufDL";
+  if (nr.startsWith("44")) return istApriko ? "SW_Erloesmind" : "BO_Erloesmind";   // Hosting/Software-Kosten je Strom
   if (m2 === "50") return istApriko ? "BO_Lohn" : "SW_Lohn";
   if (m2 === "57") return istApriko ? "BO_SV" : "SW_SV";
   if (m2 === "58" || m2 === "59") return istApriko ? "BO_UebrPA" : "SW_UebrPA";
@@ -3099,7 +3098,7 @@ function fbToggle(key) { fbExpanded[key] = !fbExpanded[key]; render(); }
 /* Ampel-Farbe für Abweichungen: Bei Aufwandzeilen ist Überschreitung schlecht
    (<10% orange, ≥10% rot; Unterschreitung grün), bei Ertrags-/Ergebniszeilen
    umgekehrt. Rückgabe: CSS-Farbwert. */
-const FB_AUFWAND_ZEILEN = new Set(["EINK", "PA", "BETRIEB"]);
+const FB_AUFWAND_ZEILEN = new Set(["PA", "BETRIEB"]);
 function fbAbwColor(key, abw, budget) {
   if (Math.abs(abw) < 0.5) return "var(--text-faint)";
   const aufwand = FB_AUFWAND.has(key) || FB_AUFWAND_ZEILEN.has(key);
@@ -3124,10 +3123,34 @@ function fbCompute(detailVal) {
   return out;
 }
 
+/* Einmal pro Sitzung: gespeicherte Konto-Zuordnungen gegen die aktuelle
+   Regel prüfen und still korrigieren (alle Zuordnungen sind maschinell
+   vergeben — z.B. Regeländerung 3400 → BPO, 3410 → SaaS). */
+let fbMigrated = false;
+function fbMigrateZuordnung(ist) {
+  if (fbMigrated || !ist.length) return;
+  fbMigrated = true;
+  let n = 0;
+  ist.forEach(d => {
+    const soll = fbZuordnung(d.kt, /apriko/i.test(d.g || ""));
+    if (soll === d.z) return;
+    n++;
+    d.z = soll;   // sofort in der Ansicht wirksam
+    const raw = cache.budget.find(x => x.id == d.id);
+    if (raw) {
+      const neu = JSON.stringify({ cfg: "ist", y: d.y, p: d.p, g: d.g, kt: d.kt, b: d.b, v: d.v, z: soll });
+      raw.Title = neu;
+      updateItem("Budget", d.id, { Title: neu }).catch(e => { budgetLastError = "Zuordnungs-Update " + d.kt + ": " + e.message; });
+    }
+  });
+  if (n) toast(n + " Konto-Zuordnung(en) an die aktuelle Regel angepasst (u.a. 3400 → BPO, 3410 → SaaS)");
+}
+
 function renderBudgetVergleich(el) {
   const year = filters.budgetYear;
   const bud = fbBudget(year);
   const ist = fbIst(year);
+  fbMigrateZuordnung(ist);
   fbGesellschaften = [...new Set(ist.map(d => d.g))].sort();
   const G = fbGesellschaften;
   const budH1 = k => (FB_SRC[k] || [k]).reduce((sum, kk) => sum + (bud[kk] || []).slice(0, 6).reduce((s,v) => s + v, 0), 0);
@@ -3229,7 +3252,7 @@ function renderBudgetVergleich(el) {
       </div>
       <span style="font-size:11px;color:var(--text-dim)">Ist H1 ÷ 6 = Ø-Monat</span>
       <div style="margin-left:auto;display:flex;gap:8px;align-items:center;font-size:11px">
-        <input id="fb-search" placeholder="Suche in Buchungen … (z.B. Swisscom)" value="${escape(filters.fbSearch || "")}"
+        <input id="fb-search" placeholder="Suche: Text oder Konto … (z.B. Swisscom, 4400)" value="${escape(filters.fbSearch || "")}"
           oninput="filters.fbSearch=this.value;fbSearchRender()"
           style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;width:220px;font-size:11px">
         <label class="btn btn-sm" title="Konzern-Budget, bexio-ERs und Buchungsdetails (XLSX oder CSV) — mehrere Dateien aufs Mal, Typ wird automatisch erkannt">⇪ Dateien importieren
@@ -3288,10 +3311,13 @@ function fbSearchResultsHtml(year) {
   if (q.length < 2) return "";
   const buchMap = fbBuchAll(year);
   const hits = [];
+  const qIstKonto = /^\d+$/.test(q);
   Object.entries(buchMap).forEach(([id, obj]) => {
     const [g, kt] = id.split("|");
+    const kontoHit = qIstKonto ? kt.startsWith(q) : (obj.bez || "").toLowerCase().includes(q);
     obj.buch.forEach(b => {
-      if (String(b[1] || "").toLowerCase().includes(q)) hits.push({ g, kt, bez: obj.bez, d: b[0], t: b[1], v: (b[2] || 0) * (kt.startsWith("3") ? 1 : -1) });
+      if (kontoHit || String(b[1] || "").toLowerCase().includes(q))
+        hits.push({ g, kt, bez: obj.bez, d: b[0], t: b[1], v: (b[2] || 0) * (kt.startsWith("3") ? 1 : -1) });
     });
   });
   const sum = hits.reduce((s, h) => s + h.v, 0);
@@ -3329,7 +3355,7 @@ function renderFbMgmt(el, ctx) {
   // Zwei Erlösströme: Software = Lizenzen, Backoffice = BPO (je mit eigenem Budget)
   const b = vals.b, t = vals.tot;
   const erloesmind = k => ({ b: b.SW_Erloesmind + b.BO_Erloesmind, i: t.SW_Erloesmind + t.BO_Erloesmind })[k];
-  const totalErtrag = { b: b.DLTOT - b.EINK, i: t.DLTOT - t.EINK };
+  const totalErtrag = { b: b.DLTOT, i: t.DLTOT };
   const lohnTot = { b: b.PA, i: t.PA };
   const opex = { b: b.BETRIEB, i: t.BETRIEB };
   const ebitda = { b: totalErtrag.b - lohnTot.b - opex.b, i: totalErtrag.i - lohnTot.i - opex.i };
@@ -3337,8 +3363,7 @@ function renderFbMgmt(el, ctx) {
   const Z = [
     ["Ertrag Apriko Lizenzen", b.SW_Ertrag, t.SW_Ertrag, "ertrag", ""],
     ["Ertrag Apriko BPO", b.BO_Ertrag, t.BO_Ertrag, "ertrag", ""],
-    ["./. Erlösminderungen", erloesmind("b"), erloesmind("i"), "ertrag", ""],
-    ["./. Einkauf bezogene Dienstleistungen", b.EINK, t.EINK, "aufwand", ""],
+    ["./. Hosting/Software Kosten", erloesmind("b"), erloesmind("i"), "ertrag", ""],
     ["Total Ertrag", totalErtrag.b, totalErtrag.i, "ertrag", "fb-calc"],
     null,
     ["Total Lohnaufwand", lohnTot.b, lohnTot.i, "aufwand", "fb-calc"],
