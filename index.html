@@ -947,7 +947,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.37.4</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.38.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -2811,59 +2811,59 @@ function fbGesFromFilename(name) {
   return s || name;
 }
 
-/* Mehrzeilige "Data"-Spalte in der Budget-Liste (für Buchungs-JSON) */
-let fbDataColOk = false;
-function fbDataField() { try { return localStorage.getItem("fbDataField") || "Data"; } catch (e) { return "Data"; } }
-async function fbEnsureDataCol() {
-  if (fbDataColOk) return;
-  let colNames = null;
-  // 1. Existiert die Spalte schon? Match auf internen Namen ODER Anzeigenamen.
+/* ---------- Buchungs-Persistenz: JSON-Dateien in der Dokumentbibliothek ----------
+   Braucht keine Listen-Schema-Rechte (Sites.ReadWrite.All genügt für Drive-Files).
+   Ein File pro Jahr+Gesellschaft: /CRM-Budgetdaten/fb_buch_{jahr}_{ges}.json
+   Inhalt: { "6600": { bez, buch: [[datum, text, betrag], …] }, … } */
+const FB_BUCH_DIR = "CRM-Budgetdaten";
+function fbBuchFileName(year, ges) {
+  return "fb_buch_" + year + "_" + String(ges).replace(/[^A-Za-z0-9äöüÄÖÜ ]/g, "").replace(/\s+/g, "_") + ".json";
+}
+let fbBuchCache = null;        // { "ges|kt": {bez, buch} } — null = noch nicht geladen
+let fbBuchCacheYear = null;
+let fbBuchLoading = false;
+async function fbSaveBuchFile(year, ges, buchObj) {
+  const path = `/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/${encodeURIComponent(fbBuchFileName(year, ges))}:/content`;
+  const body = JSON.stringify({ ges, year, konten: buchObj });
   try {
-    const cols = await graph(`/sites/${siteId}/lists/${listIds.Budget}/columns`);
-    colNames = (cols.value || []).map(c => c.name + (c.displayName && c.displayName !== c.name ? " (" + c.displayName + ")" : ""));
-    const hit = (cols.value || []).find(c => c.name === "Data" || c.displayName === "Data");
-    if (hit) {
-      try { localStorage.setItem("fbDataField", hit.name); } catch (e) {}
-      fbDataColOk = true; return;
-    }
-  } catch (e) { /* Spalten nicht lesbar — weiter zum Anlege-Versuch */ }
-  // 2. Anlegen versuchen (braucht Sites.Manage.All — kann 403 geben)
-  try {
-    await graph(`/sites/${siteId}/lists/${listIds.Budget}/columns`, {
-      method: "POST",
-      body: JSON.stringify({ name: "Data", text: { allowMultipleLines: true, textType: "plain" } })
-    });
-    try { localStorage.setItem("fbDataField", "Data"); } catch (e) {}
-    fbDataColOk = true;
+    await graph(path, { method: "PUT", body });
   } catch (e) {
-    if (/nameAlreadyExists|already exists|409/i.test(e.message)) { fbDataColOk = true; return; }
-    if (/403|accessDenied/i.test(e.message)) {
-      throw new Error("Die Spalte 'Data' (Typ 'Mehrere Textzeilen') existiert in der Budget-Liste noch nicht, und die App darf sie nicht selbst anlegen (Graph 403 — bräuchte Sites.Manage.All). " +
-        (colNames ? "Aktuell vorhandene Spalten: " + colNames.join(", ") + ". " : "") +
-        "Bitte einmalig von Hand anlegen: SharePoint-Site sales2 → Liste 'Budget' → '+ Spalte hinzufügen' → Typ 'Mehrere Textzeilen' → Name exakt: Data → Speichern. Danach den Import nochmals starten.");
-    }
-    throw e;
+    if (!/404|itemNotFound|400/i.test(e.message)) throw e;
+    // Zielordner existiert evtl. noch nicht → anlegen und wiederholen
+    await graph(`/sites/${siteId}/drive/root/children`, {
+      method: "POST",
+      body: JSON.stringify({ name: FB_BUCH_DIR, folder: {}, "@microsoft.graph.conflictBehavior": "replace" })
+    });
+    await graph(path, { method: "PUT", body });
   }
 }
-/* Buchungen pro Gesellschaft+Konto: Title-JSON + Data-Feld (JSON-Array) */
-async function fbSaveBuch(year, ges, kt, bez, buch, existingId) {
-  const title = JSON.stringify({ cfg: "bch", y: year, p: "H1", g: ges, kt, b: (bez || "").slice(0, 20), n: buch.length });
-  const data = JSON.stringify(buch);
-  const fld = fbDataField();
-  if (existingId) {
-    await updateItem("Budget", existingId, { Title: title, [fld]: data });
-    const raw = cache.budget.find(x => x.id == existingId);
-    if (raw) { raw.Title = title; raw[fld] = data; }
-  } else await createItem("Budget", { Title: title, [fld]: data });
-}
-function fbBuchAll(year) {   // Map "ges|kt" → {bez, buch:[[d,t,v],…]}
+async function fbLoadBuch(year) {
+  if (fbBuchLoading) return;
+  fbBuchLoading = true;
   const out = {};
-  cache.budget.forEach(it => {
-    const d = fbParse(it, "bch");
-    if (!d || d.y != year) return;
-    try { out[d.g + "|" + d.kt] = { bez: d.b || "", buch: JSON.parse(it[fbDataField()] || it.Data || "[]") }; } catch (e) {}
-  });
-  return out;
+  try {
+    const dir = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}:/children`);
+    for (const f of (dir.value || [])) {
+      if (!f.name || !f.name.startsWith("fb_buch_" + year + "_") || !f.name.endsWith(".json")) continue;
+      try {
+        const data = await graph(`/sites/${siteId}/drive/items/${f.id}/content`);
+        const ges = data.ges || f.name.replace(/^fb_buch_\d+_/, "").replace(/\.json$/, "").replace(/_/g, " ");
+        Object.entries(data.konten || {}).forEach(([kt, obj]) => { out[ges + "|" + kt] = obj; });
+      } catch (e) { /* einzelnes File defekt — überspringen */ }
+    }
+  } catch (e) { /* Ordner existiert noch nicht → keine Buchungen */ }
+  fbBuchCache = out;
+  fbBuchCacheYear = year;
+  fbBuchLoading = false;
+}
+function fbBuchAll(year) {
+  if (fbBuchCache === null || fbBuchCacheYear !== year) {
+    if (!fbBuchLoading && typeof siteId !== "undefined" && siteId) {
+      fbLoadBuch(year).then(() => { if (currentView === "budgetvgl") render(); });
+    }
+    return {};
+  }
+  return fbBuchCache;
 }
 let fbExpanded2 = {};   // "ges|kt" → true (aufgeklappte Konten, 3. Ebene)
 function fbToggle2(id) { fbExpanded2[id] = !fbExpanded2[id]; render(); }
@@ -2940,15 +2940,12 @@ async function fbMultiRun() {
       } else if (e.art === "buchungen") {
         const ges = (e.ges || "").trim();
         if (!ges) { meld.push(e.name + ": übersprungen (keine Gesellschaft)"); continue; }
-        await fbEnsureDataCol();
-        const existing = {};
-        cache.budget.forEach(it => { const d = fbParse(it, "bch"); if (d && d.y == year && d.g === ges) existing[d.kt] = d.id; });
-        let n = 0, b = 0;
-        for (const [kt, obj] of Object.entries(e.parsedBuch)) {
-          await fbSaveBuch(year, ges, kt, obj.bez, obj.buch, existing[kt]);
-          n++; b += obj.buch.length;
-        }
-        meld.push(e.name + " → " + ges + ": " + b + " Buchungen (" + n + " Konten)");
+        await fbSaveBuchFile(year, ges, e.parsedBuch);
+        if (fbBuchCache === null || fbBuchCacheYear !== year) { fbBuchCache = {}; fbBuchCacheYear = year; }
+        Object.entries(e.parsedBuch).forEach(([kt, obj]) => { fbBuchCache[ges + "|" + kt] = obj; });
+        const kn = Object.keys(e.parsedBuch).length;
+        const bn = Object.values(e.parsedBuch).reduce((s, k) => s + k.buch.length, 0);
+        meld.push(e.name + " → " + ges + ": " + bn + " Buchungen (" + kn + " Konten)");
       } else if (e.art === "er") {
         const ges = (e.ges || "").trim();
         if (!ges) { meld.push(e.name + ": übersprungen (keine Gesellschaft)"); continue; }
