@@ -956,7 +956,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.38.4</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.40.1</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -2515,6 +2515,7 @@ function fbSheetRows(sheetXml, shared, parser) {
   const doc = parser.parseFromString(sheetXml, "application/xml");
   const rows = [];
   for (const rowEl of doc.getElementsByTagName("row")) {
+    const rn = parseInt(rowEl.getAttribute("r") || "0");   // echte Excel-Zeile
     const arr = [];
     for (const c of rowEl.getElementsByTagName("c")) {
       const ref = c.getAttribute("r") || "";
@@ -2531,7 +2532,9 @@ function fbSheetRows(sheetXml, shared, parser) {
       }
       arr[ci] = v;
     }
-    rows.push(Array.from(arr, x => x === undefined ? "" : String(x)));
+    const clean = Array.from(arr, x => x === undefined ? "" : String(x));
+    if (rn > 0) { while (rows.length < rn - 1) rows.push([]); rows[rn - 1] = clean; }
+    else rows.push(clean);
   }
   return rows;
 }
@@ -2590,16 +2593,55 @@ async function fbReadXlsx(buf) {
       }
       arr[ci] = v;
     }
-    rows.push(Array.from(arr, x => x === undefined ? "" : String(x)));
+    const clean = Array.from(arr, x => x === undefined ? "" : String(x));
+    if (rn > 0) { while (rows.length < rn - 1) rows.push([]); rows[rn - 1] = clean; }
+    else rows.push(clean);
   }
   return rows;
 }
+/* Zell-Kommentare des ersten Blatts: { "G33": "Kommentartext", … }
+   Liest klassische Kommentare (xl/comments*.xml) und Threaded Comments. */
+async function fbReadXlsxComments(buf) {
+  const out = {};
+  const p = new DOMParser();
+  const candidates = [];
+  for (let i = 1; i <= 4; i++) { candidates.push("xl/comments" + i + ".xml"); candidates.push("xl/comments/comment" + i + ".xml"); }
+  for (const cand of candidates) {
+    const xml = await fbUnzipEntry(buf, cand);
+    if (!xml) continue;
+    const doc = p.parseFromString(xml, "application/xml");
+    for (const c of doc.getElementsByTagName("comment")) {
+      const ref = c.getAttribute("ref");
+      let t = "";
+      for (const tn of c.getElementsByTagName("t")) t += tn.textContent;
+      if (ref && t.trim()) out[ref] = (out[ref] ? out[ref] + " " : "") + t.trim();
+    }
+  }
+  for (let i = 1; i <= 4; i++) {
+    const xml = await fbUnzipEntry(buf, "xl/threadedComments/threadedComment" + i + ".xml");
+    if (!xml) continue;
+    const doc = p.parseFromString(xml, "application/xml");
+    for (const c of doc.getElementsByTagName("threadedComment")) {
+      const ref = c.getAttribute("ref");
+      let t = "";
+      for (const tn of c.getElementsByTagName("text")) t += tn.textContent;
+      if (ref && t.trim()) out[ref] = (out[ref] ? out[ref] + " " : "") + t.trim();
+    }
+  }
+  return out;
+}
+
 /* Datei → alle Blätter [{name, rows}] (CSV = 1 Pseudo-Blatt) */
 function fbReadTableAll(file) {
   return new Promise((resolve, reject) => {
     if (/\.xlsx$/i.test(file.name)) {
       const r = new FileReader();
-      r.onload = e => fbReadXlsxAll(e.target.result).then(resolve).catch(reject);
+      r.onload = e => {
+        const buf = e.target.result;
+        Promise.all([fbReadXlsxAll(buf), fbReadXlsxComments(buf).catch(() => ({}))])
+          .then(([sheets, comments]) => { if (sheets[0]) sheets[0].comments = comments; resolve(sheets); })
+          .catch(reject);
+      };
       r.onerror = () => reject(new Error("Datei nicht lesbar"));
       r.readAsArrayBuffer(file);
     } else {
@@ -2666,10 +2708,17 @@ function fbFindMonthCols(rows) {
   return null;
 }
 /* Original-Konzern-Budget: Blockheader-Kontext → FB-Keys mit 12 Monatswerten. */
-function fbParseBudgetOrig(rows) {
+function fbParseBudgetOrig(rows, comments) {
   const monthCols = fbFindMonthCols(rows);
   if (!monthCols) return null;
   const out = {};
+  const notes = {};
+  // Kommentare nach Excel-Zeile gruppieren ("G33" → Zeile 33)
+  const byRow = {};
+  Object.entries(comments || {}).forEach(([ref, t]) => {
+    const m = ref.match(/^[A-Z]+(\d+)$/);
+    if (m) { const rn = parseInt(m[1]); byRow[rn] = (byRow[rn] ? byRow[rn] + " · " : "") + t; }
+  });
   let ctx = "";
   const label = r => {
     for (let c = 0; c < Math.min(8, r.length); c++) {
@@ -2680,7 +2729,7 @@ function fbParseBudgetOrig(rows) {
   };
   const vals = r => monthCols.map(i => Math.round(parseFloat(String(r[i] ?? "").replace(/['\u2019]/g, "")) || 0));
   const hasVals = r => monthCols.some(i => String(r[i] ?? "").trim() !== "");
-  rows.forEach(r => {
+  rows.forEach((r, idx) => {
     const l = label(r);
     if (!l) return;
     if (l.includes("dienstleistungserlöse software")) { ctx = "DLSW"; return; }
@@ -2709,9 +2758,13 @@ function fbParseBudgetOrig(rows) {
       else if (l.startsWith("finanzaufwand")) key = "G_Finanz";
       else if (l.startsWith("steueraufwand")) key = "G_Steuern";
     }
-    if (key && hasVals(r) && !(key in out)) out[key] = vals(r);
+    if (key && hasVals(r) && !(key in out)) {
+      out[key] = vals(r);
+      if (byRow[idx + 1]) notes[key] = byRow[idx + 1].slice(0, 500);
+    }
   });
-  return Object.keys(out).length >= 5 ? out : null;
+  if (Object.keys(out).length < 5) return null;
+  return { werte: out, notes };
 }
 /* ---------- Buchungszeilen (Kontoauszüge) ---------- */
 function fbIsDateStr(v) { return /^\d{1,2}\.\d{1,2}\.\d{2,4}$/.test(String(v).trim()); }
@@ -2854,6 +2907,10 @@ async function fbLoadBuch(year) {
   try {
     const dir = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}:/children`);
     for (const f of (dir.value || [])) {
+      if (f.name === "fb_notes_" + year + ".json") {
+        try { fbNotesCache[year] = await graph(`/sites/${siteId}/drive/items/${f.id}/content`); } catch (e) {}
+        continue;
+      }
       if (!f.name || !f.name.startsWith("fb_buch_" + year + "_") || !f.name.endsWith(".json")) continue;
       try {
         const data = await graph(`/sites/${siteId}/drive/items/${f.id}/content`);
@@ -2875,6 +2932,23 @@ function fbBuchAll(year) {
   }
   return fbBuchCache;
 }
+/* Budget-Notizen (Zell-Kommentare aus dem Budget-Excel) — ein File pro Jahr */
+let fbNotesCache = {};
+async function fbSaveNotesFile(year, notes) {
+  const path = `/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/fb_notes_${year}.json:/content`;
+  const body = JSON.stringify(notes || {});
+  try { await graph(path, { method: "PUT", body }); }
+  catch (e) {
+    if (!/404|itemNotFound|400/i.test(e.message)) throw e;
+    await graph(`/sites/${siteId}/drive/root/children`, {
+      method: "POST",
+      body: JSON.stringify({ name: FB_BUCH_DIR, folder: {}, "@microsoft.graph.conflictBehavior": "replace" })
+    });
+    await graph(path, { method: "PUT", body });
+  }
+  fbNotesCache[year] = notes || {};
+}
+function fbNotes(year) { return fbNotesCache[year] || {}; }
 let fbExpanded2 = {};   // "ges|kt" → true (aufgeklappte Konten, 3. Ebene)
 function fbToggle2(id) { fbExpanded2[id] = !fbExpanded2[id]; render(); }
 
@@ -2907,8 +2981,13 @@ async function fbMultiSelect(input) {
       } else if (art === "budget_keys") {
         entry.info = rows.filter(r => FB_LABELS[String(r[0] || "").trim()]).length + " Positionen (Key-Format)";
       } else if (art === "budget_orig") {
-        const parsed = fbParseBudgetOrig(rows);
-        if (parsed) { entry.parsed = parsed; entry.info = Object.keys(parsed).length + " Positionen (Konzern-Budget)"; }
+        const parsed = fbParseBudgetOrig(rows, sheets[0] && sheets[0].comments);
+        if (parsed) {
+          entry.parsed = parsed.werte;
+          entry.notes = parsed.notes;
+          const nn = Object.keys(parsed.notes || {}).length;
+          entry.info = Object.keys(parsed.werte).length + " Positionen (Konzern-Budget)" + (nn ? " · " + nn + " Notizen" : "");
+        }
         else { entry.art = "unbekannt"; entry.info = "Budget-Struktur nicht erkannt"; }
       } else entry.info = "Format nicht erkannt";
       fbPending.push(entry);
@@ -2946,7 +3025,9 @@ async function fbMultiRun() {
         for (const [key, m] of Object.entries(e.parsed)) {
           await fbSaveItem({ cfg: "fb", y: year, k: key, m }, existing[key]); n++;
         }
-        meld.push(e.name + ": " + n + " Budget-Positionen");
+        const nn = Object.keys(e.notes || {}).length;
+        if (nn) await fbSaveNotesFile(year, e.notes);
+        meld.push(e.name + ": " + n + " Budget-Positionen" + (nn ? " + " + nn + " Notizen" : ""));
       } else if (e.art === "buchungen") {
         const ges = (e.ges || "").trim();
         if (!ges) { meld.push(e.name + ": übersprungen (keine Gesellschaft)"); continue; }
@@ -3054,6 +3135,7 @@ function renderBudgetVergleich(el) {
     tot: fbCompute(k => G.reduce((s, g) => s + istVal(k, g), 0))
   };
   if (filters.fbView === "monate") { renderFbMonate(el, { year, bud, ist, G, vals, rowsOut, fkt }); return; }
+  if (filters.fbView === "mgmt") { renderFbMgmt(el, { year, ist, vals, fkt }); return; }
 
   const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
@@ -3131,6 +3213,7 @@ function renderBudgetVergleich(el) {
       <div class="bud-tabs">
         <button class="bud-tab active" onclick="filters.fbView='h1';render()">Übersicht H1</button>
         <button class="bud-tab" onclick="filters.fbView='monate';render()">Monate</button>
+        <button class="bud-tab" onclick="filters.fbView='mgmt';render()">Management</button>
       </div>
       <span style="font-size:11px;color:var(--text-dim)">Ist H1 ÷ 6 = Ø-Monat</span>
       <div style="margin-left:auto;display:flex;gap:8px;align-items:center;font-size:11px">
@@ -3164,11 +3247,12 @@ function renderBudgetVergleich(el) {
           const hatKonten = row.art === "d" && ist.some(d => d.z === k);
           const bold = row.art !== "d";
           const style = bold ? "font-weight:600" : "";
-          const rowCls = row.art === "s" ? "fb-sum" : row.art === "c" ? (k === "RESULT" ? "fb-calc fb-result" : "fb-calc") : "";
+          const rowCls = row.art === "s" ? "fb-sum" : row.art === "c" ? (k === "EBITDA" ? "fb-calc fb-result" : "fb-calc") : "";
           const a = abw(k); const ap = abwPct(k);
+          const note = fbNotes(year)[k];
           return `
           <tr class="${rowCls}${hatKonten ? " fb-pos" : ""}" ${hatKonten ? `onclick="fbToggle('${k}')" title="Klicken: Konten ${fbExpanded[k] ? "zuklappen" : "aufklappen"}"` : ""}>
-            <td style="${style};padding-left:${(row.indent || 0) * 18 + 4}px">${hatKonten ? `<span style="color:var(--accent);font-size:10px">${fbExpanded[k] ? "▼" : "▶"}</span> ` : ""}${escape(row.label)}</td>
+            <td style="${style};padding-left:${(row.indent || 0) * 18 + 4}px">${hatKonten ? `<span style="color:var(--accent);font-size:10px">${fbExpanded[k] ? "▼" : "▶"}</span> ` : ""}${escape(row.label)}${note ? ` <span style="cursor:help;color:var(--warn);font-size:10px" title="${escape(note)}">ⓘ</span>` : ""}</td>
             <td style="text-align:right;font-family:var(--font-mono);${style}">${fmt(vals.b[k])}</td>
             ${G.map((g, i) => `<td style="text-align:right;font-family:var(--font-mono);${style}">${fmt(vals.g[i][k])}</td>`).join("")}
             <td style="text-align:right;font-family:var(--font-mono);${style}">${fmt(vals.tot[k])}</td>
@@ -3221,6 +3305,88 @@ function fbSearchRender() {
   if (el) el.innerHTML = fbSearchResultsHtml(filters.budgetYear);
 }
 
+/* Management-Ansicht: verdichtete Kennzahlen-Sicht.
+   Lohnaufwand = kompletter Personalaufwand je Gesellschaft (Löhne, Sozial-
+   versicherungen, übriger PA); Total Opex = Betriebsaufwand. Damit gilt:
+   Total Ertrag − Total Lohnaufwand − Total Opex = EBITDA (identisch Hauptansicht). */
+function renderFbMgmt(el, ctx) {
+  const { year, ist, vals, fkt } = ctx;
+  const fmt = v => Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH");
+  const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
+    .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
+  // Lizenzen/BPO-Split des Apriko-Ertrags über die Konto-Bezeichnungen
+  const swKonten = ist.filter(d => d.z === "SW_Ertrag");
+  const istLiz = swKonten.filter(d => /lizenz|saas|software/i.test(d.b || "")).reduce((s, d) => s + (parseFloat(d.v) || 0), 0);
+  const istSwTotal = vals.tot.SW_Ertrag;
+  const istBpo = istSwTotal - istLiz;
+  const b = vals.b, t = vals.tot;
+  const erloesmind = k => ({ b: b.SW_Erloesmind + b.BO_Erloesmind, i: t.SW_Erloesmind + t.BO_Erloesmind })[k];
+  const totalErtrag = { b: b.DLTOT - b.EINK, i: t.DLTOT - t.EINK };
+  const lohnTot = { b: b.PASW + b.PABO, i: t.PASW + t.PABO };
+  const opex = { b: b.BETRIEB, i: t.BETRIEB };
+  const ebitda = { b: totalErtrag.b - lohnTot.b - opex.b, i: totalErtrag.i - lohnTot.i - opex.i };
+  // Zeilen: [label, budget|null, ist, ampelKey ("aufwand"/"ertrag"/null), klasse]
+  const Z = [
+    ["Ertrag Apriko Lizenzen", null, istLiz, "ertrag", ""],
+    ["Ertrag Apriko BPO", null, istBpo, "ertrag", ""],
+    ["Ertrag Maverix", b.BO_Ertrag, t.BO_Ertrag, "ertrag", ""],
+    ["./. Erlösminderungen", erloesmind("b"), erloesmind("i"), "ertrag", ""],
+    ["./. Einkauf bezogene Dienstleistungen", b.EINK, t.EINK, "aufwand", ""],
+    ["Total Ertrag", totalErtrag.b, totalErtrag.i, "ertrag", "fb-calc"],
+    null,
+    ["Lohnaufwand Apriko", b.PASW, t.PASW, "aufwand", ""],
+    ["Lohnaufwand Maverix", b.PABO, t.PABO, "aufwand", ""],
+    ["Total Lohnaufwand", lohnTot.b, lohnTot.i, "aufwand", "fb-calc"],
+    null,
+    ["Total Opex", opex.b, opex.i, "aufwand", "fb-calc"],
+    null,
+    ["EBITDA", ebitda.b, ebitda.i, "ertrag", "fb-calc fb-result"]
+  ];
+  const ampel = (art, abw, budget) => art === "aufwand"
+    ? fbAbwColor("BETRIEB", abw, budget)     // Aufwand-Natur
+    : fbAbwColor("DLTOT", abw, budget);      // Ertrags-/Ergebnis-Natur
+  el.innerHTML = `
+    <div style="display:flex;gap:12px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+      <label style="color:var(--text-dim);font-size:12px">Jahr:</label>
+      <select onchange="filters.budgetYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${yearOpts}</select>
+      <div class="bud-tabs">
+        <button class="bud-tab" onclick="filters.fbView='h1';render()">Übersicht H1</button>
+        <button class="bud-tab" onclick="filters.fbView='monate';render()">Monate</button>
+        <button class="bud-tab active" onclick="filters.fbView='mgmt';render()">Management</button>
+      </div>
+      <span style="font-size:11px;color:var(--text-dim)">H1 ${year} · Konzern</span>
+    </div>
+    <div class="table-wrap"><table class="bud-table" style="min-width:640px;max-width:860px">
+      <thead><tr>
+        <th style="min-width:280px">Position</th>
+        <th style="text-align:right">Budget H1</th>
+        <th style="text-align:right">Ist H1</th>
+        <th style="text-align:right">Abw. CHF</th>
+        <th style="text-align:right">Abw. %</th>
+      </tr></thead>
+      <tbody>
+        ${Z.map(z => {
+          if (!z) return `<tr><td colspan="5" style="border:none;height:10px"></td></tr>`;
+          const [label, bud, istV, art, cls] = z;
+          const hatBud = bud !== null && bud !== undefined;
+          const a = hatBud ? istV - bud : null;
+          const ap = hatBud && bud ? (a / Math.abs(bud) * 100) : null;
+          const col = a === null ? "var(--text-faint)" : ampel(art, a, bud);
+          return `
+          <tr class="${cls}">
+            <td>${escape(label)}</td>
+            <td style="text-align:right;font-family:var(--font-mono)">${hatBud ? fmt(bud) : "—"}</td>
+            <td style="text-align:right;font-family:var(--font-mono)">${fmt(istV)}</td>
+            <td style="text-align:right;font-family:var(--font-mono);color:${col}">${a === null ? "" : fmt(a)}</td>
+            <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;color:${col}">${ap === null ? "" : (ap > 0 ? "+" : "") + ap.toFixed(1) + "%"}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table></div>
+    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">Lizenzen/BPO nach Konto-Bezeichnung der Apriko-Ertragskonten aufgeteilt (Budget kennt diese Trennung nicht). Lohnaufwand = kompletter Personalaufwand je Gesellschaft (Löhne, Sozialversicherungen, übriger PA); Total Opex = Betriebsaufwand. Total Ertrag − Lohnaufwand − Opex = EBITDA.</div>
+  `;
+}
+
 function renderFbMonate(el, ctx) {
   const { year, bud, ist, G, vals, rowsOut, fkt } = ctx;
   const fmt = v => Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH");
@@ -3256,6 +3422,7 @@ function renderFbMonate(el, ctx) {
       <div class="bud-tabs">
         <button class="bud-tab" onclick="filters.fbView='h1';render()">Übersicht H1</button>
         <button class="bud-tab active" onclick="filters.fbView='monate';render()">Monate</button>
+        <button class="bud-tab" onclick="filters.fbView='mgmt';render()">Management</button>
       </div>
       <span style="font-size:11px;color:var(--text-dim)">Ist = ER-Saldo H1 linear ÷ 6</span>
     </div>
@@ -3277,7 +3444,7 @@ function renderFbMonate(el, ctx) {
           const hatKonten = row.art === "d" && ist.some(d => d.z === k);
           const bold = row.art !== "d";
           const style = bold ? "font-weight:600;" : "";
-          const rowCls = row.art === "s" ? "fb-sum" : row.art === "c" ? (k === "RESULT" ? "fb-calc fb-result" : "fb-calc") : "";
+          const rowCls = row.art === "s" ? "fb-sum" : row.art === "c" ? (k === "EBITDA" ? "fb-calc fb-result" : "fb-calc") : "";
           const bH1 = vals.b[k], iH1 = vals.tot[k], aH1 = iH1 - bH1;
           return `
           <tr class="${rowCls}${hatKonten ? " fb-pos" : ""}" ${hatKonten ? `onclick="fbToggle('${k}')"` : ""}>
