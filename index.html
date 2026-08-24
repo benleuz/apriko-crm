@@ -956,7 +956,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.42.1</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.44.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -2981,6 +2981,10 @@ async function fbMultiSelect(input) {
         // Flag = Gesellschaft: "sw" steht für Apriko AG, "bo" für maverix ag
         const hatErtraege = rows.some(r => /^3\d{3}$/.test(String(r[0] || "")));
         entry.typ = (/apriko/i.test(f.name) || hatErtraege) ? "sw" : "bo";
+        // Jahr + Periode aus dem Dateinamen (z.B. "Jan-Dez 2025" → Jahresabschluss)
+        const jm = f.name.match(/20\d{2}/g);
+        entry.jahr = jm ? parseInt(jm[jm.length - 1]) : filters.budgetYear;
+        entry.periode = /jan[-_ ]?dez|jahresabschluss|ganzjahr/i.test(f.name) ? "Jahr" : "H1";
         entry.info = rows.filter(r => /^\d{4}$/.test(String(r[0] || ""))).length + " Konten";
         const mitSaldo = rows.filter(r => /^\d{4}$/.test(String(r[0] || "")) && String(r[2] ?? "").trim() !== "").length;
         if (!mitSaldo) entry.warn = "keine Salden in Spalte 3!";
@@ -3046,8 +3050,10 @@ async function fbMultiRun() {
       } else if (e.art === "er") {
         const ges = (e.ges || "").trim();
         if (!ges) { meld.push(e.name + ": übersprungen (keine Gesellschaft)"); continue; }
+        const erJahr = e.jahr || year;
+        const erPeriode = e.periode === "Jahr" ? "Jahr" : "H1";
         const existing = {};
-        cache.budget.forEach(it => { const d = fbParse(it, "ist"); if (d && d.y == year && d.g === ges) existing[d.kt] = d.id; });
+        cache.budget.forEach(it => { const d = fbParse(it, "ist"); if (d && d.y == erJahr && d.g === ges) existing[d.kt] = d.id; });
         let n = 0, leer = 0;
         for (const p of e.rows) {
           const nr = String(p[0] || "").trim();
@@ -3056,11 +3062,11 @@ async function fbMultiRun() {
           const rawV = String(p[2] ?? "").replace(/['\u2019\s]/g, "").replace(",", ".");
           const v = parseFloat(rawV);
           if (!rawV || isNaN(v)) { leer++; continue; }
-          await fbSaveItem({ cfg: "ist", y: year, p: "H1", g: ges, kt: nr, b: bez,
+          await fbSaveItem({ cfg: "ist", y: erJahr, p: erPeriode, g: ges, kt: nr, b: bez,
             v: Math.round(v * 100) / 100, z: fbZuordnung(nr, e.typ === "sw") }, existing[nr]);
           n++;
         }
-        meld.push(e.name + " → " + ges + ": " + n + " Konten" + (leer ? " (" + leer + " ohne Saldo)" : ""));
+        meld.push(e.name + " → " + ges + " " + erJahr + "/" + erPeriode + ": " + n + " Konten" + (leer ? " (" + leer + " ohne Saldo)" : ""));
         if (!n && leer) budgetLastError = e.name + ": " + leer + " Konten gefunden, aber keines mit Saldo — bexio-Export ohne Beträge.";
       }
       } catch (errFile) {
@@ -3154,6 +3160,7 @@ function renderBudgetVergleich(el) {
   fbGesellschaften = [...new Set(ist.map(d => d.g))].sort();
   const G = fbGesellschaften;
   const budH1 = k => (FB_SRC[k] || [k]).reduce((sum, kk) => sum + (bud[kk] || []).slice(0, 6).reduce((s,v) => s + v, 0), 0);
+  const budJahr = k => (FB_SRC[k] || [k]).reduce((sum, kk) => sum + (bud[kk] || []).reduce((s,v) => s + v, 0), 0);
   const fkt = k => FB_AUFWAND.has(k) ? -1 : 1;
   const istVal = (k, g) => ist.filter(d => d.z === k && d.g === g).reduce((s,d) => s + (parseFloat(d.v) || 0), 0) * fkt(k);
 
@@ -3168,8 +3175,23 @@ function renderBudgetVergleich(el) {
     g: G.map(g => fbCompute(k => istVal(k, g))),
     tot: fbCompute(k => G.reduce((s, g) => s + istVal(k, g), 0))
   };
+  vals.bj = fbCompute(budJahr);
+  /* Jahres-Hochrechnung: Ist H1 skaliert mit der saisonalen Budget-Struktur
+     (Forecast = Ist H1 × BudgetJahr / BudgetH1). Ohne H1-Budget: additiv
+     (Ist H1 + Budget H2); ganz ohne Budget: linear × 2. */
+  vals.fc = fbCompute(k => {
+    const ih1 = fbCompute(kk => G.reduce((s, g) => s + istVal(kk, g), 0))[k];
+    return ih1;   // Platzhalter — wird unten pro Detail ersetzt
+  });
+  vals.fc = fbCompute(k => {
+    const ih1 = vals.tot[k], bh1 = budH1(k), bj = budJahr(k);
+    if (bh1 && bj) return ih1 * (bj / bh1);
+    if (bj) return ih1 + (bj - bh1);
+    return ih1 * 2;
+  });
   if (filters.fbView === "monate") { renderFbMonate(el, { year, bud, ist, G, vals, rowsOut, fkt }); return; }
   if (filters.fbView === "mgmt") { renderFbMgmt(el, { year, ist, vals, fkt }); return; }
+  if (filters.fbView === "vorjahr") { renderFbVorjahr(el, { year, ist, vals, fkt }); return; }
 
   const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
@@ -3233,6 +3255,12 @@ function renderBudgetVergleich(el) {
               <select onchange="fbPendingSet(${i},'typ',this.value)" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px">
                 <option value="sw" ${e.typ === "sw" ? "selected" : ""}>Apriko</option>
                 <option value="bo" ${e.typ === "bo" ? "selected" : ""}>Maverix</option>
+              </select>
+              <input type="number" value="${e.jahr || year}" onchange="fbPendingSet(${i},'jahr',parseInt(this.value))" title="Geschäftsjahr"
+                style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;width:66px;font-size:11px">
+              <select onchange="fbPendingSet(${i},'periode',this.value)" title="Abgedeckte Periode" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px">
+                <option value="H1" ${e.periode !== "Jahr" ? "selected" : ""}>H1</option>
+                <option value="Jahr" ${e.periode === "Jahr" ? "selected" : ""}>Jahr</option>
               </select>` : ""}
             <span style="color:var(--text-faint);font-size:11px">${escape(e.info || "")}</span>
             ${e.warn ? `<span style="color:var(--danger);font-size:11px">⚠ ${escape(e.warn)}</span>` : ""}
@@ -3249,6 +3277,7 @@ function renderBudgetVergleich(el) {
         <button class="bud-tab active" onclick="filters.fbView='h1';render()">Übersicht H1</button>
         <button class="bud-tab" onclick="filters.fbView='monate';render()">Monate</button>
         <button class="bud-tab" onclick="filters.fbView='mgmt';render()">Management</button>
+        <button class="bud-tab" onclick="filters.fbView='vorjahr';render()">Vorjahr</button>
       </div>
       <span style="font-size:11px;color:var(--text-dim)">Ist H1 ÷ 6 = Ø-Monat</span>
       <div style="margin-left:auto;display:flex;gap:8px;align-items:center;font-size:11px">
@@ -3383,6 +3412,7 @@ function renderFbMgmt(el, ctx) {
         <button class="bud-tab" onclick="filters.fbView='h1';render()">Übersicht H1</button>
         <button class="bud-tab" onclick="filters.fbView='monate';render()">Monate</button>
         <button class="bud-tab active" onclick="filters.fbView='mgmt';render()">Management</button>
+        <button class="bud-tab" onclick="filters.fbView='vorjahr';render()">Vorjahr</button>
       </div>
       <span style="font-size:11px;color:var(--text-dim)">H1 ${year} · Konzern</span>
     </div>
@@ -3417,28 +3447,174 @@ function renderFbMgmt(el, ctx) {
   `;
 }
 
+/* Vorjahresvergleich: Ist H1 des aktuellen Jahres gegen die Vorperiode.
+   Vorjahres-Jahresabschlüsse (p="Jahr") werden auf H1-Basis normalisiert (÷2);
+   die Jahr-Spalte zeigt zusätzlich den vollen Abschluss (H1-Daten ×2). */
+function renderFbVorjahr(el, ctx) {
+  const { year, ist, vals, fkt } = ctx;
+  const vy = year - 1;
+  const vjIst = fbIst(vy);
+  const fmt = v => Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH");
+  const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
+    .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
+  const srcOf = key => FB_SRC[key] || [key];
+  // Basiswerte je Key: Jahr und H1-Äquivalent (÷2 bei Jahresabschluss, ×2 umgekehrt)
+  const baseJahr = k => vjIst.filter(d => d.z === k).reduce((s, d) => {
+    const v = parseFloat(d.v) || 0;
+    return s + (d.p === "Jahr" ? v : v * 2);
+  }, 0) * (FB_AUFWAND.has(k) ? -1 : 1);
+  const baseH1 = k => vjIst.filter(d => d.z === k).reduce((s, d) => {
+    const v = parseFloat(d.v) || 0;
+    return s + (d.p === "Jahr" ? v / 2 : v);
+  }, 0) * (FB_AUFWAND.has(k) ? -1 : 1);
+  const vjJahr = fbCompute(baseJahr);
+  const vjH1 = fbCompute(baseH1);
+
+  const kontoRows = key => {
+    // Konten-Union beider Jahre (Match über Gesellschaft+Konto)
+    const map = {};
+    vjIst.filter(d => srcOf(key).includes(d.z)).forEach(d => {
+      const id = d.g + "|" + d.kt;
+      map[id] = map[id] || { g: d.g, kt: d.kt, b: d.b, vj: 0, cur: 0 };
+      map[id].vj += (parseFloat(d.v) || 0) * (d.p === "Jahr" ? 0.5 : 1);
+    });
+    ist.filter(d => srcOf(key).includes(d.z)).forEach(d => {
+      const id = d.g + "|" + d.kt;
+      map[id] = map[id] || { g: d.g, kt: d.kt, b: d.b, vj: 0, cur: 0 };
+      map[id].cur += parseFloat(d.v) || 0;
+      if (d.b) map[id].b = d.b;
+    });
+    return Object.values(map).sort((a, b) => (a.g + a.kt).localeCompare(b.g + b.kt)).map(r => {
+      const f = fkt(key);
+      return `
+      <tr class="fb-det">
+        <td style="padding-left:36px;color:var(--text-faint);font-size:10.5px">${escape(r.g)} · ${escape(r.kt)} ${escape(r.b || "")}</td>
+        <td></td>
+        <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint)">${fmt(r.vj * f)}</td>
+        <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint)">${fmt(r.cur * f)}</td>
+        <td></td><td></td>
+      </tr>`;
+    }).join("");
+  };
+
+  const rowsOut = FB_PLAN.map(row =>
+    row[0] === "d"  ? { art: "d", key: row[1], label: FB_LABELS[row[1]], indent: row[2] } :
+    row[0] === "d2" ? { art: "d", key: row[1], label: row[2], indent: row[4] || 0 } :
+    { art: row[0] === "g" ? "s" : "c", key: row[1], label: row[2] });
+  const hatVJ = vjIst.length > 0;
+
+  el.innerHTML = `
+    <div style="display:flex;gap:12px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+      <label style="color:var(--text-dim);font-size:12px">Jahr:</label>
+      <select onchange="filters.budgetYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${yearOpts}</select>
+      <div class="bud-tabs">
+        <button class="bud-tab" onclick="filters.fbView='h1';render()">Übersicht H1</button>
+        <button class="bud-tab" onclick="filters.fbView='monate';render()">Monate</button>
+        <button class="bud-tab" onclick="filters.fbView='mgmt';render()">Management</button>
+        <button class="bud-tab active" onclick="filters.fbView='vorjahr';render()">Vorjahr</button>
+      </div>
+      <span style="font-size:11px;color:var(--text-dim)">${vy} normalisiert auf H1-Basis (Jahresabschluss ÷ 2)</span>
+    </div>
+    ${!hatVJ ? `
+      <div style="text-align:center;padding:50px 20px;color:var(--text-dim)">
+        <div style="font-size:36px;margin-bottom:10px">◫</div>
+        <div style="max-width:520px;margin:0 auto 6px">Noch keine Vorjahresdaten für <strong>${vy}</strong>. Einfach die ${vy}er-Jahresabschlüsse (bexio-ER pro Gesellschaft) über <strong>"⇪ Dateien importieren"</strong> hochladen — Jahr und Periode «Jahr» werden aus dem Dateinamen erkannt und sind im Vorschau-Panel anpassbar.</div>
+      </div>` : `
+    <div class="table-wrap"><table class="bud-table" style="min-width:860px;max-width:1100px">
+      <thead><tr>
+        <th style="min-width:280px">Position</th>
+        <th style="text-align:right">${vy} Jahr</th>
+        <th style="text-align:right">${vy} H1-Basis</th>
+        <th style="text-align:right">Ist H1 ${year}</th>
+        <th style="text-align:right">Δ CHF</th>
+        <th style="text-align:right">Δ %</th>
+      </tr></thead>
+      <tbody>
+        ${rowsOut.map(row => {
+          const k = row.key;
+          const hatKonten = row.art === "d" && (vjIst.some(d => srcOf(k).includes(d.z)) || ist.some(d => srcOf(k).includes(d.z)));
+          const bold = row.art !== "d";
+          const style = bold ? "font-weight:600" : "";
+          const rowCls = row.art === "s" ? "fb-sum" : row.art === "c" ? (k === "EBITDA" || k === "DLTOT" ? "fb-calc fb-result" : "fb-calc") : "";
+          const vj = vjH1[k], cur = vals.tot[k], a = cur - vj;
+          const ap = vj ? (a / Math.abs(vj) * 100) : null;
+          return `
+          <tr class="${rowCls}${hatKonten ? " fb-pos" : ""}" ${hatKonten ? `onclick="fbToggle('${k}')"` : ""}>
+            <td style="${style};padding-left:${(row.indent || 0) * 18 + 4}px">${hatKonten ? `<span style="color:var(--accent);font-size:10px">${fbExpanded[k] ? "▼" : "▶"}</span> ` : ""}${escape(row.label)}</td>
+            <td style="text-align:right;font-family:var(--font-mono);color:var(--text-dim);${style}">${fmt(vjJahr[k])}</td>
+            <td style="text-align:right;font-family:var(--font-mono);${style}">${fmt(vj)}</td>
+            <td style="text-align:right;font-family:var(--font-mono);${style}">${fmt(cur)}</td>
+            <td style="text-align:right;font-family:var(--font-mono);${style};color:${fbAbwColor(k, a, vj)}">${fmt(a)}</td>
+            <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;color:${fbAbwColor(k, a, vj)}">${ap === null ? "" : (ap > 0 ? "+" : "") + ap.toFixed(1) + "%"}</td>
+          </tr>
+          ${hatKonten && fbExpanded[k] ? kontoRows(k) : ""}`;
+        }).join("")}
+      </tbody>
+    </table></div>
+    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">${vy}er-Jahresabschluss ÷ 2 = H1-Basis (halbes Jahr als Vergleichsgrösse); Δ = Ist H1 ${year} − H1-Basis ${vy}. Aufklappen zeigt die Konten beider Jahre nebeneinander. Ampel: Aufwand über Vorjahr orange/rot, Ertrag über Vorjahr grün.</div>`}
+  `;
+}
+
 function renderFbMonate(el, ctx) {
   const { year, bud, ist, G, vals, rowsOut, fkt } = ctx;
   const fmt = v => Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH");
-  const budMonat = m => fbCompute(k => (bud[k] || [])[m] || 0);
-  const budM = [0,1,2,3,4,5].map(budMonat);
-  const istM = {}; Object.keys(vals.tot).forEach(k => istM[k] = vals.tot[k] / 6);
   const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
-  const MK = ["Jan","Feb","Mär","Apr","Mai","Jun"];
-
+  const MK = ["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
   const srcOf = key => FB_SRC[key] || [key];
-  const kontoRows = key => ist.filter(d => srcOf(key).includes(d.z))
-    .sort((a,b) => (a.g + a.kt).localeCompare(b.g + b.kt))
-    .map(d => {
-      const mv = (parseFloat(d.v) || 0) * fkt(key) / 6;
-      return `
+
+  /* Saisonale Verteilung + Hochrechnung:
+     Ist Jan–Jun = H1-Ist × Budget-Monatsanteil / Budget-H1 (Fallback: linear ÷6).
+     Forecast Jul–Dez = Budget-Monat × (Ist H1 / Budget H1) — Fortschreibung des
+     erreichten Niveaus entlang der budgetierten Saisonkurve.
+     Jahres-Hochrechnung = Ist H1 × Budget-Jahr / Budget-H1 (Fallback: ×2). */
+  const istBase = {};
+  FB_PLAN.forEach(r => { if (r[0] !== "d" && r[0] !== "d2") return;
+    (r[0] === "d" ? [r[1]] : r[3]).forEach(k => {
+      if (!(k in istBase)) istBase[k] = ist.filter(d => d.z === k).reduce((s,d) => s + (parseFloat(d.v) || 0), 0) * (FB_AUFWAND.has(k) ? -1 : 1);
+    });
+  });
+  const profil = k => bud[k] || [];
+  const bh1of = k => profil(k).slice(0, 6).reduce((s,v) => s + v, 0);
+  const monIst = (k, i) => {
+    const bh1 = bh1of(k);
+    if (bh1) return (istBase[k] || 0) * ((profil(k)[i] || 0) / bh1);
+    return (istBase[k] || 0) / 6;
+  };
+  const jahrIst = k => {
+    const bh1 = bh1of(k);
+    const jahr = profil(k).reduce((s,v) => s + v, 0);
+    if (bh1) return (istBase[k] || 0) * jahr / bh1;
+    return (istBase[k] || 0) * 2;
+  };
+  const budMon = [...Array(12).keys()].map(i => fbCompute(k => (bud[k] || [])[i] || 0));
+  const istMon = [...Array(12).keys()].map(i => fbCompute(k => monIst(k, i)));
+  const budJahr = fbCompute(k => (bud[k] || []).reduce((s,v) => s + v, 0));
+  const istJahr = fbCompute(jahrIst);
+
+  const buchMap = fbBuchAll(year);
+  const posProfil = key => {
+    const m = Array(12).fill(0);
+    srcOf(key).forEach(kk => (bud[kk] || []).forEach((v, i) => m[i] += v));
+    return m;
+  };
+  const kontoRows = key => {
+    const p = posProfil(key);
+    const bh1 = p.slice(0, 6).reduce((s,v) => s + v, 0);
+    return ist.filter(d => srcOf(key).includes(d.z))
+      .sort((a,b) => (a.g + a.kt).localeCompare(b.g + b.kt))
+      .map(d => {
+        const base = (parseFloat(d.v) || 0) * fkt(key);
+        const mv = i => bh1 ? base * ((p[i] || 0) / bh1) : base / 6;
+        const jv = bh1 ? base * p.reduce((s,v) => s + v, 0) / bh1 : base * 2;
+        return `
       <tr class="fb-det">
         <td style="padding-left:36px;color:var(--text-faint);font-size:10px">${escape(d.g)} · ${escape(d.kt)} ${escape(d.b || "")}</td>
-        ${MK.map(() => `<td></td><td style="text-align:right;font-family:var(--font-mono);font-size:10px;color:var(--text-faint)">${fmt(mv)}</td><td></td>`).join("")}
-        <td></td><td style="text-align:right;font-family:var(--font-mono);font-size:10px;color:var(--text-faint)">${fmt(mv * 6)}</td><td></td>
+        ${MK.map((_, i) => `<td></td><td style="text-align:right;font-family:var(--font-mono);font-size:10px;color:var(--text-faint)${i >= 6 ? ";font-style:italic" : ""}">${fmt(mv(i))}</td><td></td>`).join("")}
+        <td></td><td style="text-align:right;font-family:var(--font-mono);font-size:10px;color:var(--text-faint);font-style:italic">${fmt(jv)}</td><td></td>
       </tr>`;
-    }).join("");
+      }).join("");
+  };
 
   el.innerHTML = `
     ${budgetLastError ? `
@@ -3454,19 +3630,20 @@ function renderFbMonate(el, ctx) {
         <button class="bud-tab" onclick="filters.fbView='h1';render()">Übersicht H1</button>
         <button class="bud-tab active" onclick="filters.fbView='monate';render()">Monate</button>
         <button class="bud-tab" onclick="filters.fbView='mgmt';render()">Management</button>
+        <button class="bud-tab" onclick="filters.fbView='vorjahr';render()">Vorjahr</button>
       </div>
-      <span style="font-size:11px;color:var(--text-dim)">Ist = ER-Saldo H1 linear ÷ 6</span>
+      <span style="font-size:11px;color:var(--text-dim)">Ist saisonal nach Budget-Kurve · Jul–Dez = Hochrechnung</span>
     </div>
-    <div class="table-wrap"><table class="bud-table" style="min-width:1500px">
+    <div class="table-wrap"><table class="bud-table" style="min-width:2700px">
       <thead>
         <tr>
           <th style="min-width:210px" rowspan="2">Position</th>
-          ${MK.map((m, i) => `<th colspan="3" style="text-align:center;${i % 2 ? "background:var(--bg-hover)" : ""}">${m}</th>`).join("")}
-          <th colspan="3" style="text-align:center;border-left:2px solid var(--border)">H1 Total</th>
+          ${MK.map((m, i) => `<th colspan="3" style="text-align:center;${i % 2 ? "background:var(--bg-hover);" : ""}${i === 6 ? "border-left:2px solid var(--border);" : ""}">${m}${i >= 6 ? " ◦" : ""}</th>`).join("")}
+          <th colspan="3" style="text-align:center;border-left:2px solid var(--border)">Jahr</th>
         </tr>
         <tr>
-          ${MK.map((m, i) => ["B","I","Δ"].map(s => `<th style="text-align:right;font-size:9px;${i % 2 ? "background:var(--bg-hover)" : ""}" title="${s === "B" ? "Budget" : s === "I" ? "Ist" : "Abweichung"}">${s}</th>`).join("")).join("")}
-          ${["Budget","Ist","Δ"].map((s, j) => `<th style="text-align:right;font-size:9px;${j === 0 ? "border-left:2px solid var(--border)" : ""}">${s}</th>`).join("")}
+          ${MK.map((m, i) => ["B", i < 6 ? "I" : "F", "Δ"].map(s => `<th style="text-align:right;font-size:9px;${i % 2 ? "background:var(--bg-hover);" : ""}" title="${s === "B" ? "Budget" : s === "I" ? "Ist (saisonal verteilt)" : s === "F" ? "Forecast (hochgerechnet)" : "Abweichung"}">${s}</th>`).join("")).join("")}
+          ${["Budget", "Hochr.", "Δ"].map((s, j) => `<th style="text-align:right;font-size:9px;${j === 0 ? "border-left:2px solid var(--border)" : ""}">${s}</th>`).join("")}
         </tr>
       </thead>
       <tbody>
@@ -3476,26 +3653,28 @@ function renderFbMonate(el, ctx) {
           const bold = row.art !== "d";
           const style = bold ? "font-weight:600;" : "";
           const rowCls = row.art === "s" ? "fb-sum" : row.art === "c" ? (k === "EBITDA" || k === "DLTOT" ? "fb-calc fb-result" : "fb-calc") : "";
-          const bH1 = vals.b[k], iH1 = vals.tot[k], aH1 = iH1 - bH1;
+          const bJ = budJahr[k], iJ = istJahr[k], aJ = iJ - bJ;
           return `
           <tr class="${rowCls}${hatKonten ? " fb-pos" : ""}" ${hatKonten ? `onclick="fbToggle('${k}')"` : ""}>
             <td style="${style}padding-left:${(row.indent || 0) * 14 + 4}px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px" title="${escape(row.label)}">${hatKonten ? `<span style="color:var(--accent);font-size:9px">${fbExpanded[k] ? "▼" : "▶"}</span> ` : ""}${escape(row.label)}</td>
-            ${budM.map((bm, i) => {
-              const b = bm[k], istV = istM[k], a = istV - b;
+            ${MK.map((_, i) => {
+              const b = budMon[i][k], istV = istMon[i][k], a = istV - b;
               const zebra = (i % 2 && !bold) ? "background:var(--bg-hover);" : "";
-              return `<td style="text-align:right;font-family:var(--font-mono);font-size:10px;${zebra}${style}">${fmt(b)}</td>
-                <td style="text-align:right;font-family:var(--font-mono);font-size:10px;${zebra}${style}">${fmt(istV)}</td>
-                <td style="text-align:right;font-family:var(--font-mono);font-size:10px;${zebra}color:${fbAbwColor(k, a, b)}">${fmt(a)}</td>`;
+              const fc = i >= 6 ? "font-style:italic;" : "";
+              const bl = i === 6 ? "border-left:2px solid var(--border);" : "";
+              return `<td style="text-align:right;font-family:var(--font-mono);font-size:10px;${zebra}${bl}${style}">${fmt(b)}</td>
+                <td style="text-align:right;font-family:var(--font-mono);font-size:10px;${zebra}${fc}${style}">${fmt(istV)}</td>
+                <td style="text-align:right;font-family:var(--font-mono);font-size:10px;${zebra}${fc}color:${fbAbwColor(k, a, b)}">${fmt(a)}</td>`;
             }).join("")}
-            <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;border-left:2px solid var(--border);${style}">${fmt(bH1)}</td>
-            <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;${style}">${fmt(iH1)}</td>
-            <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;color:${fbAbwColor(k, aH1, bH1)};${style}">${fmt(aH1)}</td>
+            <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;border-left:2px solid var(--border);${style}">${fmt(bJ)}</td>
+            <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;font-style:italic;${style}">${fmt(iJ)}</td>
+            <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;color:${fbAbwColor(k, aJ, bJ)};${style}">${fmt(aJ)}</td>
           </tr>
           ${hatKonten && fbExpanded[k] ? kontoRows(k) : ""}`;
         }).join("")}
       </tbody>
     </table></div>
-    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">B = Budget (Monatswerte aus dem Konzern-Budget) · I = Ist (H1-Saldo linear ÷ 6, daher in allen Monaten gleich) · Δ = Ist − Budget. Sobald echte Monatsabschlüsse importiert werden, ersetzt der Monatswert die Gleichverteilung.</div>
+    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">B = Budget · I = Ist (H1-Saldo saisonal nach der Budget-Monatskurve verteilt) · F ◦ = Forecast Jul–Dez (Budget-Monat × erreichtes Ist/Budget-Verhältnis H1) · Jahr-Hochrechnung = Ist H1 × Budget-Jahr ÷ Budget-H1. Positionen ohne Budget-Kurve: lineare Verteilung (÷6, Jahr ×2).</div>
   `;
 }
 
