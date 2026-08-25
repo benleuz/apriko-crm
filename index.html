@@ -933,8 +933,7 @@
       <div class="nav-group" data-group="workflows">
         <div class="nav-group-h" onclick="toggleNavGroup('workflows')">Workflows <span class="nav-caret">▾</span></div>
         <div class="nav-group-items">
-          <button data-view="bpocheck"><span class="ic">☑</span> BPO Checkliste</button>
-          <button data-view="cltemp"><span class="ic">☑</span> Lohn Checkliste Temp</button>
+          <button data-view="cltemp"><span class="ic">☑</span> BPO Checkliste</button>
           <button data-view="clintern"><span class="ic">☑</span> Lohn Checkliste intern</button>
           <button data-view="clfibu"><span class="ic">☑</span> FIBU Monatsabschluss</button>
         </div>
@@ -959,7 +958,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.47.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.47.2</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -1321,7 +1320,7 @@ let currentView = "dashboard";
    Berechtigungssystem
    =========================================================== */
 const SUPER_ADMIN_EMAIL = "benjamin@apriko.com";  // hat immer volle Rechte
-const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","bpocheck","cltemp","clintern","clfibu","rapport","einsatzdash","profiles"];
+const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","cltemp","clintern","clfibu","rapport","einsatzdash","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
@@ -1329,8 +1328,7 @@ const VIEW_TITLES = {
   dashboard: "Dashboard", pipeline: "Pipeline",
   customers: "Kunden", companies: "Firmen", contacts: "Kontakte", tasks: "Aufgaben",
   revenue: "Umsätze", stats: "Statistik", budget: "Ertragsbudget", budgetvgl: "Budgetvergleich",
-  bpocheck: "BPO Checkliste",
-  cltemp: "Lohn Checkliste Temp", clintern: "Lohn Checkliste intern", clfibu: "FIBU Monatsabschluss",
+  cltemp: "BPO Checkliste", clintern: "Lohn Checkliste intern", clfibu: "FIBU Monatsabschluss",
   rapport: "Rapport", einsatzdash: "Kundendashboard",
   profiles: "Profile"
 };
@@ -4040,6 +4038,9 @@ function renderRevenue(el) {
   if (crmVertragLinks === null && typeof siteId !== "undefined" && siteId) {
     crmLoadVertragLinks().then(() => { if (currentView === "customers") render(); });
   }
+  if (crmKundenFlags === null && typeof siteId !== "undefined" && siteId) {
+    crmLoadKundenFlags().then(() => { if (currentView === "customers") render(); });
+  }
   if (!cache.customers.length) {
     el.innerHTML = `<div class="empty">Noch keine Kunden erfasst.<br><br>Geh zuerst zum Kunden-Tab und lege mindestens einen Kunden an.</div>`;
     return;
@@ -5516,7 +5517,7 @@ function deriveBpoTasks(rows, headers) {
    Inhalt: { "<custId>": { "<sektion.item>": { w: "email", t: "ISO" } } } */
 const CHECKLISTEN = {
   temp: {
-    titel: "Lohn Checkliste Temporäre",
+    titel: "BPO Checkliste — Lohnlauf Temporäre",
     hinweis: "Startversion — Prozessschritte können jederzeit angepasst werden.",
     sections: [
       { titel: "Lohnlauf Temporäre", items: [
@@ -5665,14 +5666,24 @@ function renderCheckliste(el, typ) {
     return;
   }
   const daten = wfCheckCache[key];
-  // Kunden: aktive, alphabetisch nach Firmenname
+  if (crmKundenFlags === null && typeof siteId !== "undefined" && siteId) {
+    crmLoadKundenFlags().then(() => render());
+  }
+  // Kunden: aktive, bei intern/fibu nur mit entsprechendem Workflow-Flag
+  const flagName = typ === "intern" ? "intern" : typ === "fibu" ? "fibu" : null;
   const kunden = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv")
+    .filter(c => !flagName || kundenFlag(c.id, flagName))
     .map(c => {
       const comp = cache.companies.find(x => x.id == c.CompanyId);
       return { id: String(c.id), name: comp ? comp.Title : (c.Title || "Kunde " + c.id) };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
-  if (!kunden.length) { el.innerHTML = `<div class="empty">Keine aktiven Kunden vorhanden.</div>`; return; }
+  if (!kunden.length) {
+    el.innerHTML = `<div class="empty">${flagName
+      ? `Kein aktiver Kunde hat das Häkchen «${flagName === "intern" ? "Interner Lohn" : "FIBU Monatsabschluss"}» gesetzt.<br><span style="font-size:11px;color:var(--text-faint)">Kunden → Kunde bearbeiten → Häkchen setzen — dann erscheint er hier.</span>`
+      : "Keine aktiven Kunden vorhanden."}</div>`;
+    return;
+  }
   if (!filters.wfKunde || !kunden.some(k => k.id === filters.wfKunde)) filters.wfKunde = kunden[0].id;
   const sel = filters.wfKunde;
   const selName = (kunden.find(k => k.id === sel) || {}).name || "";
@@ -8368,6 +8379,9 @@ function renderCustomers(el) {
   if (crmVertragLinks === null && typeof siteId !== "undefined" && siteId) {
     crmLoadVertragLinks().then(() => { if (currentView === "customers") render(); });
   }
+  if (crmKundenFlags === null && typeof siteId !== "undefined" && siteId) {
+    crmLoadKundenFlags().then(() => { if (currentView === "customers") render(); });
+  }
   if (!cache.customers.length) {
     el.innerHTML = `<div class="empty">Noch keine Kunden erfasst.<br><br>Tipp: Wenn du einen Deal auf "Won" setzt, wird die Firma automatisch als Kunde markiert. Hier legst du den Kundenvertrag mit Segment, ARR-Ziel etc. an.</div>`;
     return;
@@ -8508,6 +8522,7 @@ function openCustomer(id) {
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Link</dt><dd>${linkUrl(c.Link) ? `<a href="${escape(linkUrl(c.Link))}" target="_blank" rel="noopener" style="color:var(--accent-2)">${escape(linkUrl(c.Link))} ↗</a>` : "—"}</dd>
       <dt>Vertrag</dt><dd>${vertragLink(c.id) ? `<a href="${escape(vertragLink(c.id))}" target="_blank" rel="noopener" style="color:var(--accent-2)">📄 Vertragsdokument öffnen ↗</a>` : "—"}</dd>
+      <dt>Workflows</dt><dd>${[kundenFlag(c.id, "intern") ? "Interner Lohn ✓" : "", kundenFlag(c.id, "fibu") ? "FIBU Monatsabschluss ✓" : ""].filter(Boolean).join(" · ") || "—"}</dd>
       <dt>Mindesthonorar</dt><dd style="white-space:pre-wrap">${escape(c.MinFee||"—")}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
     </dl>
@@ -8579,6 +8594,10 @@ function editCustomer(id) {
     <div class="field"><label>Ziel-ARR SaaS (CHF)</label><input id="f-targetarr" type="number" step="1000" min="0" value="${c.TargetARR||""}"></div>
     <div class="field"><label>Link</label><input id="f-link" type="text" value="${escape(linkUrl(c.Link))}" placeholder="z.B. helva.apriko.app"></div>
     <div class="field"><label>Vertragsdokument (SharePoint-URL)</label><input id="f-vertrag" type="text" value="${escape(vertragLink(c.id || ""))}" placeholder="In SharePoint: Dokument → Link kopieren → hier einfügen"></div>
+    <div class="field-row">
+      <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-wf-intern" ${kundenFlag(c.id || "", "intern") ? "checked" : ""} style="width:auto;margin:0"> Interner Lohn</label></div>
+      <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-wf-fibu" ${kundenFlag(c.id || "", "fibu") ? "checked" : ""} style="width:auto;margin:0"> FIBU Monatsabschluss</label></div>
+    </div>
     <div class="field"><label>Mindesthonorar</label><textarea id="f-minfee" rows="3" placeholder="z.B. CHF 1'500/Monat, gültig ab Q3 2026">${escape(c.MinFee||"")}</textarea></div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
   `, [
@@ -8727,6 +8746,17 @@ async function saveCustomer(id) {
       if (vertragNeu !== alt) {
         if (vertragNeu) crmVertragLinks[key] = vertragNeu; else delete crmVertragLinks[key];
         await crmSaveVertragLinks();
+      }
+    }
+    if (custId != null && crmKundenFlags !== null) {
+      const key = String(custId);
+      const neuIntern = document.getElementById("f-wf-intern")?.checked || false;
+      const neuFibu = document.getElementById("f-wf-fibu")?.checked || false;
+      const alt = crmKundenFlags[key] || {};
+      if (neuIntern !== !!alt.intern || neuFibu !== !!alt.fibu) {
+        if (neuIntern || neuFibu) crmKundenFlags[key] = { intern: neuIntern, fibu: neuFibu };
+        else delete crmKundenFlags[key];
+        await crmSaveKundenFlags();
       }
     }
     await reload("Customers");
@@ -9795,6 +9825,33 @@ async function crmSaveAnsprech() {
   }
 }
 function ansprechEmail(companyId) { return (crmAnsprech || {})[String(companyId)] || ""; }
+
+/* Workflow-Flags pro Kunde — { "<custId>": { intern: true, fibu: true } } */
+let crmKundenFlags = null;
+let crmKundenFlagsLoading = false;
+async function crmLoadKundenFlags() {
+  if (crmKundenFlagsLoading) return;
+  crmKundenFlagsLoading = true;
+  try {
+    const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_kunden_flags.json:/content`);
+    crmKundenFlags = data && typeof data === "object" ? data : {};
+  } catch (e) { crmKundenFlags = {}; }
+  crmKundenFlagsLoading = false;
+}
+async function crmSaveKundenFlags() {
+  const path = `/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_kunden_flags.json:/content`;
+  const body = JSON.stringify(crmKundenFlags || {});
+  try { await graph(path, { method: "PUT", body }); }
+  catch (e) {
+    if (!/404|itemNotFound|400/i.test(e.message)) throw e;
+    await graph(`/sites/${siteId}/drive/root/children`, {
+      method: "POST",
+      body: JSON.stringify({ name: FB_BUCH_DIR, folder: {}, "@microsoft.graph.conflictBehavior": "replace" })
+    });
+    await graph(path, { method: "PUT", body });
+  }
+}
+function kundenFlag(custId, flag) { return !!((crmKundenFlags || {})[String(custId)] || {})[flag]; }
 
 function linkUrl(linkField) {
   if (!linkField) return "";
