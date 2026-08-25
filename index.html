@@ -933,7 +933,7 @@
       <div class="nav-group" data-group="workflows">
         <div class="nav-group-h" onclick="toggleNavGroup('workflows')">Workflows <span class="nav-caret">▾</span></div>
         <div class="nav-group-items">
-          <button data-view="cltemp"><span class="ic">☑</span> BPO Checkliste</button>
+          <button data-view="bpocheck"><span class="ic">☑</span> Lohn Checkliste Temp</button>
           <button data-view="clintern"><span class="ic">☑</span> Lohn Checkliste intern</button>
           <button data-view="clfibu"><span class="ic">☑</span> FIBU Monatsabschluss</button>
         </div>
@@ -958,7 +958,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.48.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.48.1</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -1320,7 +1320,7 @@ let currentView = "dashboard";
    Berechtigungssystem
    =========================================================== */
 const SUPER_ADMIN_EMAIL = "benjamin@apriko.com";  // hat immer volle Rechte
-const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","cltemp","clintern","clfibu","rapport","einsatzdash","profiles"];
+const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","bpocheck","clintern","clfibu","rapport","einsatzdash","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
@@ -1328,7 +1328,7 @@ const VIEW_TITLES = {
   dashboard: "Dashboard", pipeline: "Pipeline",
   customers: "Kunden", companies: "Firmen", contacts: "Kontakte", tasks: "Aufgaben",
   revenue: "Umsätze", stats: "Statistik", budget: "Ertragsbudget", budgetvgl: "Budgetvergleich",
-  cltemp: "BPO Checkliste", clintern: "Lohn Checkliste intern", clfibu: "FIBU Monatsabschluss",
+  bpocheck: "Lohn Checkliste Temp", clintern: "Lohn Checkliste intern", clfibu: "FIBU Monatsabschluss",
   rapport: "Rapport", einsatzdash: "Kundendashboard",
   profiles: "Profile"
 };
@@ -1759,7 +1759,6 @@ function render() {
   else if (currentView === "budget") renderBudget(content);
   else if (currentView === "budgetvgl") renderBudgetVergleich(content);
   else if (currentView === "bpocheck") renderBpoCheck(content);
-  else if (currentView === "cltemp") renderCheckliste(content, "temp");
   else if (currentView === "clintern") renderCheckliste(content, "intern");
   else if (currentView === "clfibu") renderCheckliste(content, "fibu");
   else if (currentView === "einsatzdash") renderEinsatzDash(content);
