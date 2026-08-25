@@ -958,7 +958,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.48.1</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.48.2</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -9902,6 +9902,12 @@ document.getElementById("modal").onclick = e => {
   if (e.target.id === "modal") closeModal();
 };
 
+window.addEventListener("error", e => {
+  try { toast("JS-Fehler: " + (e.message || e.error) + (e.lineno ? " (Zeile " + e.lineno + ")" : ""), true); } catch (x) {}
+});
+window.addEventListener("unhandledrejection", e => {
+  try { toast("Fehler: " + ((e.reason && e.reason.message) || e.reason), true); } catch (x) {}
+});
 init();
 
 /* ============================================================ RAPPORT-MODUL
