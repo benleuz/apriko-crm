@@ -934,6 +934,9 @@
         <div class="nav-group-h" onclick="toggleNavGroup('workflows')">Workflows <span class="nav-caret">▾</span></div>
         <div class="nav-group-items">
           <button data-view="bpocheck"><span class="ic">☑</span> BPO Checkliste</button>
+          <button data-view="cltemp"><span class="ic">☑</span> Lohn Checkliste Temp</button>
+          <button data-view="clintern"><span class="ic">☑</span> Lohn Checkliste intern</button>
+          <button data-view="clfibu"><span class="ic">☑</span> FIBU Monatsabschluss</button>
         </div>
       </div>
       <div class="nav-group" data-group="spielwiese">
@@ -956,7 +959,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.46.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.47.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -1318,7 +1321,7 @@ let currentView = "dashboard";
    Berechtigungssystem
    =========================================================== */
 const SUPER_ADMIN_EMAIL = "benjamin@apriko.com";  // hat immer volle Rechte
-const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","bpocheck","rapport","einsatzdash","profiles"];
+const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","bpocheck","cltemp","clintern","clfibu","rapport","einsatzdash","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
@@ -1327,6 +1330,7 @@ const VIEW_TITLES = {
   customers: "Kunden", companies: "Firmen", contacts: "Kontakte", tasks: "Aufgaben",
   revenue: "Umsätze", stats: "Statistik", budget: "Ertragsbudget", budgetvgl: "Budgetvergleich",
   bpocheck: "BPO Checkliste",
+  cltemp: "Lohn Checkliste Temp", clintern: "Lohn Checkliste intern", clfibu: "FIBU Monatsabschluss",
   rapport: "Rapport", einsatzdash: "Kundendashboard",
   profiles: "Profile"
 };
@@ -1757,6 +1761,9 @@ function render() {
   else if (currentView === "budget") renderBudget(content);
   else if (currentView === "budgetvgl") renderBudgetVergleich(content);
   else if (currentView === "bpocheck") renderBpoCheck(content);
+  else if (currentView === "cltemp") renderCheckliste(content, "temp");
+  else if (currentView === "clintern") renderCheckliste(content, "intern");
+  else if (currentView === "clfibu") renderCheckliste(content, "fibu");
   else if (currentView === "einsatzdash") renderEinsatzDash(content);
   else if (currentView === "companies") renderCompanies(content);
   else if (currentView === "contacts") renderContacts(content);
@@ -5501,6 +5508,235 @@ function deriveBpoTasks(rows, headers) {
       expiringPermits: expiring.length
     }
   };
+}
+
+/* ============ Workflow-Checklisten (Temp-Lohn, interner Lohn, FIBU) ============
+   Instanzen pro Kunde und Monat; Abhaken schreibt Visum (Login) + Timestamp.
+   Persistenz: ein Drive-JSON pro Typ+Monat: wf_check_{typ}_{yyyy-mm}.json
+   Inhalt: { "<custId>": { "<sektion.item>": { w: "email", t: "ISO" } } } */
+const CHECKLISTEN = {
+  temp: {
+    titel: "Lohn Checkliste Temporäre",
+    hinweis: "Startversion — Prozessschritte können jederzeit angepasst werden.",
+    sections: [
+      { titel: "Lohnlauf Temporäre", items: [
+        ["Stundenrapporte vollständig erfasst und kontrolliert", "inkl. GAV-Zuschläge, Spesen, Absenzen"],
+        ["Neueintritte und Mutationen erfasst", "Verträge, BVG-Anmeldungen, QST-Tarife, Kinderzulagen"],
+        ["Lohnlauf gerechnet und plausibilisiert", "Brutto/Netto-Kontrolle, Auffälligkeiten geklärt"],
+        ["Vorschüsse berücksichtigt, Negativlöhne geprüft", ""],
+        ["Auszahlung im E-Banking hochgeladen und freigegeben", ""],
+        ["Lohnabrechnungen versendet", "am Tag der Auszahlung"],
+        ["Verbuchung durchgeführt, Monat abgeschlossen", "gemäss Anleitung"],
+        ["Quellensteuerdeklaration durchgeführt", ""]
+      ]}
+    ]
+  },
+  intern: {
+    titel: "Checkliste Monatslohn — interne Mitarbeiter",
+    hinweis: "",
+    sections: [
+      { titel: "Lohnlauf interne Mitarbeiter", items: [
+        ["Mail an Kunde: Anpassungen beim Lohn?", ""],
+        ["Rückmeldung Kunde erhalten", ""],
+        ["Lohnabrechnungen dem Kunden zur Ansicht gesendet", ""],
+        ["Kunden-OK zu den Lohnabrechnungen erhalten", ""],
+        ["Löhne im E-Banking hochgeladen, Auszahlungsliste an Kunden gesendet", ""],
+        ["Lohnabrechnungen versendet", "am Tag der Auszahlung"],
+        ["Verbuchung durchgeführt, Monat abgeschlossen", "gemäss Anleitung"],
+        ["Quellensteuerdeklaration durchgeführt", ""]
+      ]}
+    ]
+  },
+  fibu: {
+    titel: "Checkliste Zwischenabschluss (FIBU)",
+    hinweis: "",
+    sections: [
+      { titel: "Bilanz — Kassen, Banken, Durchlauf & Debitoren", items: [
+        ["Kasse 1000", "Kassenbuch kontrolliert, Kassensturz"],
+        ["Banken / Post", "Abgleich mit Monatsauszug"],
+        ["Durchlaufkonti 1090, 1092–1095, 1097–1099", "Nachweise erstellt, Saldo muss 0 sein"],
+        ["Durchlaufkonto 1091", "Nachweis erstellt, Saldo 0 — ggf. Abgrenzung buchen"],
+        ["Durchlaufkonto 1096", "Saldonachweis vorhanden"],
+        ["Debitoren (FLL) 1100", "Nachweis Debitorenbestand, pro Filiale"],
+        ["Vorschüsse 1140", "Saldo muss 0 sein"],
+        ["Negativlöhne 1142", "Nachweis erstellt, Negativ-Lohnliste pro Monat"],
+        ["Mehrwertsteuer 1170, 1171, 2200", "Abrechnung erstellt und abgestimmt"],
+        ["ARA 1300", "Bestand nachgewiesen, Vollständigkeit, Belege"]
+      ]},
+      { titel: "Bilanz — Passiven & Abgrenzungen", items: [
+        ["Abgrenzung 1388 / 2388", "per 31.12. immer 0 — monatlich kontrollieren"],
+        ["Anlagevermögen 15XX", "Abschreibungen pro rata, neue Anlagen inkl. MWST prüfen"],
+        ["Kreditoren (VLL) 2000", "Bestand mit OP-Liste abgeglichen (Kontoblatt ganzes Jahr)"],
+        ["Ferienguthaben 2215", "gemäss Mitarbeiterkonto"],
+        ["Guthaben 13. Monatslohn 2216", "gemäss Mitarbeiterkonto"],
+        ["Kreditoren AHV/FAK/NBU/KTG/Vollzug/FAR 2270–2276", "richtiger Monat, AN/AG-Beiträge kontrolliert"],
+        ["Kreditoren BVG 2272", "TMA monatlich Saldo 0 — fehlende Monatsrechnung: Vormonat prüfen"],
+        ["Kreditoren QST 2278", "Abgleich mit Excel-Liste, identischer Saldo (Kontoblatt ganzes Jahr)"],
+        ["PRA 2300", "Bestand nachgewiesen, Vollständigkeit, Belege"],
+        ["Abgrenzung Löhne 2301.xx", "länger offene, nicht ausbezahlte Löhne"],
+        ["Abgrenzung Vorschüsse 2302.xx", "länger offene, nicht ausbezahlte Vorschüsse"],
+        ["Abgrenzung Zwischenabschluss 2390", "Saldo im Folgemonat auflösen"]
+      ]},
+      { titel: "Erfolgsrechnung & Plausibilisierung", items: [
+        ["Kontokorrente nahestehender Gesellschaften abgestimmt", ""],
+        ["Besonderheiten geprüft", "z.B. MMF/Franchising, URV — ggf. Vormonate ansehen"],
+        ["BAB bei Kunden mit Kostenstellen kontrolliert", "alle Kosten der ER zugeordnet"],
+        ["Gewinn/Verlust stimmig", "Bilanz/ER und Periodenvergleich identisch"],
+        ["Aufwandkonti durchgesehen", "Vollständigkeit"],
+        ["Ertragskonti durchgesehen", "Vollständigkeit"],
+        ["Aufwand: nur Soll-Buchungen", "Ausnahmen erklärbar"],
+        ["Ertrag: nur Haben-Buchungen", "Ausnahmen erklärbar"],
+        ["Bruttomarge abgeglichen", "Apriko-Auswertung vs. ER Abacus (Ertrag & Selbstkosten)"]
+      ]},
+      { titel: "Abschluss & Versand", items: [
+        ["Mail an Kunden bei Versand Monatsabschluss", ""]
+      ]}
+    ]
+  }
+};
+
+let wfCheckCache = {};      // fileKey → Daten
+let wfCheckLoading = {};    // fileKey → true während Ladung
+function wfCheckFileKey(typ, monat) { return "wf_check_" + typ + "_" + monat + ".json"; }
+function wfMonat() {
+  if (!filters.wfMonat) {
+    const d = new Date();
+    filters.wfMonat = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+  }
+  return filters.wfMonat;
+}
+function wfMonatShift(delta) {
+  const [y, m] = wfMonat().split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  filters.wfMonat = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+  render();
+}
+async function wfCheckLoad(typ, monat) {
+  const key = wfCheckFileKey(typ, monat);
+  if (wfCheckLoading[key]) return;
+  wfCheckLoading[key] = true;
+  try {
+    const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/${key}:/content`);
+    wfCheckCache[key] = data && typeof data === "object" ? data : {};
+  } catch (e) { wfCheckCache[key] = {}; }
+  wfCheckLoading[key] = false;
+}
+async function wfCheckSave(typ, monat) {
+  const key = wfCheckFileKey(typ, monat);
+  const path = `/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/${key}:/content`;
+  const body = JSON.stringify(wfCheckCache[key] || {});
+  try { await graph(path, { method: "PUT", body }); }
+  catch (e) {
+    if (!/404|itemNotFound|400/i.test(e.message)) throw e;
+    await graph(`/sites/${siteId}/drive/root/children`, {
+      method: "POST",
+      body: JSON.stringify({ name: FB_BUCH_DIR, folder: {}, "@microsoft.graph.conflictBehavior": "replace" })
+    });
+    await graph(path, { method: "PUT", body });
+  }
+}
+async function wfCheckToggle(typ, custId, itemKey) {
+  const monat = wfMonat();
+  const key = wfCheckFileKey(typ, monat);
+  if (!(key in wfCheckCache)) return;   // noch nicht geladen
+  const cust = wfCheckCache[key][custId] = wfCheckCache[key][custId] || {};
+  if (cust[itemKey]) delete cust[itemKey];
+  else cust[itemKey] = { w: myEmail() || "?", t: new Date().toISOString() };
+  render();   // optimistisch
+  try { await wfCheckSave(typ, monat); }
+  catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+}
+function wfVisum(eintrag) {
+  if (!eintrag) return "";
+  const d = new Date(eintrag.t);
+  const dat = isNaN(d) ? "" : String(d.getDate()).padStart(2, "0") + "." + String(d.getMonth() + 1).padStart(2, "0") + ". " +
+    String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  return `${escape(ownerLabel(eintrag.w))} · ${dat}`;
+}
+
+function renderCheckliste(el, typ) {
+  const def = CHECKLISTEN[typ];
+  const monat = wfMonat();
+  const key = wfCheckFileKey(typ, monat);
+  document.getElementById("view-actions").innerHTML = "";
+  if (!(key in wfCheckCache)) {
+    if (typeof siteId !== "undefined" && siteId) wfCheckLoad(typ, monat).then(() => { if (currentView === "cl" + typ || ["cltemp","clintern","clfibu"].includes(currentView)) render(); });
+    el.innerHTML = `<div class="empty">Checkliste wird geladen …</div>`;
+    return;
+  }
+  const daten = wfCheckCache[key];
+  // Kunden: aktive, alphabetisch nach Firmenname
+  const kunden = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv")
+    .map(c => {
+      const comp = cache.companies.find(x => x.id == c.CompanyId);
+      return { id: String(c.id), name: comp ? comp.Title : (c.Title || "Kunde " + c.id) };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+  if (!kunden.length) { el.innerHTML = `<div class="empty">Keine aktiven Kunden vorhanden.</div>`; return; }
+  if (!filters.wfKunde || !kunden.some(k => k.id === filters.wfKunde)) filters.wfKunde = kunden[0].id;
+  const sel = filters.wfKunde;
+  const selName = (kunden.find(k => k.id === sel) || {}).name || "";
+  const custDaten = daten[sel] || {};
+  const alleItems = def.sections.flatMap((s, si) => s.items.map((_, ii) => si + "." + ii));
+  const doneCount = alleItems.filter(ik => custDaten[ik]).length;
+  const pct = alleItems.length ? Math.round(doneCount / alleItems.length * 100) : 0;
+  const mLabel = (() => { const [y, m] = monat.split("-"); return ["Jan","Feb","März","April","Mai","Juni","Juli","Aug","Sep","Okt","Nov","Dez"][parseInt(m)-1] + " " + y; })();
+
+  el.innerHTML = `
+    <div style="display:flex;gap:12px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+      <div style="display:flex;gap:4px;align-items:center">
+        <button class="btn btn-sm" onclick="wfMonatShift(-1)">◀</button>
+        <span style="min-width:92px;text-align:center;font-weight:600">${mLabel}</span>
+        <button class="btn btn-sm" onclick="wfMonatShift(1)">▶</button>
+      </div>
+      <select onchange="filters.wfKunde=this.value;render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit;min-width:220px">
+        ${kunden.map(k => `<option value="${k.id}" ${k.id === sel ? "selected" : ""}>${escape(k.name)}</option>`).join("")}
+      </select>
+      <div style="flex:1;min-width:160px;max-width:320px;display:flex;align-items:center;gap:8px">
+        <div style="flex:1;height:8px;background:var(--bg-hover);border-radius:4px;overflow:hidden">
+          <div style="width:${pct}%;height:100%;background:${pct === 100 ? "var(--accent)" : "var(--accent-2)"};transition:width .3s"></div>
+        </div>
+        <span style="font-size:11px;color:var(--text-dim);white-space:nowrap">${doneCount}/${alleItems.length}</span>
+      </div>
+    </div>
+    ${def.hinweis ? `<div style="font-size:11px;color:var(--text-faint);margin-bottom:10px">ⓘ ${escape(def.hinweis)}</div>` : ""}
+    ${def.sections.map((s, si) => `
+      <div class="card" style="margin-bottom:14px;padding:14px 16px">
+        <div style="font-weight:600;margin-bottom:10px;color:var(--accent)">${escape(s.titel)}</div>
+        ${s.items.map((it, ii) => {
+          const ik = si + "." + ii;
+          const e = custDaten[ik];
+          return `
+          <div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--border)">
+            <input type="checkbox" ${e ? "checked" : ""} onchange="wfCheckToggle('${typ}','${sel}','${ik}')"
+              style="width:16px;height:16px;margin-top:2px;accent-color:var(--accent);cursor:pointer;flex-shrink:0">
+            <div style="flex:1">
+              <div style="${e ? "color:var(--text-dim)" : ""}">${escape(it[0])}</div>
+              ${it[1] ? `<div style="font-size:10.5px;color:var(--text-faint)">${escape(it[1])}</div>` : ""}
+            </div>
+            <div style="font-size:10.5px;color:${e ? "var(--accent)" : "var(--text-faint)"};white-space:nowrap;margin-top:2px">${e ? "✓ " + wfVisum(e) : ""}</div>
+          </div>`;
+        }).join("")}
+      </div>`).join("")}
+    <div class="card" style="padding:14px 16px">
+      <div style="font-weight:600;margin-bottom:10px">Monatsübersicht ${escape(mLabel)} — alle Kunden</div>
+      <table style="width:100%;font-size:12px">
+        ${kunden.map(k => {
+          const kd = daten[k.id] || {};
+          const dc = alleItems.filter(ik => kd[ik]).length;
+          const p = alleItems.length ? Math.round(dc / alleItems.length * 100) : 0;
+          const letzte = Object.values(kd).map(x => x.t).sort().pop();
+          const ld = letzte ? new Date(letzte) : null;
+          return `<tr style="cursor:pointer" onclick="filters.wfKunde='${k.id}';render()">
+            <td style="padding:5px 8px 5px 0;${k.id === sel ? "font-weight:600" : ""}">${escape(k.name)}</td>
+            <td style="width:180px;padding:5px 8px"><div style="height:6px;background:var(--bg-hover);border-radius:3px;overflow:hidden"><div style="width:${p}%;height:100%;background:${p === 100 ? "var(--accent)" : "var(--accent-2)"}"></div></div></td>
+            <td style="width:64px;text-align:right;font-family:var(--font-mono);color:${p === 100 ? "var(--accent)" : "var(--text-dim)"}">${dc}/${alleItems.length}</td>
+            <td style="width:120px;text-align:right;color:var(--text-faint);font-size:10.5px">${ld && !isNaN(ld) ? String(ld.getDate()).padStart(2,"0") + "." + String(ld.getMonth()+1).padStart(2,"0") + ". " + String(ld.getHours()).padStart(2,"0") + ":" + String(ld.getMinutes()).padStart(2,"0") : ""}</td>
+          </tr>`;
+        }).join("")}
+      </table>
+    </div>
+  `;
 }
 
 function renderBpoCheck(el) {
@@ -9465,7 +9701,8 @@ const filters = {
   customerSegments: [],       // Array von Segment-Strings; leer = alle Segmente
   customerActiveOnly: true,   // true = nur Aktive zeigen
   companyKundeFilter: "all",
-  companyAnsprech: "",  // "all", "customer", "lead"
+  companyAnsprech: "",
+  wfMonat: "", wfKunde: "",  // "all", "customer", "lead"
   companySort: "title",       // "title" oder "winprob"
   companySortDir: "asc",      // "asc" oder "desc"
   // Statistik-Ansicht: Zeitraum als Year-Month
