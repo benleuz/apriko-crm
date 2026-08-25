@@ -958,7 +958,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.47.2</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.47.3</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -8523,7 +8523,7 @@ function openCustomer(id) {
       <dt>Link</dt><dd>${linkUrl(c.Link) ? `<a href="${escape(linkUrl(c.Link))}" target="_blank" rel="noopener" style="color:var(--accent-2)">${escape(linkUrl(c.Link))} ↗</a>` : "—"}</dd>
       <dt>Vertrag</dt><dd>${vertragLink(c.id) ? `<a href="${escape(vertragLink(c.id))}" target="_blank" rel="noopener" style="color:var(--accent-2)">📄 Vertragsdokument öffnen ↗</a>` : "—"}</dd>
       <dt>Workflows</dt><dd>${[kundenFlag(c.id, "intern") ? "Interner Lohn ✓" : "", kundenFlag(c.id, "fibu") ? "FIBU Monatsabschluss ✓" : ""].filter(Boolean).join(" · ") || "—"}</dd>
-      <dt>Mindesthonorar</dt><dd style="white-space:pre-wrap">${escape(c.MinFee||"—")}</dd>
+      <dt>Mindesthonorar</dt><dd style="white-space:pre-wrap">${escape(minFeeText(c.id, c.MinFee)||"—")}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
     </dl>
 
@@ -8598,7 +8598,7 @@ function editCustomer(id) {
       <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-wf-intern" ${kundenFlag(c.id || "", "intern") ? "checked" : ""} style="width:auto;margin:0"> Interner Lohn</label></div>
       <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-wf-fibu" ${kundenFlag(c.id || "", "fibu") ? "checked" : ""} style="width:auto;margin:0"> FIBU Monatsabschluss</label></div>
     </div>
-    <div class="field"><label>Mindesthonorar</label><textarea id="f-minfee" rows="3" placeholder="z.B. CHF 1'500/Monat, gültig ab Q3 2026">${escape(c.MinFee||"")}</textarea></div>
+    <div class="field"><label>Mindesthonorar</label><textarea id="f-minfee" rows="3" placeholder="z.B. CHF 1'500/Monat, gültig ab Q3 2026">${escape(minFeeText(c.id || "", c.MinFee))}</textarea></div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
   `, [
     `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
@@ -8721,7 +8721,6 @@ async function saveCustomer(id) {
       const u = normalizeUrl(val("f-link"));
       return u ? { Url: u, Description: u } : null;
     })(),
-    MinFee: val("f-minfee") || null,
     Notes: val("f-notes")
   };
   if (!data.CompanyId) return toast("Firma erforderlich", true);
@@ -8752,9 +8751,10 @@ async function saveCustomer(id) {
       const key = String(custId);
       const neuIntern = document.getElementById("f-wf-intern")?.checked || false;
       const neuFibu = document.getElementById("f-wf-fibu")?.checked || false;
+      const neuMinfee = val("f-minfee");
       const alt = crmKundenFlags[key] || {};
-      if (neuIntern !== !!alt.intern || neuFibu !== !!alt.fibu) {
-        if (neuIntern || neuFibu) crmKundenFlags[key] = { intern: neuIntern, fibu: neuFibu };
+      if (neuIntern !== !!alt.intern || neuFibu !== !!alt.fibu || neuMinfee !== (alt.minfee || "")) {
+        if (neuIntern || neuFibu || neuMinfee) crmKundenFlags[key] = { intern: neuIntern, fibu: neuFibu, minfee: neuMinfee };
         else delete crmKundenFlags[key];
         await crmSaveKundenFlags();
       }
@@ -9852,6 +9852,10 @@ async function crmSaveKundenFlags() {
   }
 }
 function kundenFlag(custId, flag) { return !!((crmKundenFlags || {})[String(custId)] || {})[flag]; }
+function minFeeText(custId, spFallback) {
+  const t = ((crmKundenFlags || {})[String(custId)] || {}).minfee;
+  return t !== undefined && t !== null ? t : (spFallback || "");
+}
 
 function linkUrl(linkField) {
   if (!linkField) return "";
