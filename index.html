@@ -958,7 +958,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.47.3</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.48.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -8427,7 +8427,7 @@ function renderCustomers(el) {
               <td onclick="openCustomer(${c.id})" class="dim" style="font-family:var(--font-mono)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</td>
               <td onclick="openCustomer(${c.id})" class="dim">${escape(ownerLabel(c.Owner)||"—")}</td>
               <td class="actions-cell">
-                ${vertragLink(c.id) ? `<a href="${escape(vertragLink(c.id))}" target="_blank" rel="noopener" title="Vertragsdokument öffnen" onclick="event.stopPropagation()" style="text-decoration:none;font-size:14px;margin-right:4px">📄</a>` : ""}
+                ${vertragLinksAlle(c.id).map(v => `<a href="${escape(v.url)}" target="_blank" rel="noopener" title="${escape(v.label)} öffnen" onclick="event.stopPropagation()" style="text-decoration:none;font-size:13px;margin-right:3px">📄<sup style="font-size:8px">${v.art === "saas" ? "S" : v.art === "bpo" ? "B" : "+"}</sup></a>`).join("")}
                 <button class="btn btn-sm" onclick="event.stopPropagation();editCustomer(${c.id})">Edit</button>
               </td>
             </tr>`;
@@ -8521,7 +8521,7 @@ function openCustomer(id) {
       <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}${c.BPOYtd ? ` · <span style="color:var(--accent-3)">YTD-kumulativ</span>` : ""}</dd>
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Link</dt><dd>${linkUrl(c.Link) ? `<a href="${escape(linkUrl(c.Link))}" target="_blank" rel="noopener" style="color:var(--accent-2)">${escape(linkUrl(c.Link))} ↗</a>` : "—"}</dd>
-      <dt>Vertrag</dt><dd>${vertragLink(c.id) ? `<a href="${escape(vertragLink(c.id))}" target="_blank" rel="noopener" style="color:var(--accent-2)">📄 Vertragsdokument öffnen ↗</a>` : "—"}</dd>
+      ${VERTRAG_ARTEN.map(([art, label]) => `<dt>${label}</dt><dd>${vertragLink(c.id, art) ? `<a href="${escape(vertragLink(c.id, art))}" target="_blank" rel="noopener" style="color:var(--accent-2)">📄 Öffnen ↗</a>` : "—"}</dd>`).join("")}
       <dt>Workflows</dt><dd>${[kundenFlag(c.id, "intern") ? "Interner Lohn ✓" : "", kundenFlag(c.id, "fibu") ? "FIBU Monatsabschluss ✓" : ""].filter(Boolean).join(" · ") || "—"}</dd>
       <dt>Mindesthonorar</dt><dd style="white-space:pre-wrap">${escape(minFeeText(c.id, c.MinFee)||"—")}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
@@ -8593,7 +8593,7 @@ function editCustomer(id) {
     <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-bpoytd" ${c.BPOYtd?"checked":""} style="width:auto;margin:0"> BPO-Abrechnung YTD-kumulativ (Jahresbasis, Vormonate werden automatisch abgezogen)</label></div>
     <div class="field"><label>Ziel-ARR SaaS (CHF)</label><input id="f-targetarr" type="number" step="1000" min="0" value="${c.TargetARR||""}"></div>
     <div class="field"><label>Link</label><input id="f-link" type="text" value="${escape(linkUrl(c.Link))}" placeholder="z.B. helva.apriko.app"></div>
-    <div class="field"><label>Vertragsdokument (SharePoint-URL)</label><input id="f-vertrag" type="text" value="${escape(vertragLink(c.id || ""))}" placeholder="In SharePoint: Dokument → Link kopieren → hier einfügen"></div>
+    ${VERTRAG_ARTEN.map(([art, label]) => `<div class="field"><label>${label} (SharePoint-URL)</label><input id="f-vertrag-${art}" type="text" value="${escape(vertragLink(c.id || "", art))}" placeholder="In SharePoint: Dokument → Link kopieren → hier einfügen"></div>`).join("")}
     <div class="field-row">
       <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-wf-intern" ${kundenFlag(c.id || "", "intern") ? "checked" : ""} style="width:auto;margin:0"> Interner Lohn</label></div>
       <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-wf-fibu" ${kundenFlag(c.id || "", "fibu") ? "checked" : ""} style="width:auto;margin:0"> FIBU Monatsabschluss</label></div>
@@ -8725,7 +8725,11 @@ async function saveCustomer(id) {
   };
   if (!data.CompanyId) return toast("Firma erforderlich", true);
   if (!data.Title) return toast("Konnte Vertragsname nicht generieren — bitte Firma wählen", true);
-  const vertragNeu = normalizeUrl(val("f-vertrag"));
+  const vertragNeu = {
+    saas: normalizeUrl(val("f-vertrag-saas")),
+    bpo: normalizeUrl(val("f-vertrag-bpo")),
+    sonst: normalizeUrl(val("f-vertrag-sonst"))
+  };
   try {
     let custId = id;
     if (id) await updateItem("Customers", id, data);
@@ -8741,9 +8745,12 @@ async function saveCustomer(id) {
     }
     if (custId != null && crmVertragLinks !== null) {
       const key = String(custId);
-      const alt = crmVertragLinks[key] || "";
-      if (vertragNeu !== alt) {
-        if (vertragNeu) crmVertragLinks[key] = vertragNeu; else delete crmVertragLinks[key];
+      const altRaw = crmVertragLinks[key];
+      const alt = typeof altRaw === "string" ? { saas: "", bpo: "", sonst: altRaw } : (altRaw || {});
+      const geaendert = VERTRAG_ARTEN.some(([art]) => (vertragNeu[art] || "") !== (alt[art] || ""));
+      if (geaendert) {
+        const hatWas = VERTRAG_ARTEN.some(([art]) => vertragNeu[art]);
+        if (hatWas) crmVertragLinks[key] = vertragNeu; else delete crmVertragLinks[key];
         await crmSaveVertragLinks();
       }
     }
@@ -9797,7 +9804,16 @@ async function crmSaveVertragLinks() {
     await graph(path, { method: "PUT", body });
   }
 }
-function vertragLink(custId) { return (crmVertragLinks || {})[String(custId)] || ""; }
+const VERTRAG_ARTEN = [["saas", "Vertrag SaaS"], ["bpo", "Vertrag BPO"], ["sonst", "Sonstiges"]];
+function vertragLink(custId, art) {
+  const raw = (crmVertragLinks || {})[String(custId)];
+  if (!raw) return "";
+  if (typeof raw === "string") return art === "sonst" ? raw : "";   // Legacy-Einzellink
+  return raw[art] || "";
+}
+function vertragLinksAlle(custId) {
+  return VERTRAG_ARTEN.map(([art, label]) => ({ art, label, url: vertragLink(custId, art) })).filter(x => x.url);
+}
 
 /* Interne Ansprechperson pro Firma — { "<companyId>": "email@apriko.ch" } */
 let crmAnsprech = null;
