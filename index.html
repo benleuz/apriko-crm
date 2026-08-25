@@ -956,7 +956,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.44.0</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.46.0</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -1546,10 +1546,15 @@ async function createItem(listName, fields) {
 }
 
 async function updateItem(listName, id, fields) {
-  await graph(`/sites/${siteId}/lists/${listIds[listName]}/items/${id}/fields`, {
-    method: "PATCH",
-    body: JSON.stringify(fields)
-  });
+  try {
+    await graph(`/sites/${siteId}/lists/${listIds[listName]}/items/${id}/fields`, {
+      method: "PATCH",
+      body: JSON.stringify(fields)
+    });
+  } catch (e) {
+    e.message += " — betroffene Felder: " + Object.keys(fields).join(", ");
+    throw e;
+  }
 }
 
 async function deleteItem(listName, id) {
@@ -3281,6 +3286,12 @@ function renderBudgetVergleich(el) {
       </div>
       <span style="font-size:11px;color:var(--text-dim)">Ist H1 ÷ 6 = Ø-Monat</span>
       <div style="margin-left:auto;display:flex;gap:8px;align-items:center;font-size:11px">
+        <select onchange="filters.fbSearchGes=this.value;fbSearchRender()" title="Suche auf eine Gesellschaft eingrenzen"
+          style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:4px;font-size:11px">
+          <option value="">Alle Gesellschaften</option>
+          ${[...new Set([...G, ...Object.keys(fbBuchAll(year)).map(id => id.split("|")[0])])].sort()
+            .map(g => `<option value="${escape(g)}" ${filters.fbSearchGes === g ? "selected" : ""}>${escape(g)}</option>`).join("")}
+        </select>
         <input id="fb-search" placeholder="Suche: Text oder Konto … (z.B. Swisscom, 4400)" value="${escape(filters.fbSearch || "")}"
           oninput="filters.fbSearch=this.value;fbSearchRender()"
           style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;width:220px;font-size:11px">
@@ -3341,8 +3352,10 @@ function fbSearchResultsHtml(year) {
   const buchMap = fbBuchAll(year);
   const hits = [];
   const qIstKonto = /^\d+$/.test(q);
+  const gesFilter = filters.fbSearchGes || "";
   Object.entries(buchMap).forEach(([id, obj]) => {
     const [g, kt] = id.split("|");
+    if (gesFilter && g !== gesFilter) return;
     const kontoHit = qIstKonto ? kt.startsWith(q) : (obj.bez || "").toLowerCase().includes(q);
     obj.buch.forEach(b => {
       if (kontoHit || String(b[1] || "").toLowerCase().includes(q))
@@ -3352,7 +3365,7 @@ function fbSearchResultsHtml(year) {
   const sum = hits.reduce((s, h) => s + h.v, 0);
   return `
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:14px">
-      <div style="font-size:12px;margin-bottom:8px"><strong>${hits.length}</strong> Buchung(en) zu «${escape(filters.fbSearch)}»
+      <div style="font-size:12px;margin-bottom:8px"><strong>${hits.length}</strong> Buchung(en) zu «${escape(filters.fbSearch)}»${gesFilter ? ` · nur ${escape(gesFilter)}` : ""}
         · Summe <span style="font-family:var(--font-mono)">${sum.toLocaleString("de-CH", { minimumFractionDigits: 2 })}</span></div>
       ${hits.length ? `<div style="max-height:260px;overflow:auto">
         ${hits.slice(0, 200).map(h => `
@@ -4017,6 +4030,9 @@ function renderRevenue(el) {
     </div>
   `;
 
+  if (crmVertragLinks === null && typeof siteId !== "undefined" && siteId) {
+    crmLoadVertragLinks().then(() => { if (currentView === "customers") render(); });
+  }
   if (!cache.customers.length) {
     el.innerHTML = `<div class="empty">Noch keine Kunden erfasst.<br><br>Geh zuerst zum Kunden-Tab und lege mindestens einen Kunden an.</div>`;
     return;
@@ -8113,6 +8129,9 @@ function renderCustomers(el) {
     <input class="search-input" placeholder="Suchen..." oninput="filterTable(this.value, 'cust-row')">
     <button class="btn btn-primary" onclick="newCustomer()">+ Neuer Kunde</button>
   `;
+  if (crmVertragLinks === null && typeof siteId !== "undefined" && siteId) {
+    crmLoadVertragLinks().then(() => { if (currentView === "customers") render(); });
+  }
   if (!cache.customers.length) {
     el.innerHTML = `<div class="empty">Noch keine Kunden erfasst.<br><br>Tipp: Wenn du einen Deal auf "Won" setzt, wird die Firma automatisch als Kunde markiert. Hier legst du den Kundenvertrag mit Segment, ARR-Ziel etc. an.</div>`;
     return;
@@ -8158,6 +8177,7 @@ function renderCustomers(el) {
               <td onclick="openCustomer(${c.id})" class="dim" style="font-family:var(--font-mono)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</td>
               <td onclick="openCustomer(${c.id})" class="dim">${escape(ownerLabel(c.Owner)||"—")}</td>
               <td class="actions-cell">
+                ${vertragLink(c.id) ? `<a href="${escape(vertragLink(c.id))}" target="_blank" rel="noopener" title="Vertragsdokument öffnen" onclick="event.stopPropagation()" style="text-decoration:none;font-size:14px;margin-right:4px">📄</a>` : ""}
                 <button class="btn btn-sm" onclick="event.stopPropagation();editCustomer(${c.id})">Edit</button>
               </td>
             </tr>`;
@@ -8251,6 +8271,7 @@ function openCustomer(id) {
       <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}${c.BPOYtd ? ` · <span style="color:var(--accent-3)">YTD-kumulativ</span>` : ""}</dd>
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Link</dt><dd>${linkUrl(c.Link) ? `<a href="${escape(linkUrl(c.Link))}" target="_blank" rel="noopener" style="color:var(--accent-2)">${escape(linkUrl(c.Link))} ↗</a>` : "—"}</dd>
+      <dt>Vertrag</dt><dd>${vertragLink(c.id) ? `<a href="${escape(vertragLink(c.id))}" target="_blank" rel="noopener" style="color:var(--accent-2)">📄 Vertragsdokument öffnen ↗</a>` : "—"}</dd>
       <dt>Mindesthonorar</dt><dd style="white-space:pre-wrap">${escape(c.MinFee||"—")}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
     </dl>
@@ -8321,6 +8342,7 @@ function editCustomer(id) {
     <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-bpoytd" ${c.BPOYtd?"checked":""} style="width:auto;margin:0"> BPO-Abrechnung YTD-kumulativ (Jahresbasis, Vormonate werden automatisch abgezogen)</label></div>
     <div class="field"><label>Ziel-ARR SaaS (CHF)</label><input id="f-targetarr" type="number" step="1000" min="0" value="${c.TargetARR||""}"></div>
     <div class="field"><label>Link</label><input id="f-link" type="text" value="${escape(linkUrl(c.Link))}" placeholder="z.B. helva.apriko.app"></div>
+    <div class="field"><label>Vertragsdokument (SharePoint-URL)</label><input id="f-vertrag" type="text" value="${escape(vertragLink(c.id || ""))}" placeholder="In SharePoint: Dokument → Link kopieren → hier einfügen"></div>
     <div class="field"><label>Mindesthonorar</label><textarea id="f-minfee" rows="3" placeholder="z.B. CHF 1'500/Monat, gültig ab Q3 2026">${escape(c.MinFee||"")}</textarea></div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
   `, [
@@ -8430,8 +8452,8 @@ async function saveCustomer(id) {
     Segment: val("f-segment"),
     Status: val("f-status"),
     Risk: val("f-risk"),
-    StartDate: start || null,
-    EndDate: end || null,
+    StartDate: start ? start + "T00:00:00Z" : null,
+    EndDate: end ? end + "T00:00:00Z" : null,
     Owner: val("f-owner") || null,
     PricePerLicense: val("f-pricelic") ? parseFloat(val("f-pricelic")) : null,
     PriceHistory: val("f-pricehistory") || null,
@@ -8449,15 +8471,26 @@ async function saveCustomer(id) {
   };
   if (!data.CompanyId) return toast("Firma erforderlich", true);
   if (!data.Title) return toast("Konnte Vertragsname nicht generieren — bitte Firma wählen", true);
+  const vertragNeu = normalizeUrl(val("f-vertrag"));
   try {
+    let custId = id;
     if (id) await updateItem("Customers", id, data);
     else {
-      await createItem("Customers", data);
+      const created = await createItem("Customers", data);
+      custId = created && created.id;
       // Beim Anlegen auch sicherstellen, dass die Firma als Kunde markiert ist
       const comp = cache.companies.find(c => c.id == data.CompanyId);
       if (comp && !comp.IsCustomer) {
         await updateItem("Companies", comp.id, { IsCustomer: true });
         await reload("Companies");
+      }
+    }
+    if (custId != null && crmVertragLinks !== null) {
+      const key = String(custId);
+      const alt = crmVertragLinks[key] || "";
+      if (vertragNeu !== alt) {
+        if (vertragNeu) crmVertragLinks[key] = vertragNeu; else delete crmVertragLinks[key];
+        await crmSaveVertragLinks();
       }
     }
     await reload("Customers");
@@ -8476,13 +8509,23 @@ async function deleteCustomer(id) {
 
 /* ---------- Companies ---------- */
 function renderCompanies(el) {
+  if (crmAnsprech === null && typeof siteId !== "undefined" && siteId) {
+    crmLoadAnsprech().then(() => { if (currentView === "companies") render(); });
+  }
   const f = filters.companyKundeFilter;
+  const ansprechListe = [...new Set(Object.values(crmAnsprech || {}).filter(Boolean))].sort();
   document.getElementById("view-actions").innerHTML = `
     <div class="seg-filter-group">
       <button class="seg-filter-btn ${f==='all'?'active':''}" onclick="setCompanyFilter('all')">Alle</button>
       <button class="seg-filter-btn ${f==='customer'?'active':''}" onclick="setCompanyFilter('customer')">★ Kunden</button>
       <button class="seg-filter-btn ${f==='lead'?'active':''}" onclick="setCompanyFilter('lead')">Leads</button>
     </div>
+    <select onchange="filters.companyAnsprech=this.value;render()" title="Nach interner Ansprechperson filtern"
+      style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:4px;font-size:12px">
+      <option value="">Ansprechperson: Alle</option>
+      ${ansprechListe.map(e => `<option value="${escape(e)}" ${filters.companyAnsprech === e ? "selected" : ""}>${escape(ownerLabel(e))}</option>`).join("")}
+      <option value="__none" ${filters.companyAnsprech === "__none" ? "selected" : ""}>— ohne Ansprechperson —</option>
+    </select>
     <input class="search-input" placeholder="Suchen..." oninput="filterTable(this.value, 'comp-row')">
     <button class="btn btn-primary" onclick="newCompany()">+ Neue Firma</button>
   `;
@@ -8495,6 +8538,8 @@ function renderCompanies(el) {
   let filtered = cache.companies;
   if (f === "customer") filtered = filtered.filter(c => c.IsCustomer);
   else if (f === "lead") filtered = filtered.filter(c => !c.IsCustomer);
+  if (filters.companyAnsprech === "__none") filtered = filtered.filter(c => !ansprechEmail(c.id));
+  else if (filters.companyAnsprech) filtered = filtered.filter(c => ansprechEmail(c.id) === filters.companyAnsprech);
 
   // Sortierung
   const sortDir = filters.companySortDir === "desc" ? -1 : 1;
@@ -8534,6 +8579,7 @@ function renderCompanies(el) {
         <th>Ort</th>
         <th style="cursor:pointer;text-align:right" onclick="toggleCompanySort('extrev')" title="Klick zum Sortieren">Aussenumsatz${sortArrow("extrev")}</th>
         <th style="cursor:pointer" onclick="toggleCompanySort('winprob')" title="Klick zum Sortieren">Win %${sortArrow("winprob")}</th>
+        <th>Ansprechperson</th>
         <th>Kontakte</th>
         <th>Deals</th>
         <th></th>
@@ -8548,12 +8594,14 @@ function renderCompanies(el) {
           const extRevLabel = !isNaN(extRev) && extRev > 0
             ? `<span style="font-family:var(--font-mono)">${extRev.toLocaleString("de-CH",{maximumFractionDigits:0})}</span>`
             : `<span style="color:var(--text-faint);font-size:11px">—</span>`;
-          return `<tr class="comp-row" data-search="${escape((c.Title||"") + " " + (c.Industry||"") + " " + (c.City||""))}">
+          const ap = ansprechEmail(c.id);
+          return `<tr class="comp-row" data-search="${escape((c.Title||"") + " " + (c.Industry||"") + " " + (c.City||"") + " " + ap)}">
             <td onclick="openCompany(${c.id})"><strong>${c.IsCustomer ? `<span style="color:var(--accent)">★</span> ` : ""}${escape(c.Title||"")}</strong></td>
             <td onclick="openCompany(${c.id})" class="dim">${escape(c.Industry||"")}</td>
             <td onclick="openCompany(${c.id})" class="dim">${escape(c.City||"")}</td>
             <td onclick="openCompany(${c.id})" style="text-align:right">${extRevLabel}</td>
             <td onclick="openCompany(${c.id})">${winLabel}</td>
+            <td onclick="openCompany(${c.id})" class="dim" ${ap ? `title="${escape(ap)}"` : ""}>${ap ? escape(ownerLabel(ap)) : `<span style="color:var(--text-faint);font-size:11px">—</span>`}</td>
             <td onclick="openCompany(${c.id})" class="dim">${contacts}</td>
             <td onclick="openCompany(${c.id})" class="dim">${deals}</td>
             <td class="actions-cell">
@@ -9054,6 +9102,12 @@ function editCompany(id) {
       <div class="field"><label>Land</label><input id="f-country" value="${escape(c.Country||"CH")}"></div>
     </div>
     <div class="field"><label>Aussenumsatz (CHF/Jahr)</label><input id="f-extrev" type="number" step="10000" min="0" value="${c.ExternalRevenue||""}" placeholder="z.B. 10000000"></div>
+    <div class="field"><label>Interne Ansprechperson (E-Mail)</label>
+      <input id="f-ansprech" type="email" list="ansprech-emails" value="${escape(ansprechEmail(c.id || ""))}" placeholder="z.B. beni@apriko.ch">
+      <datalist id="ansprech-emails">
+        ${[...new Set([myEmail(), ...cache.customers.map(x => x.Owner), ...Object.values(crmAnsprech || {})].filter(Boolean).map(e => e.toLowerCase()))].sort().map(e => `<option value="${escape(e)}">`).join("")}
+      </datalist>
+    </div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
     <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-iscustomer" ${c.IsCustomer?"checked":""} style="width:auto;margin:0" onchange="document.getElementById('f-winprob-row').style.display=this.checked?'none':'block'"> Ist Kunde (zahlt monatlich)</label></div>
     <div id="f-winprob-row" class="field" style="display:${c.IsCustomer?'none':'block'}">
@@ -9077,9 +9131,18 @@ async function saveCompany(id) {
     ExternalRevenue: val("f-extrev") ? parseFloat(val("f-extrev")) : null
   };
   if (!data.Title) return toast("Firmenname erforderlich", true);
+  const ansprechNeu = val("f-ansprech").toLowerCase();
   try {
+    let compId = id;
     if (id) await updateItem("Companies", id, data);
-    else await createItem("Companies", data);
+    else { const created = await createItem("Companies", data); compId = created && created.id; }
+    if (compId != null && crmAnsprech !== null) {
+      const key = String(compId);
+      if (ansprechNeu !== (crmAnsprech[key] || "")) {
+        if (ansprechNeu) crmAnsprech[key] = ansprechNeu; else delete crmAnsprech[key];
+        await crmSaveAnsprech();
+      }
+    }
     await reload("Companies");
     closeModal(); render(); toast("Gespeichert");
   } catch (e) { toast(e.message, true); }
@@ -9208,7 +9271,7 @@ async function saveDeal(id) {
     Title: title, Stage: val("f-stage"),
     Value: val("f-value") ? parseFloat(val("f-value")) : null,
     Licenses: val("f-licenses") ? parseInt(val("f-licenses")) : null,
-    ExpectedClose: close ? close : null,
+    ExpectedClose: close ? close + "T00:00:00Z" : null,
     Owner: val("f-owner"), Notes: val("f-notes"),
     CompanyId: compId ? parseInt(compId) : null,
     ContactId: contId ? parseInt(contId) : null
@@ -9327,7 +9390,7 @@ async function saveActivity(id) {
   const data = {
     Title: val("f-title"), Type: val("f-type"),
     RelatedTo: rt || null, RelatedId: ri ? parseInt(ri) : null,
-    DueDate: due ? due : null,
+    DueDate: due ? due + "T00:00:00Z" : null,
     Owner: val("f-owner") || null
   };
   // Bei neuen Aktivitäten: Done=false. Bei Edit: nur ändern wenn Checkbox da
@@ -9401,7 +9464,8 @@ const filters = {
   revenueCustomerId: null,
   customerSegments: [],       // Array von Segment-Strings; leer = alle Segmente
   customerActiveOnly: true,   // true = nur Aktive zeigen
-  companyKundeFilter: "all",  // "all", "customer", "lead"
+  companyKundeFilter: "all",
+  companyAnsprech: "",  // "all", "customer", "lead"
   companySort: "title",       // "title" oder "winprob"
   companySortDir: "asc",      // "asc" oder "desc"
   // Statistik-Ansicht: Zeitraum als Year-Month
@@ -9440,6 +9504,61 @@ function normalizeUrl(s) {
 
 // SharePoint-Hyperlink-Spalten geben {Url, Description}-Objekte zurück.
 // Diese Funktion extrahiert die URL als String — egal ob Objekt oder schon String.
+/* Vertragslinks pro Kunde — JSON-File in der Dokumentbibliothek
+   (keine Listen-Spalte nötig): { "<customerId>": "https://…" } */
+let crmVertragLinks = null;   // null = noch nicht geladen
+let crmVertragLoading = false;
+async function crmLoadVertragLinks() {
+  if (crmVertragLoading) return;
+  crmVertragLoading = true;
+  try {
+    const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_vertragslinks.json:/content`);
+    crmVertragLinks = data && typeof data === "object" ? data : {};
+  } catch (e) { crmVertragLinks = {}; }
+  crmVertragLoading = false;
+}
+async function crmSaveVertragLinks() {
+  const path = `/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_vertragslinks.json:/content`;
+  const body = JSON.stringify(crmVertragLinks || {});
+  try { await graph(path, { method: "PUT", body }); }
+  catch (e) {
+    if (!/404|itemNotFound|400/i.test(e.message)) throw e;
+    await graph(`/sites/${siteId}/drive/root/children`, {
+      method: "POST",
+      body: JSON.stringify({ name: FB_BUCH_DIR, folder: {}, "@microsoft.graph.conflictBehavior": "replace" })
+    });
+    await graph(path, { method: "PUT", body });
+  }
+}
+function vertragLink(custId) { return (crmVertragLinks || {})[String(custId)] || ""; }
+
+/* Interne Ansprechperson pro Firma — { "<companyId>": "email@apriko.ch" } */
+let crmAnsprech = null;
+let crmAnsprechLoading = false;
+async function crmLoadAnsprech() {
+  if (crmAnsprechLoading) return;
+  crmAnsprechLoading = true;
+  try {
+    const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_firmen_ansprech.json:/content`);
+    crmAnsprech = data && typeof data === "object" ? data : {};
+  } catch (e) { crmAnsprech = {}; }
+  crmAnsprechLoading = false;
+}
+async function crmSaveAnsprech() {
+  const path = `/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_firmen_ansprech.json:/content`;
+  const body = JSON.stringify(crmAnsprech || {});
+  try { await graph(path, { method: "PUT", body }); }
+  catch (e) {
+    if (!/404|itemNotFound|400/i.test(e.message)) throw e;
+    await graph(`/sites/${siteId}/drive/root/children`, {
+      method: "POST",
+      body: JSON.stringify({ name: FB_BUCH_DIR, folder: {}, "@microsoft.graph.conflictBehavior": "replace" })
+    });
+    await graph(path, { method: "PUT", body });
+  }
+}
+function ansprechEmail(companyId) { return (crmAnsprech || {})[String(companyId)] || ""; }
+
 function linkUrl(linkField) {
   if (!linkField) return "";
   if (typeof linkField === "string") return linkField;
