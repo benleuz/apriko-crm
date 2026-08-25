@@ -958,7 +958,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.48.2</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.48.3</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -2899,6 +2899,8 @@ function fbBuchFileName(year, ges) {
 let fbBuchCache = null;        // { "ges|kt": {bez, buch} } — null = noch nicht geladen
 let fbBuchCacheYear = null;
 let fbBuchLoading = false;
+let fbBuchPromise = null;
+let fbBuchPromiseYear = null;
 async function fbSaveBuchFile(year, ges, buchObj) {
   const path = `/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/${encodeURIComponent(fbBuchFileName(year, ges))}:/content`;
   const body = JSON.stringify({ ges, year, konten: buchObj });
@@ -2914,7 +2916,13 @@ async function fbSaveBuchFile(year, ges, buchObj) {
     await graph(path, { method: "PUT", body });
   }
 }
-async function fbLoadBuch(year) {
+function fbLoadBuch(year) {
+  if (fbBuchPromise && fbBuchPromiseYear === year) return fbBuchPromise;
+  fbBuchPromiseYear = year;
+  fbBuchPromise = fbLoadBuchInner(year);
+  return fbBuchPromise;
+}
+async function fbLoadBuchInner(year) {
   if (fbBuchLoading) return;
   fbBuchLoading = true;
   const out = {};
@@ -5596,7 +5604,7 @@ const CHECKLISTEN = {
 };
 
 let wfCheckCache = {};      // fileKey → Daten
-let wfCheckLoading = {};    // fileKey → true während Ladung
+let wfCheckPromise = {};    // fileKey → geteiltes Lade-Promise
 function wfCheckFileKey(typ, monat) { return "wf_check_" + typ + "_" + monat + ".json"; }
 function wfMonat() {
   if (!filters.wfMonat) {
@@ -5611,15 +5619,17 @@ function wfMonatShift(delta) {
   filters.wfMonat = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
   render();
 }
-async function wfCheckLoad(typ, monat) {
+function wfCheckLoad(typ, monat) {
   const key = wfCheckFileKey(typ, monat);
-  if (wfCheckLoading[key]) return;
-  wfCheckLoading[key] = true;
-  try {
-    const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/${key}:/content`);
-    wfCheckCache[key] = data && typeof data === "object" ? data : {};
-  } catch (e) { wfCheckCache[key] = {}; }
-  wfCheckLoading[key] = false;
+  if (!wfCheckPromise[key]) {
+    wfCheckPromise[key] = (async () => {
+      try {
+        const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/${key}:/content`);
+        wfCheckCache[key] = data && typeof data === "object" ? data : {};
+      } catch (e) { wfCheckCache[key] = {}; }
+    })();
+  }
+  return wfCheckPromise[key];
 }
 async function wfCheckSave(typ, monat) {
   const key = wfCheckFileKey(typ, monat);
@@ -9780,15 +9790,19 @@ function normalizeUrl(s) {
 /* Vertragslinks pro Kunde — JSON-File in der Dokumentbibliothek
    (keine Listen-Spalte nötig): { "<customerId>": "https://…" } */
 let crmVertragLinks = null;   // null = noch nicht geladen
-let crmVertragLoading = false;
-async function crmLoadVertragLinks() {
-  if (crmVertragLoading) return;
-  crmVertragLoading = true;
-  try {
-    const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_vertragslinks.json:/content`);
-    crmVertragLinks = data && typeof data === "object" ? data : {};
-  } catch (e) { crmVertragLinks = {}; }
-  crmVertragLoading = false;
+let crmVertragLinksPromise = null;
+function crmLoadVertragLinks() {
+  // Promise-Singleton: Wiederholte Aufrufe teilen sich EIN Promise, das erst
+  // nach dem echten Ladeabschluss auflöst — verhindert Render-Endlosschleifen.
+  if (!crmVertragLinksPromise) {
+    crmVertragLinksPromise = (async () => {
+      try {
+        const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_vertragslinks.json:/content`);
+        crmVertragLinks = data && typeof data === "object" ? data : {};
+      } catch (e) { crmVertragLinks = {}; }
+    })();
+  }
+  return crmVertragLinksPromise;
 }
 async function crmSaveVertragLinks() {
   const path = `/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_vertragslinks.json:/content`;
@@ -9816,15 +9830,17 @@ function vertragLinksAlle(custId) {
 
 /* Interne Ansprechperson pro Firma — { "<companyId>": "email@apriko.ch" } */
 let crmAnsprech = null;
-let crmAnsprechLoading = false;
-async function crmLoadAnsprech() {
-  if (crmAnsprechLoading) return;
-  crmAnsprechLoading = true;
-  try {
-    const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_firmen_ansprech.json:/content`);
-    crmAnsprech = data && typeof data === "object" ? data : {};
-  } catch (e) { crmAnsprech = {}; }
-  crmAnsprechLoading = false;
+let crmAnsprechPromise = null;
+function crmLoadAnsprech() {
+  if (!crmAnsprechPromise) {
+    crmAnsprechPromise = (async () => {
+      try {
+        const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_firmen_ansprech.json:/content`);
+        crmAnsprech = data && typeof data === "object" ? data : {};
+      } catch (e) { crmAnsprech = {}; }
+    })();
+  }
+  return crmAnsprechPromise;
 }
 async function crmSaveAnsprech() {
   const path = `/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_firmen_ansprech.json:/content`;
@@ -9843,15 +9859,17 @@ function ansprechEmail(companyId) { return (crmAnsprech || {})[String(companyId)
 
 /* Workflow-Flags pro Kunde — { "<custId>": { intern: true, fibu: true } } */
 let crmKundenFlags = null;
-let crmKundenFlagsLoading = false;
-async function crmLoadKundenFlags() {
-  if (crmKundenFlagsLoading) return;
-  crmKundenFlagsLoading = true;
-  try {
-    const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_kunden_flags.json:/content`);
-    crmKundenFlags = data && typeof data === "object" ? data : {};
-  } catch (e) { crmKundenFlags = {}; }
-  crmKundenFlagsLoading = false;
+let crmKundenFlagsPromise = null;
+function crmLoadKundenFlags() {
+  if (!crmKundenFlagsPromise) {
+    crmKundenFlagsPromise = (async () => {
+      try {
+        const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_kunden_flags.json:/content`);
+        crmKundenFlags = data && typeof data === "object" ? data : {};
+      } catch (e) { crmKundenFlags = {}; }
+    })();
+  }
+  return crmKundenFlagsPromise;
 }
 async function crmSaveKundenFlags() {
   const path = `/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_kunden_flags.json:/content`;
