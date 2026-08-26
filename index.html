@@ -958,7 +958,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.48.3</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.48.4</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -1548,14 +1548,34 @@ async function createItem(listName, fields) {
 }
 
 async function updateItem(listName, id, fields) {
+  const patch = f => graph(`/sites/${siteId}/lists/${listIds[listName]}/items/${id}/fields`, {
+    method: "PATCH",
+    body: JSON.stringify(f)
+  });
   try {
-    await graph(`/sites/${siteId}/lists/${listIds[listName]}/items/${id}/fields`, {
-      method: "PATCH",
-      body: JSON.stringify(fields)
-    });
+    await patch(fields);
   } catch (e) {
-    e.message += " — betroffene Felder: " + Object.keys(fields).join(", ");
-    throw e;
+    if (!/400|invalidRequest/i.test(e.message)) {
+      e.message += " — betroffene Felder: " + Object.keys(fields).join(", ");
+      throw e;
+    }
+    // Selbstdiagnose: Felder einzeln speichern — Gesunde retten, Kranke benennen.
+    const bad = [];
+    for (const [k, v] of Object.entries(fields)) {
+      try {
+        await patch({ [k]: v });
+      } catch (e2) {
+        // Datumsfelder: zweiter Versuch im DateOnly-Format (Spalte evtl. "nur Datum")
+        if (typeof v === "string" && /\d{4}-\d{2}-\d{2}T/.test(v)) {
+          try { await patch({ [k]: v.slice(0, 10) }); continue; } catch (e3) {}
+        }
+        bad.push(k + "=" + (v === null ? "null" : JSON.stringify(v).slice(0, 40)));
+      }
+    }
+    if (bad.length) {
+      throw new Error("SharePoint lehnt diese Felder ab: " + bad.join(" · ") +
+        " — alle übrigen Felder wurden gespeichert. (Spaltentyp in der Liste '" + listName + "' prüfen oder diese Meldung an Claude geben.)");
+    }
   }
 }
 
