@@ -958,7 +958,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.48.5</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.49.0</span> · <span id="app-build-date">26.08.2026</span>
     </div>
   </aside>
 
@@ -3003,9 +3003,17 @@ async function fbMultiSelect(input) {
   for (const f of files) {
     try {
       const sheets = await fbReadTableAll(f);
-      const rows = sheets.length ? sheets[0].rows : [];
+      // ER-Blatt wählen: das Blatt mit den meisten Erfolgskonten (3xxx–8xxx) in Spalte A.
+      // So stört ein vorangestelltes Bilanz-Blatt nicht (z.B. Blatt 1 = Bilanz, Blatt 2 = ER).
+      let erSheet = null, erMax = 0;
+      for (const sh of sheets) {
+        const n = (sh.rows || []).filter(r => /^[3-8]\d{3}$/.test(String(r[0] || "").trim())).length;
+        if (n > erMax) { erMax = n; erSheet = sh; }
+      }
+      const rows = (erMax >= 5 && erSheet) ? erSheet.rows : (sheets.length ? sheets[0].rows : []);
       let art = fbLooksLikeBuchungen(sheets) ? "buchungen" : fbClassify(rows);
       const entry = { name: f.name, art, rows, sheets };
+      if (art === "er" && erSheet && sheets.length > 1) entry.erBlatt = erSheet.name;
       if (art === "buchungen") {
         entry.ges = fbGesFromFilename(f.name);
         entry.parsedBuch = fbParseBuchungen(sheets);
@@ -3018,6 +3026,7 @@ async function fbMultiSelect(input) {
         // Flag = Gesellschaft: "sw" steht für Apriko AG, "bo" für maverix ag
         const hatErtraege = rows.some(r => /^3\d{3}$/.test(String(r[0] || "")));
         entry.typ = (/apriko/i.test(f.name) || hatErtraege) ? "sw" : "bo";
+        if (entry.erBlatt) entry.info = "ER-Blatt: «" + entry.erBlatt + "»";
         // Jahr + Periode aus dem Dateinamen (z.B. "Jan-Dez 2025" → Jahresabschluss)
         const jm = f.name.match(/20\d{2}/g);
         entry.jahr = jm ? parseInt(jm[jm.length - 1]) : filters.budgetYear;
@@ -3094,7 +3103,7 @@ async function fbMultiRun() {
         let n = 0, leer = 0;
         for (const p of e.rows) {
           const nr = String(p[0] || "").trim();
-          if (!/^\d{4}$/.test(nr)) continue;
+          if (!/^[3-8]\d{3}$/.test(nr)) continue;   // nur Erfolgskonten (keine Bilanz 1xxx/2xxx)
           const bez = String(p[1] || "").slice(0, 24);
           const rawV = String(p[2] ?? "").replace(/['\u2019\s]/g, "").replace(",", ".");
           const v = parseFloat(rawV);
@@ -3174,6 +3183,18 @@ function fbMigrateZuordnung(ist) {
   if (fbMigrated || !ist.length) return;
   fbMigrated = true;
   let n = 0;
+  // Bilanzkonten (1xxx/2xxx) gehören nicht in den ER-Vergleich — aufräumen
+  const bilanz = ist.filter(d => /^[12]\d{3}$/.test(String(d.kt || "")));
+  if (bilanz.length) {
+    bilanz.forEach(d => {
+      const idx = ist.indexOf(d);
+      if (idx >= 0) ist.splice(idx, 1);
+      const ci = cache.budget.findIndex(x => x.id == d.id);
+      if (ci >= 0) cache.budget.splice(ci, 1);
+      deleteItem("Budget", d.id).catch(e => { budgetLastError = "Bilanzkonto " + d.kt + " entfernen: " + e.message; });
+    });
+    toast(bilanz.length + " Bilanzkonto/-konten aus dem ER-Vergleich entfernt");
+  }
   ist.forEach(d => {
     const soll = fbZuordnung(d.kt, /apriko/i.test(d.g || ""));
     if (soll === d.z) return;
