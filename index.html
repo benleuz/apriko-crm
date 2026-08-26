@@ -7511,10 +7511,9 @@ function bmRenderContent() {
       <label class="ed-filter"><span>Bis (Periode)</span>
         <select onchange="einsatzDashState.bmF.bis=this.value;render()">
           <option value="">Alle</option>${mkOpts(perioden, f.bis)}</select></label>
-      ${kunden.length ? (DEMO_ANON ? `<label class="ed-filter"><span>Kunde</span>
-        <select disabled title="In der Demo deaktiviert"><option>–</option></select></label>` : `<label class="ed-filter"><span>Kunde</span>
+      ${kunden.length ? `<label class="ed-filter"><span>Kunde</span>
         <select onchange="einsatzDashState.bmF.kunde=this.value;render()">
-          <option value="">Alle</option>${mkOpts(kunden, f.kunde)}</select></label>`) : ""}
+          <option value="">Alle</option>${mkOpts(kunden, f.kunde)}</select></label>` : ""}
       ${recruiters.length ? `<label class="ed-filter"><span>Recruiter</span>
         <select onchange="einsatzDashState.bmF.recruiter=this.value;render()">
           <option value="">Alle</option>${mkOpts(recruiters, f.recruiter)}</select></label>` : ""}
@@ -8201,8 +8200,6 @@ function renderEinsatzDash(el) {
 
   const mkSelect = (key, label, list, current) => {
     if (!list.length) return "";
-    if (DEMO_ANON && key === "kunde") return `<label class="ed-filter"><span>${label}</span>
-      <select disabled title="In der Demo deaktiviert"><option>–</option></select></label>`;
     const opts = list.map(v => `<option value="${escape(v)}" ${v===current?"selected":""}>${escape(v)}</option>`).join("");
     return `<label class="ed-filter">
       <span>${label}</span>
