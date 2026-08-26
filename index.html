@@ -958,7 +958,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.48.4</span> · <span id="app-build-date">19.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.48.5</span> · <span id="app-build-date">19.08.2026</span>
     </div>
   </aside>
 
@@ -8549,7 +8549,7 @@ function openCustomer(id) {
       })()}</dd>
       <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}${c.BPOYtd ? ` · <span style="color:var(--accent-3)">YTD-kumulativ</span>` : ""}</dd>
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
-      <dt>Link</dt><dd>${linkUrl(c.Link) ? `<a href="${escape(linkUrl(c.Link))}" target="_blank" rel="noopener" style="color:var(--accent-2)">${escape(linkUrl(c.Link))} ↗</a>` : "—"}</dd>
+      <dt>Link</dt><dd>${appLinkText(c.id, c.Link) ? `<a href="${escape(appLinkText(c.id, c.Link))}" target="_blank" rel="noopener" style="color:var(--accent-2)">${escape(appLinkText(c.id, c.Link))} ↗</a>` : "—"}</dd>
       ${VERTRAG_ARTEN.map(([art, label]) => `<dt>${label}</dt><dd>${vertragLink(c.id, art) ? `<a href="${escape(vertragLink(c.id, art))}" target="_blank" rel="noopener" style="color:var(--accent-2)">📄 Öffnen ↗</a>` : "—"}</dd>`).join("")}
       <dt>Workflows</dt><dd>${[kundenFlag(c.id, "intern") ? "Interner Lohn ✓" : "", kundenFlag(c.id, "fibu") ? "FIBU Monatsabschluss ✓" : ""].filter(Boolean).join(" · ") || "—"}</dd>
       <dt>Mindesthonorar</dt><dd style="white-space:pre-wrap">${escape(minFeeText(c.id, c.MinFee)||"—")}</dd>
@@ -8621,7 +8621,7 @@ function editCustomer(id) {
     </div>
     <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-bpoytd" ${c.BPOYtd?"checked":""} style="width:auto;margin:0"> BPO-Abrechnung YTD-kumulativ (Jahresbasis, Vormonate werden automatisch abgezogen)</label></div>
     <div class="field"><label>Ziel-ARR SaaS (CHF)</label><input id="f-targetarr" type="number" step="1000" min="0" value="${c.TargetARR||""}"></div>
-    <div class="field"><label>Link</label><input id="f-link" type="text" value="${escape(linkUrl(c.Link))}" placeholder="z.B. helva.apriko.app"></div>
+    <div class="field"><label>Link</label><input id="f-link" type="text" value="${escape(appLinkText(c.id || "", c.Link))}" placeholder="z.B. helva.apriko.app"></div>
     ${VERTRAG_ARTEN.map(([art, label]) => `<div class="field"><label>${label} (SharePoint-URL)</label><input id="f-vertrag-${art}" type="text" value="${escape(vertragLink(c.id || "", art))}" placeholder="In SharePoint: Dokument → Link kopieren → hier einfügen"></div>`).join("")}
     <div class="field-row">
       <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-wf-intern" ${kundenFlag(c.id || "", "intern") ? "checked" : ""} style="width:auto;margin:0"> Interner Lohn</label></div>
@@ -8746,10 +8746,6 @@ async function saveCustomer(id) {
     HourlyRate: val("f-hourlyrate") ? parseFloat(val("f-hourlyrate")) : null,
     BPOYtd: document.getElementById("f-bpoytd")?.checked || false,
     TargetARR: val("f-targetarr") ? parseFloat(val("f-targetarr")) : null,
-    Link: (() => {
-      const u = normalizeUrl(val("f-link"));
-      return u ? { Url: u, Description: u } : null;
-    })(),
     Notes: val("f-notes")
   };
   if (!data.CompanyId) return toast("Firma erforderlich", true);
@@ -8788,9 +8784,10 @@ async function saveCustomer(id) {
       const neuIntern = document.getElementById("f-wf-intern")?.checked || false;
       const neuFibu = document.getElementById("f-wf-fibu")?.checked || false;
       const neuMinfee = val("f-minfee");
+      const neuApplink = normalizeUrl(val("f-link")) || "";
       const alt = crmKundenFlags[key] || {};
-      if (neuIntern !== !!alt.intern || neuFibu !== !!alt.fibu || neuMinfee !== (alt.minfee || "")) {
-        if (neuIntern || neuFibu || neuMinfee) crmKundenFlags[key] = { intern: neuIntern, fibu: neuFibu, minfee: neuMinfee };
+      if (neuIntern !== !!alt.intern || neuFibu !== !!alt.fibu || neuMinfee !== (alt.minfee || "") || neuApplink !== (alt.applink || "")) {
+        if (neuIntern || neuFibu || neuMinfee || neuApplink) crmKundenFlags[key] = { intern: neuIntern, fibu: neuFibu, minfee: neuMinfee, applink: neuApplink };
         else delete crmKundenFlags[key];
         await crmSaveKundenFlags();
       }
@@ -9908,6 +9905,10 @@ function kundenFlag(custId, flag) { return !!((crmKundenFlags || {})[String(cust
 function minFeeText(custId, spFallback) {
   const t = ((crmKundenFlags || {})[String(custId)] || {}).minfee;
   return t !== undefined && t !== null ? t : (spFallback || "");
+}
+function appLinkText(custId, spLinkField) {
+  const t = ((crmKundenFlags || {})[String(custId)] || {}).applink;
+  return t !== undefined && t !== null ? t : linkUrl(spLinkField);
 }
 
 function linkUrl(linkField) {
