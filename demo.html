@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Apriko CRM</title>
+<title>Apriko CRM — DEMO</title>
 <script>
 /* Theme-Init sofort ausführen, um Flicker beim Laden zu vermeiden.
    Priorität: localStorage → System-Präferenz → Dark als Default. */
@@ -958,7 +958,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.49.1</span> · <span id="app-build-date">26.08.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.49.1</span> · <span id="app-build-date">26.08.2026</span>
     </div>
   </aside>
 
@@ -1303,7 +1303,7 @@ const msalConfig = {
   auth: {
     clientId: CONFIG.clientId,
     authority: `https://login.microsoftonline.com/${CONFIG.tenantId}`,
-    redirectUri: window.location.href.split("?")[0].split("#")[0]
+    redirectUri: "https://benleuz.github.io/apriko-crm/"
   },
   cache: { cacheLocation: "sessionStorage" }
 };
@@ -7541,7 +7541,7 @@ function edBerater(row) {
 
 /* Demo-Modus: Kandidatennamen werden deterministisch durch fiktive
    Nummern ersetzt ("Kandidat 001") — Firmen und Berater bleiben echt. */
-const DEMO_ANON = false;
+const DEMO_ANON = true;
 const _anonMap = new Map();
 function anonKandidat(key) {
   const k = String(key || "").trim();
