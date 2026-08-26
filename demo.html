@@ -958,7 +958,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.49.1</span> · <span id="app-build-date">26.08.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.49.2</span> · <span id="app-build-date">26.08.2026</span>
     </div>
   </aside>
 
@@ -1536,7 +1536,15 @@ async function bootstrap() {
 
 async function loadList(name) {
   const data = await graph(`/sites/${siteId}/lists/${listIds[name]}/items?expand=fields&$top=999`);
-  return data.value.map(item => ({ id: item.id, ...item.fields }));
+  const items = data.value.map(item => ({ id: item.id, ...item.fields }));
+  if (DEMO_ANON && name === "Companies") items.forEach(it => { if (it.Title) it.Title = anonKunde(it.Title); });
+  if (DEMO_ANON && name === "Customers") items.forEach(it => {
+    if (!it.Title) return;
+    const parts = String(it.Title).split(" - ");
+    if (parts.length > 1) { const seg = parts.pop(); it.Title = anonKunde(parts.join(" - ")) + " - " + seg; }
+    else it.Title = anonKunde(it.Title);
+  });
+  return items;
 }
 
 async function createItem(listName, fields) {
@@ -5367,6 +5375,18 @@ function plzToKanton(plz) {
 }
 
 // CSV-Parser: unterstützt Semikolon (Standard bei Schweizer Exports)
+function demoAnonRows(rows) {
+  if (!DEMO_ANON || !rows) return rows;
+  rows.forEach(r => {
+    if ("Kunde" in r) r["Kunde"] = anonKunde(r["Kunde"]);
+    if ("Mitarbeiter" in r || "Mitarbeiter-Nummer" in r) {
+      const anon = anonKandidat((r["Mitarbeiter-Nummer"] || "").trim() || (r["Mitarbeiter"] || "").trim());
+      if ("Mitarbeiter" in r) r["Mitarbeiter"] = anon === "—" ? "" : anon;
+      if ("Mitarbeiter-Nummer" in r) r["Mitarbeiter-Nummer"] = "";
+    }
+  });
+  return rows;
+}
 function parseCsvRows(text) {
   // BOM entfernen
   if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
@@ -5411,7 +5431,7 @@ function parseCsvRows(text) {
     headers.forEach((h, j) => obj[h] = cells[j] || "");
     rows.push(obj);
   }
-  return { headers, rows };
+  return { headers, rows: demoAnonRows(rows) };
 }
 
 // Datum-Parser für dd.MM.yyyy oder yyyy-MM-dd
@@ -7546,8 +7566,27 @@ const _anonMap = new Map();
 function anonKandidat(key) {
   const k = String(key || "").trim();
   if (!k || k === "—") return "—";
+  if (/^Kandidat \d+$/.test(k)) return k;   // bereits anonymisiert
   if (!_anonMap.has(k)) _anonMap.set(k, "Kandidat " + String(_anonMap.size + 1).padStart(3, "0"));
   return _anonMap.get(k);
+}
+const DEMO_FIRMEN = ["Albatros Personal AG","Bellevue Jobs GmbH","Cresta Work AG","Delta Staffing GmbH",
+  "Eiger Personal AG","Falken Work GmbH","Grimsel Jobs AG","Helvetia Staff GmbH","Ibex Personal AG",
+  "Jura Work GmbH","Kestrel Jobs AG","Lemano Personal GmbH","Matterhorn Staffing AG","Nordwind Jobs GmbH",
+  "Orion Personal AG","Pilatus Work GmbH","Quantum Staff AG","Rigi Personalservice GmbH","Säntis Jobs AG",
+  "Titlis Work GmbH","Uetliberg Personal AG","Vadian Staffing GmbH","Wega Jobs AG","Xenon Personal GmbH",
+  "Ypsilon Work AG","Zermatt Personal GmbH","Aare Jobs AG","Bernina Work GmbH","Calanda Personal AG",
+  "Dufour Staffing GmbH","Engadin Jobs AG","Flüela Work GmbH"];
+const _anonKundeMap = new Map();
+function anonKunde(name) {
+  const k = String(name || "").trim();
+  if (!k) return k;
+  if (DEMO_FIRMEN.includes(k) || /^Firma \d+ AG$/.test(k)) return k;   // bereits anonymisiert
+  if (!_anonKundeMap.has(k)) {
+    const i = _anonKundeMap.size;
+    _anonKundeMap.set(k, DEMO_FIRMEN[i] || ("Firma " + String(i + 1).padStart(3, "0") + " AG"));
+  }
+  return _anonKundeMap.get(k);
 }
 
 /* Kandidat-Anzeigename: Name, sonst Nummer */
