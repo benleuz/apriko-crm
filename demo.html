@@ -1314,7 +1314,48 @@ let account = null;
 let siteId = null;
 let listIds = {};
 let cache = { companies: [], contacts: [], deals: [], activities: [], customers: [], monthlyrevenue: [], budget: [], userprofiles: [] };
-let currentView = "dashboard";
+/* Demo-Modus: Kandidatennamen werden deterministisch durch fiktive
+   Nummern ersetzt ("Kandidat 001") — Firmen und Berater bleiben echt. */
+const DEMO_ANON = true;
+const _anonMap = new Map();
+function anonKandidat(key) {
+  const k = String(key || "").trim();
+  if (!k || k === "—") return "—";
+  if (/^Kandidat \d+$/.test(k)) return k;   // bereits anonymisiert
+  if (!_anonMap.has(k)) _anonMap.set(k, "Kandidat " + String(_anonMap.size + 1).padStart(3, "0"));
+  return _anonMap.get(k);
+}
+const DEMO_FIRMEN = ["Albatros Personal AG","Bellevue Jobs GmbH","Cresta Work AG","Delta Staffing GmbH",
+  "Eiger Personal AG","Falken Work GmbH","Grimsel Jobs AG","Helvetia Staff GmbH","Ibex Personal AG",
+  "Jura Work GmbH","Kestrel Jobs AG","Lemano Personal GmbH","Matterhorn Staffing AG","Nordwind Jobs GmbH",
+  "Orion Personal AG","Pilatus Work GmbH","Quantum Staff AG","Rigi Personalservice GmbH","Säntis Jobs AG",
+  "Titlis Work GmbH","Uetliberg Personal AG","Vadian Staffing GmbH","Wega Jobs AG","Xenon Personal GmbH",
+  "Ypsilon Work AG","Zermatt Personal GmbH","Aare Jobs AG","Bernina Work GmbH","Calanda Personal AG",
+  "Dufour Staffing GmbH","Engadin Jobs AG","Flüela Work GmbH"];
+const _anonBeraterMap = new Map();
+function anonBerater(name) {
+  const k = String(name || "").trim();
+  if (!k) return k;
+  if (/^Berater [A-Z]$|^Berater \d+$/.test(k)) return k;   // bereits anonymisiert
+  if (!_anonBeraterMap.has(k)) {
+    const i = _anonBeraterMap.size;
+    _anonBeraterMap.set(k, i < 26 ? "Berater " + String.fromCharCode(65 + i) : "Berater " + (i + 1));
+  }
+  return _anonBeraterMap.get(k);
+}
+const _anonKundeMap = new Map();
+function anonKunde(name) {
+  const k = String(name || "").trim();
+  if (!k) return k;
+  if (DEMO_FIRMEN.includes(k) || /^Firma \d+ AG$/.test(k)) return k;   // bereits anonymisiert
+  if (!_anonKundeMap.has(k)) {
+    const i = _anonKundeMap.size;
+    _anonKundeMap.set(k, DEMO_FIRMEN[i] || ("Firma " + String(i + 1).padStart(3, "0") + " AG"));
+  }
+  return _anonKundeMap.get(k);
+}
+
+let currentView = DEMO_ANON ? "einsatzdash" : "dashboard";
 
 /* ===========================================================
    Berechtigungssystem
@@ -5384,6 +5425,9 @@ function demoAnonRows(rows) {
       if ("Mitarbeiter" in r) r["Mitarbeiter"] = anon === "—" ? "" : anon;
       if ("Mitarbeiter-Nummer" in r) r["Mitarbeiter-Nummer"] = "";
     }
+    ["Berater", "Primärer Recruiter", "Recruiter", "Recruiter Einsatz", "Recruiter Kunde", "Recruiter Mitarbeiter"].forEach(col => {
+      if (col in r && r[col]) r[col] = anonBerater(r[col]);
+    });
   });
   return rows;
 }
@@ -7467,9 +7511,10 @@ function bmRenderContent() {
       <label class="ed-filter"><span>Bis (Periode)</span>
         <select onchange="einsatzDashState.bmF.bis=this.value;render()">
           <option value="">Alle</option>${mkOpts(perioden, f.bis)}</select></label>
-      ${kunden.length ? `<label class="ed-filter"><span>Kunde</span>
+      ${kunden.length ? (DEMO_ANON ? `<label class="ed-filter"><span>Kunde</span>
+        <select disabled title="In der Demo deaktiviert"><option>–</option></select></label>` : `<label class="ed-filter"><span>Kunde</span>
         <select onchange="einsatzDashState.bmF.kunde=this.value;render()">
-          <option value="">Alle</option>${mkOpts(kunden, f.kunde)}</select></label>` : ""}
+          <option value="">Alle</option>${mkOpts(kunden, f.kunde)}</select></label>`) : ""}
       ${recruiters.length ? `<label class="ed-filter"><span>Recruiter</span>
         <select onchange="einsatzDashState.bmF.recruiter=this.value;render()">
           <option value="">Alle</option>${mkOpts(recruiters, f.recruiter)}</select></label>` : ""}
@@ -7559,35 +7604,6 @@ function edBerater(row) {
   return (row["Recruiter Einsatz"] || row["Recruiter Kunde"] || row["Recruiter Mitarbeiter"] || "").trim();
 }
 
-/* Demo-Modus: Kandidatennamen werden deterministisch durch fiktive
-   Nummern ersetzt ("Kandidat 001") — Firmen und Berater bleiben echt. */
-const DEMO_ANON = true;
-const _anonMap = new Map();
-function anonKandidat(key) {
-  const k = String(key || "").trim();
-  if (!k || k === "—") return "—";
-  if (/^Kandidat \d+$/.test(k)) return k;   // bereits anonymisiert
-  if (!_anonMap.has(k)) _anonMap.set(k, "Kandidat " + String(_anonMap.size + 1).padStart(3, "0"));
-  return _anonMap.get(k);
-}
-const DEMO_FIRMEN = ["Albatros Personal AG","Bellevue Jobs GmbH","Cresta Work AG","Delta Staffing GmbH",
-  "Eiger Personal AG","Falken Work GmbH","Grimsel Jobs AG","Helvetia Staff GmbH","Ibex Personal AG",
-  "Jura Work GmbH","Kestrel Jobs AG","Lemano Personal GmbH","Matterhorn Staffing AG","Nordwind Jobs GmbH",
-  "Orion Personal AG","Pilatus Work GmbH","Quantum Staff AG","Rigi Personalservice GmbH","Säntis Jobs AG",
-  "Titlis Work GmbH","Uetliberg Personal AG","Vadian Staffing GmbH","Wega Jobs AG","Xenon Personal GmbH",
-  "Ypsilon Work AG","Zermatt Personal GmbH","Aare Jobs AG","Bernina Work GmbH","Calanda Personal AG",
-  "Dufour Staffing GmbH","Engadin Jobs AG","Flüela Work GmbH"];
-const _anonKundeMap = new Map();
-function anonKunde(name) {
-  const k = String(name || "").trim();
-  if (!k) return k;
-  if (DEMO_FIRMEN.includes(k) || /^Firma \d+ AG$/.test(k)) return k;   // bereits anonymisiert
-  if (!_anonKundeMap.has(k)) {
-    const i = _anonKundeMap.size;
-    _anonKundeMap.set(k, DEMO_FIRMEN[i] || ("Firma " + String(i + 1).padStart(3, "0") + " AG"));
-  }
-  return _anonKundeMap.get(k);
-}
 
 /* Kandidat-Anzeigename: Name, sonst Nummer */
 function edKandidat(row) {
@@ -8185,6 +8201,8 @@ function renderEinsatzDash(el) {
 
   const mkSelect = (key, label, list, current) => {
     if (!list.length) return "";
+    if (DEMO_ANON && key === "kunde") return `<label class="ed-filter"><span>${label}</span>
+      <select disabled title="In der Demo deaktiviert"><option>–</option></select></label>`;
     const opts = list.map(v => `<option value="${escape(v)}" ${v===current?"selected":""}>${escape(v)}</option>`).join("");
     return `<label class="ed-filter">
       <span>${label}</span>
