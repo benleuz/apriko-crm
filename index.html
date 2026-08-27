@@ -959,7 +959,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.50.1</span> · <span id="app-build-date">26.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.50.2</span> · <span id="app-build-date">26.08.2026</span>
     </div>
   </aside>
 
@@ -5679,32 +5679,53 @@ function kaItemsToTable(items) {
     centers.forEach((c, ci) => { const d = Math.abs(e - c); if (d < bd) { bd = d; best = ci; } });
     return bd <= 40 ? best : -1;
   };
-  // Datenzeilen + Kopfzeilen trennen
-  const firstColX = Math.min(...centers) - 120;
+  // Spaltenabstand für tolerante Zuordnungen
+  const gaps = centers.slice(1).map((c, i) => c - centers[i]).sort((a, b) => a - b);
+  const colGap = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 80;
+  // Datenzeilen: Label wenn vorhanden — Folgeseiten von Excel-Drucken haben oft KEINE Zeilenlabels
+  const firstColX = Math.min(...centers) - Math.max(100, colGap);
   const rows = [];
-  const headerLines = [];
-  let seenData = false;
+  const textLines = [];
   for (const l of lines) {
     const nums = l.filter(i => kaIsNumStr(i.s));
-    if (nums.length >= 1 && l.some(i => !kaIsNumStr(i.s) && i.x < firstColX)) {
-      seenData = true;
-      const label = l.filter(i => !kaIsNumStr(i.s) && i.x < firstColX).map(i => String(i.s).trim()).join(" ").trim();
+    const labelItems = l.filter(i => !kaIsNumStr(i.s) && i.x < firstColX);
+    if (nums.length >= 1 && (labelItems.length || nums.length >= 2)) {
+      const label = labelItems.map(i => String(i.s).trim()).join(" ").trim();
       const vals = new Array(centers.length).fill(null);
       nums.forEach(i => { const c = colOf(i); if (c >= 0) vals[c] = kaNum(i.s); });
-      rows.push({ label, vals });
-    } else if (!seenData && nums.length === 0) {
-      headerLines.push(l);
+      if (vals.some(v => v !== null)) rows.push({ label, vals, y: l[0].y });
+      else if (nums.length === 0) textLines.push(l);
+    } else if (nums.length === 0 && l.length >= 1) {
+      textLines.push(l);
     }
   }
   if (!rows.length) return null;
-  // Filialnamen: Text-Items der Kopfzeilen über den Spaltenzentren zuordnen
+  // Kopfzeile: die Textzeile, deren Items sich am besten auf VERSCHIEDENE Spalten verteilen
+  // (Header stehen meist zentriert über den rechtsbündigen Zahlenspalten)
+  const headerColOf = mid => {
+    let best = -1, bd = Infinity;
+    centers.forEach((c, ci) => {
+      const d = Math.abs(mid - (c - colGap * 0.45));
+      if (d < bd) { bd = d; best = ci; }
+    });
+    return bd <= colGap * 0.6 ? best : -1;
+  };
+  let bestHeader = null, bestScore = 0;
+  for (const tl of textLines) {
+    const hit = new Set();
+    tl.forEach(i => {
+      const c = headerColOf(i.x + (i.w || 0) / 2);
+      if (c >= 0) hit.add(c);
+    });
+    if (hit.size >= Math.max(2, bestScore + 1) || (hit.size >= 2 && hit.size >= bestScore)) {
+      bestScore = hit.size; bestHeader = tl;
+    }
+  }
   const colNames = new Array(centers.length).fill("");
-  for (const hl of headerLines.slice(-3)) {
-    for (const i of hl) {
-      const mid = i.x + (i.w || 0) / 2;
-      let best = -1, bd = Infinity;
-      centers.forEach((c, ci) => { const d = Math.abs(mid - (c - 25)); if (d < bd) { bd = d; best = ci; } });
-      if (bd <= 60 && best >= 0) colNames[best] = (colNames[best] + " " + String(i.s).trim()).trim();
+  if (bestHeader) {
+    for (const i of bestHeader) {
+      const c = headerColOf(i.x + (i.w || 0) / 2);
+      if (c >= 0) colNames[c] = (colNames[c] + " " + String(i.s).trim()).trim();
     }
   }
   return { colNames, colX: centers, rows };
@@ -5715,19 +5736,25 @@ function kaMergeTables(tables) {
   const t = tables.filter(Boolean);
   if (!t.length) return null;
   const base = t[0];
+  const norm = s => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
   for (let k = 1; k < t.length; k++) {
     const nxt = t[k];
-    const baseLabels = base.rows.map(r => r.label.toLowerCase().replace(/\s+/g, " "));
-    const match = nxt.rows.filter(r => baseLabels.includes(r.label.toLowerCase().replace(/\s+/g, " "))).length;
-    const similar = match >= Math.min(base.rows.length, nxt.rows.length) * 0.5 ||
+    // Passt die Seite? Labels stimmen überein ODER die Zeilen liegen auf denselben Druckhöhen (y)
+    const baseLabels = base.rows.map(r => norm(r.label)).filter(Boolean);
+    const labelMatch = nxt.rows.filter(r => r.label && baseLabels.includes(norm(r.label))).length;
+    const yMatch = nxt.rows.filter(r => r.y !== undefined && base.rows.some(b => b.y !== undefined && Math.abs(b.y - r.y) <= 4)).length;
+    const similar = labelMatch >= Math.min(baseLabels.length, nxt.rows.length) * 0.5 ||
+      yMatch >= nxt.rows.length * 0.5 ||
       Math.abs(nxt.rows.length - base.rows.length) <= Math.max(2, base.rows.length * 0.15);
-    if (!similar) continue;   // fremde Seite überspringen
+    if (!similar) continue;
     const off = base.colNames.length;
     base.colNames.push(...nxt.colNames);
     const nxtByLabel = {};
-    nxt.rows.forEach(r => { nxtByLabel[r.label.toLowerCase().replace(/\s+/g, " ")] = r; });
+    nxt.rows.forEach(r => { if (r.label) nxtByLabel[norm(r.label)] = r; });
     base.rows.forEach((r, ri) => {
-      const src = nxtByLabel[r.label.toLowerCase().replace(/\s+/g, " ")] || nxt.rows[ri];
+      let src = r.label ? nxtByLabel[norm(r.label)] : null;
+      if (!src && r.y !== undefined) src = nxt.rows.find(x => x.y !== undefined && Math.abs(x.y - r.y) <= 4);
+      if (!src) src = nxt.rows[ri];
       const vals = src ? src.vals : [];
       for (let c = 0; c < nxt.colNames.length; c++) r.vals[off + c] = vals[c] !== undefined ? vals[c] : null;
     });
