@@ -959,7 +959,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.50.2</span> · <span id="app-build-date">26.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.50.3</span> · <span id="app-build-date">26.08.2026</span>
     </div>
   </aside>
 
@@ -5661,18 +5661,36 @@ function kaItemsToTable(items) {
     cur.push(i);
   }
   lines.forEach(l => l.sort((a, b) => a.x - b.x));
-  // Spaltenraster aus rechten Kanten aller Zahl-Items
+  // OCR-Heilung: Ziffern, die direkt an Text anschliessen, gehören zum Label
+  // ("Bruttogewinn" + "1" → "Bruttogewinn 1"; "Quartal" + "2026" → Titeltext)
+  for (const l of lines) {
+    for (let k = l.length - 1; k >= 1; k--) {
+      const cur = l[k], prev = l[k - 1];
+      if (kaIsNumStr(cur.s) && !kaIsNumStr(prev.s) && (cur.x - (prev.x + (prev.w || 0))) < 15) {
+        prev.s = String(prev.s).trim() + " " + String(cur.s).trim();
+        prev.w = (cur.x + (cur.w || 0)) - prev.x;
+        l.splice(k, 1);
+      }
+    }
+  }
+  // Spaltenraster aus rechten Kanten der Zahl-Items — mit Zeilen-Belegung je Cluster
   const ends = [];
-  lines.forEach(l => l.forEach(i => { if (kaIsNumStr(i.s)) ends.push(i.x + (i.w || 0)); }));
+  lines.forEach((l, li) => l.forEach(i => { if (kaIsNumStr(i.s)) ends.push({ e: i.x + (i.w || 0), li }); }));
   if (!ends.length) return null;
-  ends.sort((a, b) => a - b);
-  const centers = [];
+  ends.sort((a, b) => a.e - b.e);
+  const clusters = [];
   let group = [ends[0]];
   for (let k = 1; k < ends.length; k++) {
-    if (ends[k] - group[group.length - 1] > 14) { centers.push(group.reduce((s, v) => s + v, 0) / group.length); group = []; }
+    if (ends[k].e - group[group.length - 1].e > 14) { clusters.push(group); group = []; }
     group.push(ends[k]);
   }
-  centers.push(group.reduce((s, v) => s + v, 0) / group.length);
+  clusters.push(group);
+  const numLineCount = new Set(ends.map(x => x.li)).size;
+  const minBeleg = Math.max(2, Math.ceil(numLineCount * 0.25));
+  const centers = clusters
+    .filter(g => new Set(g.map(x => x.li)).size >= Math.min(minBeleg, numLineCount))
+    .map(g => g.reduce((s, v) => s + v.e, 0) / g.length);
+  if (!centers.length) return null;
   const colOf = i => {
     const e = i.x + (i.w || 0);
     let best = 0, bd = Infinity;
@@ -5789,7 +5807,49 @@ async function kaParsePdf(ab) {
     const items = tc.items.map(i => ({ s: i.str, x: i.transform[4], y: i.transform[5], w: i.width || 0 }));
     tables.push(kaItemsToTable(items));
   }
-  return kaMergeTables(tables);
+  return tables;
+}
+
+/* Bilder (JPG/PNG): OCR über tesseract.js, Koordinaten aufs PDF-Raster normalisiert */
+let kaTessPromise = null;
+function kaLoadTesseract() {
+  if (!kaTessPromise) {
+    kaTessPromise = new Promise((res, rej) => {
+      if (window.Tesseract) return res();
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js";
+      s.onload = () => res();
+      s.onerror = () => { kaTessPromise = null; rej(new Error("tesseract.js konnte nicht geladen werden (Internetverbindung?)")); };
+      document.head.appendChild(s);
+    });
+  }
+  return kaTessPromise;
+}
+function kaOcrWordsToItems(words, imgH) {
+  const scale = imgH / 842;   // auf A4-Punkte normalisieren, damit alle Toleranzen passen
+  return words
+    .filter(w => w.text && w.text.trim() && (w.confidence === undefined || w.confidence > 35))
+    .map(w => {
+      const b = w.bbox || w;
+      return {
+        s: w.text,
+        x: (b.x0 !== undefined ? b.x0 : b.x) / scale,
+        y: (imgH - (b.y0 !== undefined ? (b.y0 + b.y1) / 2 : b.y)) / scale,
+        w: ((b.x1 !== undefined ? b.x1 - b.x0 : b.w) || 0) / scale
+      };
+    });
+}
+async function kaParseImage(file, info) {
+  await kaLoadTesseract();
+  toast("OCR läuft " + (info || "") + " — das dauert einen Moment …");
+  const worker = await window.Tesseract.createWorker("deu");
+  try {
+    const { data } = await worker.recognize(file);
+    const imgH = (data.imageHeight || (data.words && data.words.length ? Math.max(...data.words.map(w => w.bbox.y1)) : 842));
+    return kaItemsToTable(kaOcrWordsToItems(data.words || [], imgH));
+  } finally {
+    await worker.terminate();
+  }
 }
 
 /* XLSX/CSV: erste Spalte Label, weitere Spalten Werte; Kopf = erste Zeile ohne Zahlen */
@@ -5838,9 +5898,9 @@ function kaBuildKz(table) {
   const erlT    = get(kaFindRow(rows, /erl[öo]se tempor/));
   const erlF    = get(kaFindRow(rows, /erl[öo]se festvermitt/));
   const uprov   = get(kaFindRow(rows, /umsatzprovision/));
-  const bg1     = get(kaFindRow(rows, /bruttogewinn 1/));
-  const bg2     = get(kaFindRow(rows, /bruttoergebnis 2/));
-  const ebitda  = get(kaFindRow(rows, /betriebsergebnis 1/));
+  const bg1     = get(kaFindRow(rows, /bruttogewinn\s*1|^bruttogewinn$/));
+  const bg2     = get(kaFindRow(rows, /bruttoergebnis\s*2|^bruttoergebnis$/));
+  const ebitda  = get(kaFindRow(rows, /betriebsergebnis\s*1|vor finanzerfolg/));
   const gewinn  = get(kaFindRow(rows, /gewinn.?verlust/, /vor steuern|quartal|halbjahr|kumuliert/));
   const kz = [];
   for (let c = 0; c < n; c++) {
@@ -5863,29 +5923,35 @@ function kaBuildKz(table) {
 }
 
 async function kaUpload(input) {
-  const file = input.files[0];
+  const files = [...(input.files || [])].sort((a, b) => a.name.localeCompare(b.name, "de", { numeric: true }));
   input.value = "";
-  if (!file) return;
+  if (!files.length) return;
   try {
-    let table = null;
-    if (/\.pdf$/i.test(file.name)) {
-      const ab = await file.arrayBuffer();
-      toast("PDF wird gelesen …");
-      table = await kaParsePdf(ab);
-    } else if (/\.(xlsx|xls)$/i.test(file.name)) {
-      const sheets = await fbReadTableAll(file);
-      for (const sh of sheets) { table = kaFromRows(sh.rows); if (table) break; }
-    } else {
-      const text = await file.text();
-      const sep = text.includes(";") ? ";" : ",";
-      const raw = text.split(/\r?\n/).map(l => l.split(sep));
-      table = kaFromRows(raw);
+    const tables = [];
+    let idx = 0;
+    for (const file of files) {
+      idx++;
+      const info = files.length > 1 ? "(" + idx + "/" + files.length + ")" : "";
+      if (/\.pdf$/i.test(file.name)) {
+        toast("PDF wird gelesen " + info + " …");
+        tables.push(...await kaParsePdf(await file.arrayBuffer()));
+      } else if (/\.(jpe?g|png|webp)$/i.test(file.name)) {
+        tables.push(await kaParseImage(file, info));
+      } else if (/\.(xlsx|xls)$/i.test(file.name)) {
+        const sheets = await fbReadTableAll(file);
+        for (const sh of sheets) { const t = kaFromRows(sh.rows); if (t) { tables.push(t); break; } }
+      } else {
+        const text = await file.text();
+        const sep = text.includes(";") ? ";" : ",";
+        tables.push(kaFromRows(text.split(/\r?\n/).map(l => l.split(sep))));
+      }
     }
+    const table = kaMergeTables(tables);
     if (!table || !table.rows.length) { toast("Keine auswertbare Tabelle erkannt — ist es die Filial-ER?", true); return; }
     kaState.cols = table.colNames;
     kaState.rows = table.rows;
     kaState.kz = kaBuildKz(table);
-    kaState.fileName = file.name;
+    kaState.fileName = files.map(f => f.name).join(" + ");
     render();
     const fils = kaState.kz.filter(k => !k.isOverhead && !k.isTotal).length;
     toast(fils + " Filialen + " + kaState.kz.filter(k => k.isOverhead).length + " Overhead erkannt ✓");
@@ -5909,10 +5975,10 @@ function kaHeat(v, min, max, higherBetter) {
 
 function renderKonzern(el) {
   document.getElementById("view-actions").innerHTML = `
-    <label class="btn btn-sm" style="cursor:pointer">⇪ ER hochladen (PDF/XLSX/CSV)
-      <input type="file" accept=".pdf,.xlsx,.xls,.csv,.txt" style="display:none" onchange="kaUpload(this)"></label>`;
+    <label class="btn btn-sm" style="cursor:pointer">⇪ ER hochladen (PDF/JPG/XLSX/CSV)
+      <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.xlsx,.xls,.csv,.txt" multiple style="display:none" onchange="kaUpload(this)"></label>`;
   if (!kaState.kz) {
-    el.innerHTML = `<div class="empty">Filial-Erfolgsrechnung hochladen (PDF, Excel oder CSV).<br>
+    el.innerHTML = `<div class="empty">Filial-Erfolgsrechnung hochladen (PDF, JPG/Screenshot, Excel oder CSV) — mehrere Dateien aufs Mal möglich.<br>
       <span style="font-size:11px;color:var(--text-faint)">Erwartet: Zeilen = ER-Positionen, Spalte 1 = Overhead, danach die Filialen.<br>
       Erkannt werden u.a. Total Betriebsertrag, Bruttogewinn 1/2, Betriebsergebnis 1 (= EBITDA) und Gewinn/Verlust.</span></div>`;
     return;
