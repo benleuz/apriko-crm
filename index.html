@@ -959,7 +959,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.50.0</span> · <span id="app-build-date">26.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.50.1</span> · <span id="app-build-date">26.08.2026</span>
     </div>
   </aside>
 
@@ -5902,8 +5902,7 @@ function renderKonzern(el) {
   });
   const cols = [
     ["umsatz", "Umsatz", false, true], ["bg1", "BG 1", false, true], ["bg1m", "BG1-Marge", true, true],
-    ["bg2", "BG 2", false, true], ["ebitda", "EBITDA", false, true], ["ebitdam", "EBITDA-Marge", true, true],
-    ["gewinn", "Gewinn", false, true]
+    ["bg2", "BG 2", false, true], ["ebitda", "EBITDA", false, true], ["ebitdam", "EBITDA-Marge", true, true]
   ];
   const ranges = {};
   cols.forEach(([key]) => {
@@ -5948,8 +5947,8 @@ function renderKonzern(el) {
       <div class="card stat-card"><div class="stat-label">Filialen</div><div class="stat-value">${fils.length}</div></div>
       <div class="card stat-card"><div class="stat-label">Umsatz Filialen</div><div class="stat-value">${kaFmt(S("umsatz"))}</div></div>
       <div class="card stat-card"><div class="stat-label">EBITDA Filialen</div><div class="stat-value" style="color:${S("ebitda") >= 0 ? "var(--accent)" : "var(--danger)"}">${kaFmt(S("ebitda"))}</div></div>
-      <div class="card stat-card"><div class="stat-label">Overhead (Gewinn/Verlust)</div><div class="stat-value" style="color:var(--danger)">${kaFmt(ovh.length ? ovh[0].gewinn : null)}</div></div>
-      <div class="card stat-card"><div class="stat-label">Konzern-Gewinn</div><div class="stat-value" style="color:${(S("gewinn") + (ovh[0] && ovh[0].gewinn || 0)) >= 0 ? "var(--accent)" : "var(--danger)"}">${kaFmt(S("gewinn") + (ovh[0] && ovh[0].gewinn || 0))}</div></div>
+      <div class="card stat-card"><div class="stat-label">Overhead (EBITDA)</div><div class="stat-value" style="color:var(--danger)">${kaFmt(ovh.length ? ovh[0].ebitda : null)}</div></div>
+      <div class="card stat-card"><div class="stat-label">EBITDA Konzern (inkl. Overhead)</div><div class="stat-value" style="color:${(S("ebitda") + (ovh[0] && ovh[0].ebitda || 0)) >= 0 ? "var(--accent)" : "var(--danger)"}">${kaFmt(S("ebitda") + (ovh[0] && ovh[0].ebitda || 0))}</div></div>
     </div>
     <div class="card" style="padding:14px 16px;overflow-x:auto">
       <div style="font-weight:600;margin-bottom:8px">Filial-Ranking <span style="font-size:10px;color:var(--text-faint)">· ${escape(kaState.fileName)} · Spalten klicken zum Sortieren · Farben = Heat je Kennzahl</span></div>
@@ -5976,9 +5975,11 @@ function kaSortBy(key) {
 }
 function kaDetail(col) {
   const name = (kaState.kz.find(k => k.col === col) || {}).name || "Spalte";
-  showModal(escape(name) + " — komplette Erfolgsrechnung", `
+  let cutIdx = kaState.rows.findIndex(r => /betriebsergebnis 1/i.test(r.label));
+  if (cutIdx < 0) cutIdx = kaState.rows.length - 1;
+  showModal(escape(name) + " — Erfolgsrechnung bis EBITDA", `
     <table style="width:100%;font-size:12px">
-      ${kaState.rows.map(r => {
+      ${kaState.rows.slice(0, cutIdx + 1).map(r => {
         const v = r.vals[col];
         if (v === null || v === undefined) return "";
         return `<tr style="border-bottom:1px solid var(--border)">
