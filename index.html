@@ -959,7 +959,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.50.4</span> · <span id="app-build-date">26.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.50.5</span> · <span id="app-build-date">26.08.2026</span>
     </div>
   </aside>
 
@@ -3046,6 +3046,55 @@ let fbExpanded2 = {};   // "ges|kt" → true (aufgeklappte Konten, 3. Ebene)
 function fbToggle2(id) { fbExpanded2[id] = !fbExpanded2[id]; render(); }
 
 let fbPending = [];   // [{name, art, rows, sheets, ges, typ, info}]
+function fbDatenbestand() {
+  const gruppen = {};   // key: y|cfg|g|p → { count, ids, konten:Set }
+  cache.budget.forEach(it => {
+    let d; try { d = JSON.parse(it.Title); } catch (e) { return; }
+    if (d.cfg !== "fb" && d.cfg !== "ist") return;
+    const key = [d.y, d.cfg, d.g || "—", d.p || "—"].join("|");
+    if (!gruppen[key]) gruppen[key] = { y: d.y, cfg: d.cfg, g: d.g || "—", p: d.p || "—", count: 0, ids: [], konten: new Set() };
+    gruppen[key].count++;
+    gruppen[key].ids.push(it.id);
+    if (d.kt) gruppen[key].konten.add(d.kt);
+  });
+  const liste = Object.values(gruppen).sort((a, b) => (a.y - b.y) || a.cfg.localeCompare(b.cfg) || a.g.localeCompare(b.g));
+  showModal("Datenbestand Budgetvergleich", liste.length ? `
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">
+      Was liegt in welchem Jahr? Das Jahr stammt beim Import aus dem <strong>Dateinamen</strong> (letzte Jahreszahl) bzw. dem Vorschau-Panel.
+      Falsch gelandete Gruppen hier gezielt löschen und die Datei mit korrigiertem Jahr neu importieren.</div>
+    <table style="width:100%;font-size:12px">
+      <tr style="color:var(--text-dim)"><th style="text-align:left;padding:4px 8px 4px 0">Jahr</th><th style="text-align:left">Typ</th><th style="text-align:left">Gesellschaft</th><th style="text-align:left">Periode</th><th style="text-align:right">Einträge</th><th style="text-align:right">Konten</th><th></th></tr>
+      ${liste.map((g, i) => `<tr style="border-top:1px solid var(--border)">
+        <td style="padding:5px 8px 5px 0;font-weight:600">${g.y}</td>
+        <td>${g.cfg === "fb" ? "Budget" : "Ist/Vorjahr"}</td>
+        <td>${escape(g.g)}</td>
+        <td>${escape(g.p)}</td>
+        <td style="text-align:right;font-family:var(--font-mono)">${g.count}</td>
+        <td style="text-align:right;font-family:var(--font-mono)">${g.konten.size || "—"}</td>
+        <td style="text-align:right"><button class="btn btn-sm" style="color:var(--danger);border-color:var(--danger);font-size:10px" onclick="fbDeleteGruppe(${g.y},'${g.cfg}','${escape(g.g)}','${escape(g.p)}')">🗑</button></td>
+      </tr>`).join("")}
+    </table>` : `<div class="empty">Keine Budgetvergleich-Daten gespeichert.</div>`,
+    [{ label: "Schliessen", action: "closeModal()" }]);
+}
+async function fbDeleteGruppe(y, cfg, g, p) {
+  const opfer = cache.budget.filter(it => {
+    let d; try { d = JSON.parse(it.Title); } catch (e) { return false; }
+    return d.cfg === cfg && d.y == y && (d.g || "—") === g && (d.p || "—") === p;
+  });
+  if (!opfer.length) return;
+  if (!confirm("Gruppe löschen: " + y + " · " + (cfg === "fb" ? "Budget" : "Ist/Vorjahr") + " · " + g + " · " + p + " (" + opfer.length + " Einträge)?")) return;
+  try {
+    for (let i = 0; i < opfer.length; i += 5) {
+      await Promise.all(opfer.slice(i, i + 5).map(it => deleteItem("Budget", it.id)));
+    }
+    cache.budget = cache.budget.filter(it => !opfer.includes(it));
+    toast(opfer.length + " Einträge gelöscht ✓");
+    closeModal();
+    fbDatenbestand();
+    render();
+  } catch (e) { toast("Löschen fehlgeschlagen: " + e.message, true); }
+}
+
 async function fbClearAll() {
   const opfer = cache.budget.filter(it => {
     try { const d = JSON.parse(it.Title); return d.cfg === "fb" || d.cfg === "ist"; } catch (e) { return false; }
@@ -3437,6 +3486,7 @@ function renderBudgetVergleich(el) {
           style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;width:220px;font-size:11px">
         <label class="btn btn-sm" title="Konzern-Budget, bexio-ERs und Buchungsdetails (XLSX oder CSV) — mehrere Dateien aufs Mal, Typ wird automatisch erkannt">⇪ Dateien importieren
           <input type="file" accept=".csv,.txt,.xlsx" multiple style="display:none" onchange="fbMultiSelect(this)"></label>
+        <button class="btn btn-sm" onclick="fbDatenbestand()" title="Zeigt pro Jahr, was gespeichert ist — mit gezieltem Löschen einzelner Gruppen">ⓘ Datenbestand</button>
         <button class="btn btn-sm" onclick="fbClearAll()" title="Alle Budgetvergleich-Daten löschen (Budget, Ist aller Jahre, Buchungen, Notizen) — für einen sauberen Neuimport" style="color:var(--danger);border-color:var(--danger)">🗑 Leeren</button>
       </div>
     </div>
