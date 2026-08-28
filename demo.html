@@ -959,7 +959,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.52.1</span> · <span id="app-build-date">28.08.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.52.2</span> · <span id="app-build-date">28.08.2026</span>
     </div>
   </aside>
 
@@ -3079,7 +3079,7 @@ function fbDatenbestand() {
         <td style="text-align:right"><button class="btn btn-sm" style="color:var(--danger);border-color:var(--danger);font-size:10px" onclick="fbDeleteGruppe(${g.y},'${g.cfg}','${escape(g.g)}','${escape(g.p)}')">🗑</button></td>
       </tr>`).join("")}
     </table>` : `<div class="empty">Keine Budgetvergleich-Daten gespeichert.</div>`,
-    [{ label: "Schliessen", action: "closeModal()" }]);
+    [`<button class="btn" onclick="closeModal()">Schliessen</button>`]);
 }
 async function fbDeleteGruppe(y, cfg, g, p) {
   const opfer = cache.budget.filter(it => {
@@ -8689,8 +8689,8 @@ async function ofDialog(companyId) {
       ${ofRowsHtml("zusatz", zusatz, ofRowState.cols_zusatz)}
     </div>
     <div id="of-status" style="font-size:11px;color:var(--text-dim);margin-top:10px"></div>`,
-    [{ label: "Abbrechen", action: "closeModal()" },
-     { label: "📄 Word erstellen", action: `ofRun(${companyId})`, primary: true }]);
+    [`<button class="btn" onclick="closeModal()">Abbrechen</button>`,
+     `<button class="btn" style="background:var(--accent);color:#fff;border-color:var(--accent)" onclick="ofRun(${companyId})">📄 Word erstellen</button>`]);
 }
 async function ofRun(companyId) {
   const st = document.getElementById("of-status");
@@ -9646,6 +9646,7 @@ function openCustomer(id) {
     <div style="margin-top:8px"><button class="btn btn-sm" onclick="closeModal();filters.revenueMode='customer';filters.revenueCustomerId=${id};currentView='revenue';document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));document.querySelector('nav button[data-view=revenue]').classList.add('active');render()">In Umsätze-Tab öffnen</button></div>
   `, [
     `<button class="btn btn-danger" onclick="deleteCustomer(${id})">Löschen</button>`,
+    c.CompanyId ? `<button class="btn" onclick="closeModal();ofDialog(${c.CompanyId})">📄 Offerte erstellen</button>` : "",
     `<button class="btn" onclick="editCustomer(${id})">Bearbeiten</button>`
   ]);
 }
@@ -9989,6 +9990,7 @@ function renderCompanies(el) {
             <td onclick="openCompany(${c.id})" class="dim">${contacts}</td>
             <td onclick="openCompany(${c.id})" class="dim">${deals}</td>
             <td class="actions-cell">
+              <button class="btn btn-sm" title="Offerte erstellen" onclick="event.stopPropagation();ofDialog(${c.id})">📄</button>
               <button class="btn btn-sm" onclick="event.stopPropagation();editCompany(${c.id})">Edit</button>
             </td>
           </tr>`;
