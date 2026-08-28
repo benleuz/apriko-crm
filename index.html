@@ -959,7 +959,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.52.2</span> · <span id="app-build-date">28.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.52.5</span> · <span id="app-build-date">28.08.2026</span>
     </div>
   </aside>
 
@@ -8498,6 +8498,50 @@ async function ofDriveGet(fileName) {
   if (!res.ok) throw new Error(res.status === 404 ? "VORLAGE_FEHLT" : "Drive " + res.status);
   return await res.arrayBuffer();
 }
+/* Ablageort: Site «Marketing & Sales» → Bibliothek «Dokumente» →
+   05 Offers & Contracts → <Firmenname> (Ordner wird bei Bedarf angelegt) */
+const OF_ABLAGE_BASIS = "05 Offers & Contracts";
+async function ofAblageDrive() {
+  await ofLoad();
+  if (crmOfferten._ablage && crmOfferten._ablage.driveId) return crmOfferten._ablage.driveId;
+  const res = await graph(`/sites?search=marketing sales`);
+  const site = (res.value || []).find(s => {
+    const n = ((s.displayName || "") + " " + (s.name || "")).toLowerCase();
+    return n.includes("marketing") && n.includes("sales");
+  });
+  if (!site) throw new Error("Site «Marketing & Sales» nicht gefunden — fehlt die Berechtigung?");
+  const drive = await graph(`/sites/${site.id}/drive`);
+  crmOfferten._ablage = { driveId: drive.id, site: site.displayName || site.name };
+  try { await ofSave(); } catch (e) {}
+  return drive.id;
+}
+function ofFolderName(firma) {
+  return String(firma || "Ohne Firma").replace(/["*:<>?\/\\|#%]/g, "").trim().replace(/\.+$/, "") || "Ohne Firma";
+}
+async function ofDokUpload(fileName, blob, firma) {
+  const driveId = await ofAblageDrive();
+  const token = await getToken();
+  const basisEnc = encodeURIComponent(OF_ABLAGE_BASIS);
+  const folder = ofFolderName(firma);
+  const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/root:/${basisEnc}/${encodeURIComponent(folder)}/${encodeURIComponent(fileName)}:/content`;
+  const put = async () => fetch(url, { method: "PUT", headers: { Authorization: "Bearer " + token }, body: blob });
+  let res = await put();
+  if (!res.ok && (res.status === 404 || res.status === 400)) {
+    // Basisordner sicherstellen (409 = existiert schon, egal), dann Firmenordner
+    await fetch(`https://graph.microsoft.com/v1.0/drives/${driveId}/root/children`, {
+      method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: OF_ABLAGE_BASIS, folder: {}, "@microsoft.graph.conflictBehavior": "fail" })
+    }).catch(() => {});
+    await fetch(`https://graph.microsoft.com/v1.0/drives/${driveId}/root:/${basisEnc}:/children`, {
+      method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: folder, folder: {}, "@microsoft.graph.conflictBehavior": "fail" })
+    }).catch(() => {});
+    res = await put();
+  }
+  if (!res.ok) throw new Error("Ablage " + res.status);
+  const item = await res.json();
+  return item && item.webUrl;
+}
 async function ofDrivePut(fileName, ab) {
   const token = await getToken();
   const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/${fileName}:/content`,
@@ -8655,7 +8699,9 @@ function ofRowDel(id, ri) {
 }
 async function ofDialog(companyId) {
   await ofLoad();
+  await crmLoadStamm();
   const comp = cache.companies.find(c => c.id == companyId) || {};
+  const stammStrasse = (crmStamm[String(companyId)] && crmStamm[String(companyId)].strasse) || "";
   const letzte = (crmOfferten[companyId] || [])[0];
   const heute = new Date().toLocaleDateString("de-CH", { day: "numeric", month: "long", year: "numeric" });
   const kontakt = cache.contacts.find(k => k.CompanyId == companyId);
@@ -8677,7 +8723,7 @@ async function ofDialog(companyId) {
       <div class="field"><label>Ort, Datum</label><input id="of-ortdatum" value="Zürich, ${escape(heute)}"></div>
       <div class="field"><label>Firma</label><input id="of-firma" value="${escape(comp.Title || "")}"></div>
       <div class="field"><label>Anrede (ganze Zeile)</label><input id="of-anrede" value="Lieber ${escape(vorname)}" placeholder="Lieber Marco / Liebe Sandra"></div>
-      <div class="field"><label>Strasse</label><input id="of-strasse" value="" placeholder="Beispielstrasse 12"></div>
+      <div class="field"><label>Strasse</label><input id="of-strasse" value="${escape(stammStrasse)}" placeholder="Beispielstrasse 12"></div>
       <div class="field"><label>PLZ Ort</label><input id="of-plzort" value="${escape(comp.City || "")}"></div>
     </div>
     <div style="font-weight:600;margin:8px 0 4px">SaaS-Lizenzgebühr (Staffel)</div>
@@ -8715,11 +8761,30 @@ async function ofRun(companyId) {
     a.href = URL.createObjectURL(blob);
     a.download = fname;
     document.body.appendChild(a); a.click(); a.remove();
+    // In SharePoint ablegen (Ordner "Offerten")
+    let dokUrl = null;
+    try { dokUrl = await ofDokUpload(fname, blob, cfg.firma); }
+    catch (e) { toast("SharePoint-Ablage fehlgeschlagen: " + e.message, true); }
     // Konditionen an der Firma speichern
     crmOfferten[companyId] = crmOfferten[companyId] || [];
     crmOfferten[companyId].unshift({ d: new Date().toISOString().slice(0, 10), typ: cfg.typ,
-      ortDatum: cfg.ortDatum, anrede: cfg.anrede, saas: cfg.saas, bpo: cfg.bpo, zusatz: cfg.zusatz });
+      ortDatum: cfg.ortDatum, anrede: cfg.anrede, saas: cfg.saas, bpo: cfg.bpo, zusatz: cfg.zusatz,
+      url: dokUrl || undefined, fname });
     await ofSave();
+    // Stammdaten nachführen: Ort → Firma (SharePoint), Strasse → Stamm-JSON
+    try {
+      const compRaw = cache.companies.find(c => c.id == companyId);
+      if (compRaw && cfg.ort && cfg.ort !== (compRaw.City || "")) {
+        compRaw.City = cfg.ort;   // optimistisch
+        await updateItem("Companies", companyId, { City: cfg.ort });
+      }
+      await crmLoadStamm();
+      const key = String(companyId);
+      if (cfg.strasse && cfg.strasse !== ((crmStamm[key] && crmStamm[key].strasse) || "")) {
+        crmStamm[key] = { ...(crmStamm[key] || {}), strasse: cfg.strasse };
+        await crmSaveStamm();
+      }
+    } catch (e) { toast("Stammdaten konnten nicht nachgeführt werden: " + e.message, true); }
     // Aktivitäten: "Offerte erstellt" (heute, erledigt) + "Nachfassen Offerte" (+7 Tage, offen)
     try {
       const heuteIso = new Date().toISOString().slice(0, 10);
@@ -8733,7 +8798,10 @@ async function ofRun(companyId) {
         Owner: myEmail() || null, Done: false });
       await reload("Activities");
     } catch (e) { toast("Aktivitäten konnten nicht angelegt werden: " + e.message, true); }
-    st.textContent = "✓ " + fname + " erstellt" + (warn.length ? " — Hinweis: " + warn.join(", ") : "") + " · Konditionen gespeichert · Aktivitäten angelegt (Nachfassen in 7 Tagen)";
+    st.innerHTML = "✓ " + escape(fname) + " erstellt" +
+      (dokUrl ? ` · <a href="${dokUrl}" target="_blank" style="color:var(--accent)">in SharePoint geöffnet ↗</a>` : "") +
+      (warn.length ? " — Hinweis: " + escape(warn.join(", ")) : "") +
+      " · Konditionen gespeichert · Aktivitäten angelegt (Nachfassen in 7 Tagen)";
     toast("Offerte erstellt ✓");
     render();
   } catch (e) {
@@ -8762,7 +8830,7 @@ function ofHistorieHtml(companyId) {
   return `<div style="margin-top:10px"><div style="font-weight:600;font-size:12px;margin-bottom:4px">Offerten</div>
     ${crmOfferten[companyId].slice(0, 5).map(o => `
       <div style="font-size:11px;border-left:3px solid var(--accent);padding:4px 8px;margin-bottom:4px;background:var(--bg-hover);border-radius:3px">
-        <strong>${o.d}</strong> · ${OF_VORLAGEN[o.typ] ? OF_VORLAGEN[o.typ].label : o.typ}<br>
+        <strong>${o.url ? `<a href="${o.url}" target="_blank" style="color:var(--accent)">${o.d} 📄↗</a>` : o.d}</strong> · ${OF_VORLAGEN[o.typ] ? OF_VORLAGEN[o.typ].label : o.typ}<br>
         SaaS: ${fmtR(o.saas)}${o.typ === "saasbpo" ? `<br>BPO: ${fmtR(o.bpo)}${(o.zusatz || []).length ? `<br>Zusatz: ${fmtR(o.zusatz)}` : ""}` : ""}
       </div>`).join("")}</div>`;
 }
@@ -10474,6 +10542,7 @@ function renderActivityList(acts) {
    =========================================================== */
 function newCompany() { editCompany(null); }
 function editCompany(id) {
+  crmLoadStamm();
   const c = id ? cache.companies.find(x => x.id == id) : {};
   showModal(id ? "Firma bearbeiten" : "Neue Firma", `
     <div class="field"><label>Firmenname *</label><input id="f-title" value="${escape(c.Title||"")}"></div>
@@ -10488,6 +10557,7 @@ function editCompany(id) {
       <div class="field"><label>Website</label><input id="f-website" value="${escape(c.Website||"")}"></div>
     </div>
     <div class="field-row">
+      <div class="field"><label>Strasse</label><input id="f-street" value="${escape((crmStamm && crmStamm[String(c.id)] && crmStamm[String(c.id)].strasse) || "")}" placeholder="Beispielstrasse 12"></div>
       <div class="field"><label>Ort</label><input id="f-city" value="${escape(c.City||"")}"></div>
       <div class="field"><label>Land</label><input id="f-country" value="${escape(c.Country||"CH")}"></div>
     </div>
@@ -10531,6 +10601,16 @@ async function saveCompany(id) {
       if (ansprechNeu !== (crmAnsprech[key] || "")) {
         if (ansprechNeu) crmAnsprech[key] = ansprechNeu; else delete crmAnsprech[key];
         await crmSaveAnsprech();
+      }
+    }
+    const strasseNeu = val("f-street");
+    if (compId != null && crmStamm !== null) {
+      const key = String(compId);
+      const alt = (crmStamm[key] && crmStamm[key].strasse) || "";
+      if (strasseNeu !== alt) {
+        if (strasseNeu) crmStamm[key] = { ...(crmStamm[key] || {}), strasse: strasseNeu };
+        else if (crmStamm[key]) delete crmStamm[key].strasse;
+        await crmSaveStamm();
       }
     }
     await reload("Companies");
@@ -10937,6 +11017,23 @@ function vertragLinksAlle(custId) {
 }
 
 /* Interne Ansprechperson pro Firma — { "<companyId>": "email@apriko.ch" } */
+let crmStamm = null;      // { companyId: { strasse } } — Zusatz-Stammdaten ohne SP-Spalte
+let crmStammPromise = null;
+function crmLoadStamm() {
+  if (!crmStammPromise) {
+    crmStammPromise = (async () => {
+      try {
+        const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_firmen_stamm.json:/content`);
+        crmStamm = data && typeof data === "object" ? data : {};
+      } catch (e) { crmStamm = {}; }
+    })();
+  }
+  return crmStammPromise;
+}
+async function crmSaveStamm() {
+  await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_firmen_stamm.json:/content`,
+    { method: "PUT", body: JSON.stringify(crmStamm || {}) });
+}
 let crmAnsprech = null;
 let crmAnsprechPromise = null;
 function crmLoadAnsprech() {
