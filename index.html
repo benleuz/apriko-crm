@@ -959,7 +959,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.50.7</span> · <span id="app-build-date">26.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.51.0</span> · <span id="app-build-date">26.08.2026</span>
     </div>
   </aside>
 
@@ -2966,11 +2966,8 @@ const FB_BUCH_DIR = "CRM-Budgetdaten";
 function fbBuchFileName(year, ges) {
   return "fb_buch_" + year + "_" + String(ges).replace(/[^A-Za-z0-9äöüÄÖÜ ]/g, "").replace(/\s+/g, "_") + ".json";
 }
-let fbBuchCache = null;        // { "ges|kt": {bez, buch} } — null = noch nicht geladen
-let fbBuchCacheYear = null;
-let fbBuchLoading = false;
-let fbBuchPromise = null;
-let fbBuchPromiseYear = null;
+let fbBuchYearCache = {};      // Jahr → { "ges|kt": {bez, buch} } — Jahre koexistieren im Cache
+let fbBuchPromises = {};       // Jahr → geteiltes Lade-Promise
 async function fbSaveBuchFile(year, ges, buchObj) {
   const path = `/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/${encodeURIComponent(fbBuchFileName(year, ges))}:/content`;
   const body = JSON.stringify({ ges, year, konten: buchObj });
@@ -2987,14 +2984,10 @@ async function fbSaveBuchFile(year, ges, buchObj) {
   }
 }
 function fbLoadBuch(year) {
-  if (fbBuchPromise && fbBuchPromiseYear === year) return fbBuchPromise;
-  fbBuchPromiseYear = year;
-  fbBuchPromise = fbLoadBuchInner(year);
-  return fbBuchPromise;
+  if (!fbBuchPromises[year]) fbBuchPromises[year] = fbLoadBuchInner(year);
+  return fbBuchPromises[year];
 }
 async function fbLoadBuchInner(year) {
-  if (fbBuchLoading) return;
-  fbBuchLoading = true;
   const out = {};
   try {
     const dir = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}:/children`);
@@ -3011,18 +3004,16 @@ async function fbLoadBuchInner(year) {
       } catch (e) { /* einzelnes File defekt — überspringen */ }
     }
   } catch (e) { /* Ordner existiert noch nicht → keine Buchungen */ }
-  fbBuchCache = out;
-  fbBuchCacheYear = year;
-  fbBuchLoading = false;
+  fbBuchYearCache[year] = out;
 }
 function fbBuchAll(year) {
-  if (fbBuchCache === null || fbBuchCacheYear !== year) {
-    if (!fbBuchLoading && typeof siteId !== "undefined" && siteId) {
+  if (!fbBuchYearCache[year]) {
+    if (typeof siteId !== "undefined" && siteId) {
       fbLoadBuch(year).then(() => { if (currentView === "budgetvgl") render(); });
     }
     return {};
   }
-  return fbBuchCache;
+  return fbBuchYearCache[year];
 }
 /* Budget-Notizen (Zell-Kommentare aus dem Budget-Excel) — ein File pro Jahr */
 let fbNotesCache = {};
@@ -3118,8 +3109,7 @@ async function fbClearAll() {
       }
     } catch (e) { /* Ordner existiert evtl. noch nicht */ }
     // In-Memory-Zustand zurücksetzen
-    fbBuchCache = null; fbBuchCacheYear = null; fbBuchLoading = false;
-    fbBuchPromise = null; fbBuchPromiseYear = null;
+    fbBuchYearCache = {}; fbBuchPromises = {};
     fbNotesCache = {};
     fbPending = [];
     toast(opfer.length + " Einträge gelöscht — bereit für den frischen Import ✓");
@@ -3223,8 +3213,8 @@ async function fbMultiRun() {
         const ges = (e.ges || "").trim();
         if (!ges) { meld.push(e.name + ": übersprungen (keine Gesellschaft)"); continue; }
         await fbSaveBuchFile(year, ges, e.parsedBuch);
-        if (fbBuchCache === null || fbBuchCacheYear !== year) { fbBuchCache = {}; fbBuchCacheYear = year; }
-        Object.entries(e.parsedBuch).forEach(([kt, obj]) => { fbBuchCache[ges + "|" + kt] = obj; });
+        if (!fbBuchYearCache[year]) fbBuchYearCache[year] = {};
+        Object.entries(e.parsedBuch).forEach(([kt, obj]) => { fbBuchYearCache[year][ges + "|" + kt] = obj; });
         const kn = Object.keys(e.parsedBuch).length;
         const bn = Object.values(e.parsedBuch).reduce((s, k) => s + k.buch.length, 0);
         meld.push(e.name + " → " + ges + ": " + bn + " Buchungen (" + kn + " Konten)");
@@ -3474,6 +3464,10 @@ function renderBudgetVergleich(el) {
       </div>
       <span style="font-size:11px;color:var(--text-dim)">Ist H1 ÷ 6 = Ø-Monat</span>
       <div style="margin-left:auto;display:flex;gap:8px;align-items:center;font-size:11px">
+        <select onchange="filters.fbSearchYear=this.value;fbSearchYearChanged()" title="Suche auf ein Geschäftsjahr eingrenzen"
+          style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:4px;font-size:11px">
+          ${fbVorhandeneJahre().map(y => `<option value="${y}" ${String(fbSearchJahr()) === String(y) ? "selected" : ""}>GJ ${y}</option>`).join("")}
+        </select>
         <select onchange="filters.fbSearchGes=this.value;fbSearchRender()" title="Suche auf eine Gesellschaft eingrenzen"
           style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:4px;font-size:11px">
           <option value="">Alle Gesellschaften</option>
@@ -3489,7 +3483,7 @@ function renderBudgetVergleich(el) {
         <button class="btn btn-sm" onclick="fbClearAll()" title="Alle Budgetvergleich-Daten löschen (Budget, Ist aller Jahre, Buchungen, Notizen) — für einen sauberen Neuimport" style="color:var(--danger);border-color:var(--danger)">🗑 Leeren</button>
       </div>
     </div>
-    <div id="fb-search-results">${fbSearchResultsHtml(year)}</div>
+    <div id="fb-search-results">${fbSearchResultsHtml(fbSearchJahr())}</div>
     ${!hatBudget && !ist.length ? `
       <div style="text-align:center;padding:50px 20px;color:var(--text-dim)">
         <div style="font-size:36px;margin-bottom:10px">▦</div>
@@ -3570,9 +3564,29 @@ function fbSearchResultsHtml(year) {
       </div>` : `<div style="font-size:11px;color:var(--text-faint)">Keine Treffer.</div>`}
     </div>`;
 }
+function fbVorhandeneJahre() {
+  const jahre = new Set([filters.budgetYear]);
+  cache.budget.forEach(it => {
+    try { const d = JSON.parse(it.Title); if ((d.cfg === "ist" || d.cfg === "fb") && d.y) jahre.add(d.y); } catch (e) {}
+  });
+  return [...jahre].sort((a, b) => b - a);
+}
+function fbSearchJahr() {
+  return parseInt(filters.fbSearchYear) || filters.budgetYear;
+}
+function fbSearchYearChanged() {
+  const y = fbSearchJahr();
+  if (!fbBuchYearCache[y]) {
+    const el = document.getElementById("fb-search-results");
+    if (el && (filters.fbSearch || "").trim().length >= 2) el.innerHTML = `<div style="font-size:11px;color:var(--text-dim);padding:8px 0">Buchungen ${y} werden geladen …</div>`;
+    fbLoadBuch(y).then(() => fbSearchRender());
+  } else {
+    fbSearchRender();
+  }
+}
 function fbSearchRender() {
   const el = document.getElementById("fb-search-results");
-  if (el) el.innerHTML = fbSearchResultsHtml(filters.budgetYear);
+  if (el) el.innerHTML = fbSearchResultsHtml(fbSearchJahr());
 }
 
 /* Management-Ansicht: verdichtete Kennzahlen-Sicht.
