@@ -842,7 +842,7 @@
   .fb-sum td:first-child{border-left:3px solid var(--accent)}
   .fb-calc td{background:var(--bg-hover);border-top:1px solid var(--border);font-weight:700}
   .fb-calc td:first-child{border-left:3px solid var(--text-dim)}
-  .fb-result td{border-top:3px double var(--accent);background:color-mix(in srgb, var(--accent) 12%, transparent);
+  .fb-result td{border-top:3px double var(--accent);border-bottom:3px double var(--accent);background:color-mix(in srgb, var(--accent) 12%, transparent);
     font-size:12.5px;padding-top:9px;padding-bottom:9px}
   .fb-result td:first-child{border-left:3px solid var(--accent)}
   .fb-pos{cursor:pointer}
@@ -959,7 +959,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.50.5</span> · <span id="app-build-date">26.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.50.7</span> · <span id="app-build-date">26.08.2026</span>
     </div>
   </aside>
 
@@ -2410,8 +2410,8 @@ function budgetAddFromModal() {
      {"cfg":"ist","y":2026,"p":"H1","g":"Apriko AG","kt":"3400","b":"…","v":-123,"z":"SW_Lohn"}
    =========================================================== */
 const FB_LABELS = {
-  SW_Ertrag:"Ertrag Lizenzen", SW_Erloesmind:"Hosting/Software Kosten",
-  BO_Ertrag:"Ertrag BPO", BO_Erloesmind:"Hosting/Software Kosten",
+  SW_Ertrag:"Ertrag SaaS", SW_Erloesmind:"./. Hosting/Software Apriko",
+  BO_Ertrag:"Ertrag BPO", BO_Erloesmind:"./. Hosting/Software Maverix",
   SW_EinkaufDL:"Einkauf DL Lizenzen", BO_EinkaufDL:"Einkauf DL BPO",
   SW_Lohn:"Lohnaufwand", SW_SV:"Sozialversicherungen", SW_UebrPA:"Übriger Personalaufwand",
   BO_Lohn:"Lohnaufwand", BO_SV:"Sozialversicherungen", BO_UebrPA:"Übriger Personalaufwand",
@@ -2428,11 +2428,10 @@ const FB_AUFWAND = new Set(["SW_EinkaufDL","BO_EinkaufDL","SW_Lohn","SW_SV","SW_
 /* Render-Plan im Stil des Konzern-Budgets: Blocktotal ("g") ZUERST,
    darunter eingerückt die Details ("d"); "c" = Rechenzeilen (EBITDA-Kette). */
 const FB_PLAN = [
-  ["g","DLSW","Dienstleistungserlöse Lizenzen",["SW_Ertrag","SW_Erloesmind"]],
-  ["d","SW_Ertrag",1], ["d","SW_Erloesmind",1],
-  ["g","DLBO","Dienstleistungserlöse BPO",["BO_Ertrag","BO_Erloesmind"]],
-  ["d","BO_Ertrag",1], ["d","BO_Erloesmind",1],
-  ["c","DLTOT","Total Ertrag", r => r.DLSW + r.DLBO],
+  ["d","SW_Ertrag",0], ["d","BO_Ertrag",0],
+  ["c","ERTRAG_BRUTTO","Total Ertrag brutto", r => r.SW_Ertrag + r.BO_Ertrag],
+  ["d","SW_Erloesmind",0], ["d","BO_Erloesmind",0],
+  ["c","DLTOT","Total Ertrag netto", r => r.ERTRAG_BRUTTO + r.SW_Erloesmind + r.BO_Erloesmind],
   ["g","PA","Personalaufwand",["P_Lohn","P_SV","P_UebrPA"]],
   ["d2","P_Lohn","Lohnaufwand",["SW_Lohn","BO_Lohn"],1],
   ["d2","P_SV","Sozialversicherungen",["SW_SV","BO_SV"],1],
@@ -3597,7 +3596,7 @@ function renderFbMgmt(el, ctx) {
     ["Ertrag Apriko Lizenzen", b.SW_Ertrag, t.SW_Ertrag, "ertrag", ""],
     ["Ertrag Apriko BPO", b.BO_Ertrag, t.BO_Ertrag, "ertrag", ""],
     ["./. Hosting/Software Kosten", erloesmind("b"), erloesmind("i"), "ertrag", ""],
-    ["Total Ertrag", totalErtrag.b, totalErtrag.i, "ertrag", "fb-calc fb-result"],
+    ["Total Ertrag netto", totalErtrag.b, totalErtrag.i, "ertrag", "fb-calc fb-result"],
     null,
     ["Total Lohnaufwand", lohnTot.b, lohnTot.i, "aufwand", "fb-calc"],
     null,
@@ -6177,6 +6176,7 @@ const CHECKLISTEN = {
   temp: {
     titel: "BPO Checkliste — Lohnlauf Temporäre",
     hinweis: "Startversion — Prozessschritte können jederzeit angepasst werden.",
+    disclaimer: "Die aufgeführten Prozessschritte sind zwingend einzuhalten. Die Checkliste stellt aber bloss eine Hilfe/Wegleitung dar und ist nicht abschliessend. Weitere sinnvolle Prüfungshandlungen sind ebenso vorzunehmen.",
     sections: [
       { titel: "Lohnlauf Temporäre", items: [
         ["Stundenrapporte vollständig erfasst und kontrolliert", "inkl. GAV-Zuschläge, Spesen, Absenzen"],
@@ -6193,6 +6193,7 @@ const CHECKLISTEN = {
   intern: {
     titel: "Checkliste Monatslohn — interne Mitarbeiter",
     hinweis: "",
+    disclaimer: "Die aufgeführten Prozessschritte sind zwingend einzuhalten. Die Checkliste stellt aber bloss eine Hilfe/Wegleitung dar und ist nicht abschliessend. Weitere sinnvolle Prüfungshandlungen sind ebenso vorzunehmen.",
     sections: [
       { titel: "Lohnlauf interne Mitarbeiter", items: [
         ["Mail an Kunde: Anpassungen beim Lohn?", ""],
@@ -6209,6 +6210,7 @@ const CHECKLISTEN = {
   fibu: {
     titel: "Checkliste Zwischenabschluss (FIBU)",
     hinweis: "",
+    disclaimer: "Die im Dokument «Checkliste Zwischenabschluss» aufgeführten Prozesse (Kontenabgleiche) sind zwingend einzuhalten. Dies stellt aber bloss eine Hilfe/Wegleitung dar und ist nicht abschliessend. Weitere sinnvolle Prüfungshandlungen sind ebenso vorzunehmen.",
     sections: [
       { titel: "Bilanz — Kassen, Banken, Durchlauf & Debitoren", items: [
         ["Kasse 1000", "Kassenbuch kontrolliert, Kassensturz"],
@@ -6307,6 +6309,18 @@ async function wfCheckToggle(typ, custId, itemKey) {
   try { await wfCheckSave(typ, monat); }
   catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
 }
+async function wfNoteSave(typ, custId, val) {
+  const monat = wfMonat();
+  const key = wfCheckFileKey(typ, monat);
+  if (!(key in wfCheckCache)) return;
+  const cust = wfCheckCache[key][custId] = wfCheckCache[key][custId] || {};
+  const alt = (cust._note && cust._note.v) || "";
+  if (val.trim() === alt.trim()) return;
+  if (val.trim()) cust._note = { v: val.trim(), w: myEmail() || "?", t: new Date().toISOString() };
+  else delete cust._note;
+  try { await wfCheckSave(typ, monat); toast("Bemerkung gespeichert ✓"); render(); }
+  catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+}
 function wfVisum(eintrag) {
   if (!eintrag) return "";
   const d = new Date(eintrag.t);
@@ -6371,6 +6385,7 @@ function renderCheckliste(el, typ) {
       </div>
     </div>
     ${def.hinweis ? `<div style="font-size:11px;color:var(--text-faint);margin-bottom:10px">ⓘ ${escape(def.hinweis)}</div>` : ""}
+    ${def.disclaimer ? `<div style="border:1px solid var(--warn);border-left:4px solid var(--warn);border-radius:4px;padding:9px 12px;margin-bottom:14px;font-size:11.5px;color:var(--text-dim)"><strong style="color:var(--warn)">Wichtig:</strong> ${escape(def.disclaimer)}</div>` : ""}
     ${def.sections.map((s, si) => `
       <div class="card" style="margin-bottom:14px;padding:14px 16px">
         <div style="font-weight:600;margin-bottom:10px;color:var(--accent)">${escape(s.titel)}</div>
@@ -6389,6 +6404,13 @@ function renderCheckliste(el, typ) {
           </div>`;
         }).join("")}
       </div>`).join("")}
+    <div class="card" style="margin-bottom:14px;padding:14px 16px">
+      <div style="font-weight:600;margin-bottom:8px">Bemerkungen — ${escape(selName)} · ${escape(mLabel)}</div>
+      <textarea id="wf-note" rows="3" placeholder="Besonderheiten, Abweichungen, offene Punkte zu diesem Kunden und Monat …"
+        onblur="wfNoteSave('${typ}','${sel}',this.value)"
+        style="width:100%;background:var(--bg-input, var(--bg-hover));border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:4px;font-family:inherit;font-size:12px;resize:vertical">${escape((custDaten._note && custDaten._note.v) || "")}</textarea>
+      ${custDaten._note ? `<div style="font-size:10.5px;color:var(--text-faint);margin-top:4px">✎ ${wfVisum(custDaten._note)}</div>` : `<div style="font-size:10.5px;color:var(--text-faint);margin-top:4px">Wird beim Verlassen des Feldes gespeichert — mit Visum und Zeitstempel.</div>`}
+    </div>
     <div class="card" style="padding:14px 16px">
       <div style="font-weight:600;margin-bottom:10px">Monatsübersicht ${escape(mLabel)} — alle Kunden</div>
       <table style="width:100%;font-size:12px">
@@ -6396,10 +6418,10 @@ function renderCheckliste(el, typ) {
           const kd = daten[k.id] || {};
           const dc = alleItems.filter(ik => kd[ik]).length;
           const p = alleItems.length ? Math.round(dc / alleItems.length * 100) : 0;
-          const letzte = Object.values(kd).map(x => x.t).sort().pop();
+          const letzte = alleItems.map(ik => kd[ik] && kd[ik].t).concat([kd._note && kd._note.t]).filter(Boolean).sort().pop();
           const ld = letzte ? new Date(letzte) : null;
           return `<tr style="cursor:pointer" onclick="filters.wfKunde='${k.id}';render()">
-            <td style="padding:5px 8px 5px 0;${k.id === sel ? "font-weight:600" : ""}">${escape(k.name)}</td>
+            <td style="padding:5px 8px 5px 0;${k.id === sel ? "font-weight:600" : ""}">${escape(k.name)}${kd._note ? ` <span title="${escape(kd._note.v)}" style="cursor:help">📝</span>` : ""}</td>
             <td style="width:180px;padding:5px 8px"><div style="height:6px;background:var(--bg-hover);border-radius:3px;overflow:hidden"><div style="width:${p}%;height:100%;background:${p === 100 ? "var(--accent)" : "var(--accent-2)"}"></div></div></td>
             <td style="width:64px;text-align:right;font-family:var(--font-mono);color:${p === 100 ? "var(--accent)" : "var(--text-dim)"}">${dc}/${alleItems.length}</td>
             <td style="width:120px;text-align:right;color:var(--text-faint);font-size:10.5px">${ld && !isNaN(ld) ? String(ld.getDate()).padStart(2,"0") + "." + String(ld.getMonth()+1).padStart(2,"0") + ". " + String(ld.getHours()).padStart(2,"0") + ":" + String(ld.getMinutes()).padStart(2,"0") : ""}</td>
