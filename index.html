@@ -959,7 +959,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.51.0</span> · <span id="app-build-date">26.08.2026</span>
+      Apriko CRM · <span id="app-version">v1.51.1</span> · <span id="app-build-date">26.08.2026</span>
     </div>
   </aside>
 
@@ -5211,11 +5211,34 @@ function renderStats(el) {
 
   el.innerHTML = `
     <!-- Executive Summary -->
+    ${(() => {
+      // Aktuelle Lizenzen draussen: jüngster erfasster Monatswert je aktivem SaaS-Kunden
+      let licTotal = 0, licKunden = 0, licStand = null;
+      cache.customers
+        .filter(c => (c.Status || "Aktiv") === "Aktiv" && segmentNeedsLicenses(c.Segment))
+        .forEach(c => {
+          const recs = cache.monthlyrevenue.filter(r => r.CustomerId == c.id && (parseInt(r.Licenses) || 0) > 0);
+          if (!recs.length) return;
+          const last = recs.reduce((a, b) =>
+            (parseInt(a.Year) * 12 + parseInt(a.Month) >= parseInt(b.Year) * 12 + parseInt(b.Month)) ? a : b);
+          licTotal += parseInt(last.Licenses) || 0;
+          licKunden++;
+          const key = parseInt(last.Year) * 12 + (parseInt(last.Month) - 1);
+          if (licStand === null || key > licStand) licStand = key;
+        });
+      window.__licTile = statTile("Lizenzen draussen",
+        licTotal.toLocaleString("de-CH"),
+        { text: licStand !== null
+          ? `Stand ${MONTH_NAMES[licStand % 12]} ${String(Math.floor(licStand / 12)).slice(2)} · ${licKunden} Kunden`
+          : "Noch keine Lizenzen erfasst" });
+      return "";
+    })()}
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px">
       ${statTile("SaaS-Umsatz", `CHF ${fmtCHFShort(gSaaS)}`, deltaSaaS !== null ? { pct: deltaSaaS, positive: deltaSaaS >= 0 } : { text: "Kein Vorjahres-Vergleich" })}
       ${statTile("BPO-Umsatz", `CHF ${fmtCHFShort(gBPO)}`, deltaBPO !== null ? { pct: deltaBPO, positive: deltaBPO >= 0 } : { text: "Kein Vorjahres-Vergleich" })}
       ${statTile("Total-Umsatz", `CHF ${fmtCHFShort(gSaaS + gBPO)}`, deltaTotal !== null ? { pct: deltaTotal, positive: deltaTotal >= 0 } : { text: "Kein Vorjahres-Vergleich" })}
       ${statTile("Aktive Kunden", `${custData.length}`, deltaCust !== null ? { pct: deltaCust, positive: deltaCust >= 0 } : { text: "Kein Vorjahres-Vergleich" })}
+      ${window.__licTile}
       ${statTile("ARR SaaS (Hochrechnung)", `CHF ${fmtCHFShort(arr)}`, { text: `Nur Lizenzen · Basis: ${lastMonthCol ? lastMonthCol.label : "—"} × 12` })}
     </div>
 
