@@ -959,7 +959,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.51.1</span> · <span id="app-build-date">26.08.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.51.3</span> · <span id="app-build-date">26.08.2026</span>
     </div>
   </aside>
 
@@ -1915,9 +1915,18 @@ function budgetRows() {
   return cache.budget.map(budgetParse).filter(Boolean);
 }
 async function budgetSave(b) {
-  await updateItem("Budget", b.id, { Title: budgetSerialize(b) });
+  // Optimistisch: Cache SOFORT aktualisieren, damit der fokus-erhaltende
+  // Sofort-Render bereits den neuen Wert zeigt (sonst überholt das Rendern
+  // den Netzwerk-Save und die erste Eingabe "verschwindet" wieder).
   const raw = cache.budget.find(x => x.id == b.id);
+  const alt = raw ? raw.Title : null;
   if (raw) raw.Title = budgetSerialize(b);
+  try {
+    await updateItem("Budget", b.id, { Title: budgetSerialize(b) });
+  } catch (e) {
+    if (raw && alt !== null) raw.Title = alt;   // Rollback bei Fehler
+    throw e;
+  }
 }
 
 /* Nach einem Tabellen-Rebuild den Fokus wiederherstellen: render() ersetzt
@@ -2503,9 +2512,15 @@ window.addEventListener("error", ev => {
 /* ---------- Budget vs. Ist: Ansicht ---------- */
 async function fbSaveItem(obj, existingId) {
   const title = JSON.stringify(obj);
-  if (existingId) { await updateItem("Budget", existingId, { Title: title });
-    const raw = cache.budget.find(x => x.id == existingId); if (raw) raw.Title = title; }
-  else { await createItem("Budget", { Title: title }); }
+  if (existingId) {
+    const raw = cache.budget.find(x => x.id == existingId);
+    const alt = raw ? raw.Title : null;
+    if (raw) raw.Title = title;   // optimistisch — Renderer sehen sofort den neuen Stand
+    try { await updateItem("Budget", existingId, { Title: title }); }
+    catch (e) { if (raw && alt !== null) raw.Title = alt; throw e; }
+  } else {
+    await createItem("Budget", { Title: title });
+  }
 }
 
 /* ---------- Minimaler XLSX-Leser (ohne Fremdbibliothek) ----------
@@ -3260,10 +3275,11 @@ async function fbIstChange(id, field, value) {
   if (field === "v") d.v = parseFloat(String(value).replace(/['\u2019]/g, "").replace(",", ".")) || 0;
   else d[field] = value;
   delete d.id;
+  const altTitle = raw.Title;
   try { const t = JSON.stringify({ cfg: "ist", ...d }); raw.Title = t;
     budgetRenderKeepFocus();
     await updateItem("Budget", id, { Title: t });
-  } catch (e) { budgetLastError = e.message; render(); }
+  } catch (e) { raw.Title = altTitle; budgetLastError = e.message; render(); }
 }
 async function fbIstDelete(id) {
   if (!confirm("Konto-Zeile löschen?")) return;
