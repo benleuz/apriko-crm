@@ -959,7 +959,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.52.5</span> · <span id="app-build-date">28.08.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.53.0</span> · <span id="app-build-date">28.08.2026</span>
     </div>
   </aside>
 
@@ -6312,18 +6312,26 @@ const CHECKLISTEN = {
 let wfCheckCache = {};      // fileKey → Daten
 let wfCheckPromise = {};    // fileKey → geteiltes Lade-Promise
 function wfCheckFileKey(typ, monat) { return "wf_check_" + typ + "_" + monat + ".json"; }
+const WF_START_MONAT = "2026-07";   // Checklisten gelten erst ab Juli 2026
 function wfMonat() {
   if (!filters.wfMonat) {
     const d = new Date();
     filters.wfMonat = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
   }
+  if (filters.wfMonat < WF_START_MONAT) filters.wfMonat = WF_START_MONAT;
   return filters.wfMonat;
 }
 function wfMonatShift(delta) {
   const [y, m] = wfMonat().split("-").map(Number);
   const d = new Date(y, m - 1 + delta, 1);
-  filters.wfMonat = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+  const neu = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+  filters.wfMonat = neu < WF_START_MONAT ? WF_START_MONAT : neu;
   render();
+}
+function wfVormonat(monat) {
+  const [y, m] = monat.split("-").map(Number);
+  const d = new Date(y, m - 2, 1);
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
 }
 function wfCheckLoad(typ, monat) {
   const key = wfCheckFileKey(typ, monat);
@@ -6356,11 +6364,29 @@ async function wfCheckToggle(typ, custId, itemKey) {
   const key = wfCheckFileKey(typ, monat);
   if (!(key in wfCheckCache)) return;   // noch nicht geladen
   const cust = wfCheckCache[key][custId] = wfCheckCache[key][custId] || {};
-  if (cust[itemKey]) delete cust[itemKey];
-  else cust[itemKey] = { w: myEmail() || "?", t: new Date().toISOString() };
+  const e0 = cust[itemKey];
+  if (e0 && e0.w) {
+    if (e0.n) { delete e0.w; delete e0.t; }   // Bemerkung bleibt erhalten
+    else delete cust[itemKey];
+  } else {
+    cust[itemKey] = { ...(e0 || {}), w: myEmail() || "?", t: new Date().toISOString() };
+  }
   render();   // optimistisch
   try { await wfCheckSave(typ, monat); }
   catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+}
+async function wfItemNote(typ, custId, itemKey, val) {
+  const monat = wfMonat();
+  const key = wfCheckFileKey(typ, monat);
+  if (!(key in wfCheckCache)) return;
+  const cust = wfCheckCache[key][custId] = wfCheckCache[key][custId] || {};
+  const e = cust[itemKey];
+  const alt = (e && e.n) || "";
+  if (val.trim() === alt.trim()) return;
+  if (val.trim()) cust[itemKey] = { ...(e || {}), n: val.trim() };
+  else if (e) { delete e.n; if (!e.w) delete cust[itemKey]; }
+  try { await wfCheckSave(typ, monat); toast("Bemerkung gespeichert ✓"); }
+  catch (err) { toast("Speichern fehlgeschlagen: " + err.message, true); }
 }
 async function wfNoteSave(typ, custId, val) {
   const monat = wfMonat();
@@ -6416,14 +6442,40 @@ function renderCheckliste(el, typ) {
   const selName = (kunden.find(k => k.id === sel) || {}).name || "";
   const custDaten = daten[sel] || {};
   const alleItems = def.sections.flatMap((s, si) => s.items.map((_, ii) => si + "." + ii));
-  const doneCount = alleItems.filter(ik => custDaten[ik]).length;
+  const doneCount = alleItems.filter(ik => custDaten[ik] && custDaten[ik].w).length;
   const pct = alleItems.length ? Math.round(doneCount / alleItems.length * 100) : 0;
-  const mLabel = (() => { const [y, m] = monat.split("-"); return ["Jan","Feb","März","April","Mai","Juni","Juli","Aug","Sep","Okt","Nov","Dez"][parseInt(m)-1] + " " + y; })();
+  const mFmt = mo => { const [y, m] = mo.split("-"); return ["Jan","Feb","März","April","Mai","Juni","Juli","Aug","Sep","Okt","Nov","Dez"][parseInt(m)-1] + " " + y; };
+  const mLabel = mFmt(monat);
+  // Interner Lohn: Vormonat muss abgeschlossen sein, bevor der neue Monat beginnt
+  let locked = false, lockBanner = "";
+  if (typ === "intern") {
+    const vm = wfVormonat(monat);
+    if (vm >= WF_START_MONAT) {
+      const keyVor = wfCheckFileKey(typ, vm);
+      if (!(keyVor in wfCheckCache)) {
+        if (typeof siteId !== "undefined" && siteId) wfCheckLoad(typ, vm).then(() => render());
+        locked = true;
+        lockBanner = `<div style="border:1px solid var(--border);border-radius:4px;padding:9px 12px;margin-bottom:14px;font-size:11.5px;color:var(--text-dim)">Vormonat ${escape(mFmt(vm))} wird geprüft …</div>`;
+      } else {
+        const vorDaten = (wfCheckCache[keyVor] || {})[sel] || {};
+        const vorDone = alleItems.filter(ik => vorDaten[ik] && vorDaten[ik].w).length;
+        if (vorDone < alleItems.length) {
+          locked = true;
+          lockBanner = `<div style="border:1px solid var(--danger);border-left:4px solid var(--danger);border-radius:4px;padding:9px 12px;margin-bottom:14px;font-size:11.5px;color:var(--text-dim)">
+            <strong style="color:var(--danger)">🔒 ${escape(mLabel)} ist gesperrt.</strong>
+            Der interne Lohn verlangt den vollständigen Abschluss des Vormonats, bevor der neue Monat beginnt —
+            ${escape(mFmt(vm))} steht für ${escape(selName)} erst bei ${vorDone}/${alleItems.length}.
+            <button class="btn btn-sm" style="margin-left:8px" onclick="wfMonatShift(-1)">◀ Zu ${escape(mFmt(vm))}</button>
+          </div>`;
+        }
+      }
+    }
+  }
 
   el.innerHTML = `
     <div style="display:flex;gap:12px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
       <div style="display:flex;gap:4px;align-items:center">
-        <button class="btn btn-sm" onclick="wfMonatShift(-1)">◀</button>
+        <button class="btn btn-sm" onclick="wfMonatShift(-1)" ${monat <= WF_START_MONAT ? "disabled" : ""}>◀</button>
         <span style="min-width:92px;text-align:center;font-weight:600">${mLabel}</span>
         <button class="btn btn-sm" onclick="wfMonatShift(1)">▶</button>
       </div>
@@ -6439,21 +6491,26 @@ function renderCheckliste(el, typ) {
     </div>
     ${def.hinweis ? `<div style="font-size:11px;color:var(--text-faint);margin-bottom:10px">ⓘ ${escape(def.hinweis)}</div>` : ""}
     ${def.disclaimer ? `<div style="border:1px solid var(--warn);border-left:4px solid var(--warn);border-radius:4px;padding:9px 12px;margin-bottom:14px;font-size:11.5px;color:var(--text-dim)"><strong style="color:var(--warn)">Wichtig:</strong> ${escape(def.disclaimer)}</div>` : ""}
+    ${lockBanner}
     ${def.sections.map((s, si) => `
       <div class="card" style="margin-bottom:14px;padding:14px 16px">
         <div style="font-weight:600;margin-bottom:10px;color:var(--accent)">${escape(s.titel)}</div>
         ${s.items.map((it, ii) => {
           const ik = si + "." + ii;
           const e = custDaten[ik];
+          const done = e && e.w;
           return `
           <div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--border)">
-            <input type="checkbox" ${e ? "checked" : ""} onchange="wfCheckToggle('${typ}','${sel}','${ik}')"
-              style="width:16px;height:16px;margin-top:2px;accent-color:var(--accent);cursor:pointer;flex-shrink:0">
+            <input type="checkbox" ${done ? "checked" : ""} ${locked ? "disabled" : ""} onchange="wfCheckToggle('${typ}','${sel}','${ik}')"
+              style="width:16px;height:16px;margin-top:2px;accent-color:var(--accent);cursor:${locked ? "not-allowed" : "pointer"};flex-shrink:0">
             <div style="flex:1">
-              <div style="${e ? "color:var(--text-dim)" : ""}">${escape(it[0])}</div>
+              <div style="${done ? "color:var(--text-dim)" : ""}">${escape(it[0])}</div>
               ${it[1] ? `<div style="font-size:10.5px;color:var(--text-faint)">${escape(it[1])}</div>` : ""}
+              <input value="${escape((e && e.n) || "")}" placeholder="Bemerkung (optional)"
+                onblur="wfItemNote('${typ}','${sel}','${ik}',this.value)"
+                style="width:100%;margin-top:4px;background:transparent;border:1px solid ${e && e.n ? "var(--border)" : "transparent"};border-bottom:1px dashed var(--border);color:var(--text-dim);padding:2px 6px;border-radius:3px;font-family:inherit;font-size:10.5px">
             </div>
-            <div style="font-size:10.5px;color:${e ? "var(--accent)" : "var(--text-faint)"};white-space:nowrap;margin-top:2px">${e ? "✓ " + wfVisum(e) : ""}</div>
+            <div style="font-size:10.5px;color:${done ? "var(--accent)" : "var(--text-faint)"};white-space:nowrap;margin-top:2px">${done ? "✓ " + wfVisum(e) : ""}</div>
           </div>`;
         }).join("")}
       </div>`).join("")}
@@ -6469,7 +6526,7 @@ function renderCheckliste(el, typ) {
       <table style="width:100%;font-size:12px">
         ${kunden.map(k => {
           const kd = daten[k.id] || {};
-          const dc = alleItems.filter(ik => kd[ik]).length;
+          const dc = alleItems.filter(ik => kd[ik] && kd[ik].w).length;
           const p = alleItems.length ? Math.round(dc / alleItems.length * 100) : 0;
           const letzte = alleItems.map(ik => kd[ik] && kd[ik].t).concat([kd._note && kd._note.t]).filter(Boolean).sort().pop();
           const ld = letzte ? new Date(letzte) : null;
