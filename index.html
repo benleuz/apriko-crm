@@ -959,7 +959,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.53.2</span> · <span id="app-build-date">01.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.53.4</span> · <span id="app-build-date">01.09.2026</span>
     </div>
   </aside>
 
@@ -1059,6 +1059,7 @@
       <!-- 3 Prüfen -->
       <div class="rp-card rp-locked" id="rpS3">
         <div class="rp-card-head"><div class="rp-step">3</div><h3>Prüfen und korrigieren</h3>
+        <div style="font-size:11px;color:#c62828;margin-left:auto">Zwei unabhängige Lesungen — gelb = uneinig oder unsicher: Wert korrigieren, per Doppelklick bestätigen oder Zeile mit ✕ entfernen. Auswertung erst ohne offene Markierungen.</div>
           <div class="rp-sub">Markierte Felder gegen das Original abgleichen</div></div>
         <div class="rp-card-body">
           <div class="rp-legend">
@@ -11570,6 +11571,7 @@ function resetRapport(){
   ergebnis = null;
   currentBeleg = null;
   window.__rpZeitraum = null;
+  window.__rpRapportTotal = null;
   HINWEISE = [];
 
   // Karte 1: Dateiliste, Thumbnails, Featured, OCR-Config zurücksetzen
@@ -11719,6 +11721,13 @@ window.initRapport = function(){
   });
 
   $('rpConfirm').addEventListener('click',function(){
+    var offen = zeilen.filter(function(r){ return r.kstFlag || r.istFlag; }).length;
+    if(offen > 0){
+      var erst = document.querySelector('#rpTbody input.rp-f-low, #rpTbody input.rp-f-mid');
+      if(erst){ erst.focus(); erst.scrollIntoView({behavior:'smooth', block:'center'}); }
+      $('rpFlags').textContent = '⛔ ' + offen + ' markierte Felder noch nicht geprüft — Auswertung erst nach Prüfung möglich (Wert korrigieren oder per Doppelklick bestätigen)';
+      return;
+    }
     berechnen(); unlock($('rpS4')); $('rpS4').scrollIntoView({behavior:'smooth',block:'start'}); });
   $('rpCsv').addEventListener('click',function(){ dl(buildCsv(),'rapport.csv','text/csv;charset=utf-8'); });
   $('rpXml').addEventListener('click',function(){ dl(buildXml(),'rapport.xml','application/xml;charset=utf-8'); });
@@ -12360,7 +12369,7 @@ async function enrichCompanyInfo(firma){
         'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929',
+        model: 'claude-sonnet-5',
         max_tokens: 2000,
         tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],
         messages: [{ role: 'user', content: prompt }]
@@ -12458,6 +12467,7 @@ function updateEnrichBtnState(){
 function buildRapportOcrPrompt(heuteStr, aktuellesJahr, istJanFeb, belegKurz){
   return (
       'Du bist ein OCR-Extraktor für Schweizer Arbeitsrapporte und Monatsrapporte aus der Personalverleih- und Baubranche. ' +
+      'OBERSTE REGEL — NIEMALS ERFINDEN: Das sind Lohndaten. Du gibst NUR wieder, was auf dem Beleg tatsächlich geschrieben steht. Keine Annahmen, keine Ergänzungen, keine "plausiblen" Werte für leere Felder, kein Kopieren von Nachbartagen. Ein leeres Feld ist leer. Wenn du eine Zahl nicht sicher lesen kannst: gib deinen besten Lesewert und setze istFlag "low" — aber erfinde keinen Tag, der auf dem Beleg leer ist. Eine erfundene Buchung ist der schlimmste mögliche Fehler.\n\n' +
       'Extrahiere aus diesem Beleg (Foto, Scan oder digitales PDF):\n' +
       '1. Den Namen des Mitarbeiters (Vorname und Nachname, getrennt)\n' +
       '2. Die Firma / den Auftraggeber / Kunden\n' +
@@ -12468,7 +12478,17 @@ function buildRapportOcrPrompt(heuteStr, aktuellesJahr, istJanFeb, belegKurz){
         : 'Rapporte sind typischerweise aus den letzten 1-2 Monaten. Ein Datum aus einem Vorjahr ist SEHR unwahrscheinlich.\n\n') +
       'RAPPORT-FORMATE die du erkennen musst:\n' +
       'A) WOCHEN-RAPPORT (handschriftlich, ~5-7 Zeilen): Ein Tag pro Zeile mit Datum, Kostenstelle, Stunden.\n' +
-      'B) MONATS-/PERIODEN-RAPPORT (digital, tabellarisch): Header oben mit Personalnummer und Name (z.B. "Stundenblatt von 90237 Ngama Jonathan Pharel" oder "4575 Mathot Anthony"). Zeitraum-Angabe (z.B. "Periode von 09.08.2026 bis 15.08.2026"). Dann eine breite Tabelle mit AUFTRAG- oder LEISTUNGSART-Zeilen (z.B. "261245 Neubadstr. 95, Basel / Meier", "1205 Montage") und TAG-SPALTEN 09, 10, 11, ... 31. Jede Zelle enthält die Stunden dieses Tages für diesen Auftrag.\n\n' +
+      'B) MONATS-/PERIODEN-RAPPORT (digital, tabellarisch): Header oben mit Personalnummer und Name (z.B. "Stundenblatt von 90237 Ngama Jonathan Pharel" oder "4575 Mathot Anthony"). Zeitraum-Angabe (z.B. "Periode von 09.08.2026 bis 15.08.2026"). Dann eine breite Tabelle mit AUFTRAG- oder LEISTUNGSART-Zeilen (z.B. "261245 Neubadstr. 95, Basel / Meier", "1205 Montage") und TAG-SPALTEN 09, 10, 11, ... 31. Jede Zelle enthält die Stunden dieses Tages für diesen Auftrag.\n' +
+      'C) WOCHENRASTER (Vordruck, handschriftlich ausgefüllt, z.B. "Arbeitsrapport" von Verleihern wie increo/worknet): Die WOCHENTAGE Montag…Sonntag sind SPALTEN, die KATEGORIEN sind ZEILEN — typischerweise "Datum", "Kostenstelle", "Normalstunden", "Überzeit 125%", "Überzeit 150%", "Reisezeit", "Verpflegungsspesen", "Reisespesen", ganz rechts eine Spalte "Total". Oben Felder für Kunde/Einsatzbetrieb, Mitarbeiter, Berater, KW; unten das GAV-Feld und Unterschriften.\n\n' +
+
+      'WICHTIGE HINWEISE FÜR WOCHENRASTER (Format C):\n' +
+      '1. Lies die Tabelle SPALTENWEISE, ein Wochentag = eine Spalte. Für jeden Tag: Datum-Zelle, Kostenstellen-Zelle, Normalstunden-Zelle.\n' +
+      '2. LEERE SPALTE = KEIN ARBEITSTAG. Wenn bei Samstag/Sonntag (oder einem Werktag) die Normalstunden-Zelle leer ist, gibt es für diesen Tag KEINE Buchung — erfinde keine. Ein leeres Feld ist leer, auch wenn ein Datum darüber steht.\n' +
+      '3. DEZIMALSTUNDEN: Werte wie "09.25", "9.5", "09.50" sind Dezimalstunden (9.25 h, 9.5 h) — der Vordruck sagt oft "Minuten in Dezimalzahlen". Lies die Nachkommastellen GENAU: 09.25 ist NICHT 9.00. Führende Nullen ignorieren.\n' +
+      '4. DITTO-ZEICHEN: Ein Häkchen, Strich, Anführungszeichen oder Pfeil ("〃", "-", "\"", "→") in der Kostenstellen-Zelle bedeutet "gleiche Kostenstelle wie am Tag links davon" — übernimm den Wert der letzten ausgefüllten Kostenstelle nach links. Eine NEUE Nummer (z.B. am Freitag) gilt ab dort.\n' +
+      '5. Die Zeile "Überzeit 125%/150%" enthält ZUSÄTZLICHE Stunden desselben Tages (Zuschlagsstunden) — wenn ausgefüllt, addiere sie zu den Ist-Stunden des Tages. Reisezeit und Spesen sind KEINE Arbeitsstunden.\n' +
+      '6. TOTAL-SPALTE = KONTROLLSUMME: Der Wert rechts bei "Normalstunden" (z.B. 46.50) MUSS der Summe deiner Tageswerte entsprechen. Wenn nicht: Nachkommastellen nochmals prüfen (9.25 vs 9.00), leere Spalten prüfen. Gib den gelesenen Wert als "rapportTotal" im JSON zurück.\n' +
+      '7. Der Kunde/Einsatzbetrieb steht im Feld "Name und Adresse Kunde", der Mitarbeiter im Feld "Name und Adresse Mitarbeiter". Das Logo oben (z.B. "increo") ist der VERLEIHER, nicht der Kunde.\n\n' +
 
       'WICHTIGE HINWEISE FÜR MONATS-/PERIODEN-RAPPORTE:\n' +
       '1. MITARBEITER-HEADER: Ganz oben steht typischerweise "Stundenblatt von {PN} {Name}" oder ähnlich. Extrahiere daraus Vor- und Nachname. Bei "Ngama Jonathan Pharel" ist das ein zusammengesetzter Name — nimm die ganze Zeichenkette pragmatisch auseinander (z.B. nachname="Ngama", vorname="Jonathan Pharel").\n' +
@@ -12510,6 +12530,7 @@ function buildRapportOcrPrompt(heuteStr, aktuellesJahr, istJanFeb, belegKurz){
       '  "firma": "",\n' +
       '  "zeitraumVon": "09.08.' + aktuellesJahr + '",\n' +
       '  "zeitraumBis": "15.08.' + aktuellesJahr + '",\n' +
+      '  "rapportTotal": null,\n' +
       '  "zeilen": [\n' +
       '    {"datum":"10.08.' + aktuellesJahr + '","tag":"Mo","kst":"261245","ist":8.75,"kstFlag":null,"istFlag":null,"beleg":"' + belegKurz + '"},\n' +
       '    {"datum":"11.08.' + aktuellesJahr + '","tag":"Di","absent":true,"ist":0,"kst":"","typ":"ferien","beleg":"' + belegKurz + '"}\n' +
@@ -12522,6 +12543,7 @@ function buildRapportOcrPrompt(heuteStr, aktuellesJahr, istJanFeb, belegKurz){
       '- Wenn du ein Jahr aus dem Beleg nimmst, das weiter als 1 Jahr in der Vergangenheit liegt: setze istFlag "low" (auch wenn die Zahl klar aussieht), weil das sehr unwahrscheinlich ist.\n' +
       '- Bei Monatsrapporten: Jahr aus dem Zeitraum-Header übernehmen.\n\n' +
       'WEITERE REGELN:\n' +
+      '- rapportTotal: die auf dem Beleg gedruckte/geschriebene Gesamtsumme der Arbeitsstunden (Total-Spalte oder Total-Zeile), als Dezimalzahl; null wenn keine vorhanden.\n' +
       '- Wochentag zweistellig: Mo/Di/Mi/Do/Fr/Sa/So.\n' +
       '- Ist-Stunden immer als Dezimalzahl (8.0 nicht "8:00"). Nur Tage mit >0 Stunden aufnehmen.\n' +
       '- kst: Numerische Kennung ("261245", "1205"), NICHT Beschreibung, NICHT Personalnummer des Mitarbeiters. Leer wenn wirklich keine da ist.\n' +
@@ -12562,7 +12584,53 @@ async function prepareOcrBlob(docFile, isPdf){
 
 /* Claude-Vision-API-Call: baut den Media-Block (Bild oder PDF-Dokument)
    und schickt ihn mit dem OCR-Prompt an /v1/messages. */
-async function callClaudeOcr(key, b64, sendAsPdf, prompt){
+var RP_OCR_MODEL = 'claude-sonnet-5';        // Standard
+var RP_OCR_MODEL_STRONG = 'claude-opus-5';   // zweiter Versuch bei Kontrollsummen-Abweichung
+/* Alle Arbeitszeilen als prüfpflichtig markieren (Grund als Hinweis) */
+function ocrMarkAll(out, grund){
+  (out.rawZeilen || []).forEach(function(r){
+    if(r.absent) return;
+    r.istFlag = 'low';
+    r.note = (r.note ? r.note + ' · ' : '') + grund;
+  });
+}
+/* Zwei unabhängige Lesungen zusammenführen. a = primär (stärkeres Modell). */
+function ocrMergeLesungen(a, b){
+  var keyOf = function(r){ return String(r.datum || '') + '|' + String(r.kst || '').trim(); };
+  var bRows = (b.rawZeilen || []).slice();
+  var used = new Array(bRows.length).fill(false);
+  var findB = function(r){
+    var i = bRows.findIndex(function(x, k){ return !used[k] && keyOf(x) === keyOf(r); });
+    if(i < 0) i = bRows.findIndex(function(x, k){ return !used[k] && String(x.datum || '') === String(r.datum || '') && (!String(x.kst || '').trim() || !String(r.kst || '').trim()); });
+    if(i >= 0) used[i] = true;
+    return i >= 0 ? bRows[i] : null;
+  };
+  (a.rawZeilen || []).forEach(function(r){
+    var m = findB(r);
+    if(!m){ r.istFlag = 'low'; r.kstFlag = r.kstFlag || 'low'; r.note = 'Nur von einer Lesung erkannt — am Beleg bestätigen'; return; }
+    var ia = parseFloat(r.ist) || 0, ib = parseFloat(m.ist) || 0;
+    if(!!r.absent !== !!m.absent){ r.istFlag = 'low'; r.note = 'Lesungen uneinig: Arbeitstag oder Absenz?'; return; }
+    if(Math.abs(ia - ib) >= 0.01){ r.istFlag = 'low'; r.note = 'Zweite Lesung: ' + nf(ib) + ' h'; }
+    if(String(r.kst || '').trim() !== String(m.kst || '').trim() && String(m.kst || '').trim()){ r.kstFlag = 'low'; r.note = (r.note ? r.note + ' · ' : '') + 'Zweite Lesung Kostenstelle: ' + m.kst; }
+  });
+  // Zeilen, die nur die zweite Lesung sah: aufnehmen, aber markiert
+  bRows.forEach(function(x, k){
+    if(used[k]) return;
+    x.istFlag = 'low'; x.kstFlag = 'low'; x.note = 'Nur von der zweiten Lesung erkannt — am Beleg bestätigen';
+    a.rawZeilen.push(x);
+  });
+  if(typeof a.rapportTotal !== 'number' && typeof b.rapportTotal === 'number') a.rapportTotal = b.rapportTotal;
+  if(!a.firma && b.firma) a.firma = b.firma;
+  if(!a.mitarbeiter && b.mitarbeiter) a.mitarbeiter = b.mitarbeiter;
+  return a;
+}
+/* Stimmt die Summe der erkannten Stunden mit dem Rapport-Total überein? */
+function ocrKontrolleOk(out){
+  if(!out || typeof out.rapportTotal !== 'number') return true;   // keine Kontrollsumme → nichts zu prüfen
+  var sum = (out.rawZeilen || []).reduce(function(a, r){ return a + (r.absent ? 0 : (parseFloat(r.ist) || 0)); }, 0);
+  return Math.abs(sum - out.rapportTotal) < 0.01;
+}
+async function callClaudeOcr(key, b64, sendAsPdf, prompt, model){
   var mediaBlock = sendAsPdf
     ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64.data } }
     : { type: 'image',    source: { type: 'base64', media_type: b64.mediaType,     data: b64.data } };
@@ -12575,7 +12643,7 @@ async function callClaudeOcr(key, b64, sendAsPdf, prompt){
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-5-20250929',
+      model: model || RP_OCR_MODEL,
       max_tokens: 4000,  // Mehr Tokens für lange Monatsrapporte
       messages: [{
         role: 'user',
@@ -12603,7 +12671,7 @@ function parseOcrResponse(text){
   }
   var out = Array.isArray(parsed)
     ? { rawZeilen: parsed, mitarbeiter: null, firma: '', zeitraumVon: null, zeitraumBis: null }
-    : { rawZeilen: parsed.zeilen || [], mitarbeiter: parsed.mitarbeiter || null,
+    : { rawZeilen: parsed.zeilen || [], mitarbeiter: parsed.mitarbeiter || null, rapportTotal: (typeof parsed.rapportTotal === "number" ? parsed.rapportTotal : null),
         firma: parsed.firma || '', zeitraumVon: parsed.zeitraumVon || null,
         zeitraumBis: parsed.zeitraumBis || null };
   if(!Array.isArray(out.rawZeilen) || out.rawZeilen.length === 0){
@@ -12660,7 +12728,15 @@ async function scanWithClaude(){
 
     var prompt = buildRapportOcrPrompt(heuteStr, aktuellesJahr, istJanFeb, belegKurz);
 
-    var response = await callClaudeOcr(key, b64, sendAsPdf, prompt);
+    // VIER-AUGEN-PRINZIP: zwei unabhängige Lesungen (zwei Modelle). Nur
+    // übereinstimmende Werte gelten als sicher — alles andere wird markiert
+    // und MUSS geprüft werden. Erfinden ist damit strukturell abgefangen.
+    var responses = await Promise.all([
+      callClaudeOcr(key, b64, sendAsPdf, prompt, RP_OCR_MODEL_STRONG),
+      callClaudeOcr(key, b64, sendAsPdf, prompt, RP_OCR_MODEL)
+    ]);
+    var response = responses[0].ok ? responses[0] : responses[1];
+    var response2 = responses[0].ok ? responses[1] : null;
 
     if(!response.ok){
       var errTxt = await response.text();
@@ -12678,6 +12754,28 @@ async function scanWithClaude(){
 
     // Antwort-Text → {rawZeilen, mitarbeiter, firma, zeitraumVon, zeitraumBis}
     var ocr = parseOcrResponse(text);
+    // Zweite Lesung mergen (Konsens = sicher, Abweichung = markiert)
+    if(response2 && response2.ok){
+      try {
+        var data2 = await response2.json();
+        var text2 = (data2.content && data2.content[0] && data2.content[0].text) || '';
+        ocr = ocrMergeLesungen(ocr, parseOcrResponse(text2));
+      } catch(e2) { ocrMarkAll(ocr, 'Zweite Lesung nicht auswertbar — alle Werte prüfen'); }
+    } else {
+      ocrMarkAll(ocr, 'Nur eine Lesung verfügbar — alle Werte prüfen');
+    }
+    // Wochenend-Buchungen sind IMMER prüfpflichtig
+    (ocr.rawZeilen || []).forEach(function(r){
+      if(r.absent) return;
+      var d = rpDate(r.datum);
+      if(d && (d.getDay() === 0 || d.getDay() === 6)){ r.istFlag = 'low'; r.note = (r.note ? r.note + ' · ' : '') + 'Wochenend-Buchung — bitte am Beleg bestätigen'; }
+    });
+    // Kontrollsumme: Abweichung → alle Arbeitszeilen prüfpflichtig
+    if(!ocrKontrolleOk(ocr)){
+      var summe = (ocr.rawZeilen || []).reduce(function(a, r){ return a + (r.absent ? 0 : (parseFloat(r.ist) || 0)); }, 0);
+      ocrMarkAll(ocr, 'Summe ' + nf(summe) + ' h ≠ Rapport-Total ' + nf(ocr.rapportTotal) + ' h');
+    }
+    if(typeof ocr.rapportTotal === 'number'){ window.__rpRapportTotal = (window.__rpRapportTotal || 0) + ocr.rapportTotal; }
     var rawZeilen = ocr.rawZeilen, mitarbeiter = ocr.mitarbeiter, firma = ocr.firma,
         zeitraumVon = ocr.zeitraumVon, zeitraumBis = ocr.zeitraumBis;
 
@@ -12690,6 +12788,7 @@ async function scanWithClaude(){
         kstFlag: r.kstFlag || null,
         ist: typeof r.ist === 'number' ? r.ist : parseFloat(String(r.ist).replace(',','.')) || 0,
         istFlag: r.istFlag || null,
+        note: r.note || '',
         beleg: r.beleg || belegKurz,
         // Neu: absent/typ für Ferien/Krankheit/etc. Bei fehlenden Feldern fallen zurück
         absent: r.absent === true,
@@ -13002,8 +13101,16 @@ function renderTable(){
       var teile = [arbeit + ' Buchungen'];
       if(freiOhneTyp) teile.push(freiOhneTyp + ' freie Tage');
       if(mitTyp) teile.push(mitTyp + ' Absenzen (Ferien/Krank/etc.)');
+      var kontrolle = '';
+      if(typeof window.__rpRapportTotal === 'number'){
+        var istSumme = zeilen.reduce(function(a, r){ return a + (r.absent ? 0 : (r.ist || 0)); }, 0);
+        var diffTot = Math.round((istSumme - window.__rpRapportTotal) * 100) / 100;
+        kontrolle = Math.abs(diffTot) < 0.01
+          ? ' &nbsp;·&nbsp; <span style="color:var(--rp-green, #2e7d32)">✓ Summe stimmt mit Rapport-Total ' + nf(window.__rpRapportTotal) + ' h überein</span>'
+          : ' &nbsp;·&nbsp; <span style="color:#c62828;font-weight:600">⚠ Summe ' + nf(istSumme) + ' h ≠ Rapport-Total ' + nf(window.__rpRapportTotal) + ' h (' + (diffTot > 0 ? '+' : '') + nf(diffTot) + ') — Erkennung prüfen!</span>';
+      }
       headerEl.innerHTML = '<b>Zeitraum:</b> ' + esc(window.__rpZeitraum.von) + ' – ' + esc(window.__rpZeitraum.bis) +
-        ' &nbsp;·&nbsp; <span style="color:var(--rp-grey)">' + teile.join(', ') + '</span>';
+        ' &nbsp;·&nbsp; <span style="color:var(--rp-grey)">' + teile.join(', ') + '</span>' + kontrolle;
       headerEl.hidden = false;
     } else {
       headerEl.hidden = true;
@@ -13053,15 +13160,34 @@ function renderTable(){
         '<td></td></tr>';
     }
     return '<tr data-beleg="'+esc(r.beleg)+'" data-i="'+i+'"><td>'+renderDatumCell(r, i)+'</td><td>'+esc(r.tag)+'</td>'+
-      '<td><input type="text" value="'+esc(r.kst)+'" data-i="'+i+'" data-f="kst" class="'+
+      '<td><input type="text" value="'+esc(r.kst)+'" data-i="'+i+'" data-f="kst" title="'+esc(r.kstFlag ? (r.note || 'Unsichere Erkennung') + ' — Doppelklick = geprüft' : '')+'" class="'+
         (r.kstFlag?'rp-f-'+r.kstFlag:'')+'"></td>'+
       '<td class="rp-num" id="rpSoll'+i+'">—</td>'+
       '<td><input type="text" inputmode="decimal" class="rp-num '+(r.istFlag?'rp-f-'+r.istFlag:'')+
-        '" value="'+nf(r.ist)+'" data-i="'+i+'" data-f="ist"></td>'+
+        '" value="'+nf(r.ist)+'" data-i="'+i+'" data-f="ist" title="'+esc(r.istFlag ? (r.note || 'Unsichere Erkennung') + ' — Doppelklick = geprüft' : '')+'"></td>'+
       '<td class="rp-num" id="rpDiff'+i+'">—</td>'+
-      '<td style="color:var(--rp-grey);font-size:12px">'+esc(r.beleg)+'</td></tr>';
+      '<td style="color:var(--rp-grey);font-size:12px;white-space:nowrap">'+esc(r.beleg)+
+        ' <button type="button" class="rp-del" data-del="'+i+'" title="Zeile entfernen (steht nicht auf dem Beleg)" style="border:none;background:transparent;color:#c62828;cursor:pointer;font-size:13px;padding:0 4px">✕</button></td></tr>';
   }).join('');
 
+  $('rpTbody').onclick = function(e){
+    var b = e.target.closest ? e.target.closest('button.rp-del') : null;
+    if(!b) return;
+    var i = +b.dataset.del;
+    var r = zeilen[i];
+    if(!r) return;
+    if(!confirm('Zeile ' + r.datum + ' (' + nf(r.ist) + ' h) entfernen? Nur tun, wenn dieser Eintrag NICHT auf dem Beleg steht.')) return;
+    zeilen.splice(i, 1);
+    renderTable(); recalcRows(); countFlags();
+  };
+  $('rpTbody').ondblclick = function(e){
+    var t = e.target;
+    if(!t || t.tagName !== 'INPUT' || t.dataset.f === undefined) return;
+    var i = +t.dataset.i, f = t.dataset.f;
+    if(f === 'ist') zeilen[i].istFlag = null; else zeilen[i].kstFlag = null;
+    t.classList.remove('rp-f-low', 'rp-f-mid'); t.title = '';
+    countFlags();
+  };
   $('rpTbody').oninput = function(e){
     // Datum-Input separat behandeln (weiter unten)
     if(e.target.id === 'rpFirstDate') return;
