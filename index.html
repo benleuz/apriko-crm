@@ -959,7 +959,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.53.4</span> · <span id="app-build-date">01.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.53.5</span> · <span id="app-build-date">01.09.2026</span>
     </div>
   </aside>
 
@@ -12584,6 +12584,18 @@ async function prepareOcrBlob(docFile, isPdf){
 
 /* Claude-Vision-API-Call: baut den Media-Block (Bild oder PDF-Dokument)
    und schickt ihn mit dem OCR-Prompt an /v1/messages. */
+/* Antworttext aus ALLEN Text-Blöcken lesen (neue Modelle liefern u.U. zuerst
+   einen Thinking-Block — content[0].text wäre dann leer). */
+function ocrResponseText(data){
+  var blocks = (data && data.content) || [];
+  var txt = blocks.filter(function(b){ return b && b.type === 'text' && typeof b.text === 'string'; })
+                  .map(function(b){ return b.text; }).join('');
+  if(!txt.trim()){
+    var typen = blocks.map(function(b){ return b && b.type; }).join(',') || 'keine Blöcke';
+    throw new Error('Leere Antwort von ' + (data && data.model || 'Modell') + ' (stop_reason=' + (data && data.stop_reason) + ', Blöcke: ' + typen + ')');
+  }
+  return txt;
+}
 var RP_OCR_MODEL = 'claude-sonnet-5';        // Standard
 var RP_OCR_MODEL_STRONG = 'claude-opus-5';   // zweiter Versuch bei Kontrollsummen-Abweichung
 /* Alle Arbeitszeilen als prüfpflichtig markieren (Grund als Hinweis) */
@@ -12656,6 +12668,7 @@ async function callClaudeOcr(key, b64, sendAsPdf, prompt, model){
 /* Claude-Antwort parsen: Markdown-Fences strippen, JSON extrahieren
    (notfalls erstes { bis letztes }), Array-Fallback für alte Antwortform. */
 function parseOcrResponse(text){
+  if(!text || !String(text).trim()) throw new Error('Antwort war leer');
   text = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
   var parsed;
   try {
@@ -12750,7 +12763,7 @@ async function scanWithClaude(){
     }
 
     var data = await response.json();
-    var text = (data.content && data.content[0] && data.content[0].text) || '';
+    var text = ocrResponseText(data);
 
     // Antwort-Text → {rawZeilen, mitarbeiter, firma, zeitraumVon, zeitraumBis}
     var ocr = parseOcrResponse(text);
@@ -12758,7 +12771,7 @@ async function scanWithClaude(){
     if(response2 && response2.ok){
       try {
         var data2 = await response2.json();
-        var text2 = (data2.content && data2.content[0] && data2.content[0].text) || '';
+        var text2 = ocrResponseText(data2);
         ocr = ocrMergeLesungen(ocr, parseOcrResponse(text2));
       } catch(e2) { ocrMarkAll(ocr, 'Zweite Lesung nicht auswertbar — alle Werte prüfen'); }
     } else {
