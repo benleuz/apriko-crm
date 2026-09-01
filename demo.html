@@ -944,6 +944,7 @@
           <button data-view="rapport"><span class="ic">▤</span> Rapport</button>
           <button data-view="einsatzdash"><span class="ic">📊</span> Kundendashboard</button>
           <button data-view="konzern"><span class="ic">🏢</span> Konzernanalyse</button>
+          <button data-view="apipoc"><span class="ic">🔌</span> Apriko API (POC)</button>
         </div>
       </div>
       <div class="nav-group" data-group="admin">
@@ -959,7 +960,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.53.5</span> · <span id="app-build-date">01.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.54.0</span> · <span id="app-build-date">01.09.2026</span>
     </div>
   </aside>
 
@@ -1363,7 +1364,7 @@ let currentView = DEMO_ANON ? "einsatzdash" : "dashboard";
    Berechtigungssystem
    =========================================================== */
 const SUPER_ADMIN_EMAIL = "benjamin@apriko.com";  // hat immer volle Rechte
-const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","bpocheck","clintern","clfibu","rapport","einsatzdash","konzern","profiles"];
+const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","bpocheck","clintern","clfibu","rapport","einsatzdash","konzern","apipoc","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
@@ -1373,6 +1374,7 @@ const VIEW_TITLES = {
   revenue: "Umsätze", stats: "Statistik", budget: "Ertragsbudget", budgetvgl: "Budgetvergleich",
   bpocheck: "Lohn Checkliste Temp", clintern: "Lohn Checkliste intern", clfibu: "FIBU Monatsabschluss",
   rapport: "Rapport", einsatzdash: "Kundendashboard", konzern: "Konzernanalyse",
+  apipoc: "Apriko API (POC)",
   profiles: "Profile"
 };
 
@@ -1834,6 +1836,7 @@ function render() {
   else if (currentView === "clfibu") renderCheckliste(content, "fibu");
   else if (currentView === "einsatzdash") renderEinsatzDash(content);
   else if (currentView === "konzern") renderKonzern(content);
+  else if (currentView === "apipoc") renderApiPoc(content);
   else if (currentView === "companies") renderCompanies(content);
   else if (currentView === "contacts") renderContacts(content);
   else if (currentView === "tasks") renderTasks(content);
@@ -6111,6 +6114,177 @@ function kaHeat(v, min, max, higherBetter) {
   if (!higherBetter) t = 1 - t;
   const hue = Math.round(t * 120);   // 0 = rot, 120 = grün
   return `background:hsla(${hue},60%,38%,.35)`;
+}
+
+
+/* ============ APRIKO API — POC ============
+   Direktanbindung an die Apriko-Datenbank per REST (OpenAPI-Services).
+   Auth: Authorization: Bearer <token>. Konfiguration lokal im Browser
+   (wie der Anthropic-Key), nichts davon landet in SharePoint. */
+const AP_CFG_KEY = "apriko-api-cfg";
+let apState = {
+  tab: "people",             // people | companies
+  rows: { people: [], companies: [] },
+  page: { people: 0, companies: 0 },
+  done: { people: false, companies: false },
+  loading: false,
+  error: null,
+  info: null,                // ServiceInfos-Antwort (Verbindungstest)
+  sort: { col: null, dir: 1 },
+  filters: {},
+  detail: null,
+  _restoreFocus: null,
+  recruiter: {}              // id → Name (lazy)
+};
+const AP_PAGE_SIZE = 50;
+function apCfg() {
+  try { return JSON.parse(localStorage.getItem(AP_CFG_KEY) || "{}"); } catch (e) { return {}; }
+}
+function apCfgSave(cfg) { localStorage.setItem(AP_CFG_KEY, JSON.stringify(cfg)); }
+function apBase() { return (apCfg().baseUrl || "").replace(/\/+$/, ""); }
+async function apFetch(path, opts) {
+  const cfg = apCfg();
+  if (!cfg.baseUrl || !cfg.token) throw new Error("Bitte zuerst Basis-URL und Token hinterlegen.");
+  const url = apBase() + path;
+  let res;
+  try {
+    res = await fetch(url, Object.assign({ headers: { Authorization: "Bearer " + cfg.token, Accept: "application/json" } }, opts || {}));
+  } catch (e) {
+    throw new Error("Netzwerk/CORS: " + e.message + " — erlaubt die API Browser-Aufrufe von " + location.origin + "? (Origin muss in der CORS-Konfiguration der API stehen)");
+  }
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error("HTTP " + res.status + (res.status === 401 ? " — Token ungültig oder abgelaufen" : "") + (txt ? ": " + txt.slice(0, 200) : ""));
+  }
+  return res.json();
+}
+async function apTest() {
+  apState.error = null; apState.info = null; apState.loading = true; render();
+  try {
+    apState.info = await apFetch("/api/people/ServiceInfos");
+    toast("Verbindung OK ✓");
+  } catch (e) { apState.error = e.message; }
+  apState.loading = false; render();
+}
+async function apLoadMore(tab) {
+  if (apState.loading || apState.done[tab]) return;
+  apState.loading = true; apState.error = null; render();
+  try {
+    const ep = tab === "companies" ? "/api/people/LegalPeople" : "/api/people/IndividualPeople";
+    const data = await apFetch(ep + "?pageIndex=" + apState.page[tab] + "&pageSize=" + AP_PAGE_SIZE);
+    const arr = Array.isArray(data) ? data : (data.items || data.value || []);
+    apState.rows[tab] = apState.rows[tab].concat(arr);
+    apState.page[tab]++;
+    if (arr.length < AP_PAGE_SIZE) apState.done[tab] = true;
+  } catch (e) { apState.error = e.message; }
+  apState.loading = false; render();
+}
+function apReset() {
+  apState.rows = { people: [], companies: [] }; apState.page = { people: 0, companies: 0 };
+  apState.done = { people: false, companies: false }; apState.error = null; render();
+}
+function apSaveCfgFromForm() {
+  const cfg = { baseUrl: (document.getElementById("ap-base").value || "").trim(), token: (document.getElementById("ap-token").value || "").trim() };
+  apCfgSave(cfg); apReset(); toast("Zugangsdaten lokal gespeichert");
+}
+function apClearCfg() { localStorage.removeItem(AP_CFG_KEY); apState.info = null; apReset(); }
+function apTab(t) { apState.tab = t; apState.sort = { col: null, dir: 1 }; apState.filters = {}; render(); }
+function apSort(col) { const s = apState.sort; if (s.col === col) s.dir = -s.dir; else { s.col = col; s.dir = 1; } render(); }
+function apFilter(col, inp) { apState.filters[col] = inp.value; apState._restoreFocus = { id: inp.id, pos: inp.selectionStart }; render(); }
+function apFmtDate(s) { if (!s) return ""; const d = new Date(s); return isNaN(d) ? String(s).slice(0, 10) : d.toLocaleDateString("de-CH"); }
+const AP_COLS = {
+  people: [
+    ["personNumber", "Nr", r => r.personNumber],
+    ["name", "Name", r => [r.lastName, r.firstName].filter(Boolean).join(" ") || r.displayName],
+    ["gender", "Geschl.", r => ({ Male: "m", Female: "w" })[r.gender] || ""],
+    ["dateOfBirth", "Geburtsdatum", r => apFmtDate(r.dateOfBirth)],
+    ["age", "Alter", r => r.age],
+    ["email", "E-Mail", r => r.primaryEmailAddressValue],
+    ["phone", "Telefon", r => r.primaryPhoneNumberValue],
+    ["lang", "Sprache", r => r.correspondenceLanguage === "None" ? "" : r.correspondenceLanguage],
+    ["recruiter", "Recruiter", r => r.primaryRecruiterId ? (apState.recruiter[r.primaryRecruiterId] || "…") : ""],
+    ["updated", "Geändert", r => apFmtDate(r.updatedTime)]
+  ],
+  companies: [
+    ["personNumber", "Nr", r => r.personNumber],
+    ["name", "Firma", r => r.businessName || r.displayName],
+    ["legalForm", "Rechtsform", r => r.legalForm === "None" ? "" : r.legalForm],
+    ["uid", "UID", r => r.enterpriseIdentificationNumber],
+    ["email", "E-Mail", r => r.primaryEmailAddressValue],
+    ["phone", "Telefon", r => r.primaryPhoneNumberValue],
+    ["employees", "Mitarbeiter", r => r.numberOfEmployee],
+    ["crm", "Im CRM?", r => (cache.companies || []).some(c => (c.Title || "").trim().toLowerCase() === String(r.businessName || r.displayName || "").trim().toLowerCase()) ? "✓" : "—"],
+    ["updated", "Geändert", r => apFmtDate(r.updatedTime)]
+  ]
+};
+async function apResolveRecruiters() {
+  const ids = [...new Set(apState.rows.people.map(r => r.primaryRecruiterId).filter(id => id && !(id in apState.recruiter)))].slice(0, 30);
+  if (!ids.length) return;
+  ids.forEach(id => apState.recruiter[id] = "…");
+  await Promise.all(ids.map(async id => {
+    try { const p = await apFetch("/api/people/IndividualPeople/" + encodeURIComponent(id)); apState.recruiter[id] = [p.firstName, p.lastName].filter(Boolean).join(" ") || p.displayName || id; }
+    catch (e) { apState.recruiter[id] = "?"; }
+  }));
+  if (currentView === "apipoc") render();
+}
+function apOpenDetail(tab, idx) {
+  const r = apState.rows[tab][idx];
+  if (!r) return;
+  const skip = new Set(["picture", "signature", "communicationTools", "associations", "paymentMethods", "civilInformations", "nationalities", "residencePermits", "medicalProfile"]);
+  const rows = Object.keys(r).filter(k => !skip.has(k) && r[k] !== null && r[k] !== "" && r[k] !== undefined && typeof r[k] !== "object")
+    .map(k => `<tr><td style="color:var(--text-dim);padding:2px 12px 2px 0;white-space:nowrap">${escape(k)}</td><td style="padding:2px 0;word-break:break-all">${escape(String(r[k]))}</td></tr>`).join("");
+  const title = tab === "companies" ? (r.businessName || r.displayName) : [r.firstName, r.lastName].filter(Boolean).join(" ");
+  showModal(escape(title || "Datensatz"), `<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">Rohdaten aus der Apriko-API (${tab === "companies" ? "LegalPerson" : "IndividualPerson"})</div>
+    <table style="font-size:12px">${rows}</table>
+    <details style="margin-top:10px"><summary style="cursor:pointer;font-size:11px;color:var(--text-dim)">JSON komplett</summary><pre style="font-size:10px;white-space:pre-wrap;max-height:300px;overflow:auto">${escape(JSON.stringify(r, null, 2))}</pre></details>`,
+    [`<button class="btn" onclick="closeModal()">Schliessen</button>`]);
+}
+function renderApiPoc(el) {
+  const cfg = apCfg();
+  const tab = apState.tab;
+  const cols = AP_COLS[tab];
+  document.getElementById("view-actions").innerHTML = `
+    <button class="btn btn-sm" onclick="apTest()" ${apState.loading ? "disabled" : ""}>🔗 Verbindung testen</button>
+    <button class="btn btn-sm" onclick="apReset()">↻ Neu laden</button>`;
+  // Tabelle: Filter + Sortierung
+  let rows = apState.rows[tab].map((r, i) => ({ r, i, v: Object.fromEntries(cols.map(c => [c[0], c[2](r)])) }));
+  const fl = apState.filters;
+  rows = rows.filter(x => cols.every(c => { const q = (fl[c[0]] || "").trim().toLowerCase(); return !q || String(x.v[c[0]] === undefined || x.v[c[0]] === null ? "" : x.v[c[0]]).toLowerCase().includes(q); }));
+  if (apState.sort.col) {
+    const sc = apState.sort.col, d = apState.sort.dir;
+    rows.sort((a, b) => { const va = a.v[sc], vb = b.v[sc]; if (typeof va === "number" && typeof vb === "number") return (va - vb) * d; return String(va ?? "").localeCompare(String(vb ?? ""), "de-CH", { numeric: true }) * d; });
+  }
+  const th = c => { const a = apState.sort.col === c[0]; return `<th onclick="apSort('${c[0]}')" style="cursor:pointer;user-select:none;white-space:nowrap${a ? ";color:var(--accent)" : ""}">${c[1]}${a ? (apState.sort.dir === 1 ? " ▲" : " ▼") : ""}</th>`; };
+  const fth = c => `<th style="padding:2px 4px"><input id="ap-f-${c[0]}" value="${escape(fl[c[0]] || "")}" placeholder="Filter …" oninput="apFilter('${c[0]}',this)" style="width:100%;min-width:60px;box-sizing:border-box;background:var(--bg-input, var(--bg-hover));border:1px solid ${fl[c[0]] ? "var(--accent)" : "var(--border)"};color:var(--text);padding:3px 6px;border-radius:3px;font-size:10.5px;font-weight:400"></th>`;
+  const total = apState.rows[tab].length;
+  el.innerHTML = `
+    <div class="card" style="padding:14px 16px;margin-bottom:14px">
+      <div style="font-weight:600;margin-bottom:8px">Verbindung zur Apriko-Datenbank</div>
+      <div style="display:grid;grid-template-columns:2fr 3fr auto auto;gap:8px;align-items:end">
+        <div class="field"><label>Basis-URL der Instanz</label><input id="ap-base" value="${escape(cfg.baseUrl || "")}" placeholder="https://<instanz>.apriko.ch"></div>
+        <div class="field"><label>Bearer-Token</label><input id="ap-token" type="password" value="${escape(cfg.token || "")}" placeholder="Token aus der Apriko-Administration"></div>
+        <button class="btn btn-sm" onclick="apSaveCfgFromForm()">Speichern</button>
+        <button class="btn btn-sm" onclick="apClearCfg()" title="Zugangsdaten aus diesem Browser entfernen">Löschen</button>
+      </div>
+      <div style="font-size:10.5px;color:var(--text-faint);margin-top:6px">Zugangsdaten bleiben lokal in diesem Browser (localStorage) — nichts davon wird in SharePoint gespeichert. Endpunkte: <code>/api/people/IndividualPeople</code> (Personen), <code>/api/people/LegalPeople</code> (Firmen), Paging ${AP_PAGE_SIZE} pro Seite.</div>
+      ${apState.info ? `<div style="font-size:11px;color:var(--accent);margin-top:8px">✓ Verbunden — ServiceInfos: ${escape(JSON.stringify(apState.info).slice(0, 300))}</div>` : ""}
+      ${apState.error ? `<div style="font-size:11.5px;color:var(--danger);margin-top:8px;border:1px solid var(--danger);border-radius:4px;padding:8px 10px">⚠ ${escape(apState.error)}</div>` : ""}
+    </div>
+    <div class="card" style="padding:14px 16px">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+        <button class="btn btn-sm" onclick="apTab('people')" style="${tab === "people" ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">👤 Personen / Mitarbeiter</button>
+        <button class="btn btn-sm" onclick="apTab('companies')" style="${tab === "companies" ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">🏢 Firmen</button>
+        <span style="font-size:11px;color:var(--text-dim);margin-left:auto">${total} geladen${rows.length !== total ? " · " + rows.length + " nach Filter" : ""}${apState.done[tab] ? " · alle" : ""}</span>
+        <button class="btn btn-sm" onclick="apLoadMore('${tab}')" ${apState.loading || apState.done[tab] || !cfg.token ? "disabled" : ""}>${apState.loading ? "Lädt …" : (total ? "+ " + AP_PAGE_SIZE + " weitere" : "▶ Laden")}</button>
+      </div>
+      ${total ? `<div class="table-wrap"><table>
+        <thead><tr>${cols.map(th).join("")}</tr><tr>${cols.map(fth).join("")}</tr></thead>
+        <tbody>${rows.map(x => `<tr style="cursor:pointer" onclick="apOpenDetail('${tab}',${x.i})">${cols.map(c => `<td style="${typeof x.v[c[0]] === "number" ? "text-align:right;font-family:var(--font-mono)" : ""}">${escape(String(x.v[c[0]] ?? ""))}</td>`).join("")}</tr>`).join("")}</tbody>
+      </table></div>` : `<div class="empty">${cfg.token ? "Noch nichts geladen — «▶ Laden» klicken." : "Zuerst Basis-URL und Token hinterlegen, dann «Verbindung testen»."}</div>`}
+    </div>`;
+  if (tab === "people" && total) apResolveRecruiters();
+  const rf = apState._restoreFocus;
+  if (rf) { apState._restoreFocus = null; const inp = document.getElementById(rf.id); if (inp) { inp.focus(); const p = Math.min(rf.pos || inp.value.length, inp.value.length); inp.setSelectionRange(p, p); } }
 }
 
 function renderKonzern(el) {
