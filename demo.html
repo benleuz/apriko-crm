@@ -959,7 +959,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.53.0</span> · <span id="app-build-date">28.08.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.53.2</span> · <span id="app-build-date">01.09.2026</span>
     </div>
   </aside>
 
@@ -6977,6 +6977,56 @@ function edSortTable(col) {
   else { s.col = col; s.dir = 1; }
   render();
 }
+function edRestoreFilterFocus() {
+  const rf = einsatzDashState._restoreFocus;
+  if (!rf) return;
+  einsatzDashState._restoreFocus = null;
+  const inp = document.getElementById(rf.id);
+  if (inp) { inp.focus(); const p = Math.min(rf.pos || inp.value.length, inp.value.length); inp.setSelectionRange(p, p); }
+}
+/* Spaltenfilter (Titelleiste) — pro Tabelle ein Objekt {col: text} */
+function edColFilters(table) {
+  einsatzDashState.colFilters = einsatzDashState.colFilters || {};
+  return einsatzDashState.colFilters[table] = einsatzDashState.colFilters[table] || {};
+}
+function edColFilter(table, col, inp) {
+  edColFilters(table)[col] = inp.value;
+  einsatzDashState.showFullTable = false;
+  einsatzDashState._restoreFocus = { id: inp.id, pos: inp.selectionStart };
+  render();
+}
+function edColFilterClear(table) {
+  einsatzDashState.colFilters[table] = {};
+  render();
+}
+function edColFilterMatch(table, vals) {
+  const fl = edColFilters(table);
+  return Object.keys(fl).every(col => {
+    const q = (fl[col] || "").trim().toLowerCase();
+    if (!q) return true;
+    return String(vals[col] === undefined || vals[col] === null ? "" : vals[col]).toLowerCase().includes(q);
+  });
+}
+function edFilterTh(table, col, extraStyle) {
+  const v = edColFilters(table)[col] || "";
+  return `<th style="padding:2px 4px;${extraStyle || ""}"><input id="ed-f-${table}-${col}" value="${escape(v)}" placeholder="Filter …"
+    oninput="edColFilter('${table}','${col}',this)"
+    style="width:100%;min-width:60px;box-sizing:border-box;background:var(--bg-input, var(--bg-hover));border:1px solid ${v ? "var(--accent)" : "var(--border)"};color:var(--text);padding:3px 6px;border-radius:3px;font-family:inherit;font-size:10.5px;font-weight:400"></th>`;
+}
+function edFilterRowNote(table, total, shown) {
+  const fl = edColFilters(table);
+  const aktiv = Object.values(fl).some(v => (v || "").trim());
+  if (!aktiv) return "";
+  return `<div style="font-size:11px;color:var(--text-dim);padding:6px 0 0">Spaltenfilter aktiv: ${shown} von ${total} Zeilen
+    <button class="ed-dim-chip" style="margin-left:8px" onclick="edColFilterClear('${table}')">✕ Filter löschen</button></div>`;
+}
+/* Sortierung der "Pro Einsatz"-Tabelle (Marge-Tab) */
+function edPlSort(col) {
+  const s = einsatzDashState.plSort = einsatzDashState.plSort || { col: null, dir: 1 };
+  if (s.col === col) s.dir = -s.dir;
+  else { s.col = col; s.dir = col === "nr" || col === "ma" || col === "kunde" || col === "gav" ? 1 : -1; }
+  render();
+}
 
 /* Sortier-Wert einer Zeile für eine Tabellen-Spalte */
 function edSortVal(r, col) {
@@ -7839,21 +7889,47 @@ function bmRenderContent() {
 
   // Im Stunden-Modus: ausgeglichene Einsätze (Differenz 0) ausblenden — nur die
   // Abweichungen sind interessant
-  const plRowsAll = std ? byPlacement.filter(([,a]) => Math.abs(a.marge) >= 0.01) : byPlacement;
-  const plHidden = byPlacement.length - plRowsAll.length;
+  const plRowsBase = std ? byPlacement.filter(([,a]) => Math.abs(a.marge) >= 0.01) : byPlacement;
+  const plHidden = byPlacement.length - plRowsBase.length;
+  // Zeilenwerte für Filter/Sortierung
+  const plVals = ([pl, a]) => {
+    const meta = placementMeta[pl] || {};
+    const einsatz = hasEinsatzData ? bmLookupEinsatz(pl) : null;
+    return { nr: pl, ma: meta.ma || "", kunde: meta.kunde || "",
+      gav: einsatz ? (einsatz["GAV"] || "—").replace("Personalverleih ", "PV ") : (hasEinsatzData ? "nicht in Einsatzliste" : ""),
+      umsatz: a.umsatz, lohn: a.lohn, sozial: a.sozial, marge: a.marge, margep: a.margep };
+  };
+  const plSortState = einsatzDashState.plSort || { col: null, dir: 1 };
+  const plRowsAll = plRowsBase
+    .filter(x => edColFilterMatch("placements", plVals(x)))
+    .sort((x, y) => {
+      if (!plSortState.col) return 0;
+      const va = plVals(x)[plSortState.col], vb = plVals(y)[plSortState.col];
+      if (typeof va === "number" || typeof vb === "number") return ((va || 0) - (vb || 0)) * plSortState.dir;
+      return String(va).localeCompare(String(vb), "de-CH", { numeric: true }) * plSortState.dir;
+    });
   const PL_LIMIT = 300;
   const plRows = einsatzDashState.showFullTable ? plRowsAll : plRowsAll.slice(0, PL_LIMIT);
   const plCut = plRowsAll.length - plRows.length;
+  const plTh = (col, label, right) => {
+    const active = plSortState.col === col;
+    const arrow = active ? (plSortState.dir === 1 ? " ▲" : " ▼") : "";
+    return `<th onclick="edPlSort('${col}')" style="cursor:pointer;user-select:none;${right ? "text-align:right;" : ""}${active ? "color:var(--accent)" : ""}" title="Sortieren">${label}${arrow}</th>`;
+  };
   const placementTable = `
     <div class="ed-card">
       <div class="ed-card-title">Pro Einsatz <span style="color:var(--text-faint);font-weight:400">(${plRowsAll.length}${plHidden > 0 ? " mit Differenz, " + plHidden + " ausgeglichene ausgeblendet" : " Einsätze"}${hasEinsatzData ? ", verknüpft mit Einsatzliste" : ""})</span></div>
       <div class="table-wrap"><table>
         <thead><tr>
-          <th>Einsatz-Nr</th><th>Mitarbeiter</th><th>Kunde</th>
-          ${hasEinsatzData ? "<th>GAV</th>" : ""}
-          <th style="text-align:right">${std ? "Kundenstd." : "Umsatz"}</th><th style="text-align:right">${std ? "Kandidatenstd." : "Lohn"}</th>
-          ${std ? "" : '<th style="text-align:right">Sozialleist.</th>'}
-          <th style="text-align:right">${std ? "Differenz" : "Bruttomarge"}</th><th style="text-align:right">${std ? "Quote %" : "Marge %"}</th>
+          ${plTh("nr","Einsatz-Nr")}${plTh("ma","Mitarbeiter")}${plTh("kunde","Kunde")}
+          ${hasEinsatzData ? plTh("gav","GAV") : ""}
+          ${plTh("umsatz", std ? "Kundenstd." : "Umsatz", true)}${plTh("lohn", std ? "Kandidatenstd." : "Lohn", true)}
+          ${std ? "" : plTh("sozial","Sozialleist.", true)}
+          ${plTh("marge", std ? "Differenz" : "Bruttomarge", true)}${plTh("margep", std ? "Quote %" : "Marge %", true)}
+        </tr><tr>
+          ${edFilterTh("placements","nr")}${edFilterTh("placements","ma")}${edFilterTh("placements","kunde")}
+          ${hasEinsatzData ? edFilterTh("placements","gav") : ""}
+          <th></th><th></th>${std ? "" : "<th></th>"}<th></th><th></th>
         </tr></thead>
         <tbody>
           ${plRows.map(([pl, a]) => {
@@ -7875,6 +7951,7 @@ function bmRenderContent() {
           }).join("")}
         </tbody>
       </table></div>
+      ${edFilterRowNote("placements", plRowsBase.length, plRowsAll.length)}
       ${plCut > 0 ? `<div style="text-align:center;padding:10px">
         <button class="ed-dim-chip" onclick="einsatzDashState.showFullTable=true;render()">+ ${plCut} weitere Zeilen anzeigen</button>
       </div>` : ""}
@@ -8929,6 +9006,7 @@ function renderEinsatzDash(el) {
   // ---- Marge-Tab: eigener Inhalt, dann fertig ----
   if (tab === "marge") {
     el.innerHTML = tabBar + bmRenderContent();
+    edRestoreFilterFocus();
     return;
   }
 
@@ -9359,11 +9437,17 @@ function renderEinsatzDash(el) {
     return (edToIso(a["Eintrittsdatum"])||"").localeCompare(edToIso(b["Eintrittsdatum"])||"");
   });
   const hiddenCount = rows.length - aktivRows.length;
+  const tableRowsUnfiltered = tableRows.length;
+  const tableRowsF = tableRows.filter(r => edColFilterMatch("einsaetze", {
+    kandidat: edKandidat(r), kunde: r["Kunde"], gav: (r["GAV"] || "").replace("Personalverleih ", "PV "),
+    eintritt: edFormatIso(edToIso(r["Eintrittsdatum"])), austritt: r["Austrittsdatum"] ? edFormatIso(edToIso(r["Austrittsdatum"])) : "laufend",
+    nr: r["Einsatz-Nummer"], berater: edBerater(r), status: edStatus(r, stichtag)
+  }));
   // Grosse Tabellen bremsen den Browser (innerHTML-Parsing) — initial nur 300 Zeilen
   const TABLE_LIMIT = 300;
   const showAllTableRows = einsatzDashState.showFullTable;
-  const tableRowsShown = showAllTableRows ? tableRows : tableRows.slice(0, TABLE_LIMIT);
-  const tableCut = tableRows.length - tableRowsShown.length;
+  const tableRowsShown = showAllTableRows ? tableRowsF : tableRowsF.slice(0, TABLE_LIMIT);
+  const tableCut = tableRowsF.length - tableRowsShown.length;
 
   const statusBadge = (s) => {
     const map = {
@@ -9562,6 +9646,11 @@ function renderEinsatzDash(el) {
           ${sTh("kandidat","Kandidat")}${sTh("kunde","Kunde")}${sTh("gav","GAV")}
           ${sTh("eintritt","Eintritt")}${sTh("austritt","Austritt")}${sTh("nr","Einsatz-Nr")}
           ${beraterList.length ? sTh("berater","Berater") : ""}
+        </tr><tr>
+          ${showAll ? edFilterTh("einsaetze","status") : ""}
+          ${edFilterTh("einsaetze","kandidat")}${edFilterTh("einsaetze","kunde")}${edFilterTh("einsaetze","gav")}
+          ${edFilterTh("einsaetze","eintritt")}${edFilterTh("einsaetze","austritt")}${edFilterTh("einsaetze","nr")}
+          ${beraterList.length ? edFilterTh("einsaetze","berater") : ""}
         </tr></thead>`;
       })()}
         <tbody>
@@ -9580,6 +9669,7 @@ function renderEinsatzDash(el) {
           }).join("")}
         </tbody>
       </table></div>
+      ${edFilterRowNote("einsaetze", tableRowsUnfiltered, tableRowsF.length)}
       ${tableCut > 0 ? `<div style="text-align:center;padding:10px">
         <button class="ed-dim-chip" onclick="einsatzDashState.showFullTable=true;render()">+ ${tableCut} weitere Zeilen anzeigen</button>
       </div>` : ""}
@@ -9592,6 +9682,7 @@ function renderEinsatzDash(el) {
     const inp = document.getElementById("ed-search");
     if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
   }
+  edRestoreFilterFocus();
 }
 
 /* ---------- Customers ---------- */
@@ -13054,6 +13145,39 @@ function shiftAllDatesFromFirst(newIsoDate){
   if(input) input.focus();
 }
 
+/* Feiertage (Kanton Zürich, gesetzlich + PBK-Kalender): Neujahr, Berchtoldstag,
+   Karfreitag, Ostermontag, Tag der Arbeit, Auffahrt, Pfingstmontag, 1. August,
+   Weihnachten, Stephanstag. Ostersonntag per Gauss'scher Osterformel. */
+function rpOstern(y){
+  var a=y%19, b=Math.floor(y/100), c=y%100, d=Math.floor(b/4), e=b%4, f=Math.floor((b+8)/25),
+      g=Math.floor((b-f+1)/3), h=(19*a+b-d-g+15)%30, i=Math.floor(c/4), k=c%4,
+      l=(32+2*e+2*i-h-k)%7, m=Math.floor((a+11*h+22*l)/451),
+      mo=Math.floor((h+l-7*m+114)/31), da=((h+l-7*m+114)%31)+1;
+  return new Date(y, mo-1, da);
+}
+function rpIsoOf(d){ return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
+function rpFeiertage(y){
+  var o=rpOstern(y), add=function(n){ var d=new Date(o); d.setDate(d.getDate()+n); return rpIsoOf(d); };
+  return [y+'-01-01', y+'-01-02', add(-2), add(1), y+'-05-01', add(39), add(50), y+'-08-01', y+'-12-25', y+'-12-26'];
+}
+/* Datum der Zeile ("17.08.2026" oder ISO) → Date */
+function rpDate(datum){
+  if(!datum) return null;
+  var m = String(datum).match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if(m) return new Date(+m[3], +m[2]-1, +m[1]);
+  m = String(datum).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(m) return new Date(+m[1], +m[2]-1, +m[3]);
+  return null;
+}
+/* Sollzeit gilt nur an Arbeitstagen: Mo–Fr und kein Feiertag */
+function rpIstArbeitstag(datum){
+  var d = rpDate(datum);
+  if(!d) return true;
+  var wd = d.getDay();
+  if(wd === 0 || wd === 6) return false;
+  return rpFeiertage(d.getFullYear()).indexOf(rpIsoOf(d)) < 0;
+}
+
 function recalcRows(){
   var s = sollOf();  // Sollzeit pro Arbeitstag (z.B. 8.00)
 
@@ -13083,7 +13207,7 @@ function recalcRows(){
   var sS = 0, sI = 0;
   dateOrder.forEach(function(datum){
     var group = perDate[datum];
-    var tagSoll = group.allAbsent ? 0 : s;
+    var tagSoll = (group.allAbsent || !rpIstArbeitstag(datum)) ? 0 : s;
     sS += tagSoll;
     sI += group.istSum;
     var tagDiff = group.istSum - tagSoll;
@@ -13103,7 +13227,7 @@ function recalcRows(){
 
       if(pos === 0){
         // Erste Buchung des Tages: zeigt Soll und Tages-Differenz
-        sollCell.textContent = group.allAbsent ? '—' : nf(tagSoll);
+        sollCell.textContent = group.allAbsent ? '—' : (!rpIstArbeitstag(datum) ? '0.00' : nf(tagSoll));
         if(group.allAbsent){
           diffCell.textContent = '—';
           diffCell.className = 'rp-num';
@@ -13151,7 +13275,7 @@ function berechnen(){
   // bei mehreren Buchungen am gleichen Tag den Tag mehrfach für die Sollzeit.
   var arbeitsDaten = {};
   zeilen.forEach(function(r){
-    if(!r.absent) arbeitsDaten[r.datum] = true;
+    if(!r.absent && rpIstArbeitstag(r.datum)) arbeitsDaten[r.datum] = true;
   });
   var arbeitstageAnzahl = Object.keys(arbeitsDaten).length;
   var tIst = zeilen.reduce(function(a,r){ return a+r.ist; }, 0);
