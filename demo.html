@@ -960,7 +960,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.54.0</span> · <span id="app-build-date">01.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.54.2</span> · <span id="app-build-date">01.09.2026</span>
     </div>
   </aside>
 
@@ -6141,7 +6141,14 @@ function apCfg() {
   try { return JSON.parse(localStorage.getItem(AP_CFG_KEY) || "{}"); } catch (e) { return {}; }
 }
 function apCfgSave(cfg) { localStorage.setItem(AP_CFG_KEY, JSON.stringify(cfg)); }
-function apBase() { return (apCfg().baseUrl || "").replace(/\/+$/, ""); }
+function apNormalizeBase(u) {
+  u = String(u || "").trim();
+  if (!u) return "";
+  if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+  u = u.replace(/\/api\/.*$/i, "");        // falls jemand einen Endpunkt-Pfad einfügt
+  return u.replace(/\/+$/, "");
+}
+function apBase() { return apNormalizeBase(apCfg().baseUrl); }
 async function apFetch(path, opts) {
   const cfg = apCfg();
   if (!cfg.baseUrl || !cfg.token) throw new Error("Bitte zuerst Basis-URL und Token hinterlegen.");
@@ -6154,9 +6161,76 @@ async function apFetch(path, opts) {
   }
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    throw new Error("HTTP " + res.status + (res.status === 401 ? " — Token ungültig oder abgelaufen" : "") + (txt ? ": " + txt.slice(0, 200) : ""));
+    const isHtml = /^\s*<!doctype html|<html/i.test(txt);
+    let hint = "";
+    if (res.status === 401) hint = " — Token ungültig oder abgelaufen";
+    else if (isHtml) hint = " — die Antwort ist eine HTML-Seite, keine API-Antwort: Die Basis-URL zeigt nicht auf die Apriko-API (aufgerufen: " + url + ")";
+    else if (res.status === 404) hint = " — Endpunkt nicht gefunden (aufgerufen: " + url + ")";
+    throw new Error("HTTP " + res.status + hint + (!isHtml && txt ? ": " + txt.slice(0, 200) : ""));
+  }
+  const ct = res.headers && res.headers.get ? (res.headers.get("content-type") || "") : "";
+  if (ct && !/json/i.test(ct)) {
+    throw new Error("Antwort ist kein JSON (" + ct + ") — die Basis-URL zeigt vermutlich nicht auf die API (aufgerufen: " + url + ")");
   }
   return res.json();
+}
+/* Token per Benutzer/Passwort beziehen (OAuth2 Password-Grant). Die
+   Token-URL wird per OpenID-Discovery gesucht, sonst aus dem Formular. */
+async function apDiscoverTokenUrl() {
+  const base = apBase();
+  const kandidaten = ["/.well-known/openid-configuration", "/api/id/.well-known/openid-configuration", "/identity/.well-known/openid-configuration"];
+  for (const p of kandidaten) {
+    try {
+      const res = await fetch(base + p, { headers: { Accept: "application/json" } });
+      if (res.ok) { const j = await res.json(); if (j.token_endpoint) return j.token_endpoint; }
+    } catch (e) { /* nächster Kandidat */ }
+  }
+  return null;
+}
+async function apLogin() {
+  const st = document.getElementById("ap-login-status");
+  const base = apBase();
+  if (!base) { st.textContent = "Zuerst Basis-URL speichern."; return; }
+  const user = (document.getElementById("ap-user").value || "").trim();
+  const pw = document.getElementById("ap-pw").value || "";
+  const clientId = (document.getElementById("ap-clientid").value || "").trim();
+  const clientSecret = (document.getElementById("ap-clientsecret").value || "").trim();
+  const scope = (document.getElementById("ap-scope").value || "").trim();
+  let tokenUrl = (document.getElementById("ap-tokenurl").value || "").trim();
+  if (!user || !pw) { st.textContent = "Benutzer und Passwort eingeben."; return; }
+  st.textContent = "Suche Token-Endpunkt …";
+  try {
+    if (!tokenUrl) {
+      tokenUrl = await apDiscoverTokenUrl();
+      if (tokenUrl) { document.getElementById("ap-tokenurl").value = tokenUrl; st.textContent = "Token-Endpunkt gefunden: " + tokenUrl; }
+      else { tokenUrl = base + "/connect/token"; document.getElementById("ap-tokenurl").value = tokenUrl; st.textContent = "Keine Discovery — versuche Standardpfad " + tokenUrl; }
+    }
+    if (/^\//.test(tokenUrl)) tokenUrl = base + tokenUrl;
+    const body = new URLSearchParams();
+    body.set("grant_type", "password");
+    body.set("username", user);
+    body.set("password", pw);
+    if (clientId) body.set("client_id", clientId);
+    if (clientSecret) body.set("client_secret", clientSecret);
+    if (scope) body.set("scope", scope);
+    const res = await fetch(tokenUrl, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" }, body: body.toString() });
+    const txt = await res.text();
+    let j = null; try { j = JSON.parse(txt); } catch (e) {}
+    if (!res.ok || !j || !j.access_token) {
+      const err = j && (j.error_description || j.error) ? j.error_description || j.error : txt.slice(0, 200);
+      st.innerHTML = `<span style="color:var(--danger)">Login fehlgeschlagen (HTTP ${res.status}): ${escape(err || "keine Antwort")}</span>` +
+        (res.status === 400 && /client/i.test(err || "") ? "<br>Hinweis: Der Identity-Server verlangt eine client_id — bitte beim Apriko-Team erfragen." : "") +
+        (res.status === 404 ? "<br>Hinweis: Token-URL stimmt nicht — die korrekte URL beim Apriko-Team erfragen und oben eintragen." : "");
+      return;
+    }
+    const cfg = apCfg(); cfg.token = j.access_token; cfg.tokenExp = j.expires_in ? Date.now() + j.expires_in * 1000 : null; cfg.tokenUrl = tokenUrl; cfg.clientId = clientId; cfg.scope = scope;
+    apCfgSave(cfg);
+    document.getElementById("ap-pw").value = "";
+    st.innerHTML = `<span style="color:var(--accent)">✓ Token erhalten${j.expires_in ? " (gültig " + Math.round(j.expires_in / 60) + " Min.)" : ""} — im Token-Feld übernommen. Passwort wurde nicht gespeichert.</span>`;
+    apState.info = null; apReset();
+  } catch (e) {
+    st.innerHTML = `<span style="color:var(--danger)">Netzwerk/CORS beim Token-Endpunkt: ${escape(e.message)} — läuft der Proxy? (Er muss /connect/* und /.well-known/* durchlassen, siehe Worker v2.)</span>`;
+  }
 }
 async function apTest() {
   apState.error = null; apState.info = null; apState.loading = true; render();
@@ -6184,8 +6258,8 @@ function apReset() {
   apState.done = { people: false, companies: false }; apState.error = null; render();
 }
 function apSaveCfgFromForm() {
-  const cfg = { baseUrl: (document.getElementById("ap-base").value || "").trim(), token: (document.getElementById("ap-token").value || "").trim() };
-  apCfgSave(cfg); apReset(); toast("Zugangsdaten lokal gespeichert");
+  const cfg = { baseUrl: apNormalizeBase(document.getElementById("ap-base").value), token: (document.getElementById("ap-token").value || "").trim().replace(/^Bearer\s+/i, "") };
+  apCfgSave(cfg); apReset(); toast("Zugangsdaten lokal gespeichert — Basis-URL: " + cfg.baseUrl);
 }
 function apClearCfg() { localStorage.removeItem(AP_CFG_KEY); apState.info = null; apReset(); }
 function apTab(t) { apState.tab = t; apState.sort = { col: null, dir: 1 }; apState.filters = {}; render(); }
@@ -6261,12 +6335,27 @@ function renderApiPoc(el) {
     <div class="card" style="padding:14px 16px;margin-bottom:14px">
       <div style="font-weight:600;margin-bottom:8px">Verbindung zur Apriko-Datenbank</div>
       <div style="display:grid;grid-template-columns:2fr 3fr auto auto;gap:8px;align-items:end">
-        <div class="field"><label>Basis-URL der Instanz</label><input id="ap-base" value="${escape(cfg.baseUrl || "")}" placeholder="https://<instanz>.apriko.ch"></div>
+        <div class="field"><label>Basis-URL der Instanz (mit https://)</label><input id="ap-base" value="${escape(cfg.baseUrl || "")}" placeholder="https://<instanz>.apriko.ch" onblur="this.value = apNormalizeBase(this.value)"></div>
         <div class="field"><label>Bearer-Token</label><input id="ap-token" type="password" value="${escape(cfg.token || "")}" placeholder="Token aus der Apriko-Administration"></div>
         <button class="btn btn-sm" onclick="apSaveCfgFromForm()">Speichern</button>
         <button class="btn btn-sm" onclick="apClearCfg()" title="Zugangsdaten aus diesem Browser entfernen">Löschen</button>
       </div>
       <div style="font-size:10.5px;color:var(--text-faint);margin-top:6px">Zugangsdaten bleiben lokal in diesem Browser (localStorage) — nichts davon wird in SharePoint gespeichert. Endpunkte: <code>/api/people/IndividualPeople</code> (Personen), <code>/api/people/LegalPeople</code> (Firmen), Paging ${AP_PAGE_SIZE} pro Seite.</div>
+      <details style="margin-top:10px" ${cfg.token ? "" : "open"}>
+        <summary style="cursor:pointer;font-size:12px;font-weight:600">🔑 Token mit Benutzer/Passwort holen${cfg.tokenExp ? (cfg.tokenExp > Date.now() ? ` — aktueller Token gültig bis ${new Date(cfg.tokenExp).toLocaleTimeString("de-CH", { hour: "2-digit", minute: "2-digit" })}` : " — Token abgelaufen") : ""}</summary>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px">
+          <div class="field"><label>Benutzer</label><input id="ap-user" value="${escape(cfg.user || "")}" autocomplete="username"></div>
+          <div class="field"><label>Passwort (wird nicht gespeichert)</label><input id="ap-pw" type="password" autocomplete="current-password"></div>
+          <div class="field"><label>Token-URL (leer = automatisch suchen)</label><input id="ap-tokenurl" value="${escape(cfg.tokenUrl || "")}" placeholder="/connect/token"></div>
+          <div class="field"><label>client_id (falls verlangt)</label><input id="ap-clientid" value="${escape(cfg.clientId || "")}"></div>
+          <div class="field"><label>client_secret (optional)</label><input id="ap-clientsecret" type="password"></div>
+          <div class="field"><label>scope (optional)</label><input id="ap-scope" value="${escape(cfg.scope || "")}" placeholder="z.B. api offline_access"></div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+          <button class="btn btn-sm" onclick="const c=apCfg();c.user=document.getElementById('ap-user').value.trim();apCfgSave(c);apLogin()">Token holen</button>
+          <span id="ap-login-status" style="font-size:11px;color:var(--text-dim)"></span>
+        </div>
+      </details>
       ${apState.info ? `<div style="font-size:11px;color:var(--accent);margin-top:8px">✓ Verbunden — ServiceInfos: ${escape(JSON.stringify(apState.info).slice(0, 300))}</div>` : ""}
       ${apState.error ? `<div style="font-size:11.5px;color:var(--danger);margin-top:8px;border:1px solid var(--danger);border-radius:4px;padding:8px 10px">⚠ ${escape(apState.error)}</div>` : ""}
     </div>
