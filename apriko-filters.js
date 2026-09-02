@@ -47,9 +47,17 @@
     return hit;
   }
 
+  /* GRUPPEN-PFLICHT (empirisch 02.09.2026): Ein leeres OR-Label quittiert
+     der Server mit 400 "[FormatViolation] Group value has to be set" —
+     die Gruppe ist also obligatorisch, nicht optional. Filter ohne
+     OR-Verbund erhalten deshalb je eine eigene Gruppe (CNF: einzelne
+     Gruppen = AND). buildFilters() vergibt positionsbasiert G1..Gn;
+     buildFilter() solo nutzt "G_<feldname>" — bei MEHREREN Filtern aufs
+     selbe Feld ohne eigene Labels zwingend buildFilters() verwenden,
+     sonst landen sie ungewollt in derselben OR-Gruppe. */
   /* Einen Filter bauen.
      spec = { field, operator, value, dataType, isInclude, ignoreUnset, orLabels } */
-  function buildFilter(spec) {
+  function buildFilter(spec, autoLabel) {
     if (!spec || !spec.field) throw new Error("AprikoFilters: 'field' fehlt");
     var op = spec.operator || "=";
     if (OPERATORS.indexOf(op) < 0) {
@@ -62,6 +70,7 @@
     }
     var labels = spec.orLabels || [];
     if (!Array.isArray(labels)) labels = [labels];
+    if (!labels.length) labels = [autoLabel || ("G_" + spec.field)];
     if (labels.some(function (l) { return /[|,]/.test(String(l)); })) {
       throw new Error("AprikoFilters: OR-Labels dürfen weder '|' noch ',' enthalten");
     }
@@ -83,7 +92,7 @@
      für den POST-Body (QueryModel.filters ist EIN string) mit
      joinForBody() zusammenführen. */
   function buildFilters(specs) {
-    return (specs || []).map(buildFilter);
+    return (specs || []).map(function (spec, i) { return buildFilter(spec, "G" + (i + 1)); });
   }
 
   /* OBSOLET (Schema-Irrtum, s. apriko-api.js): Der Server verlangt für

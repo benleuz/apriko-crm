@@ -23,8 +23,8 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.57.2"></script>
-<script src="apriko-api.js?v=1.57.2"></script>
+<script src="apriko-filters.js?v=1.57.3"></script>
+<script src="apriko-api.js?v=1.57.3"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -962,7 +962,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.57.2</span> · <span id="app-build-date">01.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.57.3</span> · <span id="app-build-date">01.09.2026</span>
     </div>
   </aside>
 
@@ -11914,10 +11914,11 @@ async function rpApiPlacementsFor(personId){
      gegen die laufende Instanz: JSON.stringify-Wert ("id" mit
      Anführungszeichen) → HTTP 400 FormatViolation ⇒ das Schema-
      BEISPIEL (roher Wert) gilt, nicht die Schema-Beschreibung. */
+  /* Gruppe (Position 7) ist Pflicht — leer gibt 400 "Group value has to be set". */
   var VAR = {
-    raw:      function(id){ return 'employeeId|=|' + String(id) + '|Text|false|false|'; },
-    rawlower: function(id){ return 'employeeId|=|' + String(id) + '|text|false|false|'; },
-    json:     function(id){ return 'employeeId|=|' + JSON.stringify(id) + '|Text|false|false|'; }
+    raw:      function(id){ return 'employeeId|=|' + String(id) + '|Text|false|false|G1'; },
+    rawlower: function(id){ return 'employeeId|=|' + String(id) + '|text|false|false|G1'; },
+    json:     function(id){ return 'employeeId|=|' + JSON.stringify(id) + '|Text|false|false|G1'; }
   };
   var alle = ['raw', 'rawlower', 'json'];
   var pref = localStorage.getItem('apriko-filter-format');
