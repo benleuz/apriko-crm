@@ -23,8 +23,8 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.57.4"></script>
-<script src="apriko-api.js?v=1.57.4"></script>
+<script src="apriko-filters.js?v=1.58.0"></script>
+<script src="apriko-api.js?v=1.58.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -962,7 +962,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.57.4</span> · <span id="app-build-date">01.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.58.0</span> · <span id="app-build-date">01.09.2026</span>
     </div>
   </aside>
 
@@ -11923,7 +11923,7 @@ async function rpApiPlacementsFor(personId){
   var alle = ['json', 'raw', 'rawlower'];
   var pref = localStorage.getItem('apriko-filter-format');
   var fmts = alle.indexOf(pref) >= 0 ? [pref].concat(alle.filter(function(f){ return f !== pref; })) : alle;
-  var letzterFehler = null, sauberLeer = false;
+  var letzterFehler = null, sauberLeer = false, protokoll = [];
   for(var i = 0; i < fmts.length; i++){
     var r;
     try {
@@ -11932,17 +11932,30 @@ async function rpApiPlacementsFor(personId){
         filters: VAR[fmts[i]](personId),
         pageIndex: 0, pageSize: 50, resolveReferences: false
       });
-    } catch(e){ letzterFehler = e; continue; }
+    } catch(e){ letzterFehler = e; protokoll.push(fmts[i] + ': Fehler ' + (e.status || '')); continue; }
     var hits = (r && r.results) || [];
     if(hits.length){
       localStorage.setItem('apriko-filter-format', fmts[i]);
-      return { rows: hits.map(AprikoApi.models.hitData), fmt: fmts[i] };
+      return { rows: hits.map(AprikoApi.models.hitData), fmt: fmts[i], protokoll: protokoll };
     }
-    sauberLeer = true;   // Format akzeptiert, aber wirklich keine Einsätze
+    sauberLeer = true;   // Format akzeptiert, aber keine Treffer
+    protokoll.push(fmts[i] + ': 0 Treffer');
   }
   if(!sauberLeer && letzterFehler) throw letzterFehler;
-  return { rows: [], fmt: null };
+  return { rows: [], fmt: null, protokoll: protokoll };
 }
+/* Fallback: Einsätze per Volltextsuche zum Mitarbeiternamen — dieselbe
+   Suchart, die den Mitarbeiter zuverlässig findet. Danach hart über die
+   Personen-ID verifiziert, damit kein fremder Einsatz durchrutscht. */
+async function rpApiPlacementsByText(maName, personId){
+  var r = await AprikoApi.models.query({ query: maName, entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 25, resolveReferences: false });
+  var rows = ((r && r.results) || []).map(AprikoApi.models.hitData);
+  var mitId = rows.filter(function(e){ return e.employeeId === personId; });
+  return { rows: mitId.length ? mitId : rows, verifiziert: mitId.length > 0 };
+}
+/* Abgleich-Zustand für die Auswahl-Dropdowns */
+var rpApiState = { personen: [], personIdx: 0, einsaetze: [], einsatzId: null, von: null, bis: null, firmaName: '', unsicher: false, fmt: null, viaText: false, protokoll: [] };
+
 async function rpApiMatch(maName, firmaName, vonStr, bisStr){
   if(!window.AprikoApi) return;
   if(!rpApiUse()) return;   // weder Rapport-eigene noch POC-Verbindung eingerichtet
@@ -11950,76 +11963,132 @@ async function rpApiMatch(maName, firmaName, vonStr, bisStr){
   if(!box || !maName) return;
   box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> suche «' + esc(maName) + '» …';
   try {
-    var q = await AprikoApi.models.query({ query: maName, entityTypes: 'IndividualPerson', pageIndex: 0, pageSize: 5, resolveReferences: false });
-    var personen = ((q && q.results) || []).map(AprikoApi.models.hitData).filter(function(p){
+    var q = await AprikoApi.models.query({ query: maName, entityTypes: 'IndividualPerson', pageIndex: 0, pageSize: 8, resolveReferences: false });
+    var roh = ((q && q.results) || []).map(AprikoApi.models.hitData);
+    var passend = roh.filter(function(p){
       return rpApiNameMatch([p.firstName, p.lastName].filter(Boolean).join(' '), maName);
     });
-    if(!personen.length){
+    rpApiState.personen = passend.length ? passend : roh;   // ähnliche Treffer zur Auswahl anbieten
+    rpApiState.unsicher = !passend.length;
+    rpApiState.firmaName = firmaName || '';
+    rpApiState.von = rpDate(vonStr); rpApiState.bis = rpDate(bisStr || vonStr);
+    rpApiState.vonStr = vonStr || ''; rpApiState.bisStr = bisStr || vonStr || '';
+    if(!rpApiState.personen.length){
       box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> kein Mitarbeiter zu «' + esc(maName) + '» gefunden — Angaben unten bitte manuell prüfen.';
       return;
     }
-    var person = personen[0];
-    var pl = await rpApiPlacementsFor(person.id);
-    var von = rpDate(vonStr), bis = rpDate(bisStr || vonStr);
-    var passende = pl.rows.filter(function(e){
-      var ein = e.entryDate ? new Date(e.entryDate) : null;
-      var aus = e.withdrawalDate ? new Date(e.withdrawalDate) : null;
-      var zeitOk = (!ein || !bis || ein <= bis) && (!aus || !von || aus >= von);
-      var kundeOk = !firmaName || !e.customerId ? true : true;  // Kunde wird unten geprüft, wenn Name aufgelöst
-      return zeitOk && kundeOk;
-    });
-    // Kundennamen auflösen und damit den besten Einsatz wählen
-    var beste = null, kundeName = '';
-    for(var i = 0; i < passende.length; i++){
-      var kn = '';
-      if(passende[i].customerId){
-        try { var c = await AprikoApi.people.getLegal(passende[i].customerId); kn = c.businessName || c.displayName || ''; } catch(e2){}
-      }
-      if(firmaName && kn && rpApiNameMatch(kn, firmaName)){ beste = passende[i]; kundeName = kn; break; }
-      if(!beste){ beste = passende[i]; kundeName = kn; }
-    }
-    if(!beste){
-      box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> ' + esc([person.firstName, person.lastName].filter(Boolean).join(' ')) +
-        ' gefunden, aber kein Einsatz im Rapportzeitraum' + (firmaName ? ' bei «' + esc(firmaName) + '»' : '') + '.';
-      return;
-    }
-    var gavApi = beste.tempDataLabourStaffingAgreementName || '';
-    var bc = beste.basicPlacementCompensation || {};
-    var addl = beste.additionalPlacementCompensations || [];
-    var gewaehlt = (typeof GAV !== 'undefined' && $('rpBranche') && GAV[$('rpBranche').value]) ? GAV[$('rpBranche').value].name : '';
-    var gavZeile = gavApi
-      ? 'GAV laut Einsatz: <b>' + esc(gavApi) + '</b>' +
-        (gewaehlt ? (rpApiNameMatch(gavApi, gewaehlt)
-          ? ' <span style="color:#2e7d32">✓ passt zum gewählten Regelwerk</span>'
-          : ' <span style="color:#c62828">⚠ gewähltes Regelwerk: ' + esc(gewaehlt) + ' — bitte prüfen</span>') : '')
-      : '';
-    var lohnTeile = [];
-    if(typeof bc.basicPlacementSalary === 'number') lohnTeile.push('Grundlohn ' + bc.basicPlacementSalary.toFixed(2));
-    if(typeof bc.basicPlacementRate === 'number') lohnTeile.push('Tarif ' + bc.basicPlacementRate.toFixed(2));
-    if(typeof bc.marginPercentage === 'number') lohnTeile.push('Marge ' + bc.marginPercentage.toFixed(1) + '%');
-    var spesen = addl.map(function(a){
-      var t = [];
-      if(typeof a.salary === 'number') t.push(a.salary.toFixed(2) + ' Lohn');
-      if(typeof a.rate === 'number') t.push(a.rate.toFixed(2) + ' Tarif');
-      return esc(a.name || a.displayName || 'Zulage') + (t.length ? ' (' + t.join(' / ') + ')' : '');
-    });
-    box.innerHTML = '🔌 <b>Apriko-Abgleich: Einsatz gefunden ✓</b><br>' +
-      'Einsatz <b>Nr ' + esc(String(beste.placementNumber || beste.id)) + '</b>' +
-      (beste.jobTitle ? ' · ' + esc(beste.jobTitle) : '') +
-      ' · ' + esc([person.firstName, person.lastName].filter(Boolean).join(' ')) +
-      (kundeName ? ' bei <b>' + esc(kundeName) + '</b>' : '') +
-      ' · ' + (beste.entryDate ? new Date(beste.entryDate).toLocaleDateString('de-CH') : '?') +
-      ' – ' + (beste.withdrawalDate ? new Date(beste.withdrawalDate).toLocaleDateString('de-CH') : 'laufend') + '<br>' +
-      (gavZeile ? gavZeile + '<br>' : '') +
-      (lohnTeile.length ? 'Konditionen: ' + lohnTeile.join(' · ') + '<br>' : '') +
-      (spesen.length ? 'Zulagen/Spesen laut Einsatz: ' + spesen.join(', ') : 'Keine zusätzlichen Zulagen am Einsatz hinterlegt.') +
-      (personen.length > 1 ? '<br><span style="color:var(--rp-grey)">Hinweis: ' + personen.length + ' Mitarbeiter-Kandidaten — bitte Namen prüfen.</span>' : '') +
-      (pl.fmt ? '<br><span style="color:var(--rp-grey);font-size:11px">Filter-Serialisierung «' + pl.fmt + '» funktioniert (offener Punkt 1 der API-Doku).</span>' : '');
+    await rpApiSelectPerson(0, maName);
   } catch(e){
     box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> nicht möglich — ' + esc((e && e.message) || String(e)).slice(0, 220);
   }
 }
 
+/* Person gewählt → deren Einsätze laden (ID-Filter, sonst Volltext), Kunden auflösen */
+async function rpApiSelectPerson(idx, ocrName){
+  var box = rpApiBox(); if(!box) return;
+  rpApiState.personIdx = idx;
+  var person = rpApiState.personen[idx];
+  if(!person) return;
+  var pName = [person.firstName, person.lastName].filter(Boolean).join(' ');
+  box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> lade Einsätze von ' + esc(pName) + ' …';
+  try {
+    var pl = await rpApiPlacementsFor(person.id);
+    rpApiState.fmt = pl.fmt; rpApiState.protokoll = pl.protokoll || []; rpApiState.viaText = false;
+    if(!pl.rows.length){
+      var tf = await rpApiPlacementsByText(ocrName || pName, person.id);
+      if(tf.rows.length){ pl = { rows: tf.rows }; rpApiState.viaText = true; rpApiState.textVerifiziert = tf.verifiziert; }
+    }
+    // Kundennamen auflösen + sortieren: Überlappung + Kunden-Match zuerst, dann jüngste
+    var von = rpApiState.von, bis = rpApiState.bis;
+    var list = [];
+    for(var i = 0; i < pl.rows.length; i++){
+      var e = pl.rows[i], kn = '';
+      if(e.customerId){
+        try { var c = await AprikoApi.people.getLegal(e.customerId); kn = c.businessName || c.displayName || ''; } catch(e2){}
+      }
+      var ein = e.entryDate ? new Date(e.entryDate) : null;
+      var aus = e.withdrawalDate ? new Date(e.withdrawalDate) : null;
+      list.push({ e: e, kundeName: kn,
+        zeitOk: (!ein || !bis || ein <= bis) && (!aus || !von || aus >= von),
+        kundeOk: !!(rpApiState.firmaName && kn && rpApiNameMatch(kn, rpApiState.firmaName)) });
+    }
+    list.sort(function(a, b){
+      var s = (b.zeitOk * 2 + b.kundeOk) - (a.zeitOk * 2 + a.kundeOk);
+      if(s) return s;
+      return new Date(b.e.entryDate || 0) - new Date(a.e.entryDate || 0);
+    });
+    rpApiState.einsaetze = list;
+    rpApiState.einsatzId = list.length ? list[0].e.id : null;
+    rpApiRender();
+  } catch(e){
+    box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> Einsätze nicht ladbar — ' + esc((e && e.message) || String(e)).slice(0, 220);
+  }
+}
+function rpApiSelectEinsatz(id){ rpApiState.einsatzId = id; rpApiRender(); }
+
+function rpApiRender(){
+  var box = rpApiBox(); if(!box) return;
+  var st = rpApiState;
+  var person = st.personen[st.personIdx] || {};
+  var maDrop = '<select onchange="rpApiSelectPerson(+this.value)" style="max-width:260px">' +
+    st.personen.map(function(p, i){
+      var nm = [p.firstName, p.lastName].filter(Boolean).join(' ') || p.displayName || p.id;
+      return '<option value="' + i + '"' + (i === st.personIdx ? ' selected' : '') + '>' + esc(nm) + (p.personNumber ? ' (Nr ' + esc(String(p.personNumber)) + ')' : '') + '</option>';
+    }).join('') + '</select>';
+  var kopf = '🔌 <b>Apriko-Abgleich</b>' + (st.unsicher ? ' <span style="color:#c62828">— kein sicherer Namenstreffer, bitte wählen:</span>' : ':') + ' ' + maDrop +
+    (st.personen.length > 1 && !st.unsicher ? ' <span style="color:var(--rp-grey);font-size:11px">(' + st.personen.length + ' ähnliche Treffer)</span>' : '');
+
+  if(!st.einsaetze.length){
+    box.innerHTML = kopf + '<br>Keine Einsätze zu dieser Person gefunden (' +
+      esc((st.protokoll || []).join(' · ') || 'ID-Filter + Volltext leer') + ') — Personen-ID: <code>' + esc(String(person.id || '')) + '</code>';
+    return;
+  }
+  var einDrop = '<select onchange="rpApiSelectEinsatz(this.value)" style="max-width:420px">' +
+    st.einsaetze.map(function(x){
+      var e = x.e;
+      var lbl = 'Nr ' + (e.placementNumber || e.id) + (e.jobTitle ? ' · ' + e.jobTitle : '') +
+        (x.kundeName ? ' · ' + x.kundeName : '') +
+        ' · ' + (e.entryDate ? new Date(e.entryDate).toLocaleDateString('de-CH') : '?') + '–' + (e.withdrawalDate ? new Date(e.withdrawalDate).toLocaleDateString('de-CH') : 'laufend') +
+        (x.zeitOk ? '' : ' ⚠ ausserhalb Zeitraum') + (x.kundeOk ? ' ✓ Kunde' : '');
+      return '<option value="' + esc(String(e.id)) + '"' + (String(e.id) === String(st.einsatzId) ? ' selected' : '') + '>' + esc(lbl) + '</option>';
+    }).join('') + '</select>';
+
+  var sel = st.einsaetze.filter(function(x){ return String(x.e.id) === String(st.einsatzId); })[0] || st.einsaetze[0];
+  var beste = sel.e, kundeName = sel.kundeName;
+  var gavApi = beste.tempDataLabourStaffingAgreementName || '';
+  var bc = beste.basicPlacementCompensation || {};
+  var addl = beste.additionalPlacementCompensations || [];
+  var gewaehlt = (typeof GAV !== 'undefined' && $('rpBranche') && GAV[$('rpBranche').value]) ? GAV[$('rpBranche').value].name : '';
+  var gavZeile = gavApi
+    ? 'GAV laut Einsatz: <b>' + esc(gavApi) + '</b>' +
+      (gewaehlt ? (rpApiNameMatch(gavApi, gewaehlt)
+        ? ' <span style="color:#2e7d32">✓ passt zum gewählten Regelwerk</span>'
+        : ' <span style="color:#c62828">⚠ gewähltes Regelwerk: ' + esc(gewaehlt) + ' — bitte prüfen</span>') : '')
+    : '';
+  var lohnTeile = [];
+  if(typeof bc.basicPlacementSalary === 'number') lohnTeile.push('Grundlohn ' + bc.basicPlacementSalary.toFixed(2));
+  if(typeof bc.basicPlacementRate === 'number') lohnTeile.push('Tarif ' + bc.basicPlacementRate.toFixed(2));
+  if(typeof bc.marginPercentage === 'number') lohnTeile.push('Marge ' + bc.marginPercentage.toFixed(1) + '%');
+  var spesen = addl.map(function(a){
+    var t = [];
+    if(typeof a.salary === 'number') t.push(a.salary.toFixed(2) + ' Lohn');
+    if(typeof a.rate === 'number') t.push(a.rate.toFixed(2) + ' Tarif');
+    return esc(a.name || a.displayName || 'Zulage') + (t.length ? ' (' + t.join(' / ') + ')' : '');
+  });
+  var warn = !sel.zeitOk ? '<br><span style="color:#c62828">⚠ Dieser Einsatz überlappt den Rapportzeitraum ' + esc(st.vonStr) + ' – ' + esc(st.bisStr) + ' nicht — Zeitraum-Erkennung oder Auswahl prüfen.</span>' : '';
+
+  box.innerHTML = kopf + '<br>Einsatz: ' + einDrop +
+    (st.einsaetze.length > 1 ? ' <span style="color:var(--rp-grey);font-size:11px">(' + st.einsaetze.length + ' Einsätze — passendste zuerst)</span>' : '') + '<br>' +
+    '<b>Einsatz gefunden ✓</b> — Nr ' + esc(String(beste.placementNumber || beste.id)) +
+    (beste.jobTitle ? ' · ' + esc(beste.jobTitle) : '') +
+    (kundeName ? ' bei <b>' + esc(kundeName) + '</b>' : '') + warn + '<br>' +
+    (gavZeile ? gavZeile + '<br>' : '') +
+    (lohnTeile.length ? 'Konditionen: ' + lohnTeile.join(' · ') + '<br>' : '') +
+    (spesen.length ? 'Zulagen/Spesen laut Einsatz: ' + spesen.join(', ') : 'Keine zusätzlichen Zulagen am Einsatz hinterlegt.') +
+    (st.fmt ? '<br><span style="color:var(--rp-grey);font-size:11px">Filter-Serialisierung «' + st.fmt + '» funktioniert (offener Punkt 1 der API-Doku).</span>' : '') +
+    (st.viaText ? '<br><span style="color:var(--rp-grey);font-size:11px">Einsätze via Volltextsuche' + (st.textVerifiziert ? ', über die Personen-ID verifiziert' : ' — Personen-ID nicht bestätigt, bitte Beleg prüfen') + '; ID-Filter: ' + esc((st.protokoll || []).join(' · ')) + '.</span>' : '');
+}
+if (typeof window !== 'undefined'){ window.rpApiSelectPerson = rpApiSelectPerson; window.rpApiSelectEinsatz = rpApiSelectEinsatz; }
 if (typeof window !== 'undefined') window.rpApiMatch = rpApiMatch;   // für Tests/Debugging erreichbar
 
 function showGavSuggestion(gavKey, firma){
