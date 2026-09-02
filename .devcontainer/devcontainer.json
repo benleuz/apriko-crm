@@ -1,0 +1,17 @@
+{
+  "name": "apriko-crm POC-Proxy",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:20",
+
+  // Startet den Apriko-Proxy automatisch bei jedem Öffnen des Codespace.
+  // Die Instanz-URL steht hier fest (kein Secret — nur die Adresse).
+  "postAttachCommand": "APRIKO_BASE=https://sales.apriko.app nohup node codespace-proxy.js > /tmp/proxy.log 2>&1 & echo 'Apriko-Proxy gestartet (Log: /tmp/proxy.log)'",
+
+  "forwardPorts": [8787],
+  "portsAttributes": {
+    "8787": {
+      "label": "Apriko-Proxy",
+      "visibility": "public",
+      "onAutoForward": "silent"
+    }
+  }
+}
