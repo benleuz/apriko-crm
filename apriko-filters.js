@@ -47,10 +47,13 @@
     return hit;
   }
 
-  /* GRUPPEN-PFLICHT (empirisch 02.09.2026): Ein leeres OR-Label quittiert
-     der Server mit 400 "[FormatViolation] Group value has to be set" —
-     die Gruppe ist also obligatorisch, nicht optional. Filter ohne
-     OR-Verbund erhalten deshalb je eine eigene Gruppe (CNF: einzelne
+  /* GRUPPEN-PFLICHT + JSON-FORM (empirisch 02.09.2026, zwei Runden):
+     1. Leeres Label → 400 "Group value has to be set": Gruppe ist Pflicht.
+     2. Rohes Label "G1" → 400 "Unexpected character … parsing value: G":
+        der Server JSON-parst die Gruppe — verlangt wird ein JSON-Array,
+        z.B. ["G1"] (die Doku sagt "Array", ihr Beispiel "Group1" ist
+        vereinfacht/falsch).
+     Filter ohne OR-Verbund erhalten je eine eigene Gruppe (CNF: einzelne
      Gruppen = AND). buildFilters() vergibt positionsbasiert G1..Gn;
      buildFilter() solo nutzt "G_<feldname>" — bei MEHREREN Filtern aufs
      selbe Feld ohne eigene Labels zwingend buildFilters() verwenden,
@@ -84,7 +87,7 @@
       normalizeDataType(spec.dataType),
       spec.isInclude === true ? "true" : "false",
       spec.ignoreUnset === true ? "true" : "false",
-      labels.join(",")
+      JSON.stringify(labels)
     ].join("|");
   }
 
