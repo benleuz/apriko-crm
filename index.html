@@ -23,8 +23,8 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.57.0"></script>
-<script src="apriko-api.js?v=1.57.0"></script>
+<script src="apriko-filters.js?v=1.57.1"></script>
+<script src="apriko-api.js?v=1.57.1"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -962,7 +962,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.57.0</span> · <span id="app-build-date">01.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.57.1</span> · <span id="app-build-date">01.09.2026</span>
     </div>
   </aside>
 
@@ -11909,21 +11909,37 @@ function rpApiNameMatch(a, b){
    Treffer liefert (localStorage apriko-filter-format). Sobald am
    echten System geklärt: auf AprikoFilters.buildFilter fixieren. */
 async function rpApiPlacementsFor(personId){
+  /* Drei Formatvarianten; ein 400 (FormatViolation) einer Variante
+     bricht NICHT ab, sondern probiert die nächste. Empirie 02.09.2026
+     gegen die laufende Instanz: JSON.stringify-Wert ("id" mit
+     Anführungszeichen) → HTTP 400 FormatViolation ⇒ das Schema-
+     BEISPIEL (roher Wert) gilt, nicht die Schema-Beschreibung. */
+  var VAR = {
+    raw:      function(id){ return 'employeeId|=|' + String(id) + '|Text|false|false|'; },
+    rawlower: function(id){ return 'employeeId|=|' + String(id) + '|text|false|false|'; },
+    json:     function(id){ return 'employeeId|=|' + JSON.stringify(id) + '|Text|false|false|'; }
+  };
+  var alle = ['raw', 'rawlower', 'json'];
   var pref = localStorage.getItem('apriko-filter-format');
-  var fmts = pref === 'raw' ? ['raw', 'json'] : ['json', 'raw'];
+  var fmts = alle.indexOf(pref) >= 0 ? [pref].concat(alle.filter(function(f){ return f !== pref; })) : alle;
+  var letzterFehler = null, sauberLeer = false;
   for(var i = 0; i < fmts.length; i++){
-    var val = fmts[i] === 'json' ? JSON.stringify(personId) : String(personId);
-    var r = await AprikoApi.models.query({
-      entityTypes: 'StaffLeasePlacement',
-      filters: 'employeeId|=|' + val + '|Text|false|false|',
-      pageIndex: 0, pageSize: 50, resolveReferences: false
-    });
+    var r;
+    try {
+      r = await AprikoApi.models.query({
+        entityTypes: 'StaffLeasePlacement',
+        filters: VAR[fmts[i]](personId),
+        pageIndex: 0, pageSize: 50, resolveReferences: false
+      });
+    } catch(e){ letzterFehler = e; continue; }
     var hits = (r && r.results) || [];
     if(hits.length){
       localStorage.setItem('apriko-filter-format', fmts[i]);
       return { rows: hits.map(AprikoApi.models.hitData), fmt: fmts[i] };
     }
+    sauberLeer = true;   // Format akzeptiert, aber wirklich keine Einsätze
   }
+  if(!sauberLeer && letzterFehler) throw letzterFehler;
   return { rows: [], fmt: null };
 }
 async function rpApiMatch(maName, firmaName, vonStr, bisStr){

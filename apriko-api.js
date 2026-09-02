@@ -91,6 +91,10 @@
     if (!body || !Array.isArray(body.messages)) return [];
     return body.messages.map(function (m) {
       var txt = (m && m.value && (m.value.fallback || m.value.key)) || (m && m.key) || "";
+      var data = m && m.value && m.value.data;
+      if (data) txt = txt.replace(/\{\{(\w+)\}\}/g, function (whole, k) {
+        return data[k] !== undefined && data[k] !== null ? String(data[k]) : whole;
+      });
       return (m && m.status ? "[" + m.status + "] " : "") + txt;
     }).filter(Boolean);
   }
