@@ -23,8 +23,8 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.58.0"></script>
-<script src="apriko-api.js?v=1.58.0"></script>
+<script src="apriko-filters.js?v=1.58.1"></script>
+<script src="apriko-api.js?v=1.58.1"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -962,7 +962,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.58.0</span> · <span id="app-build-date">01.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.58.1</span> · <span id="app-build-date">01.09.2026</span>
     </div>
   </aside>
 
@@ -997,8 +997,9 @@
             <div><label style="font-size:10.5px;color:var(--rp-grey)">Gateway-/Proxy-URL</label><input id="rpDbGateway" placeholder="https://…-8787.app.github.dev" style="width:100%"></div>
             <div><label style="font-size:10.5px;color:var(--rp-grey)">Instanz (Ziel-Datenbank)</label><input id="rpDbTarget" placeholder="https://kunde.apriko.app — leer = Standard des Proxys" style="width:100%"></div>
             <div><label style="font-size:10.5px;color:var(--rp-grey)">Token dieser Datenbank</label><input id="rpDbToken" type="password" style="width:100%"></div>
-            <button type="button" class="rp-btn" id="rpDbSave">Speichern</button>
+            <button type="button" class="rp-btn" id="rpDbSave">Speichern & testen</button>
           </div>
+          <div id="rpDbTestResult" style="margin-top:8px"></div>
           <div style="font-size:10.5px;color:var(--rp-grey);margin-top:6px">Leer lassen = Verbindung aus dem Menü «Apriko API (POC)». Eine andere Instanz muss beim Proxy auf der Ziel-Allowlist stehen (APRIKO_BASES). Zugangsdaten bleiben lokal in diesem Browser.</div>
         </details>
       </div>
@@ -11856,8 +11857,44 @@ function rpDbInit(){
     if(cfg.target && !/^https?:\/\//i.test(cfg.target)) cfg.target = 'https://' + cfg.target;
     localStorage.setItem(RP_DB_KEY, JSON.stringify(cfg));
     rpDbStatus();
+    rpDbTest();
   };
   rpDbStatus();
+  // Beim Öffnen des Moduls gleich prüfen, ob die Verbindung läuft —
+  // dann sieht man den schlafenden Proxy VOR dem Scannen, nicht danach.
+  rpDbTest();
+}
+/* Verbindungs-Selbsttest im Rapport-Modul: prüft genau die Verbindung,
+   die auch der Einsatz-Abgleich nutzen würde (eigene vor POC). */
+async function rpDbTest(){
+  var out = $('rpDbTestResult'); if(!out) return;
+  var c = rpDbCfg();
+  var eigene = !!(c.gateway && c.token);
+  if(!rpApiUse()){
+    out.innerHTML = '<span style="color:var(--rp-grey);font-size:11.5px">Noch keine Verbindung eingerichtet — hier eintragen oder im Menü «Apriko API (POC)».</span>';
+    rpDbStatusText('');
+    return;
+  }
+  out.innerHTML = '<span style="font-size:11.5px">⏳ Verbindung wird geprüft …</span>';
+  var st = await AprikoApi.selfTest('people');
+  var chip = function(lbl, z){
+    var col = z.status === 'ok' ? '#2e7d32' : z.status === 'fail' ? '#c62828' : 'var(--rp-grey)';
+    var sym = z.status === 'ok' ? '✓' : z.status === 'fail' ? '✗' : '?';
+    return '<span style="border:1px solid ' + col + ';color:' + col + ';border-radius:4px;padding:2px 8px;font-size:11px;margin-right:6px;white-space:nowrap" title="' + esc(z.detail || '') + '">' + sym + ' ' + lbl + '</span>';
+  };
+  var quelle = eigene ? 'eigene Verbindung' + (c.target ? ' → ' + esc(c.target.replace(/^https?:\/\//, '')) : '') : 'POC-Verbindung';
+  var alleOk = st.gateway.status === 'ok' && st.upstream.status === 'ok' && st.token.status === 'ok';
+  var hint = '';
+  if(st.gateway.status === 'fail') hint = ' <span style="color:#c62828;font-size:11px">— Proxy nicht erreichbar (Codespace eingeschlafen? Öffnen und Proxy starten, dann hier «Speichern & testen»).</span>';
+  else if(st.token.status === 'fail') hint = ' <span style="color:#c62828;font-size:11px">— Token ungültig/abgelaufen: neues Token eintragen und speichern.</span>';
+  else if(st.upstream.status === 'fail') hint = ' <span style="color:#c62828;font-size:11px">— Proxy läuft, aber die Apriko-Instanz antwortet nicht (Ziel auf der Allowlist?).</span>';
+  out.innerHTML = chip('Gateway', st.gateway) + chip('Apriko-Instanz', st.upstream) + chip('Token', st.token) +
+    ' <span style="color:var(--rp-grey);font-size:11px">(' + quelle + ')</span>' + hint;
+  rpDbStatusText(alleOk ? ' ✓ verbunden' : ' ✗ Verbindung gestört');
+}
+function rpDbStatusText(suffix){
+  var el = $('rpDbStatus'); if(!el) return;
+  el.textContent = (el.textContent || '').replace(/ [✓✗].*$/, '') + (suffix || '');
 }
 function rpDbStatus(){
   var el = $('rpDbStatus'); if(!el) return;
@@ -12088,7 +12125,7 @@ function rpApiRender(){
     (st.fmt ? '<br><span style="color:var(--rp-grey);font-size:11px">Filter-Serialisierung «' + st.fmt + '» funktioniert (offener Punkt 1 der API-Doku).</span>' : '') +
     (st.viaText ? '<br><span style="color:var(--rp-grey);font-size:11px">Einsätze via Volltextsuche' + (st.textVerifiziert ? ', über die Personen-ID verifiziert' : ' — Personen-ID nicht bestätigt, bitte Beleg prüfen') + '; ID-Filter: ' + esc((st.protokoll || []).join(' · ')) + '.</span>' : '');
 }
-if (typeof window !== 'undefined'){ window.rpApiSelectPerson = rpApiSelectPerson; window.rpApiSelectEinsatz = rpApiSelectEinsatz; }
+if (typeof window !== 'undefined'){ window.rpApiSelectPerson = rpApiSelectPerson; window.rpApiSelectEinsatz = rpApiSelectEinsatz; window.rpDbTest = rpDbTest; window.rpDbInit = rpDbInit; }
 if (typeof window !== 'undefined') window.rpApiMatch = rpApiMatch;   // für Tests/Debugging erreichbar
 
 function showGavSuggestion(gavKey, firma){
