@@ -225,10 +225,17 @@
     };
   }
 
+  /* Diskriminator für den Create: am 02.09.2026 gegen die laufende
+     Instanz verifiziert (GET /IndividualPeople → data.type). Der Wert
+     für LegalPeople ist noch NICHT verifiziert — vor dem ersten
+     Firmen-Create per GET ablesen. */
+  var TYPE_INDIVIDUAL = "IndividualPerson";
+
   var people = {
     /* opts: { dryRun, returnResult, messagePriority } */
     createIndividual: async function (payload, opts) {
       opts = opts || {};
+      if (payload && !payload.type) payload = Object.assign({ type: TYPE_INDIVIDUAL }, payload);
       ["type", "firstName", "lastName"].forEach(function (f) {
         if (!payload || payload[f] === undefined || payload[f] === null || payload[f] === "") {
           throw AprikoApiError("config", "createIndividual: Pflichtfeld '" + f + "' fehlt (Required: Type, FirstName, LastName).");
