@@ -23,6 +23,8 @@
 })();
 </script>
 <script src="msal.js"></script>
+<script src="apriko-filters.js?v=1.55.0"></script>
+<script src="apriko-api.js?v=1.55.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -960,7 +962,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.54.2</span> · <span id="app-build-date">01.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.55.0</span> · <span id="app-build-date">01.09.2026</span>
     </div>
   </aside>
 
@@ -1153,8 +1155,13 @@ const CONFIG = {
   clientId:  "c7d6acb7-219d-4c45-baa9-ee7bfeee598e",
   tenantId:  "fad1fc7e-4003-4f4b-8b52-9a667ed0ac2e",
   siteHost:  "apriko.sharepoint.com",
-  sitePath:  "/sites/sales2"
+  sitePath:  "/sites/sales2",
+  /* Apriko-API-Gateway (Reverse-Proxy, z.B. Cloudflare-Worker-URL).
+     Leer lassen = Basis-URL aus dem Menü «Apriko API (POC)» verwenden. */
+  aprikoGateway: ""
 };
+
+if (window.AprikoApi) AprikoApi.configure({ gateway: "", getToken: async () => null });  // wird von apConfigure() mit echten Werten versorgt
 
 const STAGES = ["Lead", "Qualified", "Proposal", "Negotiation", "Won", "Lost"];
 const ACTIVITY_TYPES = ["Note", "Call", "Email", "Meeting", "Task"];
@@ -6140,7 +6147,17 @@ const AP_PAGE_SIZE = 50;
 function apCfg() {
   try { return JSON.parse(localStorage.getItem(AP_CFG_KEY) || "{}"); } catch (e) { return {}; }
 }
-function apCfgSave(cfg) { localStorage.setItem(AP_CFG_KEY, JSON.stringify(cfg)); }
+function apCfgSave(cfg) { localStorage.setItem(AP_CFG_KEY, JSON.stringify(cfg)); apConfigure(); }
+/* Token-Funktion nach dem getAnthropicKey()-Muster: liegt unter einem
+   apriko-*-Schlüssel im localStorage; erfasst wird es im POC-Menü
+   (Feld oder Login-Block) statt per prompt(). */
+function getAprikoToken() { return (apCfg().token || "").trim() || null; }
+/* Ein Ort für die Basis-URL: CONFIG.aprikoGateway (falls gesetzt),
+   sonst die im POC-Menü gespeicherte Gateway-/Proxy-URL. */
+function apGateway() { return CONFIG.aprikoGateway || apBase(); }
+function apConfigure() {
+  window.AprikoApi && AprikoApi.configure({ gateway: apGateway(), getToken: async () => getAprikoToken() });
+}
 function apNormalizeBase(u) {
   u = String(u || "").trim();
   if (!u) return "";
@@ -6149,30 +6166,21 @@ function apNormalizeBase(u) {
   return u.replace(/\/+$/, "");
 }
 function apBase() { return apNormalizeBase(apCfg().baseUrl); }
-async function apFetch(path, opts) {
-  const cfg = apCfg();
-  if (!cfg.baseUrl || !cfg.token) throw new Error("Bitte zuerst Basis-URL und Token hinterlegen.");
-  const url = apBase() + path;
-  let res;
-  try {
-    res = await fetch(url, Object.assign({ headers: { Authorization: "Bearer " + cfg.token, Accept: "application/json" } }, opts || {}));
-  } catch (e) {
-    throw new Error("Netzwerk/CORS: " + e.message + " — erlaubt die API Browser-Aufrufe von " + location.origin + "? (Origin muss in der CORS-Konfiguration der API stehen)");
+/* Transport lebt in apriko-api.js (AprikoApi) — hier nur noch UI.
+   Fehleranzeige nach Fehlerart (e.kind); bei Auth wird angeboten,
+   das gespeicherte Token zu verwerfen. */
+function apShowError(e) {
+  if (e && e.kind === "auth") {
+    apState.error = e.message + " — «Token verwerfen» unten entfernt das gespeicherte Token, danach neu erfassen.";
+    apState.authFail = true;
+  } else {
+    apState.error = (e && e.message) || String(e);
+    apState.authFail = false;
   }
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    const isHtml = /^\s*<!doctype html|<html/i.test(txt);
-    let hint = "";
-    if (res.status === 401) hint = " — Token ungültig oder abgelaufen";
-    else if (isHtml) hint = " — die Antwort ist eine HTML-Seite, keine API-Antwort: Die Basis-URL zeigt nicht auf die Apriko-API (aufgerufen: " + url + ")";
-    else if (res.status === 404) hint = " — Endpunkt nicht gefunden (aufgerufen: " + url + ")";
-    throw new Error("HTTP " + res.status + hint + (!isHtml && txt ? ": " + txt.slice(0, 200) : ""));
-  }
-  const ct = res.headers && res.headers.get ? (res.headers.get("content-type") || "") : "";
-  if (ct && !/json/i.test(ct)) {
-    throw new Error("Antwort ist kein JSON (" + ct + ") — die Basis-URL zeigt vermutlich nicht auf die API (aufgerufen: " + url + ")");
-  }
-  return res.json();
+}
+function apDropToken() {
+  const cfg = apCfg(); delete cfg.token; delete cfg.tokenExp; apCfgSave(cfg);
+  apState.error = null; apState.authFail = false; apState.info = null; apReset();
 }
 /* Token per Benutzer/Passwort beziehen (OAuth2 Password-Grant). Die
    Token-URL wird per OpenID-Discovery gesucht, sonst aus dem Formular. */
@@ -6233,24 +6241,28 @@ async function apLogin() {
   }
 }
 async function apTest() {
-  apState.error = null; apState.info = null; apState.loading = true; render();
-  try {
-    apState.info = await apFetch("/api/people/ServiceInfos");
-    toast("Verbindung OK ✓");
-  } catch (e) { apState.error = e.message; }
+  apState.error = null; apState.info = null; apState.selfTest = null; apState.loading = true; render();
+  apConfigure();
+  const st = await AprikoApi.selfTest("people");   // wirft nicht — liefert 3 Zustände
+  apState.selfTest = st;
+  apState.info = st.info;
+  apState.authFail = st.token.status === "fail";
+  if (st.gateway.status === "ok" && st.upstream.status === "ok" && st.token.status === "ok") toast("Verbindung OK ✓");
   apState.loading = false; render();
 }
 async function apLoadMore(tab) {
   if (apState.loading || apState.done[tab]) return;
   apState.loading = true; apState.error = null; render();
   try {
-    const ep = tab === "companies" ? "/api/people/LegalPeople" : "/api/people/IndividualPeople";
-    const data = await apFetch(ep + "?pageIndex=" + apState.page[tab] + "&pageSize=" + AP_PAGE_SIZE);
-    const arr = Array.isArray(data) ? data : (data.items || data.value || []);
+    apConfigure();
+    const data = tab === "companies"
+      ? await AprikoApi.people.listLegal(apState.page[tab], AP_PAGE_SIZE)
+      : await AprikoApi.people.listIndividual(apState.page[tab], AP_PAGE_SIZE);
+    const arr = Array.isArray(data) ? data : [];
     apState.rows[tab] = apState.rows[tab].concat(arr);
     apState.page[tab]++;
     if (arr.length < AP_PAGE_SIZE) apState.done[tab] = true;
-  } catch (e) { apState.error = e.message; }
+  } catch (e) { apShowError(e); }
   apState.loading = false; render();
 }
 function apReset() {
@@ -6296,7 +6308,7 @@ async function apResolveRecruiters() {
   if (!ids.length) return;
   ids.forEach(id => apState.recruiter[id] = "…");
   await Promise.all(ids.map(async id => {
-    try { const p = await apFetch("/api/people/IndividualPeople/" + encodeURIComponent(id)); apState.recruiter[id] = [p.firstName, p.lastName].filter(Boolean).join(" ") || p.displayName || id; }
+    try { const p = await AprikoApi.people.getIndividual(id); apState.recruiter[id] = [p.firstName, p.lastName].filter(Boolean).join(" ") || p.displayName || id; }
     catch (e) { apState.recruiter[id] = "?"; }
   }));
   if (currentView === "apipoc") render();
@@ -6335,12 +6347,12 @@ function renderApiPoc(el) {
     <div class="card" style="padding:14px 16px;margin-bottom:14px">
       <div style="font-weight:600;margin-bottom:8px">Verbindung zur Apriko-Datenbank</div>
       <div style="display:grid;grid-template-columns:2fr 3fr auto auto;gap:8px;align-items:end">
-        <div class="field"><label>Basis-URL der Instanz (mit https://)</label><input id="ap-base" value="${escape(cfg.baseUrl || "")}" placeholder="https://<instanz>.apriko.ch" onblur="this.value = apNormalizeBase(this.value)"></div>
+        <div class="field"><label>Gateway-/Proxy-URL (mit https://)</label><input id="ap-base" value="${escape(cfg.baseUrl || "")}" placeholder="https://<worker>.workers.dev" onblur="this.value = apNormalizeBase(this.value)"></div>
         <div class="field"><label>Bearer-Token</label><input id="ap-token" type="password" value="${escape(cfg.token || "")}" placeholder="Token aus der Apriko-Administration"></div>
         <button class="btn btn-sm" onclick="apSaveCfgFromForm()">Speichern</button>
         <button class="btn btn-sm" onclick="apClearCfg()" title="Zugangsdaten aus diesem Browser entfernen">Löschen</button>
       </div>
-      <div style="font-size:10.5px;color:var(--text-faint);margin-top:6px">Zugangsdaten bleiben lokal in diesem Browser (localStorage) — nichts davon wird in SharePoint gespeichert. Endpunkte: <code>/api/people/IndividualPeople</code> (Personen), <code>/api/people/LegalPeople</code> (Firmen), Paging ${AP_PAGE_SIZE} pro Seite.</div>
+      <div style="font-size:10.5px;color:var(--text-faint);margin-top:6px">Zugangsdaten bleiben lokal in diesem Browser (localStorage) — nichts davon wird in SharePoint gespeichert. Der Zugriff läuft über den eigenen Reverse-Proxy (CORS); Client: apriko-api.js. Sichtbarkeit dieser Ansicht ist nur UX-Filter, keine Sicherheit — die Autorisierung macht die Apriko-API am Token.</div>
       <details style="margin-top:10px" ${cfg.token ? "" : "open"}>
         <summary style="cursor:pointer;font-size:12px;font-weight:600">🔑 Token mit Benutzer/Passwort holen${cfg.tokenExp ? (cfg.tokenExp > Date.now() ? ` — aktueller Token gültig bis ${new Date(cfg.tokenExp).toLocaleTimeString("de-CH", { hour: "2-digit", minute: "2-digit" })}` : " — Token abgelaufen") : ""}</summary>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px">
@@ -6356,8 +6368,14 @@ function renderApiPoc(el) {
           <span id="ap-login-status" style="font-size:11px;color:var(--text-dim)"></span>
         </div>
       </details>
-      ${apState.info ? `<div style="font-size:11px;color:var(--accent);margin-top:8px">✓ Verbunden — ServiceInfos: ${escape(JSON.stringify(apState.info).slice(0, 300))}</div>` : ""}
-      ${apState.error ? `<div style="font-size:11.5px;color:var(--danger);margin-top:8px;border:1px solid var(--danger);border-radius:4px;padding:8px 10px">⚠ ${escape(apState.error)}</div>` : ""}
+      ${apState.selfTest ? `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11px">${[["Gateway (Proxy)", apState.selfTest.gateway], ["Apriko-Instanz", apState.selfTest.upstream], ["Token", apState.selfTest.token]].map(([lbl, z]) => `
+        <div style="border:1px solid ${z.status === "ok" ? "var(--accent)" : z.status === "fail" ? "var(--danger)" : "var(--border)"};border-radius:4px;padding:6px 10px;min-width:150px">
+          <div style="font-weight:600;color:${z.status === "ok" ? "var(--accent)" : z.status === "fail" ? "var(--danger)" : "var(--text-dim)"}">${z.status === "ok" ? "✓" : z.status === "fail" ? "✗" : "?"} ${lbl}</div>
+          <div style="color:var(--text-dim);margin-top:2px;max-width:280px">${escape(z.detail || "nicht geprüft")}</div>
+        </div>`).join("")}</div>` : ""}
+      ${apState.info ? `<div style="font-size:11px;color:var(--accent);margin-top:8px">ServiceInfos: ${escape(JSON.stringify(apState.info).slice(0, 300))}</div>` : ""}
+      ${apState.error ? `<div style="font-size:11.5px;color:var(--danger);margin-top:8px;border:1px solid var(--danger);border-radius:4px;padding:8px 10px">⚠ ${escape(apState.error)}
+        ${apState.authFail ? `<button class="btn btn-sm" style="margin-left:10px" onclick="apDropToken()">Token verwerfen</button>` : ""}</div>` : ""}
     </div>
     <div class="card" style="padding:14px 16px">
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
