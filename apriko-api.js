@@ -45,7 +45,7 @@
     timetracking:         "/api/timetracking"
   };
 
-  var cfg = { gateway: "", getToken: null };
+  var cfg = { gateway: "", getToken: null, target: "" };
 
   function configure(options) {
     if (options && typeof options.gateway === "string") {
@@ -53,6 +53,13 @@
     }
     if (options && typeof options.getToken === "function") {
       cfg.getToken = options.getToken;
+    }
+    /* target: Apriko-Instanz, gegen die der Proxy weiterleiten soll
+       (Header X-Apriko-Target). Nur nötig, wenn der Proxy mehrere
+       Instanzen bedient; er prüft das Ziel gegen seine Allowlist —
+       kein offener Relay. Leer = Standard-Instanz des Proxys. */
+    if (options && typeof options.target === "string") {
+      cfg.target = options.target.replace(/\/+$/, "");
     }
   }
   function isConfigured() { return !!(cfg.gateway && cfg.getToken); }
@@ -118,6 +125,7 @@
       method: opts.method || "GET",
       headers: { Authorization: "Bearer " + token, Accept: "application/json" }
     };
+    if (cfg.target) init.headers["X-Apriko-Target"] = cfg.target;
     if (opts.body !== undefined) {
       init.headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(opts.body);

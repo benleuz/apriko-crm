@@ -23,8 +23,8 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.55.2"></script>
-<script src="apriko-api.js?v=1.55.2"></script>
+<script src="apriko-filters.js?v=1.57.0"></script>
+<script src="apriko-api.js?v=1.57.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -962,7 +962,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.55.2</span> · <span id="app-build-date">01.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.57.0</span> · <span id="app-build-date">01.09.2026</span>
     </div>
   </aside>
 
@@ -988,6 +988,20 @@
 
       <div class="rp-main-layout">
         <div class="rp-cards-col">
+
+      <!-- 0 Apriko-Datenbank für den Einsatz-Abgleich -->
+      <div class="rp-card" style="padding:10px 14px">
+        <details id="rpDbDetails">
+          <summary style="cursor:pointer;font-weight:600;font-size:13px">🔌 Apriko-Datenbank für den Einsatz-Abgleich <span id="rpDbStatus" style="font-weight:400;font-size:11.5px;color:var(--rp-grey)"></span></summary>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:end;margin-top:8px">
+            <div><label style="font-size:10.5px;color:var(--rp-grey)">Gateway-/Proxy-URL</label><input id="rpDbGateway" placeholder="https://…-8787.app.github.dev" style="width:100%"></div>
+            <div><label style="font-size:10.5px;color:var(--rp-grey)">Instanz (Ziel-Datenbank)</label><input id="rpDbTarget" placeholder="https://kunde.apriko.app — leer = Standard des Proxys" style="width:100%"></div>
+            <div><label style="font-size:10.5px;color:var(--rp-grey)">Token dieser Datenbank</label><input id="rpDbToken" type="password" style="width:100%"></div>
+            <button type="button" class="rp-btn" id="rpDbSave">Speichern</button>
+          </div>
+          <div style="font-size:10.5px;color:var(--rp-grey);margin-top:6px">Leer lassen = Verbindung aus dem Menü «Apriko API (POC)». Eine andere Instanz muss beim Proxy auf der Ziel-Allowlist stehen (APRIKO_BASES). Zugangsdaten bleiben lokal in diesem Browser.</div>
+        </details>
+      </div>
 
       <!-- 1 Upload -->
       <div class="rp-card">
@@ -11813,6 +11827,184 @@ function suggestGavFromFirma(firma){
 }
 
 /* Zeigt eine kleine Info-Badge unter dem Branche-Select mit dem Auto-Vorschlag. */
+
+/* ============ Apriko-Abgleich für den Rapportscan ============
+   Nach der OCR: Mitarbeiter per Volltext-Query suchen, dessen
+   Einsätze holen, per Kunde + Zeitraum matchen — dann liefern
+   GAV, Lohn und Spesen die Einsatzdaten statt der Raterei.
+   Läuft nur, wenn die Apriko-Verbindung (POC-Menü) eingerichtet
+   ist; sonst bleibt der Rapport unverändert. */
+/* Eigene Datenbank-Verbindung fürs Rapport-Modul (überschreibt die
+   POC-Verbindung nur für den Einsatz-Abgleich). */
+var RP_DB_KEY = 'apriko-rapport-db';
+function rpDbCfg(){
+  try { return JSON.parse(localStorage.getItem(RP_DB_KEY) || '{}'); } catch(e){ return {}; }
+}
+function rpDbInit(){
+  var g = $('rpDbGateway'), t = $('rpDbTarget'), k = $('rpDbToken'), b = $('rpDbSave');
+  if(!g || !b || b.dataset.wired) return;
+  b.dataset.wired = '1';
+  var c = rpDbCfg();
+  g.value = c.gateway || ''; t.value = c.target || ''; k.value = c.token || '';
+  b.onclick = function(){
+    var cfg = {
+      gateway: (g.value || '').trim().replace(/\/+$/, ''),
+      target: (t.value || '').trim().replace(/\/+$/, ''),
+      token: (k.value || '').trim().replace(/^Bearer\s+/i, '')
+    };
+    if(cfg.gateway && !/^https?:\/\//i.test(cfg.gateway)) cfg.gateway = 'https://' + cfg.gateway;
+    if(cfg.target && !/^https?:\/\//i.test(cfg.target)) cfg.target = 'https://' + cfg.target;
+    localStorage.setItem(RP_DB_KEY, JSON.stringify(cfg));
+    rpDbStatus();
+  };
+  rpDbStatus();
+}
+function rpDbStatus(){
+  var el = $('rpDbStatus'); if(!el) return;
+  var c = rpDbCfg();
+  if(c.gateway && c.token) el.textContent = '— eigene Verbindung aktiv' + (c.target ? ' → ' + c.target.replace(/^https?:\/\//, '') : '');
+  else el.textContent = '— nutzt die POC-Verbindung';
+}
+/* Verbindung für den Abgleich wählen: Rapport-eigene vor POC-Konfig.
+   configure() wird unmittelbar vor der Abfrage-Kette gesetzt; das
+   POC-Menü setzt seine Konfig bei eigenen Aktionen ebenso — im
+   Ein-Nutzer-Browser kollidiert das nicht. */
+function rpApiUse(){
+  var c = rpDbCfg();
+  if(c.gateway && c.token){
+    AprikoApi.configure({ gateway: c.gateway, target: c.target || "", getToken: async function(){ return c.token; } });
+    return true;
+  }
+  if(typeof apConfigure === 'function') apConfigure();
+  AprikoApi.configure({ target: "" });
+  return AprikoApi.isConfigured() && !!getAprikoToken();
+}
+function rpApiBox(){
+  var box = document.getElementById('rpApiBox');
+  if(!box){
+    var anchor = $('rpKunde');
+    if(!anchor) return null;
+    var card = anchor.closest ? anchor.closest('.rp-card') : null;
+    if(!card) return null;
+    box = document.createElement('div');
+    box.id = 'rpApiBox';
+    box.style.cssText = 'margin-top:10px;border:1px solid var(--rp-border, #ddd);border-radius:6px;padding:10px 12px;font-size:12.5px';
+    card.appendChild(box);
+  }
+  return box;
+}
+function rpApiNorm(s){
+  return String(s || '').toLowerCase().replace(/\b(ag|gmbh|sa|sàrl|sarl)\b/g, '').replace(/[^a-zäöüéèà0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function rpApiNameMatch(a, b){
+  a = rpApiNorm(a); b = rpApiNorm(b);
+  if(!a || !b) return false;
+  return a.indexOf(b) >= 0 || b.indexOf(a) >= 0 ||
+    a.split(' ').filter(function(w){ return w.length > 2 && b.indexOf(w) >= 0; }).length >= 2;
+}
+/* Einsätze eines Mitarbeiters via Models-Query.
+   OFFENER PUNKT 1 (Filter-Serialisierung, Doku widersprüchlich):
+   probiert erst die gemerkte, sonst beide Varianten — JSON.stringify
+   ("id" mit Anführungszeichen) und roh — und merkt sich, welche
+   Treffer liefert (localStorage apriko-filter-format). Sobald am
+   echten System geklärt: auf AprikoFilters.buildFilter fixieren. */
+async function rpApiPlacementsFor(personId){
+  var pref = localStorage.getItem('apriko-filter-format');
+  var fmts = pref === 'raw' ? ['raw', 'json'] : ['json', 'raw'];
+  for(var i = 0; i < fmts.length; i++){
+    var val = fmts[i] === 'json' ? JSON.stringify(personId) : String(personId);
+    var r = await AprikoApi.models.query({
+      entityTypes: 'StaffLeasePlacement',
+      filters: 'employeeId|=|' + val + '|Text|false|false|',
+      pageIndex: 0, pageSize: 50, resolveReferences: false
+    });
+    var hits = (r && r.results) || [];
+    if(hits.length){
+      localStorage.setItem('apriko-filter-format', fmts[i]);
+      return { rows: hits.map(AprikoApi.models.hitData), fmt: fmts[i] };
+    }
+  }
+  return { rows: [], fmt: null };
+}
+async function rpApiMatch(maName, firmaName, vonStr, bisStr){
+  if(!window.AprikoApi) return;
+  if(!rpApiUse()) return;   // weder Rapport-eigene noch POC-Verbindung eingerichtet
+  var box = rpApiBox();
+  if(!box || !maName) return;
+  box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> suche «' + esc(maName) + '» …';
+  try {
+    var q = await AprikoApi.models.query({ query: maName, entityTypes: 'IndividualPerson', pageIndex: 0, pageSize: 5, resolveReferences: false });
+    var personen = ((q && q.results) || []).map(AprikoApi.models.hitData).filter(function(p){
+      return rpApiNameMatch([p.firstName, p.lastName].filter(Boolean).join(' '), maName);
+    });
+    if(!personen.length){
+      box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> kein Mitarbeiter zu «' + esc(maName) + '» gefunden — Angaben unten bitte manuell prüfen.';
+      return;
+    }
+    var person = personen[0];
+    var pl = await rpApiPlacementsFor(person.id);
+    var von = rpDate(vonStr), bis = rpDate(bisStr || vonStr);
+    var passende = pl.rows.filter(function(e){
+      var ein = e.entryDate ? new Date(e.entryDate) : null;
+      var aus = e.withdrawalDate ? new Date(e.withdrawalDate) : null;
+      var zeitOk = (!ein || !bis || ein <= bis) && (!aus || !von || aus >= von);
+      var kundeOk = !firmaName || !e.customerId ? true : true;  // Kunde wird unten geprüft, wenn Name aufgelöst
+      return zeitOk && kundeOk;
+    });
+    // Kundennamen auflösen und damit den besten Einsatz wählen
+    var beste = null, kundeName = '';
+    for(var i = 0; i < passende.length; i++){
+      var kn = '';
+      if(passende[i].customerId){
+        try { var c = await AprikoApi.people.getLegal(passende[i].customerId); kn = c.businessName || c.displayName || ''; } catch(e2){}
+      }
+      if(firmaName && kn && rpApiNameMatch(kn, firmaName)){ beste = passende[i]; kundeName = kn; break; }
+      if(!beste){ beste = passende[i]; kundeName = kn; }
+    }
+    if(!beste){
+      box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> ' + esc([person.firstName, person.lastName].filter(Boolean).join(' ')) +
+        ' gefunden, aber kein Einsatz im Rapportzeitraum' + (firmaName ? ' bei «' + esc(firmaName) + '»' : '') + '.';
+      return;
+    }
+    var gavApi = beste.tempDataLabourStaffingAgreementName || '';
+    var bc = beste.basicPlacementCompensation || {};
+    var addl = beste.additionalPlacementCompensations || [];
+    var gewaehlt = (typeof GAV !== 'undefined' && $('rpBranche') && GAV[$('rpBranche').value]) ? GAV[$('rpBranche').value].name : '';
+    var gavZeile = gavApi
+      ? 'GAV laut Einsatz: <b>' + esc(gavApi) + '</b>' +
+        (gewaehlt ? (rpApiNameMatch(gavApi, gewaehlt)
+          ? ' <span style="color:#2e7d32">✓ passt zum gewählten Regelwerk</span>'
+          : ' <span style="color:#c62828">⚠ gewähltes Regelwerk: ' + esc(gewaehlt) + ' — bitte prüfen</span>') : '')
+      : '';
+    var lohnTeile = [];
+    if(typeof bc.basicPlacementSalary === 'number') lohnTeile.push('Grundlohn ' + bc.basicPlacementSalary.toFixed(2));
+    if(typeof bc.basicPlacementRate === 'number') lohnTeile.push('Tarif ' + bc.basicPlacementRate.toFixed(2));
+    if(typeof bc.marginPercentage === 'number') lohnTeile.push('Marge ' + bc.marginPercentage.toFixed(1) + '%');
+    var spesen = addl.map(function(a){
+      var t = [];
+      if(typeof a.salary === 'number') t.push(a.salary.toFixed(2) + ' Lohn');
+      if(typeof a.rate === 'number') t.push(a.rate.toFixed(2) + ' Tarif');
+      return esc(a.name || a.displayName || 'Zulage') + (t.length ? ' (' + t.join(' / ') + ')' : '');
+    });
+    box.innerHTML = '🔌 <b>Apriko-Abgleich: Einsatz gefunden ✓</b><br>' +
+      'Einsatz <b>Nr ' + esc(String(beste.placementNumber || beste.id)) + '</b>' +
+      (beste.jobTitle ? ' · ' + esc(beste.jobTitle) : '') +
+      ' · ' + esc([person.firstName, person.lastName].filter(Boolean).join(' ')) +
+      (kundeName ? ' bei <b>' + esc(kundeName) + '</b>' : '') +
+      ' · ' + (beste.entryDate ? new Date(beste.entryDate).toLocaleDateString('de-CH') : '?') +
+      ' – ' + (beste.withdrawalDate ? new Date(beste.withdrawalDate).toLocaleDateString('de-CH') : 'laufend') + '<br>' +
+      (gavZeile ? gavZeile + '<br>' : '') +
+      (lohnTeile.length ? 'Konditionen: ' + lohnTeile.join(' · ') + '<br>' : '') +
+      (spesen.length ? 'Zulagen/Spesen laut Einsatz: ' + spesen.join(', ') : 'Keine zusätzlichen Zulagen am Einsatz hinterlegt.') +
+      (personen.length > 1 ? '<br><span style="color:var(--rp-grey)">Hinweis: ' + personen.length + ' Mitarbeiter-Kandidaten — bitte Namen prüfen.</span>' : '') +
+      (pl.fmt ? '<br><span style="color:var(--rp-grey);font-size:11px">Filter-Serialisierung «' + pl.fmt + '» funktioniert (offener Punkt 1 der API-Doku).</span>' : '');
+  } catch(e){
+    box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> nicht möglich — ' + esc((e && e.message) || String(e)).slice(0, 220);
+  }
+}
+
+if (typeof window !== 'undefined') window.rpApiMatch = rpApiMatch;   // für Tests/Debugging erreichbar
+
 function showGavSuggestion(gavKey, firma){
   var select = $('rpBranche');
   var badgeId = 'rpGavSuggestBadge';
@@ -12030,6 +12222,7 @@ window.initRapport = function(){
     startCompanyEnrich(firma);
   });
 
+  rpDbInit();
   $('rpConfirm').addEventListener('click',function(){
     var offen = zeilen.filter(function(r){ return r.kstFlag || r.istFlag; }).length;
     if(offen > 0){
@@ -13222,6 +13415,13 @@ async function scanWithClaude(){
     // manuell auf "🔍 Suchen" wenn er's braucht (kostet Geld, ~0.02 USD).
     // Wir aktivieren nur den Button falls die Firma da ist.
     updateEnrichBtnState();
+
+    // Apriko-Abgleich: Mitarbeiter + Einsatz in der Apriko-Datenbank suchen
+    // (läuft nur, wenn die API-Verbindung im POC-Menü eingerichtet ist)
+    try {
+      var maFuerMatch = mitarbeiter ? [mitarbeiter.vorname, mitarbeiter.nachname].map(function(s){ return String(s || '').trim(); }).filter(Boolean).join(' ') : '';
+      if(maFuerMatch) rpApiMatch(maFuerMatch, firma ? String(firma).trim() : '', zeitraumVon, zeitraumBis);
+    } catch(eMatch) { /* Abgleich ist Zusatznutzen — nie den Rapport blockieren */ }
 
     // Wenn Claude Werte mit Flags gemarkt hat, HINWEISE dynamisch generieren
     HINWEISE = [];

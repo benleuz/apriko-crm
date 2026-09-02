@@ -29,7 +29,11 @@
 
 const http = require("http");
 
-const APRIKO_BASE = (process.env.APRIKO_BASE || process.argv[2] || "").replace(/\/+$/, "");
+/* Eine oder mehrere erlaubte Apriko-Instanzen (kommagetrennt).
+   Der Client wählt per Header X-Apriko-Target; ohne Header gilt die
+   erste. Ziele ausserhalb der Liste werden abgelehnt — kein Relay. */
+const APRIKO_BASES = (process.env.APRIKO_BASES || process.env.APRIKO_BASE || process.argv[2] || "")
+  .split(",").map(s => s.trim().replace(/\/+$/, "")).filter(Boolean);
 const ALLOWED_ORIGINS = ["https://benleuz.github.io"]
   .concat((process.env.EXTRA_ORIGINS || "").split(",").map(s => s.trim()).filter(Boolean));
 const ALLOWED_METHODS = ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"];
@@ -41,7 +45,7 @@ function corsHeaders(origin, allowed) {
   return {
     "Access-Control-Allow-Origin": allowed ? origin : ALLOWED_ORIGINS[0],
     "Access-Control-Allow-Methods": ALLOWED_METHODS.join(", "),
-    "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, X-Apriko-Target",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin"
   };
@@ -59,7 +63,10 @@ http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") { res.writeHead(204, cors); return res.end(); }
   if (!allowed) return gatewayError(res, cors, 403, "Origin nicht erlaubt: " + origin);
   if (!ALLOWED_METHODS.includes(req.method)) return gatewayError(res, cors, 405, "Methode nicht erlaubt");
-  if (!APRIKO_BASE) return gatewayError(res, cors, 500, "APRIKO_BASE fehlt — Start: APRIKO_BASE=https://<instanz> node codespace-proxy.js");
+  if (!APRIKO_BASES.length) return gatewayError(res, cors, 500, "APRIKO_BASES fehlt — Start: APRIKO_BASES=https://<instanz1>,https://<instanz2> node codespace-proxy.js");
+  const wanted = (req.headers["x-apriko-target"] || "").replace(/\/+$/, "");
+  const APRIKO_BASE = wanted ? (APRIKO_BASES.includes(wanted) ? wanted : null) : APRIKO_BASES[0];
+  if (!APRIKO_BASE) return gatewayError(res, cors, 403, "Ziel nicht auf der Allowlist: " + wanted + " — im Proxy unter APRIKO_BASES ergänzen.");
 
   const url = new URL(req.url, "http://x");
   const isTokenPath = TOKEN_PATHS.includes(url.pathname);
@@ -92,6 +99,6 @@ http.createServer(async (req, res) => {
   res.end(Buffer.from(await upstream.arrayBuffer()));
 }).listen(PORT, () => {
   console.log("Apriko-Proxy läuft auf Port " + PORT +
-    (APRIKO_BASE ? " → " + APRIKO_BASE : "  (APRIKO_BASE fehlt noch!)"));
+    (APRIKO_BASES.length ? " → " + APRIKO_BASES.join(", ") : "  (APRIKO_BASES fehlt noch!)"));
   console.log("Jetzt im PORTS-Tab Port " + PORT + " auf «Public» stellen und die Adresse ins CRM übernehmen.");
 });
