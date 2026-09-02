@@ -187,11 +187,28 @@
   /* ---------- Paging: über totalCount weiterblättern (P0-2) ----------
      Eine Seite ist nie "hoffentlich alles": fetchAll blättert, bis
      totalCount erreicht ist. maxPages als Notbremse. */
+  /* SCHEMA-IRRTUM (empirisch 02.09.2026): Das OpenAPI-Schema deklariert
+     entityTypes/filters/sortOptions/boosts/includes als string — der
+     Server deserialisiert aber IReadOnlyCollection<string> und quittiert
+     Strings mit 400 FormatViolation ("Error converting value … to type
+     'System.Collections.Generic.IReadOnlyCollection`1[System.String]'").
+     Der Client akzeptiert deshalb String ODER Array und sendet immer
+     Arrays. AprikoFilters.joinForBody ist damit obsolet —
+     buildFilters() liefert direkt das passende Array. */
+  function toStringArray(v) {
+    if (v === undefined || v === null || v === "") return undefined;
+    return Array.isArray(v) ? v : [v];
+  }
   async function queryPaged(model) {
     if (typeof model.pageIndex !== "number" || typeof model.pageSize !== "number") {
       throw AprikoApiError("config", "QueryModel: pageIndex und pageSize sind Pflicht (Zahlen).");
     }
-    return request("models", "/Query", { method: "POST", body: model });
+    var m = Object.assign({}, model);
+    ["entityTypes", "filters", "sortOptions", "boosts", "includes"].forEach(function (k) {
+      var a = toStringArray(m[k]);
+      if (a) m[k] = a; else delete m[k];
+    });
+    return request("models", "/Query", { method: "POST", body: m });
   }
 
   async function queryAll(model, options) {

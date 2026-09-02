@@ -86,10 +86,10 @@
     return (specs || []).map(buildFilter);
   }
 
-  /* QueryModel deklariert filters/sortOptions/… als string (nicht Array).
-     Mehrere Einträge werden mit ',' verbunden — deshalb ist ',' in
-     Labels verboten (siehe oben) und in Werten durch JSON.stringify
-     unschädlich. */
+  /* OBSOLET (Schema-Irrtum, s. apriko-api.js): Der Server verlangt für
+     filters/sortOptions/… Arrays — buildFilters()/buildSorts() direkt
+     übergeben, AprikoApi sendet sie korrekt. joinForBody bleibt nur für
+     Rückwärtskompatibilität erhalten. */
   function joinForBody(pipes) {
     if (!pipes) return "";
     if (typeof pipes === "string") return pipes;
