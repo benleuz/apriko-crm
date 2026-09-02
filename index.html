@@ -23,8 +23,8 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.55.1"></script>
-<script src="apriko-api.js?v=1.55.1"></script>
+<script src="apriko-filters.js?v=1.55.2"></script>
+<script src="apriko-api.js?v=1.55.2"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -962,7 +962,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.55.1</span> · <span id="app-build-date">01.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.55.2</span> · <span id="app-build-date">01.09.2026</span>
     </div>
   </aside>
 
@@ -6130,10 +6130,10 @@ function kaHeat(v, min, max, higherBetter) {
    (wie der Anthropic-Key), nichts davon landet in SharePoint. */
 const AP_CFG_KEY = "apriko-api-cfg";
 let apState = {
-  tab: "people",             // people | companies
-  rows: { people: [], companies: [] },
-  page: { people: 0, companies: 0 },
-  done: { people: false, companies: false },
+  tab: "people",             // people | companies | placements
+  rows: { people: [], companies: [], placements: [] },
+  page: { people: 0, companies: 0, placements: 0 },
+  done: { people: false, companies: false, placements: false },
   loading: false,
   error: null,
   info: null,                // ServiceInfos-Antwort (Verbindungstest)
@@ -6141,7 +6141,8 @@ let apState = {
   filters: {},
   detail: null,
   _restoreFocus: null,
-  recruiter: {}              // id → Name (lazy)
+  recruiter: {},             // id → Name (IndividualPeople, lazy)
+  legal: {}                  // id → Firmenname (LegalPeople, lazy)
 };
 const AP_PAGE_SIZE = 50;
 function apCfg() {
@@ -6257,6 +6258,8 @@ async function apLoadMore(tab) {
     apConfigure();
     const data = tab === "companies"
       ? await AprikoApi.people.listLegal(apState.page[tab], AP_PAGE_SIZE)
+      : tab === "placements"
+      ? await AprikoApi.staffing.listStaffLease(apState.page[tab], AP_PAGE_SIZE)
       : await AprikoApi.people.listIndividual(apState.page[tab], AP_PAGE_SIZE);
     const arr = Array.isArray(data) ? data : [];
     apState.rows[tab] = apState.rows[tab].concat(arr);
@@ -6266,8 +6269,8 @@ async function apLoadMore(tab) {
   apState.loading = false; render();
 }
 function apReset() {
-  apState.rows = { people: [], companies: [] }; apState.page = { people: 0, companies: 0 };
-  apState.done = { people: false, companies: false }; apState.error = null; render();
+  apState.rows = { people: [], companies: [], placements: [] }; apState.page = { people: 0, companies: 0, placements: 0 };
+  apState.done = { people: false, companies: false, placements: false }; apState.error = null; render();
 }
 function apSaveCfgFromForm() {
   const cfg = { baseUrl: apNormalizeBase(document.getElementById("ap-base").value), token: (document.getElementById("ap-token").value || "").trim().replace(/^Bearer\s+/i, "") };
@@ -6291,6 +6294,19 @@ const AP_COLS = {
     ["recruiter", "Recruiter", r => r.primaryRecruiterId ? (apState.recruiter[r.primaryRecruiterId] || "…") : ""],
     ["updated", "Geändert", r => apFmtDate(r.updatedTime)]
   ],
+  placements: [
+    ["nr", "Einsatz-Nr", r => r.placementNumber],
+    ["titel", "Funktion", r => r.jobTitle || r.jobProfileName || r.displayName],
+    ["ma", "Mitarbeiter", r => r.employeeId ? (apState.recruiter[r.employeeId] || "…") : ""],
+    ["kunde", "Kunde", r => r.customerId ? (apState.legal[r.customerId] || "…") : ""],
+    ["gav", "GAV", r => (r.tempDataLabourStaffingAgreementName || "").replace("Personalverleih ", "PV ")],
+    ["eintritt", "Eintritt", r => apFmtDate(r.entryDate)],
+    ["austritt", "Austritt", r => r.withdrawalDate ? apFmtDate(r.withdrawalDate) : "laufend"],
+    ["status", "Status", r => r.state === "None" ? "" : r.state],
+    ["margep", "Marge %", r => typeof r.marginPercentage === "number" ? Math.round(r.marginPercentage * 10) / 10 : ""],
+    ["kanton", "Kt", r => r.workLocationCanton === "None" ? "" : r.workLocationCanton],
+    ["recruiter", "Recruiter", r => r.primaryRecruiterId ? (apState.recruiter[r.primaryRecruiterId] || "…") : ""]
+  ],
   companies: [
     ["personNumber", "Nr", r => r.personNumber],
     ["name", "Firma", r => r.businessName || r.displayName],
@@ -6304,13 +6320,25 @@ const AP_COLS = {
   ]
 };
 async function apResolveRecruiters() {
-  const ids = [...new Set(apState.rows.people.map(r => r.primaryRecruiterId).filter(id => id && !(id in apState.recruiter)))].slice(0, 30);
-  if (!ids.length) return;
-  ids.forEach(id => apState.recruiter[id] = "…");
-  await Promise.all(ids.map(async id => {
-    try { const p = await AprikoApi.people.getIndividual(id); apState.recruiter[id] = [p.firstName, p.lastName].filter(Boolean).join(" ") || p.displayName || id; }
-    catch (e) { apState.recruiter[id] = "?"; }
-  }));
+  const indIds = [...new Set(
+    apState.rows.people.map(r => r.primaryRecruiterId)
+      .concat(apState.rows.placements.flatMap(r => [r.employeeId, r.primaryRecruiterId]))
+      .filter(id => id && !(id in apState.recruiter)))].slice(0, 40);
+  const legIds = [...new Set(apState.rows.placements.map(r => r.customerId)
+      .filter(id => id && !(id in apState.legal)))].slice(0, 40);
+  if (!indIds.length && !legIds.length) return;
+  indIds.forEach(id => apState.recruiter[id] = "…");
+  legIds.forEach(id => apState.legal[id] = "…");
+  await Promise.all([
+    ...indIds.map(async id => {
+      try { const p = await AprikoApi.people.getIndividual(id); apState.recruiter[id] = [p.firstName, p.lastName].filter(Boolean).join(" ") || p.displayName || id; }
+      catch (e) { apState.recruiter[id] = "?"; }
+    }),
+    ...legIds.map(async id => {
+      try { const c = await AprikoApi.people.getLegal(id); apState.legal[id] = c.businessName || c.displayName || id; }
+      catch (e) { apState.legal[id] = "?"; }
+    })
+  ]);
   if (currentView === "apipoc") render();
 }
 function apOpenDetail(tab, idx) {
@@ -6381,6 +6409,7 @@ function renderApiPoc(el) {
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
         <button class="btn btn-sm" onclick="apTab('people')" style="${tab === "people" ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">👤 Personen / Mitarbeiter</button>
         <button class="btn btn-sm" onclick="apTab('companies')" style="${tab === "companies" ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">🏢 Firmen</button>
+        <button class="btn btn-sm" onclick="apTab('placements')" style="${tab === "placements" ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">👷 Einsätze</button>
         <span style="font-size:11px;color:var(--text-dim);margin-left:auto">${total} geladen${rows.length !== total ? " · " + rows.length + " nach Filter" : ""}${apState.done[tab] ? " · alle" : ""}</span>
         <button class="btn btn-sm" onclick="apLoadMore('${tab}')" ${apState.loading || apState.done[tab] || !cfg.token ? "disabled" : ""}>${apState.loading ? "Lädt …" : (total ? "+ " + AP_PAGE_SIZE + " weitere" : "▶ Laden")}</button>
       </div>
@@ -6389,7 +6418,7 @@ function renderApiPoc(el) {
         <tbody>${rows.map(x => `<tr style="cursor:pointer" onclick="apOpenDetail('${tab}',${x.i})">${cols.map(c => `<td style="${typeof x.v[c[0]] === "number" ? "text-align:right;font-family:var(--font-mono)" : ""}">${escape(String(x.v[c[0]] ?? ""))}</td>`).join("")}</tr>`).join("")}</tbody>
       </table></div>` : `<div class="empty">${cfg.token ? "Noch nichts geladen — «▶ Laden» klicken." : "Zuerst Basis-URL und Token hinterlegen, dann «Verbindung testen»."}</div>`}
     </div>`;
-  if (tab === "people" && total) apResolveRecruiters();
+  if ((tab === "people" || tab === "placements") && total) apResolveRecruiters();
   const rf = apState._restoreFocus;
   if (rf) { apState._restoreFocus = null; const inp = document.getElementById(rf.id); if (inp) { inp.focus(); const p = Math.min(rf.pos || inp.value.length, inp.value.length); inp.setSelectionRange(p, p); } }
 }

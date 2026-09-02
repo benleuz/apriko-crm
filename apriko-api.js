@@ -292,6 +292,18 @@
     }
   };
 
+  var staffing = {
+    /* Personalverleih-Einsätze (StaffLeasePlacements) */
+    listStaffLease: function (pageIndex, pageSize) {
+      return request("staffing", "/StaffLeasePlacements", {
+        query: { pageIndex: pageIndex || 0, pageSize: pageSize || 50 }
+      });
+    },
+    getStaffLease: function (id) {
+      return request("staffing", "/StaffLeasePlacements/" + encodeURIComponent(id));
+    }
+  };
+
   function serviceInfo(service) {
     return request(service, "/ServiceInfos");
   }
@@ -341,6 +353,7 @@
     serviceInfo: serviceInfo,
     selfTest: selfTest,
     people: people,
+    staffing: staffing,
     models: models,
     extractMessages: extractMessages
   };
