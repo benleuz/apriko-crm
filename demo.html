@@ -23,8 +23,8 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.58.1"></script>
-<script src="apriko-api.js?v=1.58.1"></script>
+<script src="apriko-filters.js?v=1.59.0"></script>
+<script src="apriko-api.js?v=1.59.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -962,7 +962,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.58.1</span> · <span id="app-build-date">01.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.59.0</span> · <span id="app-build-date">01.09.2026</span>
     </div>
   </aside>
 
@@ -993,14 +993,17 @@
       <div class="rp-card" style="padding:10px 14px">
         <details id="rpDbDetails">
           <summary style="cursor:pointer;font-weight:600;font-size:13px">🔌 Apriko-Datenbank für den Einsatz-Abgleich <span id="rpDbStatus" style="font-weight:400;font-size:11.5px;color:var(--rp-grey)"></span></summary>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:end;margin-top:8px">
+          <div style="display:grid;grid-template-columns:1.2fr 1.2fr 1fr 1fr auto;gap:8px;align-items:end;margin-top:8px">
             <div><label style="font-size:10.5px;color:var(--rp-grey)">Gateway-/Proxy-URL</label><input id="rpDbGateway" placeholder="https://…-8787.app.github.dev" style="width:100%"></div>
-            <div><label style="font-size:10.5px;color:var(--rp-grey)">Instanz (Ziel-Datenbank)</label><input id="rpDbTarget" placeholder="https://kunde.apriko.app — leer = Standard des Proxys" style="width:100%"></div>
-            <div><label style="font-size:10.5px;color:var(--rp-grey)">Token dieser Datenbank</label><input id="rpDbToken" type="password" style="width:100%"></div>
+            <div><label style="font-size:10.5px;color:var(--rp-grey)">Instanz (Ziel-Datenbank)</label><input id="rpDbTarget" placeholder="https://kunde.apriko.app — leer = Standard" style="width:100%"></div>
+            <div><label style="font-size:10.5px;color:var(--rp-grey)">API-Benutzername</label><input id="rpDbUser" autocomplete="off" style="width:100%"></div>
+            <div><label style="font-size:10.5px;color:var(--rp-grey)">API-Passwort</label><input id="rpDbPass" type="password" autocomplete="new-password" style="width:100%"></div>
             <button type="button" class="rp-btn" id="rpDbSave">Speichern & testen</button>
           </div>
+          <details style="margin-top:6px"><summary style="font-size:10.5px;color:var(--rp-grey);cursor:pointer">Stattdessen fertiges Token einfügen (fortgeschritten)</summary>
+            <input id="rpDbToken" type="password" placeholder="Bearer-Token" style="width:100%;max-width:520px;margin-top:4px"></details>
           <div id="rpDbTestResult" style="margin-top:8px"></div>
-          <div style="font-size:10.5px;color:var(--rp-grey);margin-top:6px">Leer lassen = Verbindung aus dem Menü «Apriko API (POC)». Eine andere Instanz muss beim Proxy auf der Ziel-Allowlist stehen (APRIKO_BASES). Zugangsdaten bleiben lokal in diesem Browser.</div>
+          <div style="font-size:10.5px;color:var(--rp-grey);margin-top:6px">Mit Benutzername/Passwort holt sich das Tool den Zugangsschlüssel (Token) selbst und erneuert ihn bei Ablauf automatisch. Alles leer lassen = Verbindung aus dem Menü «Apriko API (POC)». Eine andere Instanz muss beim Proxy auf der Ziel-Allowlist stehen (APRIKO_BASES). Zugangsdaten bleiben lokal in diesem Browser.</div>
         </details>
       </div>
 
@@ -11842,19 +11845,24 @@ function rpDbCfg(){
   try { return JSON.parse(localStorage.getItem(RP_DB_KEY) || '{}'); } catch(e){ return {}; }
 }
 function rpDbInit(){
-  var g = $('rpDbGateway'), t = $('rpDbTarget'), k = $('rpDbToken'), b = $('rpDbSave');
+  var g = $('rpDbGateway'), t = $('rpDbTarget'), u = $('rpDbUser'), p = $('rpDbPass'), k = $('rpDbToken'), b = $('rpDbSave');
   if(!g || !b || b.dataset.wired) return;
   b.dataset.wired = '1';
   var c = rpDbCfg();
-  g.value = c.gateway || ''; t.value = c.target || ''; k.value = c.token || '';
+  g.value = c.gateway || ''; t.value = c.target || ''; u.value = c.user || ''; p.value = c.pass || ''; if(k) k.value = c.token || '';
   b.onclick = function(){
+    var alt = rpDbCfg();
     var cfg = {
       gateway: (g.value || '').trim().replace(/\/+$/, ''),
       target: (t.value || '').trim().replace(/\/+$/, ''),
-      token: (k.value || '').trim().replace(/^Bearer\s+/i, '')
+      user: (u.value || '').trim(),
+      pass: p.value || '',
+      token: (k && k.value ? k.value : '').trim().replace(/^Bearer\s+/i, ''),
+      tokenUrl: alt.tokenUrl || ''
     };
     if(cfg.gateway && !/^https?:\/\//i.test(cfg.gateway)) cfg.gateway = 'https://' + cfg.gateway;
     if(cfg.target && !/^https?:\/\//i.test(cfg.target)) cfg.target = 'https://' + cfg.target;
+    if(cfg.user && cfg.pass){ cfg.token = ''; cfg.tokenExp = 0; }   // frisch holen mit neuen Zugangsdaten
     localStorage.setItem(RP_DB_KEY, JSON.stringify(cfg));
     rpDbStatus();
     rpDbTest();
@@ -11869,7 +11877,7 @@ function rpDbInit(){
 async function rpDbTest(){
   var out = $('rpDbTestResult'); if(!out) return;
   var c = rpDbCfg();
-  var eigene = !!(c.gateway && c.token);
+  var eigene = !!(c.gateway && (c.token || (c.user && c.pass)));
   if(!rpApiUse()){
     out.innerHTML = '<span style="color:var(--rp-grey);font-size:11.5px">Noch keine Verbindung eingerichtet — hier eintragen oder im Menü «Apriko API (POC)».</span>';
     rpDbStatusText('');
@@ -11886,7 +11894,7 @@ async function rpDbTest(){
   var alleOk = st.gateway.status === 'ok' && st.upstream.status === 'ok' && st.token.status === 'ok';
   var hint = '';
   if(st.gateway.status === 'fail') hint = ' <span style="color:#c62828;font-size:11px">— Proxy nicht erreichbar (Codespace eingeschlafen? Öffnen und Proxy starten, dann hier «Speichern & testen»).</span>';
-  else if(st.token.status === 'fail') hint = ' <span style="color:#c62828;font-size:11px">— Token ungültig/abgelaufen: neues Token eintragen und speichern.</span>';
+  else if(st.token.status === 'fail') hint = ' <span style="color:#c62828;font-size:11px">— ' + (c.user ? 'Anmeldung abgelehnt: Benutzername/Passwort prüfen (Details am Chip).' : 'Token ungültig/abgelaufen: neues Token eintragen und speichern.') + '</span>';
   else if(st.upstream.status === 'fail') hint = ' <span style="color:#c62828;font-size:11px">— Proxy läuft, aber die Apriko-Instanz antwortet nicht (Ziel auf der Allowlist?).</span>';
   out.innerHTML = chip('Gateway', st.gateway) + chip('Apriko-Instanz', st.upstream) + chip('Token', st.token) +
     ' <span style="color:var(--rp-grey);font-size:11px">(' + quelle + ')</span>' + hint;
@@ -11899,8 +11907,54 @@ function rpDbStatusText(suffix){
 function rpDbStatus(){
   var el = $('rpDbStatus'); if(!el) return;
   var c = rpDbCfg();
-  if(c.gateway && c.token) el.textContent = '— eigene Verbindung aktiv' + (c.target ? ' → ' + c.target.replace(/^https?:\/\//, '') : '');
+  if(c.gateway && (c.token || (c.user && c.pass))) el.textContent = '— eigene Verbindung aktiv' + (c.target ? ' → ' + c.target.replace(/^https?:\/\//, '') : '');
   else el.textContent = '— nutzt die POC-Verbindung';
+}
+/* Token automatisch beziehen (OAuth2 Password-Grant, wie es die
+   Apriko-API für Kunden vorsieht: Benutzer + Passwort → Token-Endpunkt
+   → Zugangsschlüssel) und bei Ablauf selbst erneuern (60s-Puffer).
+   Läuft über den Proxy; der lässt /connect/token und die
+   Discovery-Pfade durch und leitet per X-Apriko-Target zur richtigen
+   Instanz. */
+async function rpDbEnsureToken(force){
+  var c = rpDbCfg();
+  if(!(c.user && c.pass)) return c.token || null;   // Legacy: fest eingetragenes Token
+  if(!force && c.token && c.tokenExp && Date.now() < c.tokenExp - 60000) return c.token;
+  var hdr = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' };
+  if(c.target) hdr['X-Apriko-Target'] = c.target;
+  // Token-Endpunkt: gecacht, sonst per Discovery suchen, sonst Standardpfad
+  var tokenPath = c.tokenUrl || '';
+  if(!tokenPath){
+    var kandidaten = ['/api/id/.well-known/openid-configuration', '/.well-known/openid-configuration', '/identity/.well-known/openid-configuration'];
+    for(var i = 0; i < kandidaten.length && !tokenPath; i++){
+      try {
+        var res = await fetch(c.gateway + kandidaten[i], { headers: c.target ? { Accept: 'application/json', 'X-Apriko-Target': c.target } : { Accept: 'application/json' } });
+        if(res.ok){ var j = await res.json();
+          if(j.token_endpoint){
+            // Discovery liefert die absolute Instanz-URL — wir brauchen den PFAD am Gateway
+            try { tokenPath = new URL(j.token_endpoint).pathname; } catch(e2){ tokenPath = j.token_endpoint; }
+          } }
+      } catch(e3){ /* nächster Kandidat */ }
+    }
+    if(!tokenPath) tokenPath = '/connect/token';
+  }
+  var body = new URLSearchParams();
+  body.set('grant_type', 'password'); body.set('username', c.user); body.set('password', c.pass);
+  var res2 = await fetch(c.gateway + tokenPath, { method: 'POST', headers: hdr, body: body.toString() });
+  var txt = await res2.text(); var tj = null; try { tj = JSON.parse(txt); } catch(e4){}
+  if(!res2.ok || !tj || !tj.access_token){
+    var err = (tj && (tj.error_description || tj.error)) || txt.slice(0, 160) || ('HTTP ' + res2.status);
+    var e5 = new Error('Anmeldung fehlgeschlagen: ' + err +
+      (/client/i.test(err) ? ' — der Identity-Server verlangt offenbar eine client_id: beim Apriko-Team erfragen.' : ' — Benutzername/Passwort prüfen.'));
+    e5.kind = 'auth';
+    throw e5;
+  }
+  c = rpDbCfg();   // frisch lesen, dann Token + Ablauf + gefundenen Endpunkt merken
+  c.token = tj.access_token;
+  c.tokenExp = tj.expires_in ? Date.now() + tj.expires_in * 1000 : Date.now() + 10 * 60 * 1000;
+  c.tokenUrl = tokenPath;
+  localStorage.setItem(RP_DB_KEY, JSON.stringify(c));
+  return c.token;
 }
 /* Verbindung für den Abgleich wählen: Rapport-eigene vor POC-Konfig.
    configure() wird unmittelbar vor der Abfrage-Kette gesetzt; das
@@ -11908,8 +11962,8 @@ function rpDbStatus(){
    Ein-Nutzer-Browser kollidiert das nicht. */
 function rpApiUse(){
   var c = rpDbCfg();
-  if(c.gateway && c.token){
-    AprikoApi.configure({ gateway: c.gateway, target: c.target || "", getToken: async function(){ return c.token; } });
+  if(c.gateway && (c.token || (c.user && c.pass))){
+    AprikoApi.configure({ gateway: c.gateway, target: c.target || "", getToken: function(){ return rpDbEnsureToken(false); } });
     return true;
   }
   if(typeof apConfigure === 'function') apConfigure();
