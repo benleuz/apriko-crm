@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anrufliste</title>
+<script src="msal.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --paper: #f3f6f4;
+    --sheet: #ffffff;
+    --ink: #17221f;
+    --ink-dim: #6b7d77;
+    --line: #dfe6e2;
+    --green: #1f7a4d;
+    --green-soft: #e4f3ea;
+    --lime: #b8e986;
+    --amber: #f4c95d;
+    --amber-soft: #fdf3d6;
+    --red: #d9534f;
+    --red-soft: #fbe5e4;
+    --font: "Avenir Next", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font); font-size: 16px; line-height: 1.4; }
+  a { color: var(--green); }
+  button { font: inherit; cursor: pointer; }
+  input, textarea { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
+  /* Kopf */
+  header { position: sticky; top: 0; z-index: 5; background: var(--paper); border-bottom: 1px solid var(--line); }
+  .bar { max-width: 960px; margin: 0 auto; padding: 14px 20px 10px; display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+  .bar h1 { font-size: 20px; font-weight: 600; margin: 0; letter-spacing: -.01em; }
+  .bar .who { color: var(--ink-dim); font-size: 14px; margin-left: auto; display: flex; gap: 12px; align-items: center; }
+  .bar .who button { background: none; border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; color: var(--ink); }
+  .tools { max-width: 960px; margin: 0 auto; padding: 0 20px 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .tools input[type=search] { flex: 1 1 220px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--sheet); font-size: 16px; }
+  .tools .filt { display: flex; gap: 4px; }
+  .tools .filt button { border: 1px solid var(--line); background: var(--sheet); border-radius: 999px; padding: 6px 12px; font-size: 14px; color: var(--ink-dim); }
+  .tools .filt button[aria-pressed=true] { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .progress { height: 4px; background: var(--line); }
+  .progress > div { height: 100%; background: var(--green); width: 0; transition: width .3s; }
+
+  /* Liste */
+  main { max-width: 960px; margin: 0 auto; padding: 16px 20px 80px; }
+  .count { color: var(--ink-dim); font-size: 14px; margin: 0 0 10px; }
+  .row { background: var(--sheet); border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-bottom: 10px; display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; }
+  .row.s-erreicht { border-left-color: var(--green); }
+  .row.s-nochmals { border-left-color: var(--amber); }
+  .row.s-kein { border-left-color: var(--red); opacity: .75; }
+  .row .head { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+  .row .name { font-size: 19px; font-weight: 600; letter-spacing: -.01em; }
+  .row .id { font-family: var(--mono); font-size: 13px; color: var(--ink-dim); }
+  .row .ort { color: var(--ink-dim); font-size: 15px; }
+  .row .web { font-size: 15px; word-break: break-all; }
+  .row .status { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+  .row .status button { border: 1px solid var(--line); background: var(--paper); border-radius: 999px; padding: 6px 12px; font-size: 14px; color: var(--ink-dim); }
+  .row .status button[aria-pressed=true][data-s=erreicht] { background: var(--green-soft); border-color: var(--green); color: var(--green); }
+  .row .status button[aria-pressed=true][data-s=nochmals] { background: var(--amber-soft); border-color: var(--amber); color: #7a5a00; }
+  .row .status button[aria-pressed=true][data-s=kein] { background: var(--red-soft); border-color: var(--red); color: var(--red); }
+  .row .status button[aria-pressed=true][data-s=offen] { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .row textarea { grid-column: 1 / -1; width: 100%; min-height: 44px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; background: var(--paper); font-size: 16px; }
+  .row textarea:focus { background: var(--sheet); }
+  .row .meta { grid-column: 1 / -1; font-size: 13px; color: var(--ink-dim); min-height: 1.2em; }
+  .row .meta.saving { color: var(--ink-dim); }
+  .row .meta.saved { color: var(--green); }
+  .row .meta.err { color: var(--red); }
+
+  /* Login / Leerzustand */
+  .gate { max-width: 420px; margin: 18vh auto; padding: 0 20px; text-align: center; }
+  .gate h1 { font-size: 26px; font-weight: 600; margin: 0 0 8px; }
+  .gate p { color: var(--ink-dim); margin: 0 0 22px; }
+  .gate button, .empty button { background: var(--green); color: #fff; border: 0; border-radius: 8px; padding: 12px 22px; font-size: 16px; font-weight: 600; }
+  .empty { background: var(--sheet); border: 1px dashed var(--line); border-radius: 8px; padding: 30px; text-align: center; color: var(--ink-dim); }
+  .empty p { margin: 0 0 14px; }
+  .error { background: var(--red-soft); color: #7a2320; border-radius: 8px; padding: 12px 14px; margin: 12px 0; font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+  .admin { margin-top: 30px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; color: var(--ink-dim); display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .admin button, .admin label { border: 1px solid var(--line); background: var(--sheet); border-radius: 6px; padding: 6px 10px; color: var(--ink); cursor: pointer; }
+  .hidden { display: none !important; }
+  @media (max-width: 560px) { .row { grid-template-columns: 1fr; } .row .name { font-size: 18px; } }
+  @media (prefers-reduced-motion: reduce) { .progress > div { transition: none; } }
+</style>
+</head>
+<body>
+
+<div class="gate" id="gate">
+  <h1>Anrufliste</h1>
+  <p>Melde dich mit deinem Zugang an, um die Firmenliste zu sehen.</p>
+  <button onclick="login()">Anmelden</button>
+  <div class="error hidden" id="gate-error"></div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="bar">
+      <h1>Anrufliste</h1>
+      <div class="who"><span id="who"></span><button onclick="logout()">Abmelden</button></div>
+    </div>
+    <div class="tools">
+      <input type="search" id="q" placeholder="Firma, Ort, ID suchen" autocomplete="off">
+      <div class="filt" id="filt">
+        <button data-f="alle" aria-pressed="true">Alle</button>
+        <button data-f="offen" aria-pressed="false">Offen</button>
+        <button data-f="nochmals" aria-pressed="false">Nochmals</button>
+        <button data-f="erledigt" aria-pressed="false">Erledigt</button>
+      </div>
+    </div>
+    <div class="progress"><div id="prog"></div></div>
+  </header>
+  <main>
+    <div class="error hidden" id="app-error"></div>
+    <p class="count" id="count"></p>
+    <div id="list"></div>
+    <div class="admin hidden" id="admin">
+      <span>Liste verwalten:</span>
+      <label>Excel importieren <input type="file" id="xlsx" accept=".xlsx,.xls,.csv" class="hidden"></label>
+      <button onclick="exportCsv()">Kommentare als CSV</button>
+      <span id="admin-info"></span>
+    </div>
+  </main>
+</div>
+
+<script>
+/* ===========================================================
+   Konfiguration – gleiche App-Registrierung wie das CRM.
+   folderUrl: SharePoint-URL des Ordners, der mit dem Sales geteilt ist
+   (Rechtsklick → «Link kopieren» oder Adresszeile im Browser).
+   Leer lassen = Ordner "CRM-Calls" im Site-Drive des CRM.
+   =========================================================== */
+const CONFIG = {
+  clientId:   "c7d6acb7-219d-4c45-baa9-ee7bfeee598e",
+  tenantId:   "fad1fc7e-4003-4f4b-8b52-9a667ed0ac2e",
+  siteHost:   "apriko.sharepoint.com",
+  sitePath:   "/sites/sales2",
+  folderUrl:  "",
+  folderName: "CRM-Calls",
+  fileName:   "calls.json",
+  adminDomain: "apriko.com"
+};
+const STATUS = [
+  ["offen",    "Offen"],
+  ["erreicht", "Erreicht"],
+  ["nochmals", "Nochmals anrufen"],
+  ["kein",     "Kein Interesse"]
+];
+
+/* ---------- MSAL ---------- */
+const msalConfig = {
+  auth: {
+    clientId: CONFIG.clientId,
+    authority: `https://login.microsoftonline.com/${CONFIG.tenantId}`,
+    redirectUri: window.location.href.split("?")[0].split("#")[0]
+  },
+  cache: { cacheLocation: "sessionStorage" }
+};
+const SCOPES = ["Sites.ReadWrite.All", "User.Read"];
+let msalApp = null, account = null;
+
+async function init() {
+  try {
+    msalApp = new msal.PublicClientApplication(msalConfig);
+    await msalApp.initialize();
+    const r = await msalApp.handleRedirectPromise();
+    if (r && r.account) account = r.account;
+    if (!account) { const a = msalApp.getAllAccounts(); if (a.length) account = a[0]; }
+    if (account) await startApp();
+  } catch (e) { showGateError("Anmeldung fehlgeschlagen: " + e.message); }
+}
+async function login() {
+  try { await msalApp.loginRedirect({ scopes: SCOPES }); }
+  catch (e) { showGateError("Anmeldung fehlgeschlagen: " + e.message); }
+}
+function logout() { msalApp.logoutRedirect(); }
+async function getToken() {
+  try { return (await msalApp.acquireTokenSilent({ scopes: SCOPES, account })).accessToken; }
+  catch (e) { return (await msalApp.acquireTokenPopup({ scopes: SCOPES })).accessToken; }
+}
+
+/* ---------- Graph ---------- */
+async function graph(path, opts = {}) {
+  const token = await getToken();
+  const res = await fetch("https://graph.microsoft.com/v1.0" + path, {
+    ...opts,
+    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json", ...(opts.headers || {}) }
+  });
+  if (!res.ok) throw new Error(`Graph ${res.status}: ${await res.text()}`);
+  if (res.status === 204) return null;
+  const ct = res.headers.get("content-type") || "";
+  return ct.includes("json") ? res.json() : res.text();
+}
+
+let folder = null;   // { driveId, itemId }
+async function resolveFolder() {
+  if (CONFIG.folderUrl) {
+    const enc = "u!" + btoa(CONFIG.folderUrl).replace(/=+$/, "").replace(/\//g, "_").replace(/\+/g, "-");
+    const item = await graph(`/shares/${enc}/driveItem`);
+    folder = { driveId: item.parentReference.driveId, itemId: item.id };
+  } else {
+    const site = await graph(`/sites/${CONFIG.siteHost}:${CONFIG.sitePath}`);
+    const drive = await graph(`/sites/${site.id}/drive`);
+    let item;
+    try { item = await graph(`/drives/${drive.id}/root:/${encodeURIComponent(CONFIG.folderName)}`); }
+    catch (e) {
+      item = await graph(`/drives/${drive.id}/root/children`, { method: "POST",
+        body: JSON.stringify({ name: CONFIG.folderName, folder: {}, "@microsoft.graph.conflictBehavior": "fail" }) });
+    }
+    folder = { driveId: drive.id, itemId: item.id };
+  }
+}
+const filePath = () => `/drives/${folder.driveId}/items/${folder.itemId}:/${encodeURIComponent(CONFIG.fileName)}:/content`;
+async function loadData() {
+  try { const d = await graph(filePath()); return typeof d === "string" ? JSON.parse(d) : d; }
+  catch (e) { if (/404/.test(e.message)) return { companies: [] }; throw e; }
+}
+async function saveData(d) {
+  d.updated = new Date().toISOString();
+  await graph(filePath(), { method: "PUT", body: JSON.stringify(d, null, 1) });
+}
+
+/* ---------- App ---------- */
+let data = { companies: [] };
+let filter = "alle", query = "";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function showGateError(m) { $("gate-error").textContent = m; $("gate-error").classList.remove("hidden"); }
+function showError(m) { $("app-error").textContent = m; $("app-error").classList.remove("hidden"); }
+const isAdmin = () => (account?.username || "").toLowerCase().endsWith("@" + CONFIG.adminDomain);
+
+async function startApp() {
+  $("gate").classList.add("hidden"); $("app").classList.remove("hidden");
+  $("who").textContent = account.name || account.username;
+  if (isAdmin()) $("admin").classList.remove("hidden");
+  try { await resolveFolder(); data = await loadData(); }
+  catch (e) { showError("Liste konnte nicht geladen werden.\n" + e.message + "\n\nIst der Ordner freigegeben und die folderUrl korrekt?"); }
+  render();
+}
+
+function visible() {
+  const q = query.trim().toLowerCase();
+  return data.companies.filter(c => {
+    const s = c.status || "offen";
+    if (filter === "offen" && s !== "offen") return false;
+    if (filter === "nochmals" && s !== "nochmals") return false;
+    if (filter === "erledigt" && (s === "offen" || s === "nochmals")) return false;
+    if (!q) return true;
+    return [c.name, c.city, c.region, c.id, c.comment].some(v => String(v ?? "").toLowerCase().includes(q));
+  });
+}
+
+function render() {
+  const all = data.companies, done = all.filter(c => c.status && c.status !== "offen").length;
+  $("prog").style.width = all.length ? (100 * done / all.length) + "%" : "0";
+  const rows = visible();
+  $("count").textContent = all.length ? `${rows.length} von ${all.length} Firmen · ${done} bearbeitet` : "";
+  const list = $("list");
+  if (!all.length) {
+    list.innerHTML = `<div class="empty"><p>Noch keine Firmen in der Liste.</p>${isAdmin() ? "<p>Importiere unten das Excel mit den Firmen.</p>" : "<p>Bitte bei Apriko melden – die Liste wurde noch nicht hochgeladen.</p>"}</div>`;
+    return;
+  }
+  list.innerHTML = rows.map(c => {
+    const s = c.status || "offen";
+    const ort = [c.region, c.city].filter(Boolean).join(" · ");
+    const web = c.website ? `<a class="web" href="${esc(/^https?:/i.test(c.website) ? c.website : "http://" + c.website)}" target="_blank" rel="noopener">${esc(c.website.replace(/^https?:\/\//i, ""))}</a>` : "";
+    return `<div class="row s-${s}" data-id="${esc(c.id)}">
+      <div class="head"><span class="name">${esc(c.name)}</span><span class="id">${esc(c.id)}</span></div>
+      <div class="ort">${esc(ort)}</div>${web}
+      <div class="status">${STATUS.map(([k, l]) => `<button data-s="${k}" aria-pressed="${s === k}" onclick="setStatus('${esc(c.id)}','${k}')">${l}</button>`).join("")}</div>
+      <textarea placeholder="Kommentar zum Gespräch …" onblur="setComment('${esc(c.id)}', this.value)">${esc(c.comment)}</textarea>
+      <div class="meta">${c.updatedBy ? esc(c.updatedBy) + ", " + new Date(c.updatedAt).toLocaleString("de-CH", { dateStyle: "short", timeStyle: "short" }) : ""}</div>
+    </div>`;
+  }).join("") || `<div class="empty"><p>Keine Firma passt zu Suche und Filter.</p></div>`;
+}
+
+/* Speichern: immer frisch laden, nur die eine Firma ändern, zurückschreiben */
+let saveChain = Promise.resolve();
+function persist(id, patch) {
+  const row = document.querySelector(`.row[data-id="${CSS.escape(id)}"]`), meta = row?.querySelector(".meta");
+  if (meta) { meta.textContent = "Speichern …"; meta.className = "meta saving"; }
+  saveChain = saveChain.then(async () => {
+    try {
+      const fresh = await loadData();
+      const c = fresh.companies.find(x => String(x.id) === String(id));
+      if (!c) throw new Error("Firma nicht mehr in der Liste");
+      Object.assign(c, patch, { updatedBy: account.name || account.username, updatedAt: new Date().toISOString() });
+      await saveData(fresh);
+      data = fresh;
+      if (meta) { meta.textContent = "Gespeichert"; meta.className = "meta saved"; }
+      const all = data.companies, done = all.filter(x => x.status && x.status !== "offen").length;
+      $("prog").style.width = (100 * done / all.length) + "%";
+      $("count").textContent = `${visible().length} von ${all.length} Firmen · ${done} bearbeitet`;
+    } catch (e) {
+      if (meta) { meta.textContent = "Nicht gespeichert: " + e.message; meta.className = "meta err"; }
+    }
+  });
+}
+function setStatus(id, s) {
+  const c = data.companies.find(x => String(x.id) === String(id)); if (!c) return;
+  c.status = s;
+  const row = document.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
+  row.className = "row s-" + s;
+  row.querySelectorAll(".status button").forEach(b => b.setAttribute("aria-pressed", b.dataset.s === s));
+  persist(id, { status: s });
+}
+function setComment(id, v) {
+  const c = data.companies.find(x => String(x.id) === String(id)); if (!c) return;
+  if ((c.comment || "") === v) return;
+  c.comment = v;
+  persist(id, { comment: v });
+}
+
+/* ---------- Suche / Filter ---------- */
+$("q").addEventListener("input", e => { query = e.target.value; render(); });
+$("filt").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  filter = b.dataset.f;
+  $("filt").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b));
+  render();
+});
+
+/* ---------- Admin: Excel-Import (mergt nach ID, Kommentare bleiben) ---------- */
+$("xlsx").addEventListener("change", async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+    const key = (r, ...names) => { for (const n of names) { const k = Object.keys(r).find(k => k.trim().toLowerCase() === n); if (k) return String(r[k]).trim(); } return ""; };
+    const byId = new Map(data.companies.map(c => [String(c.id), c]));
+    let added = 0, updated = 0;
+    for (const r of rows) {
+      const id = key(r, "custom ( id", "custom (id", "id", "custom_id"); const name = key(r, "name");
+      if (!id && !name) continue;
+      const rec = { id: id || name, name, region: key(r, "region"), city: key(r, "city", "ort"), website: key(r, "website") };
+      const ex = byId.get(String(rec.id));
+      if (ex) { Object.assign(ex, rec); updated++; } else { data.companies.push({ ...rec, status: "offen", comment: "" }); added++; }
+    }
+    await saveData(data);
+    $("admin-info").textContent = `${added} neu, ${updated} aktualisiert`;
+    render();
+  } catch (err) { showError("Import fehlgeschlagen: " + err.message); }
+  e.target.value = "";
+});
+function exportCsv() {
+  const cols = ["id", "name", "region", "city", "website", "status", "comment", "updatedBy", "updatedAt"];
+  const q = v => '"' + String(v ?? "").replace(/"/g, '""') + '"';
+  const csv = [cols.join(";"), ...data.companies.map(c => cols.map(k => q(c[k])).join(";"))].join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv" })); a.download = "anrufliste.csv"; a.click();
+}
+
+init();
+</script>
+</body>
+</html>
