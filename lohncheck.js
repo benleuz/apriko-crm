@@ -12,7 +12,7 @@
    iterativ nachgeschärft werden kann. */
 
 const lcState = {
-  von: 1000, bis: 6000,
+  von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
   issues: [],
   files: [],
@@ -30,7 +30,9 @@ const LC_REF = {
   BVG: { codes: [5090], key: /\bBVG\b/i, satz: null, pflicht: "gelb" },
   VOLLZUG: { codes: [5120], key: /Vollzug/i, satz: null, pflicht: "gelb" }
 };
-const LC_TOTAL_CODES = new Set([4900, 5500, 5900, 6500, 6900]);
+/* Nicht sozialversicherungspflichtige Lohnarten (z.B. Spesen 36xx) — fliessen nicht in die AHV/ALV/NBU/KTG-Basis */
+const LC_NICHT_PFLICHTIG = code => code >= 3600 && code <= 3699;
+const LC_TOTAL_CODES = new Set([4900, 5500, 5900, 6500, 6900, 7900, 8900, 9900]);
 const LC_MONATE = "Januar Februar März April Mai Juni Juli August September Oktober November Dezember".split(" ");
 
 /* ---------- Zahlen / Formatierung ---------- */
@@ -202,7 +204,9 @@ function lcParseSlip(slip) {
   }
   // Kennzahlen
   const g = c => { const r = slip.rows.find(x => x.code === c); return r ? r.betrag : null; };
-  slip.brutto = g(4900); slip.abzuege = g(5500); slip.netto = g(5900); slip.abgerechnet = g(6900);
+  slip.brutto = g(4900); slip.abzuege = g(5500); slip.netto = g(5900); slip.sonstige = g(6500); slip.abgerechnet = g(6900);
+  const ausz = slip.rows.find(x => x.code > 6900 && /Auszahlung|Überweisung|Zahlung|Bank|Post/i.test(x.label));
+  slip.auszahlung = ausz ? ausz.betrag : null;
   if (slip.brutto === null) { const r = slip.rows.find(x => /^Bruttolohn/i.test(x.label)); if (r) slip.brutto = r.betrag; }
   if (slip.netto === null) { const r = slip.rows.find(x => /^Nettolohn/i.test(x.label)); if (r) slip.netto = r.betrag; }
 }
@@ -273,6 +277,21 @@ function lcCheckAll(slips) {
     if (s.brutto !== null && s.abzuege !== null && s.netto !== null && !lcNear(s.brutto + s.abzuege, s.netto))
       add(s, "rot", "Rechnung", "Brutto + Abzüge = " + lcFmt(s.brutto + s.abzuege) + " ≠ Nettolohn " + lcFmt(s.netto) + ".");
     if (s.netto !== null && s.netto < 0) add(s, "rot", "Nettolohn", "Negativer Nettolohn " + lcFmt(s.netto) + ".");
+    // Sonstige Zulagen/Abzüge (6000–6499) → 6500 → 6900 Abgerechnet → Auszahlung
+    const sonst = s.rows.filter(r => r.code >= 6000 && r.code < 6500 && !r.isTotal);
+    if (s.sonstige !== null && sonst.length) {
+      const sum = sonst.reduce((a, r) => a + r.betrag, 0);
+      if (!lcNear(sum, s.sonstige)) add(s, "rot", "Rechnung", "Summe sonstige Zulagen/Abzüge " + lcFmt(sum) + " ≠ Total 6500 " + lcFmt(s.sonstige) + ".");
+    }
+    const sonstTot = s.sonstige !== null ? s.sonstige : sonst.reduce((a, r) => a + r.betrag, 0);
+    if (s.netto !== null && s.abgerechnet !== null && !lcNear(s.netto + sonstTot, s.abgerechnet))
+      add(s, "rot", "Rechnung", "Netto + Sonstige = " + lcFmt(s.netto + sonstTot) + " ≠ Abgerechnet " + lcFmt(s.abgerechnet) + ".");
+    if (s.abgerechnet !== null && s.abgerechnet < 0) add(s, "rot", "Auszahlung", "Negativer Abrechnungsbetrag " + lcFmt(s.abgerechnet) + ".");
+    if (s.auszahlung !== null && s.abgerechnet !== null && !lcNear(Math.abs(s.auszahlung), Math.abs(s.abgerechnet)))
+      add(s, "rot", "Auszahlung", "Auszahlung " + lcFmt(s.auszahlung) + " ≠ Abgerechnet " + lcFmt(s.abgerechnet) + ".");
+    if (s.abgerechnet !== null && s.auszahlung === null && s.rows.some(r => r.code > 6900)) add(s, "grau", "Auszahlung", "Keine Auszahlungszeile erkannt (Codes > 6900 vorhanden).");
+    const vorschuss = s.rows.filter(r => /Vorschuss/i.test(r.label) && !r.isTotal);
+    if (vorschuss.length > 1) add(s, "gelb", "Vorschuss", vorschuss.length + " Vorschuss-Zeilen in einer Abrechnung.");
     // Basis × Ansatz = Betrag
     for (const r of s.rows) {
       if (r.isTotal || r.basis === null || r.ansatz === null) continue;
@@ -280,8 +299,10 @@ function lcCheckAll(slips) {
       if (!lcNear(Math.abs(exp), Math.abs(r.betrag), Math.max(0.06, Math.abs(exp) * 0.002)))
         add(s, "gelb", "Rechnung", r.code + " " + r.label + ": Basis × Ansatz" + (r.anzahl ? " × Anzahl" : "") + " = " + lcFmt(exp) + ", Betrag " + lcFmt(r.betrag) + ".");
     }
-    // Pflichtabzüge
+    // Pflichtabzüge — Basis = Bruttolohn abzüglich nicht pflichtiger Lohnarten (36xx)
     if (s.brutto !== null && s.brutto > 0) {
+      const nichtPflichtig = s.rows.filter(r => LC_NICHT_PFLICHTIG(r.code) && !r.isTotal && r.level === 0).reduce((a, r) => a + r.betrag, 0);
+      const svBasis = s.brutto - nichtPflichtig;
       for (const [nm, ref] of Object.entries(LC_REF)) {
         const row = abz.find(r => ref.codes.includes(r.code)) || abz.find(r => ref.key.test(r.label));
         if (!row) { add(s, ref.pflicht, "Abzug fehlt", "Kein " + nm + "-Abzug (" + ref.codes.join("/") + ") bei Bruttolohn " + lcFmt(s.brutto) + "."); continue; }
@@ -289,13 +310,14 @@ function lcCheckAll(slips) {
         if (row.betrag > 0) add(s, "gelb", "Vorzeichen", nm + "-Abzug ist positiv (" + lcFmt(row.betrag) + ").");
         if (ref.satz !== null && row.ansatz !== null && !lcNear(row.ansatz, ref.satz, 0.0001))
           add(s, "rot", "Satz", nm + "-Satz " + lcFmtPct(row.ansatz) + " statt " + lcFmtPct(ref.satz) + ".");
-        if (nm !== "BVG" && row.basis !== null && !lcNear(row.basis, s.brutto))
-          add(s, "gelb", "Basis", nm + "-Basis " + lcFmt(row.basis) + " ≠ Bruttolohn " + lcFmt(s.brutto) + ".");
+        if (nm !== "BVG" && row.basis !== null && !lcNear(row.basis, svBasis))
+          add(s, "gelb", "Basis", nm + "-Basis " + lcFmt(row.basis) + " ≠ pflichtiger Lohn " + lcFmt(svBasis) + (nichtPflichtig ? " (Brutto " + lcFmt(s.brutto) + " − 36xx " + lcFmt(nichtPflichtig) + ")" : "") + ".");
       }
     }
-    // Satz weicht vom häufigsten Satz ab (alle Abzüge 5000–5499)
+    // Satz weicht vom häufigsten Satz ab (Abzüge 5000–5499; BVG ausgenommen — Satz ist altersabhängig)
     for (const r of abz) {
       const m = satzMode[r.code];
+      if (LC_REF.BVG.codes.includes(r.code) || LC_REF.BVG.key.test(r.label)) continue;
       if (m && r.ansatz !== null && m.n >= 3 && !lcNear(r.ansatz, m.satz, 0.0001) && !Object.values(LC_REF).some(ref => ref.codes.includes(r.code) && ref.satz !== null))
         add(s, "gelb", "Satz", r.code + " " + r.label + ": " + lcFmtPct(r.ansatz) + ", üblich " + lcFmtPct(m.satz) + " (" + m.n + "×).");
     }
@@ -408,8 +430,8 @@ function renderLohncheck(el) {
       <input type="number" value="${lcState.von}" style="width:64px" onchange="lcRange(this.value,${lcState.bis})"> bis
       <input type="number" value="${lcState.bis}" style="width:64px" onchange="lcRange(${lcState.von},this.value)">
       werden erfasst und über alle Abrechnungen totalisiert (Lohnkontoblatt).<br>
-      Geprüft werden Rechnung (Brutto/Abzüge/Netto, Basis × Ansatz), Pflichtabzüge AHV/ALV/NBU/KTG/BVG/Vollzug,
-      Sätze, Abzugsbasis, Temporär-Bestandteile und doppelte Abrechnungen.</span></div>`;
+      Geprüft werden Rechnung (Brutto/Abzüge/Netto/Sonstige/Abgerechnet/Auszahlung, Basis × Ansatz), Pflichtabzüge AHV/ALV/NBU/KTG/BVG/Vollzug,
+      Sätze, Abzugsbasis, Temporär-Bestandteile, Vorschüsse und doppelte Abrechnungen.</span></div>`;
     return;
   }
   const S = lcState.slips, I = lcState.issues;
