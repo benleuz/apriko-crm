@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.69.0";
+const LC_VERSION = "1.73.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -29,11 +29,14 @@ const LC_REF = {
   ALV: { codes: [5020], key: /\bALV\b/i, satz: 1.1, pflicht: "rot" },
   NBU: { codes: [5050], key: /\bNBU\b/i, satz: null, pflicht: "gelb" },
   KTG: { codes: [5080], key: /\bKTG\b/i, satz: null, pflicht: "gelb" },
-  BVG: { codes: [5090], key: /\bBVG\b/i, satz: null, pflicht: "gelb" },
+  BVG: { codes: [5090], key: /\bBVG\b/i, satz: null, pflicht: "grau" }, // Temporäre: erste 3 Monate ohne BVG möglich → nur Hinweis
   VOLLZUG: { codes: [5120], key: /Vollzug/i, satz: null, pflicht: "gelb" }
 };
-/* Nicht sozialversicherungspflichtige Lohnarten (z.B. Spesen 36xx) — fliessen nicht in die AHV/ALV/NBU/KTG-Basis */
-const LC_NICHT_PFLICHTIG = code => code >= 3600 && code <= 3699;
+/* Nicht sozialversicherungspflichtige Lohnarten — fliessen nicht in die AHV/ALV/NBU/KTG-Basis:
+   Spesen 36xx, Taggelder (Unfall-/Kranken-/KTG-Taggeld, 2030), Kinder-/Familien-/Ausbildungszulagen */
+const LC_NICHT_PFLICHTIG = (code, label) => (code >= 3600 && code <= 3699) || code === 2030 || /Taggeld|Kinderzulage|Familienzulage|Ausbildungszulage|Geburtszulage/i.test(label || "");
+/* Quellensteuer: Satz ist individuell (Hochrechnung + Tabelle) — keine Satzprüfung */
+const LC_QST = r => r.code === 5400 || /\bQST\b|Quellensteuer/i.test(r.label || "");
 const LC_TOTAL_CODES = new Set([4900, 5500, 5900, 6500, 6900, 7900, 8900, 9900]);
 const LC_MONATE = "Januar Februar März April Mai Juni Juli August September Oktober November Dezember".split(" ");
 
@@ -271,6 +274,7 @@ function lcCheckAll(slips) {
   for (const s of slips) {
     s.issues = [];
     const lohn = s.rows.filter(r => r.code < 4900 && !r.isTotal && r.level === 0);
+    const ref5 = r => Object.values(LC_REF).some(ref => ref.codes.includes(r.code) || ref.key.test(r.label));
     const abz = s.rows.filter(r => r.code >= 5000 && r.code < 5500 && !r.isTotal);
     if (!s.name) add(s, "grau", "Erkennung", "Kein Mitarbeitername erkannt — Kopfzeilen im Detail prüfen.");
     if (s.periode === "?") add(s, "grau", "Erkennung", "Keine Abrechnungsperiode erkannt.");
@@ -285,19 +289,20 @@ function lcCheckAll(slips) {
       if (s.brutto < 0) add(s, "rot", "Bruttolohn", "Negativer Bruttolohn " + lcFmt(s.brutto) + ".");
       if (s.brutto === 0) add(s, "gelb", "Bruttolohn", "Bruttolohn ist 0.");
     } else add(s, "gelb", "Erkennung", "Kein Bruttolohn (4900) gefunden.");
-    if (s.abzuege !== null && abz.length) {
-      const sum = abz.reduce((a, r) => a + r.betrag, 0);
-      if (!lcNear(sum, s.abzuege)) add(s, "rot", "Rechnung", "Summe Abzüge " + lcFmt(sum) + " ≠ Total Abzüge " + lcFmt(s.abzuege) + ".");
-    }
+    // Abzüge (5000–5499) vs. 5500 und Sonstige (6000–6499) vs. 6500 — Korrekturlohnarten können im Block «Abzüge»
+    // stehen, aber im Total «Sonstige» landen (Apriko-Zuweisung). Heben sich die beiden Differenzen auf → kein Fehler.
+    const sonst0 = s.rows.filter(r => r.code >= 6000 && r.code < 6500 && !r.isTotal);
+    const dAbz = (s.abzuege !== null && abz.length) ? abz.reduce((a, r) => a + r.betrag, 0) - s.abzuege : null;
+    const dSonst = (s.sonstige !== null && sonst0.length) ? sonst0.reduce((a, r) => a + r.betrag, 0) - s.sonstige : null;
+    const verschoben = dAbz !== null && dSonst !== null && !lcNear(dAbz, 0) && lcNear(dAbz + dSonst, 0, 0.06);
+    if (verschoben) add(s, "grau", "Zuweisung", "Korrekturlohnarten von " + lcFmt(Math.abs(dAbz)) + " stehen bei den Abzügen, zählen aber im Total 6500 — geht über beide Blöcke auf.");
+    if (dAbz !== null && !lcNear(dAbz, 0) && !verschoben) add(s, "rot", "Rechnung", "Summe Abzüge " + lcFmt(s.abzuege + dAbz) + " ≠ Total Abzüge " + lcFmt(s.abzuege) + ".");
     if (s.brutto !== null && s.abzuege !== null && s.netto !== null && !lcNear(s.brutto + s.abzuege, s.netto))
       add(s, "rot", "Rechnung", "Brutto + Abzüge = " + lcFmt(s.brutto + s.abzuege) + " ≠ Nettolohn " + lcFmt(s.netto) + ".");
     if (s.netto !== null && s.netto < 0) add(s, "rot", "Nettolohn", "Negativer Nettolohn " + lcFmt(s.netto) + ".");
     // Sonstige Zulagen/Abzüge (6000–6499) → 6500 → 6900 Abgerechnet → Auszahlung
-    const sonst = s.rows.filter(r => r.code >= 6000 && r.code < 6500 && !r.isTotal);
-    if (s.sonstige !== null && sonst.length) {
-      const sum = sonst.reduce((a, r) => a + r.betrag, 0);
-      if (!lcNear(sum, s.sonstige)) add(s, "rot", "Rechnung", "Summe sonstige Zulagen/Abzüge " + lcFmt(sum) + " ≠ Total 6500 " + lcFmt(s.sonstige) + ".");
-    }
+    const sonst = sonst0;
+    if (dSonst !== null && !lcNear(dSonst, 0) && !verschoben) add(s, "rot", "Rechnung", "Summe sonstige Zulagen/Abzüge " + lcFmt(s.sonstige + dSonst) + " ≠ Total 6500 " + lcFmt(s.sonstige) + ".");
     const sonstTot = s.sonstige !== null ? s.sonstige : sonst.reduce((a, r) => a + r.betrag, 0);
     if (s.netto !== null && s.abgerechnet !== null && !lcNear(s.netto + sonstTot, s.abgerechnet))
       add(s, "rot", "Rechnung", "Netto + Sonstige = " + lcFmt(s.netto + sonstTot) + " ≠ Abgerechnet " + lcFmt(s.abgerechnet) + ".");
@@ -326,15 +331,17 @@ function lcCheckAll(slips) {
     if (vorschuesse.length && !gebuehr) add(s, "gelb", "Vorschuss", vorschuesse.length + " Vorschüsse ohne Vorschussgebühr (6390).");
     // Basis × Ansatz = Betrag
     for (const r of s.rows) {
-      if (r.isTotal || r.basis === null || r.ansatz === null || LC_NICHT_PFLICHTIG(r.code)) continue;
+      if (r.isTotal || r.basis === null || r.ansatz === null || LC_NICHT_PFLICHTIG(r.code, r.label)) continue;
       const exp = r.basis * r.ansatz / 100 * (r.anzahl !== null && r.anzahl !== 0 ? r.anzahl : 1);
       if (!lcNear(Math.abs(exp), Math.abs(r.betrag), Math.max(0.06, Math.abs(exp) * 0.002)))
         add(s, "gelb", "Rechnung", r.code + " " + r.label + ": Basis × Ansatz" + (r.anzahl ? " × Anzahl" : "") + " = " + lcFmt(exp) + ", Betrag " + lcFmt(r.betrag) + ".");
     }
     // Pflichtabzüge — Basis = Bruttolohn abzüglich nicht pflichtiger Lohnarten (36xx)
     if (s.brutto !== null && s.brutto > 0) {
-      const nichtPflichtig = s.rows.filter(r => LC_NICHT_PFLICHTIG(r.code) && !r.isTotal && r.level === 0).reduce((a, r) => a + r.betrag, 0);
+      const nichtPflichtig = s.rows.filter(r => LC_NICHT_PFLICHTIG(r.code, r.label) && !r.isTotal && r.level === 0).reduce((a, r) => a + r.betrag, 0);
       const svBasis = s.brutto - nichtPflichtig;
+      // Nur SV-freie Lohnarten (z.B. reines Unfall-Taggeld)? → keine SV-Abzüge erwartet
+      const svFrei = lohn.length > 0 && lohn.every(r => LC_NICHT_PFLICHTIG(r.code, r.label)) || Math.abs(svBasis) < 0.051;
       const svRow = nm => { const ref = LC_REF[nm]; return abz.find(r => ref.codes.includes(r.code)) || abz.find(r => ref.key.test(r.label)); };
       const ahvRow = svRow("AHV"), alvRow = svRow("ALV");
       // Gemeinsame Basis der übrigen SV-Abzüge (ALV/NBU/KTG/Vollzug) ermitteln
@@ -354,9 +361,11 @@ function lcCheckAll(slips) {
         if (found) add(s, "grau", "SV-Basis", "SV-Basis " + lcFmt(commonBasis) + " = Brutto " + lcFmt(s.brutto) + " − nicht pflichtige Lohnarten: " + found.map(i => cand[i].code + " " + cand[i].label + " " + lcFmt(cand[i].betrag)).join(", ") + ".");
         else add(s, "gelb", "SV-Basis", "SV-Basis " + lcFmt(commonBasis) + " ≠ Brutto − 36xx " + lcFmt(svBasis) + " (Δ " + lcFmt(svBasis - commonBasis) + " nicht durch Lohnarten erklärbar).");
       }
+      if (svFrei && !abz.some(r => ref5(r))) add(s, "grau", "SV-frei", "Nur nicht SV-pflichtige Lohnarten (" + [...new Set(lohn.map(r => r.code + " " + r.label.replace(/\s*\d{2}\.\d{2}\.\d{2,4}.*$/, "")))].join(", ") + ") — keine SV-Abzüge erwartet.");
       for (const [nm, ref] of Object.entries(LC_REF)) {
         const row = svRow(nm);
         if (!row) {
+          if (svFrei) continue;
           if (nm === "ALV" && rentner) { add(s, "grau", "Abzug fehlt", "Kein ALV-Abzug — bei Rentner/in korrekt."); continue; }
           add(s, ref.pflicht, "Abzug fehlt", "Kein " + nm + "-Abzug (" + ref.codes.join("/") + ") bei Bruttolohn " + lcFmt(s.brutto) + "."); continue;
         }
@@ -373,7 +382,7 @@ function lcCheckAll(slips) {
     // Satz weicht vom häufigsten Satz ab (Abzüge 5000–5499; BVG ausgenommen — Satz ist altersabhängig)
     for (const r of abz) {
       const m = satzMode[r.code];
-      if (LC_REF.BVG.codes.includes(r.code) || LC_REF.BVG.key.test(r.label)) continue;
+      if (LC_REF.BVG.codes.includes(r.code) || LC_REF.BVG.key.test(r.label) || LC_QST(r)) continue;
       if (m && r.ansatz !== null && m.n >= 3 && !lcNear(r.ansatz, m.satz, 0.0001) && !Object.values(LC_REF).some(ref => ref.codes.includes(r.code) && ref.satz !== null))
         add(s, "gelb", "Satz", r.code + " " + r.label + ": " + lcFmtPct(r.ansatz) + ", üblich " + lcFmtPct(m.satz) + " (" + m.n + "×).");
     }
@@ -439,6 +448,24 @@ function lcDrop(ev) {
   ev.preventDefault(); ev.stopPropagation();
   const el = ev.currentTarget; if (el) el.style.outline = "";
   lcProcessFiles([...(ev.dataTransfer && ev.dataTransfer.files ? ev.dataTransfer.files : [])]);
+}
+// Globale Drop-Behandlung: solange der Ultimative Check offen ist, öffnet der Browser fallengelassene PDFs
+// nicht mehr selbst, sondern sie landen im Tool — egal wo in der Ansicht sie losgelassen werden.
+let lcGlobalDropInstalled = false;
+function lcInstallGlobalDrop() {
+  if (lcGlobalDropInstalled) return;
+  lcGlobalDropInstalled = true;
+  const active = () => typeof currentView !== "undefined" && currentView === "lohncheck";
+  const zone = () => document.getElementById("lc-dropzone");
+  document.addEventListener("dragover", ev => { if (!active()) return; ev.preventDefault(); ev.dataTransfer.dropEffect = "copy"; const z = zone(); if (z) z.style.outline = "2px dashed var(--accent)"; });
+  document.addEventListener("dragleave", ev => { if (!active()) return; if (ev.relatedTarget === null || ev.clientX <= 0 || ev.clientY <= 0) { const z = zone(); if (z) z.style.outline = ""; } });
+  document.addEventListener("drop", ev => {
+    if (!active()) return;
+    ev.preventDefault();
+    const z = zone(); if (z) z.style.outline = "";
+    const files = [...(ev.dataTransfer && ev.dataTransfer.files ? ev.dataTransfer.files : [])];
+    if (files.length) lcProcessFiles(files);
+  });
 }
 function lcDragOver(ev) { ev.preventDefault(); ev.dataTransfer.dropEffect = "copy"; ev.currentTarget.style.outline = "2px dashed var(--accent)"; }
 function lcDragLeave(ev) { ev.currentTarget.style.outline = ""; }
@@ -516,7 +543,8 @@ function renderLohncheck(el) {
     ${lcState.slips.length ? `<button class="btn btn-sm" onclick="lcExport()">⇩ CSV</button>
     <button class="btn btn-sm" onclick="lcReset()" title="Alles zurücksetzen">↺</button>` : ""}`;
   if (lcState.busy) { el.innerHTML = `<div class="full-loading"><div class="loading"></div></div>`; return; }
-  const DZ = `ondragover="lcDragOver(event)" ondragleave="lcDragLeave(event)" ondrop="lcDrop(event)" style="border-radius:10px;min-height:120px"`;
+  lcInstallGlobalDrop();
+  const DZ = `id="lc-dropzone" style="border-radius:10px;min-height:120px"`;
   if (!lcState.slips.length) {
     el.innerHTML = `<div ${DZ}><div class="empty">Lohnabrechnungen als PDF hochladen oder <b>hierher ziehen</b> — beliebig viele Seiten und Dateien aufs Mal.<br>
       <span style="font-size:11px;color:var(--text-faint)">Jede Abrechnung wird ab «Lohn und Zulagen» erkannt, die Lohnarten
@@ -524,7 +552,7 @@ function renderLohncheck(el) {
       <input type="number" value="${lcState.bis}" style="width:64px" onchange="lcRange(${lcState.von},this.value)">
       werden erfasst und über alle Abrechnungen totalisiert (Lohnkontoblatt). Check v${LC_VERSION}<br>
       Geprüft werden Rechnung (Brutto/Abzüge/Netto/Sonstige/Abgerechnet/Rückbehalte/Auszahlung, Basis × Ansatz), Pflichtabzüge AHV/ALV/NBU/KTG/BVG/Vollzug,
-      Sätze, Abzugsbasis, Temporär-Bestandteile, Ferienrückbehalt, Vorschussgebühren und doppelte Abrechnungen.</span></div></div>`;
+      Sätze, Abzugsbasis (Spesen/Taggelder/Zulagen SV-frei), Temporär-Bestandteile, Ferienrückbehalt, Vorschussgebühren und doppelte Abrechnungen.</span></div></div>`;
     return;
   }
   const S = lcState.slips, I = lcState.issues;
@@ -548,7 +576,7 @@ function renderLohncheck(el) {
         <th style="text-align:right;padding:4px 8px">Belege</th><th style="text-align:right;padding:4px 8px">MA</th>
         <th style="text-align:right;padding:4px 8px">Anzahl Σ</th><th style="text-align:right;padding:4px 8px">Basis Σ</th><th style="text-align:right;padding:4px 8px">Ansatz</th><th style="text-align:right;padding:4px 8px">Betrag Σ</th><th style="text-align:right;padding:4px 8px">Berechnet</th><th style="text-align:left;padding:4px 8px">Kontrolle</th></tr>
       ${K.map(e => {
-        const saetze = Object.keys(e.saetze); const satz = saetze.length === 1 ? lcFmtPct(parseFloat(saetze[0])) : saetze.length > 1 ? saetze.length + " versch." : "";
+        const saetze = Object.keys(e.saetze); const satz = saetze.length === 1 ? lcFmtPct(parseFloat(saetze[0])) : saetze.length > 1 ? saetze.length + " versch." : ""; const satzOk = LC_QST(e) || LC_REF.BVG.codes.includes(e.code);
         return `<tr style="border-top:1px solid var(--border);${e.isTotal ? "font-weight:700" : ""};${e.level ? "color:var(--text-dim)" : ""}">
           <td style="padding:5px 8px 5px 0;font-family:var(--font-mono)">${e.code}</td>
           <td style="padding:5px 8px 5px ${e.level ? 18 : 0}px">${e.level ? "↳ " : ""}${escape(e.label)}</td>
@@ -556,10 +584,10 @@ function renderLohncheck(el) {
           <td style="text-align:right;padding:5px 8px;font-family:var(--font-mono)">${e.ma.size}</td>
           <td style="text-align:right;padding:5px 8px;font-family:var(--font-mono)">${e.hasAnzahl ? lcFmt(e.anzahl) : ""}</td>
           <td style="text-align:right;padding:5px 8px;font-family:var(--font-mono);color:var(--text-dim)">${e.hasBasis && !e.isTotal ? lcFmt(e.basis) : ""}</td>
-          <td style="text-align:right;padding:5px 8px;font-family:var(--font-mono);color:${saetze.length > 1 ? "var(--warn)" : "inherit"}">${satz}</td>
+          <td style="text-align:right;padding:5px 8px;font-family:var(--font-mono);color:${saetze.length > 1 && !satzOk ? "var(--warn)" : "inherit"}">${satz}</td>
           <td style="text-align:right;padding:5px 8px;font-family:var(--font-mono);color:${e.betrag < 0 ? "var(--danger)" : "inherit"}">${lcFmt(e.betrag)}</td>
           <td style="text-align:right;padding:5px 8px;font-family:var(--font-mono);color:var(--text-dim)">${e.calc ? lcFmt(e.calc.exp) : ""}</td>
-          <td style="padding:5px 8px;white-space:nowrap">${e.calc ? (e.calc.ok ? `<span style="color:var(--ok, #3a3)">✓ stimmt</span>` : `<span style="color:var(--danger)">✗ Δ ${lcFmt(e.calc.diff)}</span>`) : (saetze.length > 1 ? `<span style="color:var(--text-faint)">versch. Sätze</span>` : "")}</td></tr>`;
+          <td style="padding:5px 8px;white-space:nowrap">${e.calc ? (e.calc.ok ? `<span style="color:var(--ok, #3a3)">✓ stimmt</span>` : `<span style="color:var(--danger)">✗ Δ ${lcFmt(e.calc.diff)}</span>`) : (saetze.length > 1 ? `<span style="color:var(--text-faint)">${satzOk ? "individuell" : "versch. Sätze"}</span>` : "")}</td></tr>`;
       }).join("")}</table>
       <div style="font-size:10px;color:var(--text-faint);margin-top:8px">↳ = Bestandteil einer übergeordneten Lohnart (z.B. Grundlohn/Ferien/Feiertag/13. ML in Stundenlohn enthalten) — nicht zusätzlich zum Bruttolohn zählen. Fett = Totalzeilen. Berechnet = Basis Σ × Ansatz für Sozialabzüge 5000–5499 mit einheitlichem Ansatz über alle Belege; Kontrolle vergleicht mit Betrag Σ.</div>`;
   } else if (lcState.tab === "diff") {
