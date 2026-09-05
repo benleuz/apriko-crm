@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.77.0";
+const LC_VERSION = "1.80.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -20,6 +20,7 @@ const lcState = {
   tab: "konto",       // konto | diff | ma
   sev: "all",         // all | rot | gelb | grau
   open: {},           // aufgeklappte Mitarbeitende in der Differenzen-Ansicht (key → true)
+  flag: "all",        // Belegfilter (siehe LC_FLAGS) — wirkt auf alle Tabs und Kennzahlen
   busy: false
 };
 
@@ -258,11 +259,43 @@ function lcIdentify(slip) {
   if (plzIdx >= 1) {
     for (let k = plzIdx - 1; k >= Math.max(0, plzIdx - 4); k--) { if (nameLike(H[k])) { name = clean(H[k]); break; } }
   }
+  if (!name) { const c = H.find(l => /^(Herr|Frau|Herrn)\s+\S/i.test(l.trim()) && nameLike(l)); if (c) name = clean(c); }
   if (!name) { const c = H.find(nameLike); if (c) name = clean(c); }
   slip.name = name;
   slip.key = slip.ahv || (slip.persNr ? "P" + slip.persNr : null) || (name ? name.toLowerCase() : null) || ("Abrechnung #" + slip.id);
   slip.anzeige = name || (slip.persNr ? "Pers.-Nr. " + slip.persNr : null) || slip.ahv || ("Abrechnung #" + slip.id);
 }
+
+/* ---------- Namen über Belege mit gleicher AHV-/Personal-Nr übernehmen ---------- */
+function lcPropagateNames(slips) {
+  const byAhv = {}, byPers = {};
+  slips.forEach(s => { if (s.name && s.ahv) byAhv[s.ahv] = s.name; if (s.name && s.persNr) byPers[s.persNr] = s.name; });
+  slips.forEach(s => {
+    if (s.name) return;
+    const n = (s.ahv && byAhv[s.ahv]) || (s.persNr && byPers[s.persNr]) || null;
+    if (n) { s.name = n; s.nameFrom = "übernommen"; s.anzeige = n; s.key = s.ahv || (s.persNr ? "P" + s.persNr : n.toLowerCase()); }
+  });
+}
+
+/* ---------- Belegmerkmale (Filter) ---------- */
+const LC_FLAGS = [
+  ["all", "Alle Belege", () => true],
+  ["neg", "Negative Auszahlung", s => (s.auszahlung !== null && s.auszahlung < 0) || (s.auszahlung === null && s.abgerechnet !== null && s.abgerechnet < 0)],
+  ["bvg", "Mit BVG", s => s.rows.some(r => r.code === 5090 || (r.code >= 5000 && r.code < 5500 && /\bBVG\b/i.test(r.label)))],
+  ["nobvg", "Ohne BVG", s => s.brutto !== null && s.brutto > 0 && !s.rows.some(r => r.code === 5090 || (r.code >= 5000 && r.code < 5500 && /\bBVG\b/i.test(r.label)))],
+  ["kinder", "Mit Kinderzulagen", s => s.rows.some(r => r.code < 4900 && /Kinderzulage|Familienzulage|Ausbildungszulage|Geburtszulage/i.test(r.label))],
+  ["taggeld", "Mit Taggeld", s => s.rows.some(r => r.code < 4900 && (r.code === 2030 || /Taggeld/i.test(r.label)))],
+  ["stunden", "Stundenlohn", s => s.rows.some(r => r.code === 1005 || (r.code < 4900 && /Stundenlohn/i.test(r.label)))],
+  ["monat", "Monatslohn", s => s.rows.some(r => r.code < 4900 && /^Monatslohn/i.test(r.label))],
+  ["qst", "Mit Quellensteuer", s => s.rows.some(r => LC_QST(r))],
+  ["vorschuss", "Mit Vorschuss", s => s.rows.some(r => r.code === 8105 || (r.code >= 8000 && r.code < 8500 && /^Vorschuss\b/i.test(r.label)))],
+  ["rentner", "Rentner (AHV-Freibetrag)", s => !!s.rentner],
+  ["spesen", "Mit Spesen (36xx/6xxx)", s => s.rows.some(r => (r.code >= 3600 && r.code <= 3699) || /Spesen/i.test(r.label))],
+  ["korrektur", "Ohne Lohnblock (Korrektur)", s => s.brutto === null],
+  ["clean", "Ohne Hinweise", s => !s.issues.some(i => i.sev !== "grau")]
+];
+function lcFilteredSlips() { const f = LC_FLAGS.find(x => x[0] === lcState.flag) || LC_FLAGS[0]; return lcState.slips.filter(f[2]); }
+function lcSetFlag(v) { lcState.flag = v; lcState.open = {}; render(); }
 
 /* ---------- Plausibilitätsprüfung ---------- */
 // Teilmenge von Beträgen finden, die (auf 5 Rp.) einen Zielwert ergibt — kleinste Teilmenge bevorzugt, max. 16 Kandidaten
@@ -325,7 +358,7 @@ function lcCheckAll(slips) {
     const sonstTot = s.sonstige !== null ? s.sonstige : sonst.reduce((a, r) => a + r.betrag, 0);
     if (s.netto !== null && s.abgerechnet !== null && !lcNear(s.netto + sonstTot, s.abgerechnet) && !verschoben)
       add(s, "rot", "Rechnung", "Netto + Sonstige = " + lcFmt(s.netto + sonstTot) + " ≠ Abgerechnet " + lcFmt(s.abgerechnet) + ".");
-    if (s.abgerechnet !== null && s.abgerechnet < 0) add(s, "rot", "Abgerechnet", "Negativer Abrechnungsbetrag " + lcFmt(s.abgerechnet) + ".");
+    if (s.abgerechnet !== null && s.abgerechnet < 0) add(s, "grau", "Abgerechnet", "Negativer Abrechnungsbetrag " + lcFmt(s.abgerechnet) + " (Korrekturabrechnung?).");
     // Rückbehalte und Zahlungen (8000–8499) → 8500 → 6900 + 8500 = 8900 Auszahlung
     const rueck = s.rows.filter(r => r.code >= 8000 && r.code < 8500 && !r.isTotal);
     const rueckTot = s.rueckbehalt !== null ? s.rueckbehalt : rueck.reduce((a, r) => a + r.betrag, 0);
@@ -335,7 +368,7 @@ function lcCheckAll(slips) {
     }
     if (s.abgerechnet !== null && s.auszahlung !== null && !lcNear(s.abgerechnet + rueckTot, s.auszahlung))
       add(s, "rot", "Auszahlung", "Abgerechnet " + lcFmt(s.abgerechnet) + " + Rückbehalte/Zahlungen " + lcFmt(rueckTot) + " = " + lcFmt(s.abgerechnet + rueckTot) + " ≠ Auszahlung " + lcFmt(s.auszahlung) + ".");
-    if (s.auszahlung !== null && s.auszahlung < 0) add(s, "rot", "Auszahlung", "Negative Auszahlung " + lcFmt(s.auszahlung) + ".");
+    if (s.auszahlung !== null && s.auszahlung < 0) add(s, "grau", "Auszahlung", "Negative Auszahlung " + lcFmt(s.auszahlung) + " — Vorschüsse/Rückbehalte übersteigen den Abrechnungsbetrag, Übertrag/Rückforderung.");
     if (s.abgerechnet !== null && s.auszahlung === null) add(s, "grau", "Auszahlung", "Keine Auszahlungszeile (8900) erkannt.");
     // Ferienrückbehalt (8020) sollte der Ferienvergütung (1160) entsprechen
     const ferien = s.rows.find(r => r.code === 1160 || (/Ferienvergütung/i.test(r.label) && r.code < 4900));
@@ -502,6 +535,7 @@ async function lcProcessFiles(list) {
       slips.forEach(s => { s.id = lcState.slips.length + 1; lcState.slips.push(s); });
       lcState.files.push(file.name + " (" + pages.length + " S., " + slips.length + " Abr.)");
     }
+    lcPropagateNames(lcState.slips);
     lcState.issues = lcCheckAll(lcState.slips);
     lcState.busy = false;
     render();
@@ -511,7 +545,7 @@ async function lcProcessFiles(list) {
     toast("Import fehlgeschlagen: " + e.message, true);
   }
 }
-function lcReset() { lcState.slips = []; lcState.issues = []; lcState.files = []; lcState.open = {}; render(); }
+function lcReset() { lcState.slips = []; lcState.issues = []; lcState.files = []; lcState.open = {}; lcState.flag = "all"; render(); }
 function lcRange(von, bis) {
   lcState.von = parseInt(von, 10) || 1000; lcState.bis = parseInt(bis, 10) || 6000;
   // Zeilen neu filtern: Abrechnungen neu parsen wäre nötig — Rows sind bereits mit altem Bereich erfasst,
@@ -529,18 +563,18 @@ function lcCsv(rows) {
 }
 function lcExport() {
   if (lcState.tab === "diff") {
-    lcCsv([["Schwere", "Mitarbeiter", "Periode", "Prüfung", "Meldung"], ...lcState.issues.map(i => [i.sev, i.ma, i.periode, i.pruef, i.text])]);
+    lcCsv([["Schwere", "Mitarbeiter", "Periode", "Prüfung", "Meldung"], ...lcState.issues.filter(i => lcFilteredSlips().some(s => s.id === i.slipId)).map(i => [i.sev, i.ma, i.periode, i.pruef, i.text])]);
   } else if (lcState.tab === "ma") {
     lcCsv([["Mitarbeiter", "AHV-Nr", "Pers.-Nr", "Abrechnungen", "Bruttolohn", "Nettolohn", "Hinweise"], ...lcEmployees().map(m => [m.name, m.ahv, m.persNr, m.n, m.brutto.toFixed(2), m.netto.toFixed(2), m.rot + m.gelb])]);
   } else {
-    lcCsv([["Code", "Lohnart", "Belege", "Mitarbeiter", "Anzahl", "Betrag"], ...lcKonto(lcState.slips).map(e => [e.code, e.label, e.n, e.ma.size, e.hasAnzahl ? e.anzahl.toFixed(2) : "", e.betrag.toFixed(2)])]);
+    lcCsv([["Code", "Lohnart", "Belege", "Mitarbeiter", "Anzahl", "Betrag"], ...lcKonto(lcFilteredSlips()).map(e => [e.code, e.label, e.n, e.ma.size, e.hasAnzahl ? e.anzahl.toFixed(2) : "", e.betrag.toFixed(2)])]);
   }
 }
 
 /* ---------- Aggregation Mitarbeiter ---------- */
 function lcEmployees() {
   const m = {};
-  for (const s of lcState.slips) {
+  for (const s of lcFilteredSlips()) {
     let e = m[s.key];
     if (!e) e = m[s.key] = { key: s.key, name: s.anzeige, ahv: s.ahv || "", persNr: s.persNr || "", n: 0, brutto: 0, netto: 0, rot: 0, gelb: 0, slips: [] };
     e.n++; e.brutto += s.brutto || 0; e.netto += s.netto || 0; e.slips.push(s);
@@ -573,8 +607,11 @@ function renderLohncheck(el) {
       Sätze, Abzugsbasis (Spesen/Taggelder/Zulagen SV-frei), Temporär-Bestandteile, Ferienrückbehalt, Vorschussgebühren und doppelte Abrechnungen.</span></div></div>`;
     return;
   }
-  const S = lcState.slips, I = lcState.issues;
+  const S = lcFilteredSlips();
+  const ids = new Set(S.map(s => s.id));
+  const I = lcState.issues.filter(i => ids.has(i.slipId));
   const rot = I.filter(i => i.sev === "rot").length, gelb = I.filter(i => i.sev === "gelb").length;
+  const flagSel = `<select onchange="lcSetFlag(this.value)" style="font-size:12px;padding:3px 6px">${LC_FLAGS.map(([id, label, fn]) => { const n = lcState.slips.filter(fn).length; return `<option value="${id}" ${lcState.flag === id ? "selected" : ""}>${label} (${n})</option>`; }).join("")}</select>`;
   const sum = k => S.reduce((a, s) => a + (s[k] || 0), 0);
   const emps = lcEmployees();
   const tab = (id, label) => `<button class="btn btn-sm" style="${lcState.tab === id ? "background:var(--accent);color:#fff" : ""}" onclick="lcState.tab='${id}';render()">${label}</button>`;
@@ -648,7 +685,7 @@ function renderLohncheck(el) {
   }
   el.innerHTML = `<div ${DZ}>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
-      <div class="card stat-card"><div class="stat-label">Abrechnungen</div><div class="stat-value">${S.length}</div></div>
+      <div class="card stat-card"><div class="stat-label">Abrechnungen${lcState.flag !== "all" ? " <span style=\"color:var(--accent)\">(gefiltert)</span>" : ""}</div><div class="stat-value">${S.length}${lcState.flag !== "all" ? `<span style="font-size:12px;color:var(--text-faint)"> / ${lcState.slips.length}</span>` : ""}</div></div>
       <div class="card stat-card"><div class="stat-label">Mitarbeitende</div><div class="stat-value">${emps.length}</div></div>
       <div class="card stat-card"><div class="stat-label">Bruttolohn Σ</div><div class="stat-value">${lcFmt(sum("brutto"), 0)}</div></div>
       <div class="card stat-card"><div class="stat-label">Nettolohn Σ</div><div class="stat-value">${lcFmt(sum("netto"), 0)}</div></div>
@@ -657,7 +694,7 @@ function renderLohncheck(el) {
     </div>
     <div class="card" style="padding:14px 16px;overflow-x:auto">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
-        <div style="display:flex;gap:6px">${tab("konto", "Lohnkontoblatt")}${tab("diff", "Differenzen " + I.length)}${tab("ma", "Mitarbeitende")}</div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${tab("konto", "Lohnkontoblatt")}${tab("diff", "Differenzen " + I.length)}${tab("ma", "Mitarbeitende")}<span style="margin-left:8px;font-size:11px;color:var(--text-dim)">Filter:</span>${flagSel}</div>
         <div style="font-size:10px;color:var(--text-faint)">${escape(lcState.files.join(" + "))} · Lohnarten ${lcState.von}–${lcState.bis} · Check v${LC_VERSION}</div>
       </div>
       ${body}
@@ -666,7 +703,7 @@ function renderLohncheck(el) {
 }
 
 function lcToggle(key) { if (lcState.open[key]) delete lcState.open[key]; else lcState.open[key] = true; render(); }
-function lcToggleAll(open) { lcState.open = {}; if (open) lcState.issues.forEach(i => { lcState.open[i.key] = true; }); render(); }
+function lcToggleAll(open) { lcState.open = {}; if (open) { const ids = new Set(lcFilteredSlips().map(s => s.id)); lcState.issues.forEach(i => { if (ids.has(i.slipId)) lcState.open[i.key] = true; }); } render(); }
 
 function lcDetail(slipId) {
   const s = lcState.slips.find(x => x.id === slipId);
@@ -675,7 +712,7 @@ function lcDetail(slipId) {
   const navi = same.length > 1 ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">${same.map(x => `<button class="btn btn-sm" style="${x.id === s.id ? "background:var(--accent);color:#fff" : ""}" onclick="lcDetail(${x.id})">${escape(x.periode)}</button>`).join("")}</div>` : "";
   showModal(escape(s.anzeige) + " — " + escape(s.periode), `
     ${navi}
-    <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">Abrechnung #${s.id} · ${escape(s.file)} · Seite ${s.pages[0].n}${s.pages.length > 1 ? "–" + s.pages[s.pages.length - 1].n : ""}${s.ahv ? " · AHV " + escape(s.ahv) : ""}${s.persNr ? " · Pers.-Nr. " + escape(s.persNr) : ""}</div>
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">Abrechnung #${s.id} · ${escape(s.file)} · Seite ${s.pages[0].n}${s.pages.length > 1 ? "–" + s.pages[s.pages.length - 1].n : ""}${s.ahv ? " · AHV " + escape(s.ahv) : ""}${s.nameFrom ? " · Name aus anderem Beleg übernommen" : ""}${s.persNr ? " · Pers.-Nr. " + escape(s.persNr) : ""}</div>
     ${s.issues.length ? `<div style="margin-bottom:10px">${s.issues.map(i => `<div style="font-size:12px;padding:3px 0">${lcSevBadge(i.sev)}<b>${escape(i.pruef)}</b> ${escape(i.text)}</div>`).join("")}</div>` : `<div style="font-size:12px;margin-bottom:10px">✓ Keine Hinweise</div>`}
     <table style="width:100%;font-size:12px;border-collapse:collapse">
       <tr style="color:var(--text-dim)"><th style="text-align:left">Code</th><th style="text-align:left">Lohnart</th><th style="text-align:right">Basis</th><th style="text-align:right">Ansatz</th><th style="text-align:right">Anzahl</th><th style="text-align:right">Betrag</th></tr>
