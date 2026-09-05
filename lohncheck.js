@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.80.0";
+const LC_VERSION = "1.82.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -253,13 +253,21 @@ function lcIdentify(slip) {
   // Name: Zeile vor Strasse+PLZ-Block, sonst erste "namensartige" Zeile
   const bad = /\b(AG|GmbH|SA|Sàrl|Apriko|Lohnabrechnung|Lohnausweis|Seite|Tel|Fax|www\.|@|Strasse|Str\.|Weg|Platz|Gasse|IBAN|Bank|Konto|Eintritt|Austritt|Personal|Abrechnung|Zahlung|Datum)\b/i;
   const clean = s => s.replace(/^(Herr|Frau|Herrn|Monsieur|Madame|Mr\.?|Mrs\.?)\s+/i, "").trim();
-  const nameLike = s => { const t = clean(s); return t.length >= 4 && t.length <= 60 && !/\d/.test(t) && !bad.test(t) && /^[A-ZÄÖÜÉÈ][\wÄÖÜäöüéèàç'.-]+(\s+[A-ZÄÖÜÉÈ(][\wÄÖÜäöüéèàç'.()-]*){1,4}$/.test(t); };
+  // Namensartige Zeile: 2–5 Wörter, Grossbuchstaben am Anfang, Adelspartikel/Bindewörter (da, de, van, von, …) erlaubt, keine Ziffern
+  const W = "[A-ZÄÖÜÉÈÁÀÂÇÑŁŚŻ][\\wÄÖÜäöüéèàâçñłśżãõáíóúüïë'’.()-]*|(?:da|de|del|della|di|do|dos|das|du|la|le|van|von|der|den|ten|ter|y|e|al|el|bin|ibn)";
+  const nameRe = new RegExp("^(?:" + W + ")(?:\\s+(?:" + W + ")){1,4}$", "u");
+  const nameLike = s => { const t = clean(s).replace(/,\s*$/, ""); return t.length >= 4 && t.length <= 60 && !/\d/.test(t) && !bad.test(t) && nameRe.test(t); };
   let name = null;
-  const plzIdx = H.findIndex(l => /^(CH-)?\d{4}\s+[A-ZÄÖÜ]/.test(l.trim()));
+  // PLZ-Zeile: CH 4-stellig, DE 5-stellig, FR 5-stellig, AT/LI 4-stellig — mit oder ohne Länderkürzel (CH-, D-, DE-, F-, FR-, A-, AT-, FL-, I-, IT-)
+  const plzIdx = H.findIndex(l => /^(?:[A-Z]{1,2}-\s?)?\d{4,5}\s+[A-ZÄÖÜÉÈ]/.test(l.trim()));
   if (plzIdx >= 1) {
     for (let k = plzIdx - 1; k >= Math.max(0, plzIdx - 4); k--) { if (nameLike(H[k])) { name = clean(H[k]); break; } }
   }
-  if (!name) { const c = H.find(l => /^(Herr|Frau|Herrn)\s+\S/i.test(l.trim()) && nameLike(l)); if (c) name = clean(c); }
+  if (!name) { const c = H.find(l => /^(Herr|Frau|Herrn|Monsieur|Madame)\s+\S/i.test(l.trim()) && nameLike(l)); if (c) name = clean(c); }
+  if (!name) { // Zeile direkt vor einer Strassenzeile («… strasse 12», «Rue …», «Chemin …», «… Str. 5»)
+    const strIdx = H.findIndex(l => /(strasse|straße|str\.|weg|gasse|platz|allee|ring|rue|route|chemin|avenue|via|piazza)\b.*\d|^\d+\s*,?\s*(rue|route|chemin|avenue)/i.test(l.trim()));
+    if (strIdx >= 1) for (let k = strIdx - 1; k >= Math.max(0, strIdx - 3); k--) { if (nameLike(H[k])) { name = clean(H[k]); break; } }
+  }
   if (!name) { const c = H.find(nameLike); if (c) name = clean(c); }
   slip.name = name;
   slip.key = slip.ahv || (slip.persNr ? "P" + slip.persNr : null) || (name ? name.toLowerCase() : null) || ("Abrechnung #" + slip.id);
@@ -654,7 +662,9 @@ function renderLohncheck(el) {
     list.forEach(i => { let g = byKey[i.key]; if (!g) { g = byKey[i.key] = { key: i.key, ma: i.ma, items: [], rot: 0, gelb: 0, grau: 0 }; groups.push(g); } g.items.push(i); g[i.sev]++; });
     groups.sort((a, b) => b.rot - a.rot || b.gelb - a.gelb || a.ma.localeCompare(b.ma, "de"));
     const allOpen = groups.length && groups.every(g => lcState.open[g.key]);
-    body = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center">${f("all", "Alle " + I.length)}${f("rot", "Rot " + rot)}${f("gelb", "Gelb " + gelb)}${f("grau", "Grau " + (I.length - rot - gelb))}
+    // Zähler = Anzahl betroffene Mitarbeitende, nicht Anzahl Hinweise
+    const maCount = sev => new Set(I.filter(i => sev === "all" || i.sev === sev).map(i => i.key)).size;
+    body = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center">${f("all", "Alle " + maCount("all"))}${f("rot", "Rot " + maCount("rot"))}${f("gelb", "Gelb " + maCount("gelb"))}${f("grau", "Grau " + maCount("grau"))}<span style="font-size:11px;color:var(--text-faint);margin-left:4px">Mitarbeitende</span>
       <span style="flex:1"></span><button class="btn btn-sm" onclick="lcToggleAll(${allOpen ? "false" : "true"})">${allOpen ? "Alle zuklappen" : "Alle aufklappen"}</button></div>
       ${groups.length ? `<table style="width:100%;font-size:12px;border-collapse:collapse">
       <tr style="color:var(--text-dim)"><th style="text-align:left">Mitarbeiter</th><th style="text-align:left">Hinweise</th><th style="text-align:left">Perioden</th></tr>
@@ -694,7 +704,7 @@ function renderLohncheck(el) {
     </div>
     <div class="card" style="padding:14px 16px;overflow-x:auto">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${tab("konto", "Lohnkontoblatt")}${tab("diff", "Differenzen " + I.length)}${tab("ma", "Mitarbeitende")}<span style="margin-left:8px;font-size:11px;color:var(--text-dim)">Filter:</span>${flagSel}</div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${tab("konto", "Lohnkontoblatt")}${tab("diff", "Differenzen " + new Set(I.filter(i => i.sev !== "grau").map(i => i.key)).size)}${tab("ma", "Mitarbeitende")}<span style="margin-left:8px;font-size:11px;color:var(--text-dim)">Filter:</span>${flagSel}</div>
         <div style="font-size:10px;color:var(--text-faint)">${escape(lcState.files.join(" + "))} · Lohnarten ${lcState.von}–${lcState.bis} · Check v${LC_VERSION}</div>
       </div>
       ${body}
