@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.88.0";
+const LC_VERSION = "1.90.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -677,7 +677,8 @@ function renderLohncheck(el) {
   const rot = I.filter(i => i.sev === "rot").length, gelb = I.filter(i => i.sev === "gelb").length;
   const implCnt = {}; S.forEach(s => { if (s.koordImpl !== null && s.koordImpl !== undefined) { const k = s.koordImpl.toFixed(2); implCnt[k] = (implCnt[k] || 0) + 1; } });
   const implTop = Object.entries(implCnt).sort((a, b) => b[1] - a[1])[0];
-  const koordHint = implTop ? `<span style="font-size:10px;color:${lcNear(parseFloat(implTop[0]), lcState.koord, 0.011) ? "var(--text-faint)" : "var(--warn)"}" title="Aus AHV- und BVG-Basis der Stundenlöhner zurückgerechnet">(Belege implizieren ${implTop[0]}/h bei ${implTop[1]} von ${Object.values(implCnt).reduce((a, b) => a + b, 0)})</span>` : "";
+  // Nur anzeigen, wenn die Mehrheit der Belege einen anderen Koordinationsabzug impliziert als hinterlegt (12.10)
+  const koordHint = implTop && !lcNear(parseFloat(implTop[0]), lcState.koord, 0.011) ? `<span style="font-size:10px;color:var(--warn)" title="Aus AHV- und BVG-Basis der Stundenlöhner zurückgerechnet: (AHV-Basis − BVG-Basis) / Stunden">⚠ BVG-Koordinationsabzug in den Belegen ${implTop[0]}/h statt ${lcFmt(lcState.koord)} (${implTop[1]} von ${Object.values(implCnt).reduce((a, b) => a + b, 0)} Stundenlohn-Belegen)</span>` : "";
   const flagSel = `<select onchange="lcSetFlag(this.value)" style="font-size:12px;padding:3px 6px">${LC_FLAGS.map(([id, label, fn]) => { const n = lcState.slips.filter(fn).length; return `<option value="${id}" ${lcState.flag === id ? "selected" : ""}>${label} (${n})</option>`; }).join("")}</select>`;
   const sum = k => S.reduce((a, s) => a + (s[k] || 0), 0);
   const emps = lcEmployees();
