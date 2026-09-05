@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.66.0";
+const LC_VERSION = "1.67.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -326,11 +326,16 @@ function lcCheckAll(slips) {
       // AHV-Freibetrag Rentner (CHF 1'400/Monat): AHV-Basis = ALV-Basis − 1'400
       const ahvRow = abz.find(r => r.code === 5010) || abz.find(r => LC_REF.AHV.key.test(r.label));
       const alvRow = abz.find(r => r.code === 5020) || abz.find(r => LC_REF.ALV.key.test(r.label));
-      const rentner = ahvRow && alvRow && ahvRow.basis !== null && alvRow.basis !== null && lcNear(alvRow.basis - ahvRow.basis, 1400);
-      if (rentner) add(s, "grau", "Rentner?", "AHV-Basis " + lcFmt(ahvRow.basis) + " = ALV-Basis " + lcFmt(alvRow.basis) + " − 1'400.00 → AHV-Freibetrag, Rentner/in?");
+      // Erkennung über ALV-Basis (falls vorhanden) oder über den pflichtigen Lohn (Brutto − 36xx); Rentner haben oft keinen ALV-Abzug
+      const rentner = !!(ahvRow && ahvRow.basis !== null && (
+        (alvRow && alvRow.basis !== null && lcNear(alvRow.basis - ahvRow.basis, 1400)) || lcNear(svBasis - ahvRow.basis, 1400)));
+      if (rentner) add(s, "grau", "Rentner?", "AHV-Basis " + lcFmt(ahvRow.basis) + " = pflichtiger Lohn " + lcFmt(svBasis) + " − 1'400.00 → AHV-Freibetrag, Rentner/in?");
       for (const [nm, ref] of Object.entries(LC_REF)) {
         const row = abz.find(r => ref.codes.includes(r.code)) || abz.find(r => ref.key.test(r.label));
-        if (!row) { add(s, ref.pflicht, "Abzug fehlt", "Kein " + nm + "-Abzug (" + ref.codes.join("/") + ") bei Bruttolohn " + lcFmt(s.brutto) + "."); continue; }
+        if (!row) {
+          if (nm === "ALV" && rentner) { add(s, "grau", "Abzug fehlt", "Kein ALV-Abzug — bei Rentner/in korrekt."); continue; }
+          add(s, ref.pflicht, "Abzug fehlt", "Kein " + nm + "-Abzug (" + ref.codes.join("/") + ") bei Bruttolohn " + lcFmt(s.brutto) + "."); continue;
+        }
         if (row.betrag === 0) add(s, ref.pflicht, "Abzug 0", nm + "-Abzug vorhanden, aber Betrag 0.");
         if (row.betrag > 0) add(s, "gelb", "Vorzeichen", nm + "-Abzug ist positiv (" + lcFmt(row.betrag) + ").");
         if (ref.satz !== null && row.ansatz !== null && !lcNear(row.ansatz, ref.satz, 0.0001))
