@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.73.0";
+const LC_VERSION = "1.75.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -294,8 +294,11 @@ function lcCheckAll(slips) {
     const sonst0 = s.rows.filter(r => r.code >= 6000 && r.code < 6500 && !r.isTotal);
     const dAbz = (s.abzuege !== null && abz.length) ? abz.reduce((a, r) => a + r.betrag, 0) - s.abzuege : null;
     const dSonst = (s.sonstige !== null && sonst0.length) ? sonst0.reduce((a, r) => a + r.betrag, 0) - s.sonstige : null;
-    const verschoben = dAbz !== null && dSonst !== null && !lcNear(dAbz, 0) && lcNear(dAbz + dSonst, 0, 0.06);
-    if (verschoben) add(s, "grau", "Zuweisung", "Korrekturlohnarten von " + lcFmt(Math.abs(dAbz)) + " stehen bei den Abzügen, zählen aber im Total 6500 — geht über beide Blöcke auf.");
+    // Die Korrektur kann im 6500 auftauchen (dSonst) oder — ohne Block «Sonstige» — direkt im 6900 Abgerechnet (dAbger)
+    const sonstTot0 = s.sonstige !== null ? s.sonstige : sonst0.reduce((a, r) => a + r.betrag, 0);
+    const dAbger = (s.netto !== null && s.abgerechnet !== null) ? s.abgerechnet - (s.netto + sonstTot0) : null;
+    const verschoben = dAbz !== null && !lcNear(dAbz, 0) && lcNear(dAbz + (dSonst || 0) - (dAbger || 0), 0, 0.06);
+    if (verschoben) add(s, "grau", "Zuweisung", "Korrekturlohnarten von " + lcFmt(Math.abs(dAbz)) + " stehen bei den Abzügen, zählen aber erst im " + (dSonst !== null && !lcNear(dSonst, 0) ? "Total 6500" : "Abgerechnet 6900") + " — geht über die Blöcke auf.");
     if (dAbz !== null && !lcNear(dAbz, 0) && !verschoben) add(s, "rot", "Rechnung", "Summe Abzüge " + lcFmt(s.abzuege + dAbz) + " ≠ Total Abzüge " + lcFmt(s.abzuege) + ".");
     if (s.brutto !== null && s.abzuege !== null && s.netto !== null && !lcNear(s.brutto + s.abzuege, s.netto))
       add(s, "rot", "Rechnung", "Brutto + Abzüge = " + lcFmt(s.brutto + s.abzuege) + " ≠ Nettolohn " + lcFmt(s.netto) + ".");
@@ -304,7 +307,7 @@ function lcCheckAll(slips) {
     const sonst = sonst0;
     if (dSonst !== null && !lcNear(dSonst, 0) && !verschoben) add(s, "rot", "Rechnung", "Summe sonstige Zulagen/Abzüge " + lcFmt(s.sonstige + dSonst) + " ≠ Total 6500 " + lcFmt(s.sonstige) + ".");
     const sonstTot = s.sonstige !== null ? s.sonstige : sonst.reduce((a, r) => a + r.betrag, 0);
-    if (s.netto !== null && s.abgerechnet !== null && !lcNear(s.netto + sonstTot, s.abgerechnet))
+    if (s.netto !== null && s.abgerechnet !== null && !lcNear(s.netto + sonstTot, s.abgerechnet) && !verschoben)
       add(s, "rot", "Rechnung", "Netto + Sonstige = " + lcFmt(s.netto + sonstTot) + " ≠ Abgerechnet " + lcFmt(s.abgerechnet) + ".");
     if (s.abgerechnet !== null && s.abgerechnet < 0) add(s, "rot", "Abgerechnet", "Negativer Abrechnungsbetrag " + lcFmt(s.abgerechnet) + ".");
     // Rückbehalte und Zahlungen (8000–8499) → 8500 → 6900 + 8500 = 8900 Auszahlung
@@ -328,7 +331,6 @@ function lcCheckAll(slips) {
     const gebuehr = s.rows.find(r => r.code === 6390 || /Vorschussgebühr/i.test(r.label));
     if (vorschuesse.length && gebuehr && gebuehr.anzahl !== null && !lcNear(gebuehr.anzahl, vorschuesse.length))
       add(s, "gelb", "Vorschuss", vorschuesse.length + " Vorschüsse, aber " + lcFmt(gebuehr.anzahl) + " Vorschussgebühren verrechnet.");
-    if (vorschuesse.length && !gebuehr) add(s, "gelb", "Vorschuss", vorschuesse.length + " Vorschüsse ohne Vorschussgebühr (6390).");
     // Basis × Ansatz = Betrag
     for (const r of s.rows) {
       if (r.isTotal || r.basis === null || r.ansatz === null || LC_NICHT_PFLICHTIG(r.code, r.label)) continue;
