@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.64.0";
+const LC_VERSION = "1.65.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -314,7 +314,7 @@ function lcCheckAll(slips) {
     if (vorschuesse.length && !gebuehr) add(s, "gelb", "Vorschuss", vorschuesse.length + " Vorschüsse ohne Vorschussgebühr (6390).");
     // Basis × Ansatz = Betrag
     for (const r of s.rows) {
-      if (r.isTotal || r.basis === null || r.ansatz === null) continue;
+      if (r.isTotal || r.basis === null || r.ansatz === null || LC_NICHT_PFLICHTIG(r.code)) continue;
       const exp = r.basis * r.ansatz / 100 * (r.anzahl !== null && r.anzahl !== 0 ? r.anzahl : 1);
       if (!lcNear(Math.abs(exp), Math.abs(r.betrag), Math.max(0.06, Math.abs(exp) * 0.002)))
         add(s, "gelb", "Rechnung", r.code + " " + r.label + ": Basis × Ansatz" + (r.anzahl ? " × Anzahl" : "") + " = " + lcFmt(exp) + ", Betrag " + lcFmt(r.betrag) + ".");
@@ -361,17 +361,24 @@ function lcCheckAll(slips) {
 
 /* ---------- Totalisierung ---------- */
 function lcKonto(slips) {
+  // Zusammenzug ausschliesslich nach Lohnartennummer; Bezeichnung = häufigste Bezeichnung (Datumsangaben entfernt)
   const map = {};
+  const norm = l => l.replace(/\b\d{2}\.\d{2}\.\d{4}\b/g, "").replace(/\b(Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s+20\d{2}\b/gi, "").replace(/\s*\(\d+(\.\d+)?\s*%\)\s*$/, "").replace(/\s+/g, " ").trim();
   for (const s of slips) for (const r of s.rows) {
-    const k = r.code + "|" + r.label.toLowerCase().replace(/\s*\(.*?\)\s*/g, " ").trim();
-    let e = map[k];
-    if (!e) e = map[k] = { code: r.code, label: r.label.replace(/\s*\(\d+(\.\d+)?\s*%\)\s*$/, ""), n: 0, anzahl: 0, hasAnzahl: false, betrag: 0, isTotal: r.isTotal, level: r.level || 0, ma: new Set(), saetze: {} };
+    let e = map[r.code];
+    if (!e) e = map[r.code] = { code: r.code, labels: {}, n: 0, anzahl: 0, hasAnzahl: false, betrag: 0, isTotal: r.isTotal, level: r.level || 0, ma: new Set(), saetze: {} };
+    const l = norm(r.label); e.labels[l] = (e.labels[l] || 0) + 1;
     e.n++; e.betrag += r.betrag; e.ma.add(s.key);
     if (r.anzahl !== null) { e.anzahl += r.anzahl; e.hasAnzahl = true; }
     if (r.ansatz !== null) e.saetze[r.ansatz] = (e.saetze[r.ansatz] || 0) + 1;
     if (r.level === 1) e.level = 1;
+    if (r.isTotal) e.isTotal = true;
   }
-  return Object.values(map).sort((a, b) => a.code - b.code || a.label.localeCompare(b.label, "de"));
+  return Object.values(map).map(e => {
+    const ls = Object.entries(e.labels).sort((a, b) => b[1] - a[1]);
+    e.label = ls[0][0] + (ls.length > 1 ? " (+" + (ls.length - 1) + " weitere Bez.)" : "");
+    return e;
+  }).sort((a, b) => a.code - b.code);
 }
 
 /* ---------- Upload ---------- */
