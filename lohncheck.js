@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.85.0";
+const LC_VERSION = "1.87.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -251,20 +251,29 @@ function lcIdentify(slip) {
     if (m) { per = m[1] + " " + m[2]; break; }
   }
   if (!per) { const m = /(\d{2}\.\d{2}\.\d{4})\s*[-–]\s*(\d{2}\.\d{2}\.\d{4})/.exec(all); if (m) per = m[1] + " – " + m[2]; }
-  if (!per) { const m = /(\d{2})\.(\d{4})\b/.exec(all); if (m) per = LC_MONATE[parseInt(m[1], 10) - 1] + " " + m[2]; }
+  if (!per) { const m = /Abgerechnet bis\s+\d{2}\.(\d{2})\.(\d{4})/i.exec(all); if (m) per = LC_MONATE[parseInt(m[1], 10) - 1] + " " + m[2]; }
+  if (!per) { const m = /\b(\d{2})\.(20\d{2})\b/.exec(all); if (m && parseInt(m[1], 10) >= 1 && parseInt(m[1], 10) <= 12) per = LC_MONATE[parseInt(m[1], 10) - 1] + " " + m[2]; }
   slip.periode = per || "?";
   // Name: Zeile vor Strasse+PLZ-Block, sonst erste "namensartige" Zeile
-  const bad = /\b(AG|GmbH|SA|Sàrl|Apriko|Lohnabrechnung|Lohnausweis|Seite|Tel|Fax|www\.|@|Strasse|Str\.|Weg|Platz|Gasse|IBAN|Bank|Konto|Eintritt|Austritt|Personal|Abrechnung|Zahlung|Datum)\b/i;
+  const bad = /\b(AG|GmbH|SA|Sàrl|Apriko|Arbeitnehmer|Arbeitnehmerin|Mitarbeiter|Sozialversicherungsnr|Abgerechnet|Lohnabrechnung|Lohnausweis|Seite|Tel|Fax|www\.|@|Strasse|Str\.|Weg|Platz|Gasse|IBAN|Bank|Konto|Eintritt|Austritt|Personal|Abrechnung|Zahlung|Datum)\b/i;
   const clean = s => s.replace(/^(Herr|Frau|Herrn|Monsieur|Madame|Mr\.?|Mrs\.?)\s+/i, "").trim();
   // Namensartige Zeile: 2–5 Wörter, Grossbuchstaben am Anfang, Adelspartikel/Bindewörter (da, de, van, von, …) erlaubt, keine Ziffern
   const W = "[A-ZÄÖÜÉÈÁÀÂÇÑŁŚŻ][\\wÄÖÜäöüéèàâçñłśżãõáíóúüïë'’.()-]*|(?:da|de|del|della|di|do|dos|das|du|la|le|van|von|der|den|ten|ter|y|e|al|el|bin|ibn)";
-  const nameRe = new RegExp("^(?:" + W + ")(?:\\s+(?:" + W + ")){1,4}$", "u");
+  const nameRe = new RegExp("^(?:" + W + ")(?:\\s+(?:" + W + ")){1,7}$", "u");
   const nameLike = s => { const t = clean(s).replace(/,\s*$/, ""); return t.length >= 4 && t.length <= 60 && !/\d/.test(t) && !bad.test(t) && nameRe.test(t); };
   let name = null;
-  // PLZ-Zeile: CH 4-stellig, DE 5-stellig, FR 5-stellig, AT/LI 4-stellig — mit oder ohne Länderkürzel (CH-, D-, DE-, F-, FR-, A-, AT-, FL-, I-, IT-)
+  // 1. Beschriftetes Feld «Arbeitnehmer …» / «Mitarbeiter …» / «Name …» (auf derselben Zeile können weitere Felder folgen, z.B. «Abgerechnet am»)
+  for (const l of H) {
+    const m = /^(?:Arbeitnehmer(?:in|\/in)?|Mitarbeiter(?:in|\/in)?|Name|Nom|Versicherte[rn]?)\s*:?\s+(.+)$/i.exec(l.trim());
+    if (m) {
+      const v = m[1].replace(/\s+(Abgerechnet|Sozialversicherung|AHV|Personal|Eintritt|Austritt|Geb\.|Geburts|Adresse|Periode|Zahlung|Bank|IBAN)\b.*$/i, "").trim();
+      if (v && !/\d/.test(v) && v.length <= 80) { name = clean(v); break; }
+    }
+  }
+  // 2. Adressblock — PLZ-Zeile: CH 4-stellig, DE 5-stellig, FR 5-stellig, AT/LI 4-stellig — mit oder ohne Länderkürzel (CH-, D-, DE-, F-, FR-, A-, AT-, FL-, I-, IT-)
   const plzIdx = H.findIndex(l => /^(?:[A-Z]{1,2}-\s?)?\d{4,5}\s+[A-ZÄÖÜÉÈ]/.test(l.trim()));
-  if (plzIdx >= 1) {
-    for (let k = plzIdx - 1; k >= Math.max(0, plzIdx - 4); k--) { if (nameLike(H[k])) { name = clean(H[k]); break; } }
+  if (!name && plzIdx >= 1) {
+    for (let k = plzIdx - 1; k >= Math.max(0, plzIdx - 5); k--) { if (/^c\/o\b/i.test(H[k].trim())) continue; if (nameLike(H[k])) { name = clean(H[k]); break; } }
   }
   if (!name) { const c = H.find(l => /^(Herr|Frau|Herrn|Monsieur|Madame)\s+\S/i.test(l.trim()) && nameLike(l)); if (c) name = clean(c); }
   if (!name) { // Zeile direkt vor einer Strassenzeile («… strasse 12», «Rue …», «Chemin …», «… Str. 5»)
@@ -521,7 +530,24 @@ function lcSvBasisCheck(slips) {
   const rentnerN = slips.filter(s => s.rentner).length;
   const vals = o => names.filter(nm => o[nm].n).map(nm => o[nm].basis);
   const same = o => { const v = vals(o); return v.length > 1 && v.every(x => lcNear(x, v[0], 0.051 * slips.length)); };
-  return { all, normal, rentnerN, okAll: same(all), okNormal: same(normal), names };
+  // Verursacher: Belege, bei denen die fünf Basen nicht identisch sind oder ein Abzug fehlt (Rentner: AHV −1'400 / kein ALV toleriert)
+  const culprits = [];
+  for (const s of slips) {
+    const b = {}; names.forEach(nm => { const r = rowOf(s, nm); b[nm] = r && r.basis !== null ? r.basis : null; });
+    const present = names.filter(nm => b[nm] !== null);
+    if (present.length < 2) continue;
+    const cnt = {}; present.forEach(nm => { if (s.rentner && nm === "AHV") return; const k = b[nm].toFixed(2); cnt[k] = (cnt[k] || 0) + 1; });
+    const ref = Object.entries(cnt).sort((x, y) => y[1] - x[1])[0]; if (!ref) continue;
+    const refV = parseFloat(ref[0]);
+    const dev = [], missing = [];
+    names.forEach(nm => {
+      if (b[nm] === null) { if ((s.brutto || 0) > 0 && !(s.rentner && nm === "ALV")) missing.push(nm); return; }
+      if (s.rentner && nm === "AHV") { if (!lcNear(refV - b[nm], 1400)) dev.push(nm + " " + lcFmt(b[nm]) + " (Rentner: erwartet " + lcFmt(refV - 1400) + ")"); return; }
+      if (!lcNear(b[nm], refV)) dev.push(nm + " " + lcFmt(b[nm]) + " (Δ " + lcFmt(b[nm] - refV) + ")");
+    });
+    if (dev.length || missing.length) culprits.push({ slipId: s.id, ma: s.anzeige, periode: s.periode, ref: refV, dev, missing });
+  }
+  return { all, normal, rentnerN, okAll: same(all), okNormal: same(normal), names, culprits };
 }
 
 /* ---------- Upload ---------- */
@@ -658,6 +684,9 @@ function renderLohncheck(el) {
     const svPanel = `<div style="font-size:12px;padding:8px 10px;margin-bottom:10px;border-radius:8px;border:1px solid ${sv.okAll || sv.okNormal ? "var(--border)" : "var(--danger)"}">
       <b>SV-Basis-Kontrolle</b> ${sv.okAll ? `<span style="color:var(--ok, #3a3)">✓ AHV/ALV/NBU/KTG/Vollzug haben dieselbe Basis Σ</span>` : sv.okNormal ? `<span style="color:var(--ok, #3a3)">✓ identisch ohne die ${sv.rentnerN} Rentner-Abrechnung${sv.rentnerN > 1 ? "en" : ""}</span> <span style="color:var(--text-faint)">(dort AHV-Basis −1'400 / kein ALV)</span>` : `<span style="color:var(--danger)">✗ Basen weichen ab</span>${sv.rentnerN ? ` <span style="color:var(--text-faint)">(auch ohne ${sv.rentnerN} Rentner-Abr. nicht identisch)</span>` : ""}`}
       <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;font-family:var(--font-mono)">${sv.names.map(nm => cell(sv.all, nm)).join("")}</div>
+      ${!sv.okAll && !sv.okNormal && sv.culprits.length ? `<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px"><div style="color:var(--text-dim);margin-bottom:3px">Verursacher (${sv.culprits.length} Beleg${sv.culprits.length > 1 ? "e" : ""}, Klick öffnet):</div>
+        ${sv.culprits.slice(0, 25).map(c => `<div style="cursor:pointer;padding:2px 0" onclick="lcDetail(${c.slipId})">▸ <b>${escape(c.ma)}</b> <span style="color:var(--text-dim)">${escape(c.periode)}</span> · Basis übrige ${lcFmt(c.ref)}${c.dev.length ? " · " + c.dev.map(escape).join(", ") : ""}${c.missing.length ? ` · <span style="color:var(--danger)">fehlt: ${c.missing.join(", ")}</span>` : ""}</div>`).join("")}
+        ${sv.culprits.length > 25 ? `<div style="color:var(--text-faint)">… und ${sv.culprits.length - 25} weitere</div>` : ""}</div>` : ""}
       ${!sv.okAll && sv.rentnerN ? `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;font-family:var(--font-mono);color:var(--text-dim)"><span>ohne Rentner:</span>${sv.names.map(nm => { const r2 = Math.max(...sv.names.map(x => sv.normal[x].basis)); return sv.normal[nm].n ? `<span style="white-space:nowrap"><b>${nm}</b> ${lcFmt(sv.normal[nm].basis)}${!lcNear(sv.normal[nm].basis, r2, 0.051 * S.length) ? ` <span style="color:var(--danger)">(Δ ${lcFmt(sv.normal[nm].basis - r2)})</span>` : ""}</span>` : ""; }).join("")}</div>` : ""}
     </div>`;
     body = svPanel + `<table style="width:100%;font-size:12px;border-collapse:collapse">
