@@ -11,6 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
+const LC_VERSION = "1.62.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -205,7 +206,8 @@ function lcParseSlip(slip) {
   // Kennzahlen
   const g = c => { const r = slip.rows.find(x => x.code === c); return r ? r.betrag : null; };
   slip.brutto = g(4900); slip.abzuege = g(5500); slip.netto = g(5900); slip.sonstige = g(6500); slip.abgerechnet = g(6900);
-  const ausz = slip.rows.find(x => x.code > 6900 && /Auszahlung|Überweisung|Zahlung|Bank|Post/i.test(x.label));
+  slip.rueckbehalt = g(8500);
+  const ausz = slip.rows.find(x => x.code === 8900) || slip.rows.find(x => x.code > 6900 && /^Auszahlung$/i.test(x.label));
   slip.auszahlung = ausz ? ausz.betrag : null;
   if (slip.brutto === null) { const r = slip.rows.find(x => /^Bruttolohn/i.test(x.label)); if (r) slip.brutto = r.betrag; }
   if (slip.netto === null) { const r = slip.rows.find(x => /^Nettolohn/i.test(x.label)); if (r) slip.netto = r.betrag; }
@@ -286,12 +288,29 @@ function lcCheckAll(slips) {
     const sonstTot = s.sonstige !== null ? s.sonstige : sonst.reduce((a, r) => a + r.betrag, 0);
     if (s.netto !== null && s.abgerechnet !== null && !lcNear(s.netto + sonstTot, s.abgerechnet))
       add(s, "rot", "Rechnung", "Netto + Sonstige = " + lcFmt(s.netto + sonstTot) + " ≠ Abgerechnet " + lcFmt(s.abgerechnet) + ".");
-    if (s.abgerechnet !== null && s.abgerechnet < 0) add(s, "rot", "Auszahlung", "Negativer Abrechnungsbetrag " + lcFmt(s.abgerechnet) + ".");
-    if (s.auszahlung !== null && s.abgerechnet !== null && !lcNear(Math.abs(s.auszahlung), Math.abs(s.abgerechnet)))
-      add(s, "rot", "Auszahlung", "Auszahlung " + lcFmt(s.auszahlung) + " ≠ Abgerechnet " + lcFmt(s.abgerechnet) + ".");
-    if (s.abgerechnet !== null && s.auszahlung === null && s.rows.some(r => r.code > 6900)) add(s, "grau", "Auszahlung", "Keine Auszahlungszeile erkannt (Codes > 6900 vorhanden).");
-    const vorschuss = s.rows.filter(r => /Vorschuss/i.test(r.label) && !r.isTotal);
-    if (vorschuss.length > 1) add(s, "gelb", "Vorschuss", vorschuss.length + " Vorschuss-Zeilen in einer Abrechnung.");
+    if (s.abgerechnet !== null && s.abgerechnet < 0) add(s, "rot", "Abgerechnet", "Negativer Abrechnungsbetrag " + lcFmt(s.abgerechnet) + ".");
+    // Rückbehalte und Zahlungen (8000–8499) → 8500 → 6900 + 8500 = 8900 Auszahlung
+    const rueck = s.rows.filter(r => r.code >= 8000 && r.code < 8500 && !r.isTotal);
+    const rueckTot = s.rueckbehalt !== null ? s.rueckbehalt : rueck.reduce((a, r) => a + r.betrag, 0);
+    if (s.rueckbehalt !== null && rueck.length) {
+      const sum = rueck.reduce((a, r) => a + r.betrag, 0);
+      if (!lcNear(sum, s.rueckbehalt)) add(s, "rot", "Rechnung", "Summe Rückbehalte/Zahlungen " + lcFmt(sum) + " ≠ Total 8500 " + lcFmt(s.rueckbehalt) + ".");
+    }
+    if (s.abgerechnet !== null && s.auszahlung !== null && !lcNear(s.abgerechnet + rueckTot, s.auszahlung))
+      add(s, "rot", "Auszahlung", "Abgerechnet " + lcFmt(s.abgerechnet) + " + Rückbehalte/Zahlungen " + lcFmt(rueckTot) + " = " + lcFmt(s.abgerechnet + rueckTot) + " ≠ Auszahlung " + lcFmt(s.auszahlung) + ".");
+    if (s.auszahlung !== null && s.auszahlung < 0) add(s, "rot", "Auszahlung", "Negative Auszahlung " + lcFmt(s.auszahlung) + ".");
+    if (s.abgerechnet !== null && s.auszahlung === null) add(s, "grau", "Auszahlung", "Keine Auszahlungszeile (8900) erkannt.");
+    // Ferienrückbehalt (8020) sollte der Ferienvergütung (1160) entsprechen
+    const ferien = s.rows.find(r => r.code === 1160 || (/Ferienvergütung/i.test(r.label) && r.code < 4900));
+    const ferienRb = s.rows.find(r => r.code === 8020 || /Ferienrückbehalt/i.test(r.label));
+    if (ferien && ferienRb && !lcNear(ferien.betrag + ferienRb.betrag, 0))
+      add(s, "gelb", "Ferienrückbehalt", "Ferienrückbehalt " + lcFmt(ferienRb.betrag) + " ≠ Ferienvergütung " + lcFmt(ferien.betrag) + ".");
+    // Anzahl Vorschussgebühren (6390) vs. Anzahl Vorschüsse (8105)
+    const vorschuesse = s.rows.filter(r => r.code === 8105 || (/^Vorschuss\b/i.test(r.label) && r.code >= 8000 && r.code < 8500));
+    const gebuehr = s.rows.find(r => r.code === 6390 || /Vorschussgebühr/i.test(r.label));
+    if (vorschuesse.length && gebuehr && gebuehr.anzahl !== null && !lcNear(gebuehr.anzahl, vorschuesse.length))
+      add(s, "gelb", "Vorschuss", vorschuesse.length + " Vorschüsse, aber " + lcFmt(gebuehr.anzahl) + " Vorschussgebühren verrechnet.");
+    if (vorschuesse.length && !gebuehr) add(s, "gelb", "Vorschuss", vorschuesse.length + " Vorschüsse ohne Vorschussgebühr (6390).");
     // Basis × Ansatz = Betrag
     for (const r of s.rows) {
       if (r.isTotal || r.basis === null || r.ansatz === null) continue;
@@ -429,9 +448,9 @@ function renderLohncheck(el) {
       <span style="font-size:11px;color:var(--text-faint)">Jede Abrechnung wird ab «Lohn und Zulagen» erkannt, die Lohnarten
       <input type="number" value="${lcState.von}" style="width:64px" onchange="lcRange(this.value,${lcState.bis})"> bis
       <input type="number" value="${lcState.bis}" style="width:64px" onchange="lcRange(${lcState.von},this.value)">
-      werden erfasst und über alle Abrechnungen totalisiert (Lohnkontoblatt).<br>
-      Geprüft werden Rechnung (Brutto/Abzüge/Netto/Sonstige/Abgerechnet/Auszahlung, Basis × Ansatz), Pflichtabzüge AHV/ALV/NBU/KTG/BVG/Vollzug,
-      Sätze, Abzugsbasis, Temporär-Bestandteile, Vorschüsse und doppelte Abrechnungen.</span></div>`;
+      werden erfasst und über alle Abrechnungen totalisiert (Lohnkontoblatt). Check v${LC_VERSION}<br>
+      Geprüft werden Rechnung (Brutto/Abzüge/Netto/Sonstige/Abgerechnet/Rückbehalte/Auszahlung, Basis × Ansatz), Pflichtabzüge AHV/ALV/NBU/KTG/BVG/Vollzug,
+      Sätze, Abzugsbasis, Temporär-Bestandteile, Ferienrückbehalt, Vorschussgebühren und doppelte Abrechnungen.</span></div>`;
     return;
   }
   const S = lcState.slips, I = lcState.issues;
@@ -493,7 +512,7 @@ function renderLohncheck(el) {
     <div class="card" style="padding:14px 16px;overflow-x:auto">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
         <div style="display:flex;gap:6px">${tab("konto", "Lohnkontoblatt")}${tab("diff", "Differenzen " + I.length)}${tab("ma", "Mitarbeitende")}</div>
-        <div style="font-size:10px;color:var(--text-faint)">${escape(lcState.files.join(" + "))} · Lohnarten ${lcState.von}–${lcState.bis}</div>
+        <div style="font-size:10px;color:var(--text-faint)">${escape(lcState.files.join(" + "))} · Lohnarten ${lcState.von}–${lcState.bis} · Check v${LC_VERSION}</div>
       </div>
       ${body}
     </div>`;
