@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.87.0";
+const LC_VERSION = "1.88.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -21,6 +21,7 @@ const lcState = {
   sev: "all",         // all | rot | gelb | grau
   open: {},           // aufgeklappte Mitarbeitende in der Differenzen-Ansicht (key → true)
   flag: "all",        // Belegfilter (siehe LC_FLAGS) — wirkt auf alle Tabs und Kennzahlen
+  q: "",              // Suchtext (Mitarbeiter, AHV-Nr, Lohnart, Betrag, Meldung)
   koord: (() => { try { const v = parseFloat(localStorage.getItem("lc-koord")); return isNaN(v) ? 12.10 : v; } catch (e) { return 12.10; } })(), // BVG-Koordinationsabzug CHF pro Stunde (swissstaffing TEMP BASIC 2026: 12.10)
   busy: false
 };
@@ -314,8 +315,14 @@ const LC_FLAGS = [
   ["korrektur", "Ohne Lohnblock (Korrektur)", s => s.brutto === null],
   ["clean", "Ohne Hinweise", s => !s.issues.some(i => i.sev !== "grau")]
 ];
-function lcFilteredSlips() { const f = LC_FLAGS.find(x => x[0] === lcState.flag) || LC_FLAGS[0]; return lcState.slips.filter(f[2]); }
+function lcFilteredSlips() { const f = LC_FLAGS.find(x => x[0] === lcState.flag) || LC_FLAGS[0]; return lcState.slips.filter(f[2]).filter(s => !lcState.q.trim() || lcSlipHit(s)); }
 function lcSetKoord(v) { const n = parseFloat(String(v).replace(",", ".")); if (isNaN(n)) return; lcState.koord = n; try { localStorage.setItem("lc-koord", String(n)); } catch (e) {} lcState.issues = lcCheckAll(lcState.slips); render(); }
+// Suche: trifft Mitarbeiter/AHV/Periode, Lohnartencode/-text, Beträge (formatiert oder roh) und Meldungstexte
+function lcSearch(v) { lcState.q = v || ""; render(); const el = document.getElementById("lc-search"); if (el) { el.focus(); const n = el.value.length; try { el.setSelectionRange(n, n); } catch (e) {} } }
+function lcNormQ() { return lcState.q.trim().toLowerCase().replace(/['’]/g, ""); }
+function lcHit(text) { const q = lcNormQ(); if (!q) return true; return String(text || "").toLowerCase().replace(/['’]/g, "").includes(q); }
+function lcRowHit(r) { return lcHit(r.code + " " + r.label) || lcHit(lcFmt(r.betrag)) || lcHit(String(r.betrag)) || (r.basis !== null && lcHit(lcFmt(r.basis))); }
+function lcSlipHit(s) { return lcHit(s.anzeige) || lcHit(s.ahv) || lcHit(s.persNr) || lcHit(s.periode) || s.rows.some(lcRowHit) || s.issues.some(i => lcHit(i.text) || lcHit(i.pruef)); }
 function lcSetFlag(v) { lcState.flag = v; lcState.open = {}; render(); }
 
 /* ---------- Plausibilitätsprüfung ---------- */
@@ -602,7 +609,7 @@ async function lcProcessFiles(list) {
     toast("Import fehlgeschlagen: " + e.message, true);
   }
 }
-function lcReset() { lcState.slips = []; lcState.issues = []; lcState.files = []; lcState.open = {}; lcState.flag = "all"; render(); }
+function lcReset() { lcState.slips = []; lcState.issues = []; lcState.files = []; lcState.open = {}; lcState.flag = "all"; lcState.q = ""; render(); }
 function lcRange(von, bis) {
   lcState.von = parseInt(von, 10) || 1000; lcState.bis = parseInt(bis, 10) || 6000;
   // Zeilen neu filtern: Abrechnungen neu parsen wäre nötig — Rows sind bereits mit altem Bereich erfasst,
@@ -678,6 +685,8 @@ function renderLohncheck(el) {
   let body = "";
   if (lcState.tab === "konto") {
     const K = lcKonto(S);
+    // Trifft der Suchtext eine Lohnart/einen Betrag, werden nur diese Zeilen gezeigt; trifft er nur Personen, das ganze Kontoblatt dieser Personen
+    const anyRowHit = lcState.q.trim() && S.some(s => s.rows.some(lcRowHit));
     const sv = lcSvBasisCheck(S);
     const ref = sv.all[sv.names.find(nm => sv.all[nm].n)] ? Math.max(...sv.names.map(nm => sv.all[nm].basis)) : 0;
     const cell = (o, nm) => o[nm].n ? `<span style="white-space:nowrap"><b>${nm}</b> ${lcFmt(o[nm].basis)}${!lcNear(o[nm].basis, ref, 0.051 * S.length) ? ` <span style="color:var(--danger)">(Δ ${lcFmt(o[nm].basis - ref)})</span>` : ""}</span>` : `<span style="white-space:nowrap;color:var(--text-faint)"><b>${nm}</b> —</span>`;
@@ -693,7 +702,7 @@ function renderLohncheck(el) {
       <tr style="color:var(--text-dim)"><th style="text-align:left;padding:4px 8px 4px 0">Code</th><th style="text-align:left">Lohnart</th>
         <th style="text-align:right;padding:4px 8px">Belege</th><th style="text-align:right;padding:4px 8px">MA</th>
         <th style="text-align:right;padding:4px 8px">Anzahl Σ</th><th style="text-align:right;padding:4px 8px">Basis Σ</th><th style="text-align:right;padding:4px 8px">Ansatz</th><th style="text-align:right;padding:4px 8px">Betrag Σ</th><th style="text-align:right;padding:4px 8px">Berechnet</th><th style="text-align:left;padding:4px 8px">Kontrolle</th></tr>
-      ${K.map(e => {
+      ${K.filter(e => !lcState.q.trim() || !anyRowHit || lcHit(e.code + " " + e.label) || lcHit(lcFmt(e.betrag)) || S.some(s => s.rows.some(r => r.code === e.code && lcRowHit(r)))).map(e => {
         const saetze = Object.keys(e.saetze); const satz = saetze.length === 1 ? lcFmtPct(parseFloat(saetze[0])) : saetze.length > 1 ? saetze.length + " versch." : ""; const satzOk = LC_QST(e) || LC_REF.BVG.codes.includes(e.code) || LC_REF.NBU.codes.includes(e.code);
         return `<tr style="border-top:1px solid var(--border);${e.isTotal ? "font-weight:700" : ""};${e.level ? "color:var(--text-dim)" : ""}">
           <td style="padding:5px 8px 5px 0;font-family:var(--font-mono)">${e.code}</td>
@@ -709,7 +718,8 @@ function renderLohncheck(el) {
       }).join("")}</table>
       <div style="font-size:10px;color:var(--text-faint);margin-top:8px">↳ = Bestandteil einer übergeordneten Lohnart (z.B. Grundlohn/Ferien/Feiertag/13. ML in Stundenlohn enthalten) — nicht zusätzlich zum Bruttolohn zählen. Fett = Totalzeilen. Berechnet = Basis Σ × Ansatz für Sozialabzüge 5000–5499 mit einheitlichem Ansatz über alle Belege; Kontrolle vergleicht mit Betrag Σ.</div>`;
   } else if (lcState.tab === "diff") {
-    const list = I.filter(i => lcState.sev === "all" || i.sev === lcState.sev);
+    const q = lcState.q.trim();
+    const list = I.filter(i => (lcState.sev === "all" || i.sev === lcState.sev) && (!q || lcHit(i.ma) || lcHit(i.text) || lcHit(i.pruef) || lcHit(i.periode) || (lcState.slips.find(s => s.id === i.slipId) || { rows: [] }).rows.some(lcRowHit)));
     const f = (id, label) => `<button class="btn btn-sm" style="${lcState.sev === id ? "background:var(--accent);color:#fff" : ""}" onclick="lcState.sev='${id}';render()">${label}</button>`;
     // Gruppierung: eine Zeile pro Mitarbeiter, Klick klappt die einzelnen Hinweise auf
     const groups = [];
@@ -750,7 +760,7 @@ function renderLohncheck(el) {
   }
   el.innerHTML = `<div ${DZ}>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
-      <div class="card stat-card"><div class="stat-label">Abrechnungen${lcState.flag !== "all" ? " <span style=\"color:var(--accent)\">(gefiltert)</span>" : ""}</div><div class="stat-value">${S.length}${lcState.flag !== "all" ? `<span style="font-size:12px;color:var(--text-faint)"> / ${lcState.slips.length}</span>` : ""}</div></div>
+      <div class="card stat-card"><div class="stat-label">Abrechnungen${lcState.flag !== "all" || lcState.q.trim() ? " <span style=\"color:var(--accent)\">(gefiltert)</span>" : ""}</div><div class="stat-value">${S.length}${lcState.flag !== "all" || lcState.q.trim() ? `<span style="font-size:12px;color:var(--text-faint)"> / ${lcState.slips.length}</span>` : ""}</div></div>
       <div class="card stat-card"><div class="stat-label">Mitarbeitende</div><div class="stat-value">${emps.length}</div></div>
       <div class="card stat-card"><div class="stat-label">Bruttolohn Σ</div><div class="stat-value">${lcFmt(sum("brutto"), 0)}</div></div>
       <div class="card stat-card"><div class="stat-label">Nettolohn Σ</div><div class="stat-value">${lcFmt(sum("netto"), 0)}</div></div>
@@ -760,7 +770,8 @@ function renderLohncheck(el) {
     <div class="card" style="padding:14px 16px;overflow-x:auto">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${tab("konto", "Lohnkontoblatt")}${tab("diff", "Differenzen " + new Set(I.filter(i => i.sev !== "grau").map(i => i.key)).size)}${tab("ma", "Mitarbeitende")}<span style="margin-left:8px;font-size:11px;color:var(--text-dim)">Filter:</span>${flagSel}
-          <span style="margin-left:8px;font-size:11px;color:var(--text-dim)" title="BVG-Koordinationsabzug pro Stunde (swissstaffing TEMP BASIC 2026: 12.10; Stundenlohn max. 41.50, versichert min. 1.75)">Koord.-Abzug/h:</span><input type="number" step="0.05" value="${lcState.koord}" style="width:64px;font-size:12px;padding:3px 6px" onchange="lcSetKoord(this.value)">${koordHint}</div>
+          <input id="lc-search" type="search" placeholder="Suche: Name, AHV-Nr, Lohnart, Betrag, Meldung …" value="${escape(lcState.q)}" style="margin-left:8px;font-size:12px;padding:3px 8px;width:260px" oninput="lcSearch(this.value)">
+          ${koordHint ? `<span style="margin-left:8px">${koordHint}</span>` : ""}</div>
         <div style="font-size:10px;color:var(--text-faint)">${escape(lcState.files.join(" + "))} · Lohnarten ${lcState.von}–${lcState.bis} · Check v${LC_VERSION}</div>
       </div>
       ${body}
