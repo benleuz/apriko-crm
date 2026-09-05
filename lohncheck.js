@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.75.0";
+const LC_VERSION = "1.77.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -115,13 +115,29 @@ function lcItemsToLines(items) {
 function lcSplitSlips(pages, fileName) {
   const slips = [];
   let cur = null;
-  const isStart = pg => pg.lines.some(l => /^Lohn und Zulagen\b/i.test(l.text));
+  // Blockreihenfolge auf einer Abrechnung; Totalzeilen kommen je Abrechnung höchstens einmal vor
+  const SECTION = [[/^Lohn und Zulagen\b/i, 1], [/^Abzüge\b/i, 2], [/^Sonstige Zulagen und Abzüge\b/i, 3], [/^Rückbehalte und Zahlungen\b/i, 4]];
+  const pageInfo = pg => {
+    let first = null, last = null; const totals = [];
+    for (const l of pg.lines) {
+      for (const [re, o] of SECTION) if (re.test(l.text)) { if (first === null) first = o; last = o; }
+      const m = /^(\d{4})\b/.exec(l.text); if (m && LC_TOTAL_CODES.has(parseInt(m[1], 10))) totals.push(parseInt(m[1], 10));
+    }
+    return { first, last, totals };
+  };
   for (const pg of pages) {
-    if (isStart(pg) || !cur) {
-      cur = { id: slips.length + 1, file: fileName, pages: [], rows: [], header: [], issues: [] };
+    const info = pageInfo(pg);
+    const startsNew = !cur
+      || info.first === 1                                                    // «Lohn und Zulagen» = neuer Beleg
+      || info.totals.some(c => cur.totals.has(c))                            // Totalzeile wiederholt sich → neuer Beleg
+      || (info.first !== null && cur.lastOrder !== null && info.first < cur.lastOrder); // Block in falscher Reihenfolge → neuer Beleg (z.B. Korrekturabrechnung ohne Lohnblock)
+    if (startsNew) {
+      cur = { id: slips.length + 1, file: fileName, pages: [], rows: [], header: [], issues: [], totals: new Set(), lastOrder: null };
       slips.push(cur);
     }
     cur.pages.push(pg);
+    info.totals.forEach(c => cur.totals.add(c));
+    if (info.last !== null) cur.lastOrder = info.last;
   }
   slips.forEach(s => { lcParseSlip(s); });
   // Seiten ohne Lohnarten (Deckblatt o.ä.) verwerfen
@@ -146,7 +162,7 @@ function lcColumns(page) {
 function lcParseSlip(slip) {
   const first = slip.pages[0];
   // Kopfzeilen = alles vor "Lohn und Zulagen" auf der ersten Seite
-  const startIdx = first.lines.findIndex(l => /^Lohn und Zulagen\b/i.test(l.text));
+  const startIdx = first.lines.findIndex(l => /^(Lohn und Zulagen|Abzüge|Sonstige Zulagen und Abzüge|Rückbehalte und Zahlungen)\b/i.test(l.text));
   slip.header = first.lines.slice(0, startIdx < 0 ? Math.min(25, first.lines.length) : startIdx).map(l => l.text);
   lcIdentify(slip);
 
@@ -381,10 +397,10 @@ function lcCheckAll(slips) {
           add(s, "gelb", "Basis", nm + "-Basis " + lcFmt(row.basis) + " ≠ Basis der übrigen SV-Abzüge " + lcFmt(commonBasis) + ".");
       }
     }
-    // Satz weicht vom häufigsten Satz ab (Abzüge 5000–5499; BVG ausgenommen — Satz ist altersabhängig)
+    // Satz weicht vom häufigsten Satz ab (Abzüge 5000–5499; BVG altersabhängig, NBU branchenabhängig, QST individuell → ausgenommen)
     for (const r of abz) {
       const m = satzMode[r.code];
-      if (LC_REF.BVG.codes.includes(r.code) || LC_REF.BVG.key.test(r.label) || LC_QST(r)) continue;
+      if (LC_REF.BVG.codes.includes(r.code) || LC_REF.BVG.key.test(r.label) || LC_REF.NBU.codes.includes(r.code) || LC_REF.NBU.key.test(r.label) || LC_QST(r)) continue; // BVG altersabhängig, NBU branchenabhängig
       if (m && r.ansatz !== null && m.n >= 3 && !lcNear(r.ansatz, m.satz, 0.0001) && !Object.values(LC_REF).some(ref => ref.codes.includes(r.code) && ref.satz !== null))
         add(s, "gelb", "Satz", r.code + " " + r.label + ": " + lcFmtPct(r.ansatz) + ", üblich " + lcFmtPct(m.satz) + " (" + m.n + "×).");
     }
@@ -578,7 +594,7 @@ function renderLohncheck(el) {
         <th style="text-align:right;padding:4px 8px">Belege</th><th style="text-align:right;padding:4px 8px">MA</th>
         <th style="text-align:right;padding:4px 8px">Anzahl Σ</th><th style="text-align:right;padding:4px 8px">Basis Σ</th><th style="text-align:right;padding:4px 8px">Ansatz</th><th style="text-align:right;padding:4px 8px">Betrag Σ</th><th style="text-align:right;padding:4px 8px">Berechnet</th><th style="text-align:left;padding:4px 8px">Kontrolle</th></tr>
       ${K.map(e => {
-        const saetze = Object.keys(e.saetze); const satz = saetze.length === 1 ? lcFmtPct(parseFloat(saetze[0])) : saetze.length > 1 ? saetze.length + " versch." : ""; const satzOk = LC_QST(e) || LC_REF.BVG.codes.includes(e.code);
+        const saetze = Object.keys(e.saetze); const satz = saetze.length === 1 ? lcFmtPct(parseFloat(saetze[0])) : saetze.length > 1 ? saetze.length + " versch." : ""; const satzOk = LC_QST(e) || LC_REF.BVG.codes.includes(e.code) || LC_REF.NBU.codes.includes(e.code);
         return `<tr style="border-top:1px solid var(--border);${e.isTotal ? "font-weight:700" : ""};${e.level ? "color:var(--text-dim)" : ""}">
           <td style="padding:5px 8px 5px 0;font-family:var(--font-mono)">${e.code}</td>
           <td style="padding:5px 8px 5px ${e.level ? 18 : 0}px">${e.level ? "↳ " : ""}${escape(e.label)}</td>
