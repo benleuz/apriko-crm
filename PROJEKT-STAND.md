@@ -1,4 +1,4 @@
-# Apriko Mini-CRM — Projektstand (05.09.2026, v1.62.0)
+# Apriko Mini-CRM — Projektstand (05.09.2026, v1.64.0)
 
 ## Live & Repo
 - App: https://benleuz.github.io/apriko-crm/ · Demo: …/demo.html
@@ -48,7 +48,7 @@
   und Serialisierungs-Fusszeile noch nie erfolgreich durchgelaufen
   (zuletzt am schlafenden Codespace gescheitert).
 
-## Ultimativer Check (Spielwiese, neu v1.60.0, Stand v1.62.0, lohncheck.js; zeigt eigene
+## Ultimativer Check (Spielwiese, neu v1.60.0, Stand v1.64.0, lohncheck.js; zeigt eigene
   Versionsnummer LC_VERSION in der Fusszeile des Kastens)
 - Upload vieler Lohnabrechnungs-PDFs → Abrechnung beginnt je Seite mit
   «Lohn und Zulagen»; alle Lohnarten 1000–9999 (Bereich einstellbar) per
@@ -57,7 +57,9 @@
 - Mitarbeiter-Erkennung aus Kopfzeilen: AHV-Nr 756.…, Personal-Nr, Name
   (Zeile vor Strasse/PLZ), Periode «Monat Jahr». Kopfzeilen im Detail-Modal
   sichtbar zum Nachschärfen — noch nie an echtem Apriko-PDF getestet.
-- Tabs: Lohnkontoblatt (Totale je Lohnart), Differenzen (rot/gelb/grau),
+- Tabs: Lohnkontoblatt (Totale je Lohnart), Differenzen (rot/gelb/grau,
+  eine Zeile pro Mitarbeiter, Klick klappt Einzelhinweise auf, Klick auf
+  Hinweis öffnet Abrechnung),
   Mitarbeitende; CSV-Export je Tab.
 - Prüfungen: Summe Lohnarten=4900, Summe Abzüge=5500, 4900+5500=5900,
   Basis×Ansatz(×Anzahl)=Betrag, Pflichtabzüge AHV/ALV (rot) NBU/KTG/BVG/
@@ -66,7 +68,8 @@
   altersabhängig), Ferien/Feiertag/13. ML bei Stundenlohn,
   Sonstige=6500, Netto+Sonstige=6900, Rückbehalte 8000–8499=8500,
   6900+8500=8900 Auszahlung, 8020 Ferienrückbehalt=−1160, Anzahl 6390-
-  Gebühren = Anzahl 8105-Vorschüsse, doppelte Abrechnung (gleicher MA + Periode).
+  Gebühren = Anzahl 8105-Vorschüsse, AHV-Basis = ALV-Basis − 1'400 → Hinweis
+  «Rentner?» (Freibetrag, keine Basis-Warnung), doppelte Abrechnung (gleicher MA + Periode).
 
 ## Weitere offene Punkte
 - Ultimativer Check mit echtem Lohnlauf-PDF testen; Erkennung Name/Periode

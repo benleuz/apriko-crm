@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.62.0";
+const LC_VERSION = "1.64.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -19,6 +19,7 @@ const lcState = {
   files: [],
   tab: "konto",       // konto | diff | ma
   sev: "all",         // all | rot | gelb | grau
+  open: {},           // aufgeklappte Mitarbeitende in der Differenzen-Ansicht (key → true)
   busy: false
 };
 
@@ -247,7 +248,7 @@ function lcIdentify(slip) {
 /* ---------- Plausibilitätsprüfung ---------- */
 function lcCheckAll(slips) {
   const issues = [];
-  const add = (slip, sev, pruef, text) => { const i = { sev, pruef, text, slipId: slip.id, ma: slip.anzeige, periode: slip.periode }; issues.push(i); slip.issues.push(i); };
+  const add = (slip, sev, pruef, text) => { const i = { sev, pruef, text, slipId: slip.id, ma: slip.anzeige, key: slip.key, periode: slip.periode }; issues.push(i); slip.issues.push(i); };
   // Häufigster Ansatz je Abzugscode (über alle Abrechnungen) als Referenz
   const satzMode = {};
   const cnt = {};
@@ -322,6 +323,11 @@ function lcCheckAll(slips) {
     if (s.brutto !== null && s.brutto > 0) {
       const nichtPflichtig = s.rows.filter(r => LC_NICHT_PFLICHTIG(r.code) && !r.isTotal && r.level === 0).reduce((a, r) => a + r.betrag, 0);
       const svBasis = s.brutto - nichtPflichtig;
+      // AHV-Freibetrag Rentner (CHF 1'400/Monat): AHV-Basis = ALV-Basis − 1'400
+      const ahvRow = abz.find(r => r.code === 5010) || abz.find(r => LC_REF.AHV.key.test(r.label));
+      const alvRow = abz.find(r => r.code === 5020) || abz.find(r => LC_REF.ALV.key.test(r.label));
+      const rentner = ahvRow && alvRow && ahvRow.basis !== null && alvRow.basis !== null && lcNear(alvRow.basis - ahvRow.basis, 1400);
+      if (rentner) add(s, "grau", "Rentner?", "AHV-Basis " + lcFmt(ahvRow.basis) + " = ALV-Basis " + lcFmt(alvRow.basis) + " − 1'400.00 → AHV-Freibetrag, Rentner/in?");
       for (const [nm, ref] of Object.entries(LC_REF)) {
         const row = abz.find(r => ref.codes.includes(r.code)) || abz.find(r => ref.key.test(r.label));
         if (!row) { add(s, ref.pflicht, "Abzug fehlt", "Kein " + nm + "-Abzug (" + ref.codes.join("/") + ") bei Bruttolohn " + lcFmt(s.brutto) + "."); continue; }
@@ -329,6 +335,7 @@ function lcCheckAll(slips) {
         if (row.betrag > 0) add(s, "gelb", "Vorzeichen", nm + "-Abzug ist positiv (" + lcFmt(row.betrag) + ").");
         if (ref.satz !== null && row.ansatz !== null && !lcNear(row.ansatz, ref.satz, 0.0001))
           add(s, "rot", "Satz", nm + "-Satz " + lcFmtPct(row.ansatz) + " statt " + lcFmtPct(ref.satz) + ".");
+        if (nm === "AHV" && rentner) continue;
         if (nm !== "BVG" && row.basis !== null && !lcNear(row.basis, svBasis))
           add(s, "gelb", "Basis", nm + "-Basis " + lcFmt(row.basis) + " ≠ pflichtiger Lohn " + lcFmt(svBasis) + (nichtPflichtig ? " (Brutto " + lcFmt(s.brutto) + " − 36xx " + lcFmt(nichtPflichtig) + ")" : "") + ".");
       }
@@ -393,7 +400,7 @@ async function lcUpload(input) {
     toast("Import fehlgeschlagen: " + e.message, true);
   }
 }
-function lcReset() { lcState.slips = []; lcState.issues = []; lcState.files = []; render(); }
+function lcReset() { lcState.slips = []; lcState.issues = []; lcState.files = []; lcState.open = {}; render(); }
 function lcRange(von, bis) {
   lcState.von = parseInt(von, 10) || 1000; lcState.bis = parseInt(bis, 10) || 6000;
   // Zeilen neu filtern: Abrechnungen neu parsen wäre nötig — Rows sind bereits mit altem Bereich erfasst,
@@ -480,14 +487,29 @@ function renderLohncheck(el) {
   } else if (lcState.tab === "diff") {
     const list = I.filter(i => lcState.sev === "all" || i.sev === lcState.sev);
     const f = (id, label) => `<button class="btn btn-sm" style="${lcState.sev === id ? "background:var(--accent);color:#fff" : ""}" onclick="lcState.sev='${id}';render()">${label}</button>`;
-    body = `<div style="display:flex;gap:6px;margin-bottom:10px">${f("all", "Alle " + I.length)}${f("rot", "Rot " + rot)}${f("gelb", "Gelb " + gelb)}${f("grau", "Grau " + (I.length - rot - gelb))}</div>
-      ${list.length ? `<table style="width:100%;font-size:12px;border-collapse:collapse">
-      <tr style="color:var(--text-dim)"><th style="text-align:left">Mitarbeiter</th><th style="text-align:left">Periode</th><th style="text-align:left">Prüfung</th><th style="text-align:left">Meldung</th></tr>
-      ${list.map(i => `<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="lcDetail(${i.slipId})">
-        <td style="padding:5px 8px 5px 0;white-space:nowrap">${lcSevBadge(i.sev)}${escape(i.ma)}</td>
-        <td style="padding:5px 8px;white-space:nowrap;color:var(--text-dim)">${escape(i.periode)}</td>
-        <td style="padding:5px 8px;white-space:nowrap">${escape(i.pruef)}</td>
-        <td style="padding:5px 8px">${escape(i.text)}</td></tr>`).join("")}</table>` : `<div class="empty">Keine Hinweise in dieser Kategorie ✓</div>`}`;
+    // Gruppierung: eine Zeile pro Mitarbeiter, Klick klappt die einzelnen Hinweise auf
+    const groups = [];
+    const byKey = {};
+    list.forEach(i => { let g = byKey[i.key]; if (!g) { g = byKey[i.key] = { key: i.key, ma: i.ma, items: [], rot: 0, gelb: 0, grau: 0 }; groups.push(g); } g.items.push(i); g[i.sev]++; });
+    groups.sort((a, b) => b.rot - a.rot || b.gelb - a.gelb || a.ma.localeCompare(b.ma, "de"));
+    const allOpen = groups.length && groups.every(g => lcState.open[g.key]);
+    body = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center">${f("all", "Alle " + I.length)}${f("rot", "Rot " + rot)}${f("gelb", "Gelb " + gelb)}${f("grau", "Grau " + (I.length - rot - gelb))}
+      <span style="flex:1"></span><button class="btn btn-sm" onclick="lcToggleAll(${allOpen ? "false" : "true"})">${allOpen ? "Alle zuklappen" : "Alle aufklappen"}</button></div>
+      ${groups.length ? `<table style="width:100%;font-size:12px;border-collapse:collapse">
+      <tr style="color:var(--text-dim)"><th style="text-align:left">Mitarbeiter</th><th style="text-align:left">Hinweise</th><th style="text-align:left">Perioden</th></tr>
+      ${groups.map(g => {
+        const openG = !!lcState.open[g.key];
+        const per = [...new Set(g.items.map(i => i.periode))];
+        const head = `<tr style="border-top:1px solid var(--border);cursor:pointer;${openG ? "background:var(--bg-hover, rgba(127,127,127,.08))" : ""}" onclick="lcToggle('${escape(g.key).replace(/'/g, "\\'")}')">
+          <td style="padding:6px 8px 6px 0;font-weight:600;white-space:nowrap"><span style="display:inline-block;width:14px;color:var(--text-faint)">${openG ? "▾" : "▸"}</span>${escape(g.ma)}</td>
+          <td style="padding:6px 8px;white-space:nowrap">${g.rot ? `<span style="color:var(--danger)">${g.rot} rot</span> ` : ""}${g.gelb ? `<span style="color:var(--warn)">${g.gelb} gelb</span> ` : ""}${g.grau ? `<span style="color:var(--text-faint)">${g.grau} grau</span>` : ""}</td>
+          <td style="padding:6px 8px;color:var(--text-dim)">${escape(per.length > 4 ? per.length + " Perioden" : per.join(", "))}</td></tr>`;
+        if (!openG) return head;
+        return head + g.items.map(i => `<tr style="cursor:pointer" onclick="lcDetail(${i.slipId})" title="Abrechnung öffnen">
+          <td style="padding:3px 8px 3px 20px;white-space:nowrap;color:var(--text-dim)">${lcSevBadge(i.sev)}${escape(i.periode)}</td>
+          <td style="padding:3px 8px;white-space:nowrap">${escape(i.pruef)}</td>
+          <td style="padding:3px 8px">${escape(i.text)}</td></tr>`).join("");
+      }).join("")}</table>` : `<div class="empty">Keine Hinweise in dieser Kategorie ✓</div>`}`;
   } else {
     body = `<table style="width:100%;font-size:12px;border-collapse:collapse">
       <tr style="color:var(--text-dim)"><th style="text-align:left">Mitarbeiter</th><th style="text-align:left">AHV-Nr</th>
@@ -517,6 +539,9 @@ function renderLohncheck(el) {
       ${body}
     </div>`;
 }
+
+function lcToggle(key) { if (lcState.open[key]) delete lcState.open[key]; else lcState.open[key] = true; render(); }
+function lcToggleAll(open) { lcState.open = {}; if (open) lcState.issues.forEach(i => { lcState.open[i.key] = true; }); render(); }
 
 function lcDetail(slipId) {
   const s = lcState.slips.find(x => x.id === slipId);
