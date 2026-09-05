@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.67.0";
+const LC_VERSION = "1.69.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -246,6 +246,18 @@ function lcIdentify(slip) {
 }
 
 /* ---------- Plausibilitätsprüfung ---------- */
+// Teilmenge von Beträgen finden, die (auf 5 Rp.) einen Zielwert ergibt — kleinste Teilmenge bevorzugt, max. 16 Kandidaten
+function lcSubset(vals, target) {
+  const n = Math.min(vals.length, 16);
+  let best = null;
+  for (let mask = 1; mask < (1 << n); mask++) {
+    let sum = 0, cnt = 0;
+    for (let i = 0; i < n; i++) if (mask & (1 << i)) { sum += vals[i]; cnt++; }
+    if (Math.abs(sum - target) <= 0.051 && (!best || cnt < best.length)) { best = []; for (let i = 0; i < n; i++) if (mask & (1 << i)) best.push(i); if (cnt === 1) break; }
+  }
+  return best;
+}
+
 function lcCheckAll(slips) {
   const issues = [];
   const add = (slip, sev, pruef, text) => { const i = { sev, pruef, text, slipId: slip.id, ma: slip.anzeige, key: slip.key, periode: slip.periode }; issues.push(i); slip.issues.push(i); };
@@ -323,15 +335,27 @@ function lcCheckAll(slips) {
     if (s.brutto !== null && s.brutto > 0) {
       const nichtPflichtig = s.rows.filter(r => LC_NICHT_PFLICHTIG(r.code) && !r.isTotal && r.level === 0).reduce((a, r) => a + r.betrag, 0);
       const svBasis = s.brutto - nichtPflichtig;
-      // AHV-Freibetrag Rentner (CHF 1'400/Monat): AHV-Basis = ALV-Basis − 1'400
-      const ahvRow = abz.find(r => r.code === 5010) || abz.find(r => LC_REF.AHV.key.test(r.label));
-      const alvRow = abz.find(r => r.code === 5020) || abz.find(r => LC_REF.ALV.key.test(r.label));
-      // Erkennung über ALV-Basis (falls vorhanden) oder über den pflichtigen Lohn (Brutto − 36xx); Rentner haben oft keinen ALV-Abzug
-      const rentner = !!(ahvRow && ahvRow.basis !== null && (
-        (alvRow && alvRow.basis !== null && lcNear(alvRow.basis - ahvRow.basis, 1400)) || lcNear(svBasis - ahvRow.basis, 1400)));
-      if (rentner) add(s, "grau", "Rentner?", "AHV-Basis " + lcFmt(ahvRow.basis) + " = pflichtiger Lohn " + lcFmt(svBasis) + " − 1'400.00 → AHV-Freibetrag, Rentner/in?");
+      const svRow = nm => { const ref = LC_REF[nm]; return abz.find(r => ref.codes.includes(r.code)) || abz.find(r => ref.key.test(r.label)); };
+      const ahvRow = svRow("AHV"), alvRow = svRow("ALV");
+      // Gemeinsame Basis der übrigen SV-Abzüge (ALV/NBU/KTG/Vollzug) ermitteln
+      const otherBases = ["ALV", "NBU", "KTG", "VOLLZUG"].map(svRow).filter(r => r && r.basis !== null).map(r => r.basis);
+      const baseCount = {}; otherBases.forEach(b => { const k = b.toFixed(2); baseCount[k] = (baseCount[k] || 0) + 1; });
+      const commonBasis = otherBases.length ? parseFloat(Object.entries(baseCount).sort((a, b) => b[1] - a[1])[0][0]) : null;
+      const refBasis = commonBasis !== null ? commonBasis : svBasis;
+      // AHV-Freibetrag Rentner (CHF 1'400/Monat): AHV-Basis = übrige SV-Basis − 1'400
+      const rentner = !!(ahvRow && ahvRow.basis !== null && (lcNear(refBasis - ahvRow.basis, 1400) || lcNear(svBasis - ahvRow.basis, 1400)));
+      s.rentner = rentner;
+      if (rentner) add(s, "grau", "Rentner?", "AHV-Basis " + lcFmt(ahvRow.basis) + " = SV-Basis " + lcFmt(refBasis) + " − 1'400.00 → AHV-Freibetrag, Rentner/in?");
+      // Weicht die gemeinsame SV-Basis vom Brutto − 36xx ab? → versuchen, die Differenz durch Lohnarten zu erklären
+      if (commonBasis !== null && !lcNear(commonBasis, svBasis)) {
+        const diff = s.brutto - commonBasis;
+        const cand = s.rows.filter(r => !r.isTotal && r.level === 0 && r.code < 4900 && Math.abs(r.betrag) > 0.005);
+        const found = lcSubset(cand.map(r => r.betrag), diff);
+        if (found) add(s, "grau", "SV-Basis", "SV-Basis " + lcFmt(commonBasis) + " = Brutto " + lcFmt(s.brutto) + " − nicht pflichtige Lohnarten: " + found.map(i => cand[i].code + " " + cand[i].label + " " + lcFmt(cand[i].betrag)).join(", ") + ".");
+        else add(s, "gelb", "SV-Basis", "SV-Basis " + lcFmt(commonBasis) + " ≠ Brutto − 36xx " + lcFmt(svBasis) + " (Δ " + lcFmt(svBasis - commonBasis) + " nicht durch Lohnarten erklärbar).");
+      }
       for (const [nm, ref] of Object.entries(LC_REF)) {
-        const row = abz.find(r => ref.codes.includes(r.code)) || abz.find(r => ref.key.test(r.label));
+        const row = svRow(nm);
         if (!row) {
           if (nm === "ALV" && rentner) { add(s, "grau", "Abzug fehlt", "Kein ALV-Abzug — bei Rentner/in korrekt."); continue; }
           add(s, ref.pflicht, "Abzug fehlt", "Kein " + nm + "-Abzug (" + ref.codes.join("/") + ") bei Bruttolohn " + lcFmt(s.brutto) + "."); continue;
@@ -340,9 +364,10 @@ function lcCheckAll(slips) {
         if (row.betrag > 0) add(s, "gelb", "Vorzeichen", nm + "-Abzug ist positiv (" + lcFmt(row.betrag) + ").");
         if (ref.satz !== null && row.ansatz !== null && !lcNear(row.ansatz, ref.satz, 0.0001))
           add(s, "rot", "Satz", nm + "-Satz " + lcFmtPct(row.ansatz) + " statt " + lcFmtPct(ref.satz) + ".");
+        // Einzelbasis weicht von der gemeinsamen SV-Basis ab (AHV bei Rentner ausgenommen, BVG koordiniert)
         if (nm === "AHV" && rentner) continue;
-        if (nm !== "BVG" && row.basis !== null && !lcNear(row.basis, svBasis))
-          add(s, "gelb", "Basis", nm + "-Basis " + lcFmt(row.basis) + " ≠ pflichtiger Lohn " + lcFmt(svBasis) + (nichtPflichtig ? " (Brutto " + lcFmt(s.brutto) + " − 36xx " + lcFmt(nichtPflichtig) + ")" : "") + ".");
+        if (nm !== "BVG" && row.basis !== null && commonBasis !== null && !lcNear(row.basis, commonBasis))
+          add(s, "gelb", "Basis", nm + "-Basis " + lcFmt(row.basis) + " ≠ Basis der übrigen SV-Abzüge " + lcFmt(commonBasis) + ".");
       }
     }
     // Satz weicht vom häufigsten Satz ab (Abzüge 5000–5499; BVG ausgenommen — Satz ist altersabhängig)
@@ -396,10 +421,29 @@ function lcKonto(slips) {
   }).sort((a, b) => a.code - b.code);
 }
 
+/* ---------- SV-Basis-Kontrolle (Hauptübersicht): AHV/ALV/NBU/KTG/Vollzug müssen dieselbe Basis Σ haben ---------- */
+function lcSvBasisCheck(slips) {
+  const names = ["AHV", "ALV", "NBU", "KTG", "VOLLZUG"];
+  const rowOf = (s, nm) => { const ref = LC_REF[nm]; return s.rows.find(r => ref.codes.includes(r.code) && r.code >= 5000 && r.code < 5500) || s.rows.find(r => r.code >= 5000 && r.code < 5500 && ref.key.test(r.label)); };
+  const sum = list => { const o = {}; names.forEach(nm => { o[nm] = { basis: 0, n: 0 }; list.forEach(s => { const r = rowOf(s, nm); if (r && r.basis !== null) { o[nm].basis += r.basis; o[nm].n++; } }); }); return o; };
+  const all = sum(slips), normal = sum(slips.filter(s => !s.rentner));
+  const rentnerN = slips.filter(s => s.rentner).length;
+  const vals = o => names.filter(nm => o[nm].n).map(nm => o[nm].basis);
+  const same = o => { const v = vals(o); return v.length > 1 && v.every(x => lcNear(x, v[0], 0.051 * slips.length)); };
+  return { all, normal, rentnerN, okAll: same(all), okNormal: same(normal), names };
+}
+
 /* ---------- Upload ---------- */
-async function lcUpload(input) {
-  const files = [...(input.files || [])].sort((a, b) => a.name.localeCompare(b.name, "de", { numeric: true }));
-  input.value = "";
+function lcUpload(input) { const f = [...(input.files || [])]; input.value = ""; lcProcessFiles(f); }
+function lcDrop(ev) {
+  ev.preventDefault(); ev.stopPropagation();
+  const el = ev.currentTarget; if (el) el.style.outline = "";
+  lcProcessFiles([...(ev.dataTransfer && ev.dataTransfer.files ? ev.dataTransfer.files : [])]);
+}
+function lcDragOver(ev) { ev.preventDefault(); ev.dataTransfer.dropEffect = "copy"; ev.currentTarget.style.outline = "2px dashed var(--accent)"; }
+function lcDragLeave(ev) { ev.currentTarget.style.outline = ""; }
+async function lcProcessFiles(list) {
+  const files = list.sort((a, b) => a.name.localeCompare(b.name, "de", { numeric: true }));
   if (!files.length) return;
   lcState.busy = true; render();
   try {
@@ -472,14 +516,15 @@ function renderLohncheck(el) {
     ${lcState.slips.length ? `<button class="btn btn-sm" onclick="lcExport()">⇩ CSV</button>
     <button class="btn btn-sm" onclick="lcReset()" title="Alles zurücksetzen">↺</button>` : ""}`;
   if (lcState.busy) { el.innerHTML = `<div class="full-loading"><div class="loading"></div></div>`; return; }
+  const DZ = `ondragover="lcDragOver(event)" ondragleave="lcDragLeave(event)" ondrop="lcDrop(event)" style="border-radius:10px;min-height:120px"`;
   if (!lcState.slips.length) {
-    el.innerHTML = `<div class="empty">Lohnabrechnungen als PDF hochladen — beliebig viele Seiten und Dateien aufs Mal.<br>
+    el.innerHTML = `<div ${DZ}><div class="empty">Lohnabrechnungen als PDF hochladen oder <b>hierher ziehen</b> — beliebig viele Seiten und Dateien aufs Mal.<br>
       <span style="font-size:11px;color:var(--text-faint)">Jede Abrechnung wird ab «Lohn und Zulagen» erkannt, die Lohnarten
       <input type="number" value="${lcState.von}" style="width:64px" onchange="lcRange(this.value,${lcState.bis})"> bis
       <input type="number" value="${lcState.bis}" style="width:64px" onchange="lcRange(${lcState.von},this.value)">
       werden erfasst und über alle Abrechnungen totalisiert (Lohnkontoblatt). Check v${LC_VERSION}<br>
       Geprüft werden Rechnung (Brutto/Abzüge/Netto/Sonstige/Abgerechnet/Rückbehalte/Auszahlung, Basis × Ansatz), Pflichtabzüge AHV/ALV/NBU/KTG/BVG/Vollzug,
-      Sätze, Abzugsbasis, Temporär-Bestandteile, Ferienrückbehalt, Vorschussgebühren und doppelte Abrechnungen.</span></div>`;
+      Sätze, Abzugsbasis, Temporär-Bestandteile, Ferienrückbehalt, Vorschussgebühren und doppelte Abrechnungen.</span></div></div>`;
     return;
   }
   const S = lcState.slips, I = lcState.issues;
@@ -490,7 +535,15 @@ function renderLohncheck(el) {
   let body = "";
   if (lcState.tab === "konto") {
     const K = lcKonto(S);
-    body = `<table style="width:100%;font-size:12px;border-collapse:collapse">
+    const sv = lcSvBasisCheck(S);
+    const ref = sv.all[sv.names.find(nm => sv.all[nm].n)] ? Math.max(...sv.names.map(nm => sv.all[nm].basis)) : 0;
+    const cell = (o, nm) => o[nm].n ? `<span style="white-space:nowrap"><b>${nm}</b> ${lcFmt(o[nm].basis)}${!lcNear(o[nm].basis, ref, 0.051 * S.length) ? ` <span style="color:var(--danger)">(Δ ${lcFmt(o[nm].basis - ref)})</span>` : ""}</span>` : `<span style="white-space:nowrap;color:var(--text-faint)"><b>${nm}</b> —</span>`;
+    const svPanel = `<div style="font-size:12px;padding:8px 10px;margin-bottom:10px;border-radius:8px;border:1px solid ${sv.okAll || sv.okNormal ? "var(--border)" : "var(--danger)"}">
+      <b>SV-Basis-Kontrolle</b> ${sv.okAll ? `<span style="color:var(--ok, #3a3)">✓ AHV/ALV/NBU/KTG/Vollzug haben dieselbe Basis Σ</span>` : sv.okNormal ? `<span style="color:var(--ok, #3a3)">✓ identisch ohne die ${sv.rentnerN} Rentner-Abrechnung${sv.rentnerN > 1 ? "en" : ""}</span> <span style="color:var(--text-faint)">(dort AHV-Basis −1'400 / kein ALV)</span>` : `<span style="color:var(--danger)">✗ Basen weichen ab</span>${sv.rentnerN ? ` <span style="color:var(--text-faint)">(auch ohne ${sv.rentnerN} Rentner-Abr. nicht identisch)</span>` : ""}`}
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;font-family:var(--font-mono)">${sv.names.map(nm => cell(sv.all, nm)).join("")}</div>
+      ${!sv.okAll && sv.rentnerN ? `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;font-family:var(--font-mono);color:var(--text-dim)"><span>ohne Rentner:</span>${sv.names.map(nm => { const r2 = Math.max(...sv.names.map(x => sv.normal[x].basis)); return sv.normal[nm].n ? `<span style="white-space:nowrap"><b>${nm}</b> ${lcFmt(sv.normal[nm].basis)}${!lcNear(sv.normal[nm].basis, r2, 0.051 * S.length) ? ` <span style="color:var(--danger)">(Δ ${lcFmt(sv.normal[nm].basis - r2)})</span>` : ""}</span>` : ""; }).join("")}</div>` : ""}
+    </div>`;
+    body = svPanel + `<table style="width:100%;font-size:12px;border-collapse:collapse">
       <tr style="color:var(--text-dim)"><th style="text-align:left;padding:4px 8px 4px 0">Code</th><th style="text-align:left">Lohnart</th>
         <th style="text-align:right;padding:4px 8px">Belege</th><th style="text-align:right;padding:4px 8px">MA</th>
         <th style="text-align:right;padding:4px 8px">Anzahl Σ</th><th style="text-align:right;padding:4px 8px">Basis Σ</th><th style="text-align:right;padding:4px 8px">Ansatz</th><th style="text-align:right;padding:4px 8px">Betrag Σ</th><th style="text-align:right;padding:4px 8px">Berechnet</th><th style="text-align:left;padding:4px 8px">Kontrolle</th></tr>
@@ -547,7 +600,7 @@ function renderLohncheck(el) {
         <td style="text-align:right;padding:5px 8px;font-family:var(--font-mono)">${lcFmt(m.netto)}</td>
         <td style="text-align:right;padding:5px 8px;font-family:var(--font-mono)">${m.rot ? `<span style="color:var(--danger)">${m.rot} rot</span> ` : ""}${m.gelb ? `<span style="color:var(--warn)">${m.gelb} gelb</span>` : ""}${!m.rot && !m.gelb ? "✓" : ""}</td></tr>`).join("")}</table>`;
   }
-  el.innerHTML = `
+  el.innerHTML = `<div ${DZ}>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
       <div class="card stat-card"><div class="stat-label">Abrechnungen</div><div class="stat-value">${S.length}</div></div>
       <div class="card stat-card"><div class="stat-label">Mitarbeitende</div><div class="stat-value">${emps.length}</div></div>
@@ -562,7 +615,8 @@ function renderLohncheck(el) {
         <div style="font-size:10px;color:var(--text-faint)">${escape(lcState.files.join(" + "))} · Lohnarten ${lcState.von}–${lcState.bis} · Check v${LC_VERSION}</div>
       </div>
       ${body}
-    </div>`;
+    </div>
+    <div style="font-size:10px;color:var(--text-faint);margin-top:6px">Weitere PDFs einfach hierher ziehen — sie werden dazugerechnet.</div></div>`;
 }
 
 function lcToggle(key) { if (lcState.open[key]) delete lcState.open[key]; else lcState.open[key] = true; render(); }
