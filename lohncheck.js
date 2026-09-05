@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.82.0";
+const LC_VERSION = "1.85.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -21,6 +21,7 @@ const lcState = {
   sev: "all",         // all | rot | gelb | grau
   open: {},           // aufgeklappte Mitarbeitende in der Differenzen-Ansicht (key → true)
   flag: "all",        // Belegfilter (siehe LC_FLAGS) — wirkt auf alle Tabs und Kennzahlen
+  koord: (() => { try { const v = parseFloat(localStorage.getItem("lc-koord")); return isNaN(v) ? 12.10 : v; } catch (e) { return 12.10; } })(), // BVG-Koordinationsabzug CHF pro Stunde (swissstaffing TEMP BASIC 2026: 12.10)
   busy: false
 };
 
@@ -38,6 +39,8 @@ const LC_REF = {
 const LC_NICHT_PFLICHTIG = (code, label) => (code >= 3600 && code <= 3699) || code === 2030 || /Taggeld|Kinderzulage|Familienzulage|Ausbildungszulage|Geburtszulage/i.test(label || "");
 /* Quellensteuer: Satz ist individuell (Hochrechnung + Tabelle) — keine Satzprüfung */
 const LC_QST = r => r.code === 5400 || /\bQST\b|Quellensteuer/i.test(r.label || "");
+/* swissstaffing Stiftung 2. Säule, Plan TEMP BASIC (gültig ab 01.01.2026): versicherter Stundenlohn = min(AHV-Stundenlohn, 41.50) − Koordinationsabzug, mindestens 1.75 */
+const LC_BVG = { maxStundenlohn: 41.50, minVersichert: 1.75 };
 const LC_TOTAL_CODES = new Set([4900, 5500, 5900, 6500, 6900, 7900, 8900, 9900]);
 const LC_MONATE = "Januar Februar März April Mai Juni Juli August September Oktober November Dezember".split(" ");
 
@@ -303,6 +306,7 @@ const LC_FLAGS = [
   ["clean", "Ohne Hinweise", s => !s.issues.some(i => i.sev !== "grau")]
 ];
 function lcFilteredSlips() { const f = LC_FLAGS.find(x => x[0] === lcState.flag) || LC_FLAGS[0]; return lcState.slips.filter(f[2]); }
+function lcSetKoord(v) { const n = parseFloat(String(v).replace(",", ".")); if (isNaN(n)) return; lcState.koord = n; try { localStorage.setItem("lc-koord", String(n)); } catch (e) {} lcState.issues = lcCheckAll(lcState.slips); render(); }
 function lcSetFlag(v) { lcState.flag = v; lcState.open = {}; render(); }
 
 /* ---------- Plausibilitätsprüfung ---------- */
@@ -426,6 +430,10 @@ function lcCheckAll(slips) {
         if (!row) {
           if (svFrei) continue;
           if (nm === "ALV" && rentner) { add(s, "grau", "Abzug fehlt", "Kein ALV-Abzug — bei Rentner/in korrekt."); continue; }
+          if (nm === "BVG") {
+            const zul = s.rows.filter(r => r.code < 4900 && !r.isTotal && /Kinderzulage|Familienzulage|Ausbildungszulage/i.test(r.label));
+            if (zul.length) { add(s, "rot", "Abzug fehlt", "Kein BVG-Abzug, obwohl Kinder-/Ausbildungszulagen abgerechnet sind (" + [...new Set(zul.map(r => r.code))].join(", ") + ")."); continue; }
+          }
           add(s, ref.pflicht, "Abzug fehlt", "Kein " + nm + "-Abzug (" + ref.codes.join("/") + ") bei Bruttolohn " + lcFmt(s.brutto) + "."); continue;
         }
         if (row.betrag === 0) add(s, ref.pflicht, "Abzug 0", nm + "-Abzug vorhanden, aber Betrag 0.");
@@ -444,6 +452,21 @@ function lcCheckAll(slips) {
       if (LC_REF.BVG.codes.includes(r.code) || LC_REF.BVG.key.test(r.label) || LC_REF.NBU.codes.includes(r.code) || LC_REF.NBU.key.test(r.label) || LC_QST(r)) continue; // BVG altersabhängig, NBU branchenabhängig
       if (m && r.ansatz !== null && m.n >= 3 && !lcNear(r.ansatz, m.satz, 0.0001) && !Object.values(LC_REF).some(ref => ref.codes.includes(r.code) && ref.satz !== null))
         add(s, "gelb", "Satz", r.code + " " + r.label + ": " + lcFmtPct(r.ansatz) + ", üblich " + lcFmtPct(m.satz) + " (" + m.n + "×).");
+    }
+    // BVG-Basis nachrechnen (Stundenlöhner): (AHV-Basis / Stunden − Koordinationsabzug/h) × Stunden = BVG-Basis
+    const stdRows = s.rows.filter(r => (r.code === 1005 || /^Stundenlohn/i.test(r.label)) && !r.isTotal && r.level === 0 && r.anzahl !== null);
+    const stunden = stdRows.reduce((a, r) => a + r.anzahl, 0);
+    const bvgRow = abz.find(r => r.code === 5090) || abz.find(r => LC_REF.BVG.key.test(r.label));
+    const ahvRow2 = abz.find(r => r.code === 5010) || abz.find(r => LC_REF.AHV.key.test(r.label));
+    s.koordImpl = null;
+    if (stunden > 0 && bvgRow && bvgRow.basis !== null && ahvRow2 && ahvRow2.basis !== null && ahvRow2.basis > 0) {
+      const impl = (ahvRow2.basis - bvgRow.basis) / stunden;
+      s.koordImpl = Math.round(impl * 100) / 100;
+      const stdLohn = ahvRow2.basis / stunden;
+      const versichert = Math.max(LC_BVG.minVersichert, Math.min(stdLohn, LC_BVG.maxStundenlohn) - lcState.koord);
+      const exp = versichert * stunden;
+      if (!lcNear(exp, bvgRow.basis, Math.max(0.06, 0.005 * stunden)))
+        add(s, "gelb", "BVG-Basis", "BVG-Basis " + lcFmt(bvgRow.basis) + " ≠ (AHV-Stundenlohn " + lcFmt(stdLohn) + (stdLohn > LC_BVG.maxStundenlohn ? " → max. " + lcFmt(LC_BVG.maxStundenlohn) : "") + " − Koord. " + lcFmt(lcState.koord) + (versichert === LC_BVG.minVersichert ? " → min. " + lcFmt(LC_BVG.minVersichert) : "") + ") × " + lcFmt(stunden) + " h = " + lcFmt(exp) + " · impliziter Koordinationsabzug " + lcFmt(impl) + "/h.");
     }
     // Temporär-Bestandteile bei Stundenlohn
     const hasStd = s.rows.some(r => r.code === 1005 || /Stundenlohn/i.test(r.label));
@@ -619,6 +642,9 @@ function renderLohncheck(el) {
   const ids = new Set(S.map(s => s.id));
   const I = lcState.issues.filter(i => ids.has(i.slipId));
   const rot = I.filter(i => i.sev === "rot").length, gelb = I.filter(i => i.sev === "gelb").length;
+  const implCnt = {}; S.forEach(s => { if (s.koordImpl !== null && s.koordImpl !== undefined) { const k = s.koordImpl.toFixed(2); implCnt[k] = (implCnt[k] || 0) + 1; } });
+  const implTop = Object.entries(implCnt).sort((a, b) => b[1] - a[1])[0];
+  const koordHint = implTop ? `<span style="font-size:10px;color:${lcNear(parseFloat(implTop[0]), lcState.koord, 0.011) ? "var(--text-faint)" : "var(--warn)"}" title="Aus AHV- und BVG-Basis der Stundenlöhner zurückgerechnet">(Belege implizieren ${implTop[0]}/h bei ${implTop[1]} von ${Object.values(implCnt).reduce((a, b) => a + b, 0)})</span>` : "";
   const flagSel = `<select onchange="lcSetFlag(this.value)" style="font-size:12px;padding:3px 6px">${LC_FLAGS.map(([id, label, fn]) => { const n = lcState.slips.filter(fn).length; return `<option value="${id}" ${lcState.flag === id ? "selected" : ""}>${label} (${n})</option>`; }).join("")}</select>`;
   const sum = k => S.reduce((a, s) => a + (s[k] || 0), 0);
   const emps = lcEmployees();
@@ -704,7 +730,8 @@ function renderLohncheck(el) {
     </div>
     <div class="card" style="padding:14px 16px;overflow-x:auto">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${tab("konto", "Lohnkontoblatt")}${tab("diff", "Differenzen " + new Set(I.filter(i => i.sev !== "grau").map(i => i.key)).size)}${tab("ma", "Mitarbeitende")}<span style="margin-left:8px;font-size:11px;color:var(--text-dim)">Filter:</span>${flagSel}</div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${tab("konto", "Lohnkontoblatt")}${tab("diff", "Differenzen " + new Set(I.filter(i => i.sev !== "grau").map(i => i.key)).size)}${tab("ma", "Mitarbeitende")}<span style="margin-left:8px;font-size:11px;color:var(--text-dim)">Filter:</span>${flagSel}
+          <span style="margin-left:8px;font-size:11px;color:var(--text-dim)" title="BVG-Koordinationsabzug pro Stunde (swissstaffing TEMP BASIC 2026: 12.10; Stundenlohn max. 41.50, versichert min. 1.75)">Koord.-Abzug/h:</span><input type="number" step="0.05" value="${lcState.koord}" style="width:64px;font-size:12px;padding:3px 6px" onchange="lcSetKoord(this.value)">${koordHint}</div>
         <div style="font-size:10px;color:var(--text-faint)">${escape(lcState.files.join(" + "))} · Lohnarten ${lcState.von}–${lcState.bis} · Check v${LC_VERSION}</div>
       </div>
       ${body}
