@@ -11,19 +11,20 @@
    Persistenz (Title-JSON in Liste «Budget»):
      {"cfg":"jb","y":2027,"g":"Apriko AG","kt":"6500","v":12345,"n":"Notiz","b":"Bez.","z":"G_VerwIT","man":1}
        v = Budgetwert (Anzeige-Vorzeichen: Aufwand positiv), null/fehlend = Vorschlag gilt
+       pos = [{t:"Text", v:Betrag, n:"Notiz"}, …] Einzelpositionen; vorhanden → Konto-Budget = Σ pos
        b/z/man nur bei manuell ergänzten Konten (ohne Ist-Basis)
    Abhängigkeiten aus index.html: cache, fbParse, fbSaveItem, fbIst, fbBudget, fbLoadBuch,
    fbBuchYearCache, FB_PLAN, FB_LABELS, FB_AUFWAND, FB_SRC, fbCompute, fbZuordnung,
    budgetRows, budgetChfOf, budgetIsSaaS, budgetErloes, BUDGET_MONTH_FIELDS,
    deleteItem, reload, escape, toast, render, currentView. */
 
-const JB_VERSION = "1.97.0";
+const JB_VERSION = "1.98.0";
 const JB_GES = ["Apriko AG", "Maverix AG"];
 const JB_PERSONAL = new Set(["SW_Lohn", "SW_SV", "SW_UebrPA", "BO_Lohn", "BO_SV", "BO_UebrPA"]);
 const JB_ERTRAG = new Set(["SW_Ertrag", "BO_Ertrag"]);
 const JB_PA_GES = { SW_Lohn: "Maverix AG", SW_SV: "Maverix AG", SW_UebrPA: "Maverix AG", BO_Lohn: "Apriko AG", BO_SV: "Apriko AG", BO_UebrPA: "Apriko AG" };
 
-const jbState = { year: 2027, open: {}, buch: {}, busy: false, onlyChanged: false, q: "" };
+const jbState = { year: 2027, open: {}, buch: {}, pos: {}, busy: false, onlyChanged: false, q: "" };
 
 /* ---------- Hilfen ---------- */
 function jbFkt(key) { return FB_AUFWAND.has(key) ? -1 : 1; }           // bexio → Anzeige
@@ -64,7 +65,7 @@ function jbBuild(year) {
   });
   Object.values(acc).forEach(r => {
     const o = over[r.g + "|" + r.kt];
-    push(r.key, { ...r, id: o ? o.id : null, bud: o && o.v !== null && o.v !== undefined ? parseFloat(o.v) : null, note: o ? (o.n || "") : "", man: false, editable: true });
+    push(r.key, { ...r, id: o ? o.id : null, bud: o && o.v !== null && o.v !== undefined ? parseFloat(o.v) : null, note: o ? (o.n || "") : "", pos: o && Array.isArray(o.pos) ? o.pos : [], man: false, editable: true });
   });
   // Manuell ergänzte Konten (ohne Ist-Basis)
   jbItems(year).forEach(d => {
@@ -72,7 +73,7 @@ function jbBuild(year) {
     if (acc[d.g + "|" + d.kt]) return;
     const key = d.z || fbZuordnung(d.kt, d.g === "Apriko AG");
     if (!key || JB_PERSONAL.has(key) || JB_ERTRAG.has(key)) return;
-    push(key, { key, g: d.g, kt: d.kt, b: d.b || "", ist: 0, hoch: 0, p: "—", id: d.id, bud: d.v !== null && d.v !== undefined ? parseFloat(d.v) : null, note: d.n || "", man: true, editable: true });
+    push(key, { key, g: d.g, kt: d.kt, b: d.b || "", ist: 0, hoch: 0, p: "—", id: d.id, bud: d.v !== null && d.v !== undefined ? parseFloat(d.v) : null, note: d.n || "", pos: Array.isArray(d.pos) ? d.pos : [], man: true, editable: true });
   });
   // Ertrag aus Ertragsbudget (beide Ströme über Apriko AG)
   push("SW_Ertrag", { key: "SW_Ertrag", g: "Apriko AG", kt: "34xx", b: "Ertragsbudget " + year + " · SaaS/Lizenzen", ist: null, hoch: eb.saas, p: "EB", bud: eb.saas, note: "", editable: false, src: "Ertragsbudget" });
@@ -88,11 +89,14 @@ function jbBuild(year) {
   ist.forEach(d => { istKey[d.z] = (istKey[d.z] || 0) + (parseFloat(d.v) || 0) * jbFkt(d.z) * jbHochFaktor(d.p); });
   return { basis, byKey, eb, istKey, hasIst: ist.length > 0 };
 }
-function jbRowBudget(r) { return r.bud !== null && r.bud !== undefined ? r.bud : r.hoch; }
+function jbPosSum(r) { return (r.pos || []).reduce((s, p) => s + (parseFloat(p.v) || 0), 0); }
+function jbHasPos(r) { return !!(r.pos && r.pos.length); }
+function jbRowBudget(r) { if (jbHasPos(r)) return jbPosSum(r); return r.bud !== null && r.bud !== undefined ? r.bud : r.hoch; }
 
 /* ---------- Persistenz ---------- */
 async function jbSaveRow(r, patch) {
   const obj = { cfg: "jb", y: jbState.year, g: r.g, kt: r.kt, v: r.bud, n: r.note };
+  if (r.pos && r.pos.length) obj.pos = r.pos;
   if (r.man) { obj.man = 1; obj.b = r.b; obj.z = r.key; }
   Object.assign(obj, patch);
   if (obj.v === undefined) obj.v = null;
@@ -120,6 +124,27 @@ async function jbAddKonto(key) {
   catch (e) { toast(e.message, true); }
   jbState.busy = false; render();
 }
+/* Einzelpositionen je Konto */
+async function jbPosAdd(g, kt) {
+  const r = jbFindRow(g, kt); if (!r) return;
+  const pos = (r.pos || []).concat([{ t: "", v: 0, n: "" }]);
+  jbState.pos[g + "|" + kt] = true;
+  await jbSaveRow(r, { pos });
+  setTimeout(() => { const inps = document.querySelectorAll(`input[data-pos="${g}|${kt}"][data-f="t"]`); const last = inps[inps.length - 1]; if (last) last.focus(); }, 60);
+}
+async function jbPosSet(g, kt, i, field, value) {
+  const r = jbFindRow(g, kt); if (!r || !r.pos || !r.pos[i]) return;
+  const pos = r.pos.map(p => ({ ...p }));
+  if (field === "v") pos[i].v = jbNum(value) || 0; else pos[i][field] = String(value).trim();
+  await jbSaveRow(r, { pos });
+}
+async function jbPosDel(g, kt, i) {
+  const r = jbFindRow(g, kt); if (!r || !r.pos) return;
+  const pos = r.pos.filter((p, k) => k !== i);
+  if (!pos.length && !confirm("Letzte Position entfernen? Das Konto fällt dann auf Vorschlag/Überschreibung zurück.")) return;
+  await jbSaveRow(r, pos.length ? { pos } : { pos: undefined });
+}
+function jbTogglePos(id) { jbState.pos[id] = !jbState.pos[id]; render(); }
 function jbSetYear(y) { jbState.year = parseInt(y, 10); jbState.open = {}; render(); }
 function jbToggle(k) { jbState.open[k] = !jbState.open[k]; render(); }
 function jbToggleBuch(id) { jbState.buch[id] = !jbState.buch[id]; render(); }
@@ -144,7 +169,7 @@ function jbExport() {
   const y = jbState.year, m = jbBuild(y);
   const q = v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
   const lines = [["Position", "Gesellschaft", "Konto", "Bezeichnung", "Ist " + m.basis, "Hochrechnung", "Budget " + y, "Notiz"].map(q).join(";")];
-  FB_PLAN.forEach(row => { if (row[0] !== "d" && row[0] !== "d2") return; (FB_SRC[row[1]] || [row[1]]).forEach(k => (m.byKey[k] || []).forEach(r => lines.push([FB_LABELS[k] || k, r.g, r.kt, r.b, r.ist === null ? "" : Math.round(r.ist), Math.round(r.hoch), Math.round(jbRowBudget(r)), r.note].map(q).join(";")))); });
+  FB_PLAN.forEach(row => { if (row[0] !== "d" && row[0] !== "d2") return; (FB_SRC[row[1]] || [row[1]]).forEach(k => (m.byKey[k] || []).forEach(r => { lines.push([FB_LABELS[k] || k, r.g, r.kt, r.b, r.ist === null ? "" : Math.round(r.ist), Math.round(r.hoch), Math.round(jbRowBudget(r)), r.note].map(q).join(";")); (r.pos || []).forEach(p => lines.push([FB_LABELS[k] || k, r.g, r.kt, "  └ " + (p.t || ""), "", "", Math.round(p.v || 0), p.n || ""].map(q).join(";"))); })); });
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" })); a.download = "jahresbudget-" + y + ".csv"; a.click();
 }
 
@@ -163,7 +188,8 @@ function renderJahresbudget(el) {
   const years = jbYears();
   const q = jbState.q.trim().toLowerCase();
   const hit = r => !q || (r.g + " " + r.kt + " " + r.b + " " + r.note + " " + (FB_LABELS[r.key] || "")).toLowerCase().includes(q);
-  const visible = r => hit(r) && (!jbState.onlyChanged || (r.bud !== null && r.editable) || r.note);
+  const hit2 = r => hit(r) || (r.pos || []).some(p => ((p.t || "") + " " + (p.n || "")).toLowerCase().includes(q));
+  const visible = r => hit2(r) && (!jbState.onlyChanged || (r.bud !== null && r.editable) || r.note || jbHasPos(r));
 
   // Positionswerte (Budget & Hochrechnung) → EBITDA-Kette
   const sumBud = k => (m.byKey[k] || []).reduce((s, r) => s + jbRowBudget(r), 0);
@@ -178,7 +204,9 @@ function renderJahresbudget(el) {
     const bid = r.g + "|" + r.kt;
     const buch = buchMap[bid] && buchMap[bid].buch && buchMap[bid].buch.length ? buchMap[bid].buch : null;
     const openB = buch && jbState.buch[bid];
-    const over = r.editable && r.bud !== null;
+    const hasPos = r.editable && jbHasPos(r);
+    const openP = hasPos && jbState.pos[bid] !== false || (r.editable && jbState.pos[bid] === true);
+    const over = r.editable && r.bud !== null && !hasPos;
     const gi = (g, kt) => `'${escape(g).replace(/'/g, "\\'")}','${escape(kt)}'`;
     return `
       <tr style="border-top:1px solid var(--border-soft);${over ? "background:rgba(127,127,127,.06)" : ""}">
@@ -186,11 +214,20 @@ function renderJahresbudget(el) {
         ${td(r.ist === null ? `<span style="color:var(--text-faint)">${r.src ? jbFmt(m.istKey[r.key] || 0) : ""}</span>` : jbFmt(r.ist), "color:var(--text-dim);font-size:11.5px")}
         ${td(`<span style="color:var(--text-dim)">${jbFmt(r.hoch)}</span>`, "font-size:11.5px")}
         <td style="text-align:right;white-space:nowrap">${r.editable
-          ? `<input value="${r.bud === null ? "" : Math.round(r.bud)}" placeholder="${Math.round(r.hoch)}" style="width:100px;text-align:right;font-family:var(--font-mono);font-size:12px;padding:3px 6px;${over ? "font-weight:600;border-color:var(--accent)" : "color:var(--text-dim)"}" title="${over ? "Überschrieben — leeren = zurück zum Vorschlag" : "Vorschlag (Hochrechnung); Wert eintippen zum Überschreiben"}" onchange="jbSetVal(${gi(r.g, r.kt)},this.value)">${over || r.man ? `<span style="cursor:pointer;color:var(--text-faint);margin-left:4px" title="${r.man ? "Konto entfernen" : "Zurück zum Vorschlag"}" onclick="jbResetRow(${gi(r.g, r.kt)})">↺</span>` : ""}`
+          ? hasPos ? `<span style="font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--accent)" title="Summe der ${r.pos.length} Einzelpositionen">${jbFmt(jbPosSum(r))}</span> <span style="cursor:pointer;color:var(--accent);font-size:10px" onclick="jbTogglePos('${escape(bid).replace(/'/g, "\\'")}')" title="Einzelpositionen ${openP ? "zuklappen" : "anzeigen"}">${openP ? "▾" : "▸"} ${r.pos.length} Pos.</span>`
+            : `<input value="${r.bud === null ? "" : Math.round(r.bud)}" placeholder="${Math.round(r.hoch)}" style="width:100px;text-align:right;font-family:var(--font-mono);font-size:12px;padding:3px 6px;${over ? "font-weight:600;border-color:var(--accent)" : "color:var(--text-dim)"}" title="${over ? "Überschrieben — leeren = zurück zum Vorschlag" : "Vorschlag (Hochrechnung); Wert eintippen zum Überschreiben"}" onchange="jbSetVal(${gi(r.g, r.kt)},this.value)">${over || r.man ? `<span style="cursor:pointer;color:var(--text-faint);margin-left:4px" title="${r.man ? "Konto entfernen" : "Zurück zum Vorschlag"}" onclick="jbResetRow(${gi(r.g, r.kt)})">↺</span>` : ""}`
           : `<span style="font-family:var(--font-mono);font-size:12px">${jbFmt(r.bud)}</span>`}</td>
         ${td(r.editable ? delta(jbRowBudget(r), r.hoch) : "", "font-size:11px")}
-        <td style="padding:3px 6px">${r.editable ? `<input value="${escape(r.note)}" placeholder="Notiz …" style="width:100%;min-width:160px;font-size:11.5px;padding:3px 6px;${r.note ? "" : "color:var(--text-faint)"}" onchange="jbSetNote(${gi(r.g, r.kt)},this.value)">` : ""}</td>
+        <td style="padding:3px 6px;white-space:nowrap"><div style="display:flex;gap:6px;align-items:center">${r.editable ? `<input value="${escape(r.note)}" placeholder="Notiz …" style="flex:1;min-width:140px;font-size:11.5px;padding:3px 6px;${r.note ? "" : "color:var(--text-faint)"}" onchange="jbSetNote(${gi(r.g, r.kt)},this.value)"><span class="btn btn-sm" style="padding:0 6px;font-size:10px" onclick="jbPosAdd(${gi(r.g, r.kt)})" title="Einzelposition mit Betrag und Notiz ergänzen — das Konto-Budget wird dann aus den Positionen summiert">＋ Position</span>` : ""}</div></td>
       </tr>
+      ${r.editable && openP && r.pos && r.pos.length ? r.pos.map((p, i) => `
+      <tr style="background:rgba(127,127,127,.04)">
+        <td style="padding:2px 6px 2px 58px;font-size:11px"><span style="color:var(--text-faint)">└</span> <input data-pos="${escape(bid)}" data-f="t" value="${escape(p.t || "")}" placeholder="Position (z.B. Google Cloud)" style="width:260px;font-size:11.5px;padding:2px 6px" onchange="jbPosSet(${gi(r.g, r.kt)},${i},'t',this.value)"></td>
+        <td></td><td></td>
+        <td style="text-align:right;white-space:nowrap"><input data-pos="${escape(bid)}" data-f="v" value="${p.v ? Math.round(p.v) : ""}" placeholder="0" style="width:100px;text-align:right;font-family:var(--font-mono);font-size:11.5px;padding:2px 6px" onchange="jbPosSet(${gi(r.g, r.kt)},${i},'v',this.value)"></td>
+        <td></td>
+        <td style="padding:2px 6px"><div style="display:flex;gap:6px;align-items:center"><input value="${escape(p.n || "")}" placeholder="Notiz …" style="flex:1;min-width:140px;font-size:11px;padding:2px 6px;${p.n ? "" : "color:var(--text-faint)"}" onchange="jbPosSet(${gi(r.g, r.kt)},${i},'n',this.value)"><span style="cursor:pointer;color:var(--danger);font-size:11px" onclick="jbPosDel(${gi(r.g, r.kt)},${i})" title="Position entfernen">✕</span></div></td>
+      </tr>`).join("") : ""}
       ${openB ? buch.map(b => `<tr><td colspan="6" style="padding:2px 8px 2px 58px;font-family:var(--font-mono);font-size:10px;color:var(--text-faint);border-bottom:1px dotted var(--border)">
           <span style="display:inline-block;width:60px">${escape(b[0])}</span><span style="display:inline-block;min-width:280px">${escape(b[1])}</span><span style="display:inline-block;width:90px;text-align:right">${((b[2] || 0) * jbFkt(r.key)).toLocaleString("de-CH", { minimumFractionDigits: 2 })}</span></td></tr>`).join("") : ""}`;
   }).join("");
@@ -198,7 +235,7 @@ function renderJahresbudget(el) {
   const posRow = (key, label, indent, bold, srcKeys) => {
     const keys = srcKeys || [key];
     const n = keys.reduce((s, k) => s + (m.byKey[k] || []).filter(visible).length, 0);
-    const changed = keys.reduce((s, k) => s + (m.byKey[k] || []).filter(r => r.editable && (r.bud !== null || r.note)).length, 0);
+    const changed = keys.reduce((s, k) => s + (m.byKey[k] || []).filter(r => r.editable && (r.bud !== null || r.note || jbHasPos(r))).length, 0);
     const open = jbState.open[key];
     const canAdd = !keys.some(k => JB_PERSONAL.has(k) || JB_ERTRAG.has(k));
     return `
@@ -248,6 +285,6 @@ function renderJahresbudget(el) {
           <th style="text-align:left;padding:4px 6px">Notiz / je Gesellschaft</th></tr>
         ${body}
       </table>
-      <div style="font-size:10px;color:var(--text-faint);margin-top:8px">Aufwand positiv dargestellt. Positionen aufklappen (▶) zeigt Gesellschaft und Konto; Budgetfeld leer = Vorschlag aus der Hochrechnung gilt, eingetippter Wert überschreibt (↺ setzt zurück), Notiz je Konto. ▶ vor einem Konto zeigt die einzelnen Buchungen ${basis}. Ertrag SaaS/BPO kommt aus dem Ertragsbudget ${y}, Personalaufwand aus «Budget Personalaufwand» (beides nur Ansicht). «→ Budgetvergleich ${y}» schreibt alle übrigen Positionen als Budget-Positionen (1/12). · Jahresbudget v${JB_VERSION}</div>
+      <div style="font-size:10px;color:var(--text-faint);margin-top:8px">Aufwand positiv dargestellt. Positionen aufklappen (▶) zeigt Gesellschaft und Konto; Budgetfeld leer = Vorschlag aus der Hochrechnung gilt, eingetippter Wert überschreibt (↺ setzt zurück), Notiz je Konto. «＋ Position» legt Einzelpositionen (Text, Betrag, Notiz) unter dem Konto an — dann ist das Konto-Budget die Summe der Positionen. ▶ vor einem Konto zeigt die einzelnen Buchungen ${basis}. Ertrag SaaS/BPO kommt aus dem Ertragsbudget ${y}, Personalaufwand aus «Budget Personalaufwand» (beides nur Ansicht). «→ Budgetvergleich ${y}» schreibt alle übrigen Positionen als Budget-Positionen (1/12). · Jahresbudget v${JB_VERSION}</div>
     </div>`;
 }
