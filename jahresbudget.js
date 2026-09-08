@@ -19,7 +19,7 @@
    budgetRows, budgetChfOf, budgetIsSaaS, budgetErloes, BUDGET_MONTH_FIELDS,
    deleteItem, reload, escape, toast, render, currentView. */
 
-const JB_VERSION = "1.104.0";
+const JB_VERSION = "1.106.0";
 const JB_GES = ["Apriko AG", "Maverix AG"];
 const JB_PERSONAL = new Set(["SW_Lohn", "SW_SV", "SW_UebrPA", "BO_Lohn", "BO_SV", "BO_UebrPA"]);
 const JB_ERTRAG = new Set(["SW_Ertrag", "BO_Ertrag"]);

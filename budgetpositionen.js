@@ -10,11 +10,18 @@
    Abhängigkeiten: jahresbudget.js (jbBuild, jbSaveRow, jbFindRow, jbPos*, jbFmt, jbNum, JB_*),
    index.html (fbSaveItem, reload, escape, toast, render, FB_PLAN, FB_LABELS, FB_SRC). */
 
-const BP_VERSION = "1.104.0";
+const BP_VERSION = "1.106.0";
 const BP_MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 const BP_FAELL = [["m", "monatlich (÷12)"], ["q", "quartalsweise (÷4)"], ["e", "einmalig im Monat"], ["h", "halbjährlich (÷2)"], ["r", "Monat von – bis"]];
 
-const bpState = { year: 2027, ges: "Apriko AG", q: "", showEmpty: true, open: {} };
+const bpState = { year: 2027, ges: "Apriko AG", q: "", showEmpty: true, open: {}, buch: {} };
+/* Vorjahres-Buchungen je Monat summieren (Datum «dd.mm.yy» oder «dd.mm.yyyy» in b[0]) */
+function bpBuchMonate(buch, fkt) {
+  const out = Array(12).fill(0); let rest = 0;
+  (buch || []).forEach(b => { const m = /^\s*\d{1,2}\.(\d{1,2})\./.exec(String(b[0] || "")); const v = (parseFloat(b[2]) || 0) * fkt; if (m) { const mi = parseInt(m[1], 10) - 1; if (mi >= 0 && mi < 12) out[mi] += v; else rest += v; } else rest += v; });
+  return { m: out, rest };
+}
+function bpToggleBuch(id) { bpState.buch[id] = !bpState.buch[id]; render(); }
 
 /* Monatsverteilung einer Position (Jahresbetrag v) */
 function bpMonths(p) {
@@ -100,6 +107,9 @@ function renderBudgetpositionen(el) {
   if (jbState.busy) { el.innerHTML = `<div class="full-loading"><div class="loading"></div></div>`; return; }
   const y = bpState.year, ges = bpState.ges;
   const { rows, model } = bpRows(y, ges);
+  const basis = y - 1;
+  if (!fbBuchYearCache[basis] && typeof siteId !== "undefined" && siteId) fbLoadBuch(basis).then(() => { if (currentView === "budgetpos") render(); });
+  const buchMap = fbBuchYearCache[basis] || {};
   const q = bpState.q.trim().toLowerCase();
   const hit = r => !q || (r.kt + " " + r.b + " " + r.posLabel + " " + (r.pos || []).map(p => (p.t || "") + " " + (p.n || "")).join(" ")).toLowerCase().includes(q);
   const shown = rows.filter(r => hit(r) && (bpState.showEmpty || jbHasPos(r)));
@@ -119,10 +129,14 @@ function renderBudgetpositionen(el) {
     const posHead = r.posLabel !== lastPos ? `<tr><td colspan="19" style="padding:8px 6px 3px;font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;border-top:1px solid var(--border)">${escape(r.posLabel)}</td></tr>` : "";
     lastPos = r.posLabel;
     const bid = r.g + "|" + r.kt, open = !!bpState.open[bid];
+    const buch = buchMap[bid] && buchMap[bid].buch && buchMap[bid].buch.length ? buchMap[bid].buch : null;
+    const openB = buch && bpState.buch[bid];
     const kontoRow = `
       <tr style="border-top:1px solid var(--border-soft);background:var(--bg-elev);cursor:pointer" onclick="bpToggle('${escape(bid).replace(/'/g, "\\'")}')" title="Klicken: Positionen ${open ? "zuklappen" : "aufklappen"}">
         <td style="padding:4px 6px;white-space:nowrap;font-weight:600"><span style="display:inline-block;width:12px;color:var(--accent);font-size:9px">${open ? "▼" : "▶"}</span>${escape(r.kt)} <span style="font-weight:400">${escape(r.b)}</span>${r.man ? ` <span style="color:var(--text-faint);font-size:10px">manuell</span>` : ""}</td>
-        <td style="padding:4px 6px;font-size:11px;color:var(--text-faint)">${jbHasPos(r) ? r.pos.length + " Pos." : `<span title="Ohne Positionen gilt der Wert aus dem Jahresbudget (Hochrechnung bzw. Überschreibung), gleichmässig ÷12">Vorschlag ${jbFmt(jbRowBudget(r))} ÷ 12</span>`}</td>
+        <td style="padding:4px 6px;font-size:11px;color:var(--text-faint);white-space:nowrap">${jbHasPos(r) ? r.pos.length + " Pos." : `<span title="Ohne Positionen gilt der Wert aus dem Jahresbudget (Hochrechnung bzw. Überschreibung), gleichmässig ÷12">Vorschlag ${jbFmt(jbRowBudget(r))} ÷ 12</span>`}
+          <span style="margin-left:8px" title="Ist ${basis} (wie importiert) → Hochrechnung">Ist ${basis}: ${r.ist === null ? "—" : jbFmt(r.ist)} → ${jbFmt(r.hoch)}</span>
+          ${buch ? ` <span style="cursor:pointer;color:var(--accent);margin-left:6px" onclick="event.stopPropagation();bpToggleBuch('${escape(bid).replace(/'/g, "\\'")}')" title="Buchungen ${basis} ${openB ? "zuklappen" : "anzeigen"}">${openB ? "▼" : "▶"} ${buch.length} Buchungen ${basis}</span>` : ""}</td>
         <td></td><td></td>
         ${kontoM.map(v => tdm(v, "font-weight:600")).join("")}
         ${tdm(kontoJahr, "font-weight:700")}
@@ -143,7 +157,18 @@ function renderBudgetpositionen(el) {
         <td style="padding:2px 6px"><div style="display:flex;gap:6px;align-items:center"><input value="${escape(p.n || "")}" placeholder="Notiz …" style="width:150px;font-size:11px;padding:2px 6px;${p.n ? "" : "color:var(--text-faint)"}" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'n',this.value)"><span style="cursor:pointer;color:var(--danger);font-size:11px" onclick="jbPosDel(${gi(r.g, r.kt)},${i})" title="Position entfernen">✕</span></div></td>
       </tr>`;
     }).join("");
-    return posHead + kontoRow + (open ? posRows : "");
+    const vj = buch ? bpBuchMonate(buch, jbFkt(r.key)) : null;
+    const vjRow = vj ? `
+      <tr style="background:rgba(127,127,127,.04)">
+        <td style="padding:2px 6px 2px 22px;font-size:10.5px;color:var(--text-faint);white-space:nowrap">Vorjahr ${basis} nach Monat <span style="opacity:.7">(${buch.length} Buchungen${vj.rest ? ", ohne Datum " + jbFmt(vj.rest) : ""})</span></td>
+        <td></td><td></td><td></td>
+        ${vj.m.map(v => tdm(v, "color:var(--text-faint);font-style:italic")).join("")}
+        ${tdm(vj.m.reduce((s, v) => s + v, 0) + vj.rest, "color:var(--text-faint);font-style:italic")}
+        <td></td>
+      </tr>` : "";
+    const buchRows = openB ? buch.map(b => `<tr><td colspan="19" style="padding:2px 8px 2px 40px;font-family:var(--font-mono);font-size:10px;color:var(--text-faint);border-bottom:1px dotted var(--border)">
+          <span style="display:inline-block;width:60px">${escape(b[0])}</span><span style="display:inline-block;min-width:280px">${escape(b[1])}</span><span style="display:inline-block;width:90px;text-align:right">${((b[2] || 0) * jbFkt(r.key)).toLocaleString("de-CH", { minimumFractionDigits: 2 })}</span></td></tr>`).join("") : "";
+    return posHead + kontoRow + vjRow + buchRows + (open ? posRows : "");
   }).join("");
 
   el.innerHTML = `
@@ -172,6 +197,6 @@ function renderBudgetpositionen(el) {
           <td style="padding:6px">Total ${escape(ges)}</td><td></td><td></td><td></td>
           ${totalM.map(v => tdm(v)).join("")}${tdm(totalJahr)}<td></td></tr>
       </table>
-      <div style="font-size:10px;color:var(--text-faint);margin-top:8px">Betrag = Jahresbetrag; die Fälligkeit verteilt ihn auf die Monate (monatlich ÷12, quartalsweise ÷4 ab gewähltem Monat, einmalig, halbjährlich ÷2, von–bis gleichmässig). Konto-Zeile anklicken (▶) zeigt die Positionen; «＋ Position» klappt automatisch auf. Konten ohne Positionen zeigen den Wert aus dem Jahresbudget ÷12. Positionen und Beträge sind dieselben wie im Jahresbudget — Änderungen wirken in beiden Ansichten. Die Monatssummen unten sind die Aufwand-Seite des künftigen Liquiditätsplans. · Budgetpositionen v${BP_VERSION}</div>
+      <div style="font-size:10px;color:var(--text-faint);margin-top:8px">Betrag = Jahresbetrag; die Fälligkeit verteilt ihn auf die Monate (monatlich ÷12, quartalsweise ÷4 ab gewähltem Monat, einmalig, halbjährlich ÷2, von–bis gleichmässig). Konto-Zeile anklicken (▶) zeigt die Positionen; «＋ Position» klappt automatisch auf. Die kursive Zeile «Vorjahr nach Monat» verteilt die Vorjahresbuchungen auf die Monate (Ist, nicht hochgerechnet); «▶ n Buchungen» zeigt sie einzeln. Konten ohne Positionen zeigen den Wert aus dem Jahresbudget ÷12. Positionen und Beträge sind dieselben wie im Jahresbudget — Änderungen wirken in beiden Ansichten. Die Monatssummen unten sind die Aufwand-Seite des künftigen Liquiditätsplans. · Budgetpositionen v${BP_VERSION}</div>
     </div>`;
 }
