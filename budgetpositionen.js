@@ -10,7 +10,7 @@
    Abhängigkeiten: jahresbudget.js (jbBuild, jbSaveRow, jbFindRow, jbPos*, jbFmt, jbNum, JB_*),
    index.html (fbSaveItem, reload, escape, toast, render, FB_PLAN, FB_LABELS, FB_SRC). */
 
-const BP_VERSION = "1.101.0";
+const BP_VERSION = "1.103.0";
 const BP_MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 const BP_FAELL = [["m", "monatlich (÷12)"], ["q", "quartalsweise (÷4)"], ["e", "einmalig im Monat"], ["h", "halbjährlich (÷2)"], ["r", "Monat von – bis"]];
 
@@ -45,7 +45,7 @@ function bpRows(year, ges) {
   const out = [];
   FB_PLAN.forEach(row => {
     if (row[0] !== "d" && row[0] !== "d2") return;
-    (FB_SRC[row[1]] || [row[1]]).forEach(k => (m.byKey[k] || []).forEach(r => { if (r.editable && r.g === ges) out.push({ ...r, posLabel: FB_LABELS[k] || k }); }));
+    (FB_SRC[row[1]] || [row[1]]).forEach(k => (m.byKey[k] || []).forEach(r => { if (r.editable && jbSameGes(r.g, ges)) out.push({ ...r, posLabel: FB_LABELS[k] || k }); }));
   });
   return { rows: out, model: m };
 }
@@ -61,20 +61,24 @@ async function bpPosSet(g, kt, i, field, value) {
 }
 async function bpPosAdd(g, kt) {
   const r = jbFindRow(g, kt); if (!r) return;
+  bpState.open[g + "|" + kt] = true;
   await jbSaveRow(r, { pos: (r.pos || []).concat([{ t: "", v: 0, n: "", f: "m", sm: 1 }]) });
   setTimeout(() => { const inps = document.querySelectorAll(`input[data-bp="${g}|${kt}"]`); const last = inps[inps.length - 1]; if (last) last.focus(); }, 60);
 }
 async function bpAddKonto() {
   const kt = prompt("Kontonummer gemäss Abacus (z.B. 6510):"); if (!kt || !/^\d{3,5}$/.test(kt.trim())) { if (kt) toast("Ungültige Kontonummer.", true); return; }
   const b = prompt("Bezeichnung:", "") || "";
-  const key = fbZuordnung(kt.trim(), bpState.ges === "Apriko AG");
+  const key = fbZuordnung(kt.trim(), jbSameGes(bpState.ges, "Apriko AG"));
+  const istG = fbIst(bpState.year - 1).map(d => d.g).find(x => jbSameGes(x, bpState.ges)) || bpState.ges;
   if (!key || JB_PERSONAL.has(key) || JB_ERTRAG.has(key)) { toast("Konto " + kt + " gehört zu Ertrag/Personal — dort wird nicht manuell budgetiert.", true); return; }
   jbState.year = bpState.year;
-  try { await fbSaveItem({ cfg: "jb", y: bpState.year, g: bpState.ges, kt: kt.trim(), b, z: key, man: 1, v: 0, n: "", pos: [{ t: "", v: 0, n: "", f: "m", sm: 1 }] }); await reload("Budget"); }
+  try { await fbSaveItem({ cfg: "jb", y: bpState.year, g: istG, kt: kt.trim(), b, z: key, man: 1, v: 0, n: "", pos: [{ t: "", v: 0, n: "", f: "m", sm: 1 }] }); await reload("Budget"); }
   catch (e) { toast(e.message, true); }
   render();
 }
-function bpSetGes(g) { bpState.ges = g; render(); }
+function bpToggle(id) { bpState.open[id] = !bpState.open[id]; render(); }
+function bpToggleAll(open) { bpState.open = {}; if (open) bpRows(bpState.year, bpState.ges).rows.forEach(r => { bpState.open[r.g + "|" + r.kt] = true; }); render(); }
+function bpSetGes(g) { bpState.ges = g; bpState.open = {}; render(); }
 function bpSetYear(y) { bpState.year = parseInt(y, 10); jbState.year = bpState.year; render(); }
 function bpExport() {
   const { rows } = bpRows(bpState.year, bpState.ges);
@@ -90,6 +94,8 @@ function renderBudgetpositionen(el) {
   document.getElementById("view-actions").innerHTML = `
     <button class="btn btn-sm" onclick="bpAddKonto()">＋ Konto</button>
     <button class="btn btn-sm" onclick="bpState.showEmpty=!bpState.showEmpty;render()" style="${bpState.showEmpty ? "" : "background:var(--accent);color:#fff"}" title="Konten ohne Positionen ausblenden">nur mit Positionen</button>
+    <button class="btn btn-sm" onclick="bpToggleAll(true)" title="Alle Konten aufklappen">▾ alle</button>
+    <button class="btn btn-sm" onclick="bpToggleAll(false)" title="Alle Konten zuklappen">▸ alle</button>
     <button class="btn btn-sm" onclick="bpExport()">⇩ CSV</button>`;
   if (jbState.busy) { el.innerHTML = `<div class="full-loading"><div class="loading"></div></div>`; return; }
   const y = bpState.year, ges = bpState.ges;
@@ -112,14 +118,15 @@ function renderBudgetpositionen(el) {
     kontoM.forEach((v, i) => totalM[i] += v); const kontoJahr = kontoM.reduce((s, v) => s + v, 0); totalJahr += kontoJahr; posCount += (r.pos || []).length;
     const posHead = r.posLabel !== lastPos ? `<tr><td colspan="19" style="padding:8px 6px 3px;font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;border-top:1px solid var(--border)">${escape(r.posLabel)}</td></tr>` : "";
     lastPos = r.posLabel;
+    const bid = r.g + "|" + r.kt, open = !!bpState.open[bid];
     const kontoRow = `
-      <tr style="border-top:1px solid var(--border-soft);background:var(--bg-elev)">
-        <td style="padding:4px 6px;white-space:nowrap;font-weight:600">${escape(r.kt)} <span style="font-weight:400">${escape(r.b)}</span>${r.man ? ` <span style="color:var(--text-faint);font-size:10px">manuell</span>` : ""}</td>
+      <tr style="border-top:1px solid var(--border-soft);background:var(--bg-elev);cursor:pointer" onclick="bpToggle('${escape(bid).replace(/'/g, "\\'")}')" title="Klicken: Positionen ${open ? "zuklappen" : "aufklappen"}">
+        <td style="padding:4px 6px;white-space:nowrap;font-weight:600"><span style="display:inline-block;width:12px;color:var(--accent);font-size:9px">${open ? "▼" : "▶"}</span>${escape(r.kt)} <span style="font-weight:400">${escape(r.b)}</span>${r.man ? ` <span style="color:var(--text-faint);font-size:10px">manuell</span>` : ""}</td>
         <td style="padding:4px 6px;font-size:11px;color:var(--text-faint)">${jbHasPos(r) ? r.pos.length + " Pos." : `<span title="Ohne Positionen gilt der Wert aus dem Jahresbudget (Hochrechnung bzw. Überschreibung), gleichmässig ÷12">Vorschlag ${jbFmt(jbRowBudget(r))} ÷ 12</span>`}</td>
         <td></td><td></td>
         ${kontoM.map(v => tdm(v, "font-weight:600")).join("")}
         ${tdm(kontoJahr, "font-weight:700")}
-        <td style="padding:2px 6px;white-space:nowrap"><span class="btn btn-sm" style="padding:0 6px;font-size:10px" onclick="bpPosAdd(${gi(r.g, r.kt)})">＋ Position</span></td>
+        <td style="padding:2px 6px;white-space:nowrap"><span class="btn btn-sm" style="padding:0 6px;font-size:10px" onclick="event.stopPropagation();bpPosAdd(${gi(r.g, r.kt)})">＋ Position</span></td>
       </tr>`;
     const posRows = (r.pos || []).map((p, i) => {
       const mo = bpMonths(p), f = p.f || "m";
@@ -136,12 +143,12 @@ function renderBudgetpositionen(el) {
         <td style="padding:2px 6px"><div style="display:flex;gap:6px;align-items:center"><input value="${escape(p.n || "")}" placeholder="Notiz …" style="width:150px;font-size:11px;padding:2px 6px;${p.n ? "" : "color:var(--text-faint)"}" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'n',this.value)"><span style="cursor:pointer;color:var(--danger);font-size:11px" onclick="jbPosDel(${gi(r.g, r.kt)},${i})" title="Position entfernen">✕</span></div></td>
       </tr>`;
     }).join("");
-    return posHead + kontoRow + posRows;
+    return posHead + kontoRow + (open ? posRows : "");
   }).join("");
 
   el.innerHTML = `
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
-      <div style="display:flex;gap:4px">${JB_GES.map(g => `<button class="btn btn-sm" style="${g === ges ? "background:var(--accent);color:#fff" : ""}" onclick="bpSetGes('${g}')">${escape(g)}</button>`).join("")}</div>
+      <div style="display:flex;gap:4px">${JB_GES.map(g => `<button class="btn btn-sm" style="${jbSameGes(g, ges) ? "background:var(--accent);color:#fff" : ""}" onclick="bpSetGes('${g}')">${escape(g)}</button>`).join("")}</div>
       <label style="font-size:12px;color:var(--text-dim)">Budgetjahr <select onchange="bpSetYear(this.value)" style="padding:4px 6px;font-size:12px;margin-left:4px">${years.map(v => `<option ${v === y ? "selected" : ""}>${v}</option>`).join("")}</select></label>
       <input type="search" placeholder="Suche Konto, Text, Notiz …" value="${escape(bpState.q)}" style="font-size:12px;padding:4px 8px;width:220px" oninput="bpState.q=this.value;render()">
       ${model.hasIst ? "" : `<span style="font-size:12px;color:var(--danger)">Keine Ist-Daten ${y - 1} — Konten stammen nur aus manuellen Ergänzungen</span>`}
@@ -165,6 +172,6 @@ function renderBudgetpositionen(el) {
           <td style="padding:6px">Total ${escape(ges)}</td><td></td><td></td><td></td>
           ${totalM.map(v => tdm(v)).join("")}${tdm(totalJahr)}<td></td></tr>
       </table>
-      <div style="font-size:10px;color:var(--text-faint);margin-top:8px">Betrag = Jahresbetrag; die Fälligkeit verteilt ihn auf die Monate (monatlich ÷12, quartalsweise ÷4 ab gewähltem Monat, einmalig, halbjährlich ÷2, von–bis gleichmässig). Konten ohne Positionen zeigen den Wert aus dem Jahresbudget ÷12. Positionen und Beträge sind dieselben wie im Jahresbudget — Änderungen wirken in beiden Ansichten. Die Monatssummen unten sind die Aufwand-Seite des künftigen Liquiditätsplans. · Budgetpositionen v${BP_VERSION}</div>
+      <div style="font-size:10px;color:var(--text-faint);margin-top:8px">Betrag = Jahresbetrag; die Fälligkeit verteilt ihn auf die Monate (monatlich ÷12, quartalsweise ÷4 ab gewähltem Monat, einmalig, halbjährlich ÷2, von–bis gleichmässig). Konto-Zeile anklicken (▶) zeigt die Positionen; «＋ Position» klappt automatisch auf. Konten ohne Positionen zeigen den Wert aus dem Jahresbudget ÷12. Positionen und Beträge sind dieselben wie im Jahresbudget — Änderungen wirken in beiden Ansichten. Die Monatssummen unten sind die Aufwand-Seite des künftigen Liquiditätsplans. · Budgetpositionen v${BP_VERSION}</div>
     </div>`;
 }

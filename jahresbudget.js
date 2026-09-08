@@ -19,12 +19,16 @@
    budgetRows, budgetChfOf, budgetIsSaaS, budgetErloes, BUDGET_MONTH_FIELDS,
    deleteItem, reload, escape, toast, render, currentView. */
 
-const JB_VERSION = "1.101.0";
+const JB_VERSION = "1.103.0";
 const JB_GES = ["Apriko AG", "Maverix AG"];
 const JB_PERSONAL = new Set(["SW_Lohn", "SW_SV", "SW_UebrPA", "BO_Lohn", "BO_SV", "BO_UebrPA"]);
 const JB_ERTRAG = new Set(["SW_Ertrag", "BO_Ertrag"]);
 const JB_PA_GES = { SW_Lohn: "Maverix AG", SW_SV: "Maverix AG", SW_UebrPA: "Maverix AG", BO_Lohn: "Apriko AG", BO_SV: "Apriko AG", BO_UebrPA: "Apriko AG" };
 
+/* Gesellschaftsnamen tolerant vergleichen («maverix ag» im Import = «Maverix AG») */
+function jbGesNorm(g) { return String(g || "").toLowerCase().replace(/[^a-z0-9äöü]/g, ""); }
+function jbSameGes(a, b) { return jbGesNorm(a) === jbGesNorm(b); }
+function jbGesCanon(g) { return JB_GES.find(x => jbSameGes(x, g)) || g; }
 const jbState = { year: 2027, open: {}, buch: {}, pos: {}, busy: false, onlyChanged: false, q: "" };
 
 /* ---------- Hilfen ---------- */
@@ -72,7 +76,7 @@ function jbBuild(year) {
   jbItems(year).forEach(d => {
     if (!d.man) return;
     if (acc[d.g + "|" + d.kt]) return;
-    const key = d.z || fbZuordnung(d.kt, d.g === "Apriko AG");
+    const key = d.z || fbZuordnung(d.kt, jbSameGes(d.g, "Apriko AG"));
     if (!key || JB_PERSONAL.has(key) || JB_ERTRAG.has(key)) return;
     push(key, { key, g: d.g, kt: d.kt, b: d.b || "", ist: 0, hoch: 0, p: "—", id: d.id, bud: d.v !== null && d.v !== undefined ? parseFloat(d.v) : null, note: d.n || "", pos: Array.isArray(d.pos) ? d.pos : [], man: true, editable: true });
   });
@@ -105,7 +109,7 @@ async function jbSaveRow(r, patch) {
   try { await fbSaveItem(obj, r.id); if (!r.id) await reload("Budget"); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
   jbState.busy = false; render();
 }
-function jbFindRow(g, kt) { const m = jbBuild(jbState.year); for (const rows of Object.values(m.byKey)) { const r = rows.find(x => x.g === g && x.kt === kt && x.editable); if (r) return r; } return null; }
+function jbFindRow(g, kt) { const m = jbBuild(jbState.year); for (const rows of Object.values(m.byKey)) { const r = rows.find(x => jbSameGes(x.g, g) && x.kt === kt && x.editable); if (r) return r; } return null; }
 async function jbSetVal(g, kt, value) {
   const r = jbFindRow(g, kt); if (!r) return;
   const v = String(value).trim() === "" ? null : jbNum(value);
@@ -117,11 +121,13 @@ async function jbResetRow(g, kt) { const r = jbFindRow(g, kt); if (!r || !r.id) 
 async function jbAddKonto(key) {
   const g = prompt("Gesellschaft (Apriko AG / Maverix AG):", "Apriko AG"); if (!g) return;
   const ges = JB_GES.find(x => x.toLowerCase().startsWith(g.trim().toLowerCase().slice(0, 3))) || JB_GES[0];
+  // Schreibweise der Ist-Daten übernehmen, damit Buchungen/Konten zusammenpassen
+  const istG = fbIst(jbState.year - 1).map(d => d.g).find(x => jbSameGes(x, ges)) || ges;
   const kt = prompt("Kontonummer (z.B. 6510):"); if (!kt || !/^\d{3,5}$/.test(kt.trim())) { toast("Ungültige Kontonummer.", true); return; }
   const b = prompt("Bezeichnung:", "") || "";
   const v = jbNum(prompt("Budget " + jbState.year + " (CHF):", "0"));
   jbState.busy = true;
-  try { await fbSaveItem({ cfg: "jb", y: jbState.year, g: ges, kt: kt.trim(), b, z: key, man: 1, v: v === null ? 0 : v, n: "" }); await reload("Budget"); }
+  try { await fbSaveItem({ cfg: "jb", y: jbState.year, g: istG, kt: kt.trim(), b, z: key, man: 1, v: v === null ? 0 : v, n: "" }); await reload("Budget"); }
   catch (e) { toast(e.message, true); }
   jbState.busy = false; render();
 }
@@ -196,7 +202,7 @@ function renderJahresbudget(el) {
   const sumBud = k => (m.byKey[k] || []).reduce((s, r) => s + jbRowBudget(r), 0);
   const sumHoch = k => (m.byKey[k] || []).reduce((s, r) => s + (r.hoch || 0), 0);
   const vb = fbCompute(sumBud), vh = fbCompute(sumHoch);
-  const gesBud = g => k => (m.byKey[k] || []).filter(r => r.g === g).reduce((s, r) => s + jbRowBudget(r), 0);
+  const gesBud = g => k => (m.byKey[k] || []).filter(r => jbSameGes(r.g, g)).reduce((s, r) => s + jbRowBudget(r), 0);
   const vg = {}; JB_GES.forEach(g => vg[g] = fbCompute(gesBud(g)));
 
   const td = (h, extra) => `<td style="text-align:right;font-family:var(--font-mono);white-space:nowrap;${extra || ""}">${h}</td>`;
