@@ -23,11 +23,12 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.98.0"></script>
-<script src="apriko-api.js?v=1.98.0"></script>
-<script src="lohncheck.js?v=1.98.0"></script>
-<script src="personalbudget.js?v=1.98.0"></script>
-<script src="jahresbudget.js?v=1.98.0"></script>
+<script src="apriko-filters.js?v=1.101.0"></script>
+<script src="apriko-api.js?v=1.101.0"></script>
+<script src="lohncheck.js?v=1.101.0"></script>
+<script src="personalbudget.js?v=1.101.0"></script>
+<script src="jahresbudget.js?v=1.101.0"></script>
+<script src="budgetpositionen.js?v=1.101.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -935,6 +936,7 @@
           <button data-view="budgetvgl"><span class="ic">⇄</span> Budgetvergleich</button>
           <button data-view="personalbudget"><span class="ic">🔐</span> Budget Personalaufwand</button>
           <button data-view="jahresbudget"><span class="ic">📅</span> Jahresbudget</button>
+          <button data-view="budgetpos"><span class="ic">🗓</span> Budgetpositionen</button>
         </div>
       </div>
       <div class="nav-group" data-group="workflows">
@@ -968,7 +970,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.98.0</span> · <span id="app-build-date">08.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.101.0</span> · <span id="app-build-date">08.09.2026</span>
     </div>
   </aside>
 
@@ -1395,14 +1397,14 @@ let currentView = DEMO_ANON ? "einsatzdash" : "dashboard";
    Berechtigungssystem
    =========================================================== */
 const SUPER_ADMIN_EMAIL = "benjamin@apriko.com";  // hat immer volle Rechte
-const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","bpocheck","clintern","clfibu","rapport","einsatzdash","konzern","lohncheck","apipoc","profiles"];
+const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","rapport","einsatzdash","konzern","lohncheck","apipoc","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
 const VIEW_TITLES = {
   dashboard: "Dashboard", pipeline: "Pipeline",
   customers: "Kunden", companies: "Firmen", contacts: "Kontakte", tasks: "Aufgaben",
-  revenue: "Umsätze", stats: "Statistik", budget: "Ertragsbudget", budgetvgl: "Budgetvergleich", personalbudget: "Budget Personalaufwand", jahresbudget: "Jahresbudget",
+  revenue: "Umsätze", stats: "Statistik", budget: "Ertragsbudget", budgetvgl: "Budgetvergleich", personalbudget: "Budget Personalaufwand", jahresbudget: "Jahresbudget", budgetpos: "Budgetpositionen (Erfassung & Jahresübersicht)",
   bpocheck: "Lohn Checkliste Temp", clintern: "Lohn Checkliste intern", clfibu: "FIBU Monatsabschluss",
   rapport: "Rapport", einsatzdash: "Kundendashboard", konzern: "Konzernanalyse",
   lohncheck: "Ultimativer Check", apipoc: "Apriko API (POC)",
@@ -1870,6 +1872,7 @@ function render() {
   else if (currentView === "lohncheck") renderLohncheck(content);
   else if (currentView === "personalbudget") renderPersonalBudget(content);
   else if (currentView === "jahresbudget") renderJahresbudget(content);
+  else if (currentView === "budgetpos") renderBudgetpositionen(content);
   else if (currentView === "apipoc") renderApiPoc(content);
   else if (currentView === "companies") renderCompanies(content);
   else if (currentView === "contacts") renderContacts(content);

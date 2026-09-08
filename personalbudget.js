@@ -13,13 +13,17 @@
    Abhängigkeiten aus index.html: cache, fbParse, fbSaveItem, deleteItem,
    reload, escape, toast, render, showModal, closeModal, currentUser. */
 
-const PA_VERSION = "1.98.0";
+const PA_VERSION = "1.101.0";
 const PA_GES = ["Apriko AG", "Maverix AG"];
 /* Budgetvergleich rechnet Personal ÜBER KREUZ (fbZuordnung): Maverix-Löhne = SW_*, Apriko-Löhne = BO_* */
 const PA_FB_KEYS = { "Apriko AG": { lohn: "BO_Lohn", sv: "BO_SV", uebr: "BO_UebrPA" }, "Maverix AG": { lohn: "SW_Lohn", sv: "SW_SV", uebr: "SW_UebrPA" } };
 const PA_SALT = "apriko-pa-2026";
 
-const paState = { year: 2027, unlocked: sessionStorage.getItem("pa-unlocked") === "1", busy: false, pwError: "", sort: "g" };
+const paState = { year: 2027, unlocked: sessionStorage.getItem("pa-unlocked") === "1", busy: false, pwError: "", sort: "g", order: null };
+/* Reihenfolge bleibt beim Editieren stabil (kein Springen der Zeilen); neu sortiert wird nur beim
+   Hinzufügen eines Mitarbeiters, Jahreswechsel oder Klick auf eine Spaltenüberschrift. */
+function paSortRows(rows) { return rows.slice().sort((a, b) => paState.sort === "n" ? String(a.n).localeCompare(String(b.n), "de") : String(a.g).localeCompare(String(b.g)) || String(a.n).localeCompare(String(b.n), "de")); }
+function paResort() { paState.order = null; render(); }
 
 /* ---------- Daten ---------- */
 function paItems(t) { return cache.budget.map(it => fbParse(it, "pa")).filter(d => d && d.t === t); }
@@ -51,6 +55,7 @@ async function paSetField(id, field, value) {
   await paSave(obj, id);
 }
 async function paAddRow() {
+  paState.order = null;   // beim nächsten Render neu sortieren, neue Zeile ans Ende
   await paSave({ cfg: "pa", t: "row", y: paState.year, n: "", g: PA_GES[0], l: 0, p: 1, s: 0, w: 0 });
   setTimeout(() => { const inp = document.querySelector("#pa-table tr:last-child input[data-f='n']"); if (inp) inp.focus(); }, 50);
 }
@@ -62,7 +67,7 @@ async function paDeleteRow(id) {
   paState.busy = false; render();
 }
 async function paSetAg(v) { const c = paCfg(paState.year); await paSave({ cfg: "pa", t: "cfg", y: paState.year, ag: paNum(v) }, c ? c.id : null); }
-function paSetYear(y) { paState.year = parseInt(y, 10); render(); }
+function paSetYear(y) { paState.year = parseInt(y, 10); paState.order = null; render(); }
 async function paCopyYear(from) {
   if (paRows(paState.year).length && !confirm("Jahr " + paState.year + " hat bereits Zeilen. Zeilen aus " + from + " zusätzlich kopieren?")) return;
   paState.busy = true; render();
@@ -201,7 +206,18 @@ function renderPersonalBudget(el) {
 
   const y = paState.year, ag = paAg(y);
   let rows = paRows(y);
-  rows.sort((a, b) => paState.sort === "n" ? String(a.n).localeCompare(String(b.n), "de") : String(a.g).localeCompare(String(b.g)) || String(a.n).localeCompare(String(b.n), "de"));
+  const ids = rows.map(r => String(r.id));
+  if (!paState.order || paState.order.some(id => !ids.includes(id))) {
+    // Neu sortieren; noch unbekannte (neue) Zeilen ans Ende
+    const known = paState.order ? paState.order.filter(id => ids.includes(id)) : [];
+    const base = paState.order ? rows.filter(r => known.includes(String(r.id))) : rows.filter(r => String(r.n || "").trim());
+    const sortedKnown = paSortRows(base).map(r => String(r.id));
+    const fresh = ids.filter(id => !sortedKnown.includes(id));   // neue/leere Zeilen ans Ende
+    paState.order = sortedKnown.concat(fresh);
+  } else if (paState.order.length !== ids.length) {
+    paState.order = paState.order.concat(ids.filter(id => !paState.order.includes(id)));
+  }
+  rows.sort((a, b) => paState.order.indexOf(String(a.id)) - paState.order.indexOf(String(b.id)));
   const sums = paSums(rows, ag);
   const years = paYears();
   const inp = (r, f, v, w, extra) => `<input data-f="${f}" value="${escape(v)}" style="width:${w}px;padding:4px 6px;font-size:12px;text-align:${f === "n" ? "left" : "right"}" ${extra || ""} onchange="paSetField(${r.id},'${f}',this.value)">`;
@@ -222,8 +238,8 @@ function renderPersonalBudget(el) {
     <div class="card" style="padding:12px 14px;overflow-x:auto">
       <table id="pa-table" style="width:100%;font-size:12px;border-collapse:collapse">
         <tr style="color:var(--text-dim);font-size:11px">
-          <th style="text-align:left;padding:4px 6px;cursor:pointer" onclick="paState.sort='n';render()">Name ${paState.sort === "n" ? "▾" : ""}</th>
-          <th style="text-align:left;padding:4px 6px;cursor:pointer" onclick="paState.sort='g';render()">Firma ${paState.sort === "g" ? "▾" : ""}</th>
+          <th style="text-align:left;padding:4px 6px;cursor:pointer" title="Nach Name sortieren" onclick="paState.sort='n';paResort()">Name ${paState.sort === "n" ? "▾" : ""}</th>
+          <th style="text-align:left;padding:4px 6px;cursor:pointer" title="Nach Firma sortieren" onclick="paState.sort='g';paResort()">Firma ${paState.sort === "g" ? "▾" : ""}</th>
           <th style="text-align:right;padding:4px 6px">Lohn bei 100 %<br><span style="font-weight:400">pro Monat</span></th>
           <th style="text-align:right;padding:4px 6px">Pensum</th>
           <th style="text-align:right;padding:4px 6px">Jahreslohn<br><span style="font-weight:400">Lohn × 12 × Pensum</span></th>
