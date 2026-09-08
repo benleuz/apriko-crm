@@ -23,9 +23,10 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.93.0"></script>
-<script src="apriko-api.js?v=1.93.0"></script>
-<script src="lohncheck.js?v=1.93.0"></script>
+<script src="apriko-filters.js?v=1.95.0"></script>
+<script src="apriko-api.js?v=1.95.0"></script>
+<script src="lohncheck.js?v=1.95.0"></script>
+<script src="personalbudget.js?v=1.95.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -931,6 +932,7 @@
           <button data-view="stats"><span class="ic">∑</span> Statistik</button>
           <button data-view="budget"><span class="ic">▣</span> Ertragsbudget</button>
           <button data-view="budgetvgl"><span class="ic">⇄</span> Budgetvergleich</button>
+          <button data-view="personalbudget"><span class="ic">🔐</span> Budget Personalaufwand</button>
         </div>
       </div>
       <div class="nav-group" data-group="workflows">
@@ -964,7 +966,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.93.0</span> · <span id="app-build-date">08.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.95.0</span> · <span id="app-build-date">08.09.2026</span>
     </div>
   </aside>
 
@@ -1391,14 +1393,14 @@ let currentView = DEMO_ANON ? "einsatzdash" : "dashboard";
    Berechtigungssystem
    =========================================================== */
 const SUPER_ADMIN_EMAIL = "benjamin@apriko.com";  // hat immer volle Rechte
-const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","bpocheck","clintern","clfibu","rapport","einsatzdash","konzern","lohncheck","apipoc","profiles"];
+const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","bpocheck","clintern","clfibu","rapport","einsatzdash","konzern","lohncheck","apipoc","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
 const VIEW_TITLES = {
   dashboard: "Dashboard", pipeline: "Pipeline",
   customers: "Kunden", companies: "Firmen", contacts: "Kontakte", tasks: "Aufgaben",
-  revenue: "Umsätze", stats: "Statistik", budget: "Ertragsbudget", budgetvgl: "Budgetvergleich",
+  revenue: "Umsätze", stats: "Statistik", budget: "Ertragsbudget", budgetvgl: "Budgetvergleich", personalbudget: "Budget Personalaufwand",
   bpocheck: "Lohn Checkliste Temp", clintern: "Lohn Checkliste intern", clfibu: "FIBU Monatsabschluss",
   rapport: "Rapport", einsatzdash: "Kundendashboard", konzern: "Konzernanalyse",
   lohncheck: "Ultimativer Check", apipoc: "Apriko API (POC)",
@@ -1864,6 +1866,7 @@ function render() {
   else if (currentView === "einsatzdash") renderEinsatzDash(content);
   else if (currentView === "konzern") renderKonzern(content);
   else if (currentView === "lohncheck") renderLohncheck(content);
+  else if (currentView === "personalbudget") renderPersonalBudget(content);
   else if (currentView === "apipoc") renderApiPoc(content);
   else if (currentView === "companies") renderCompanies(content);
   else if (currentView === "contacts") renderContacts(content);
@@ -2454,8 +2457,8 @@ const FB_LABELS = {
   SW_Ertrag:"Ertrag SaaS", SW_Erloesmind:"./. Hosting/Software Apriko",
   BO_Ertrag:"Ertrag BPO", BO_Erloesmind:"./. Hosting/Software Maverix",
   SW_EinkaufDL:"Einkauf DL Lizenzen", BO_EinkaufDL:"Einkauf DL BPO",
-  SW_Lohn:"Lohnaufwand", SW_SV:"Sozialversicherungen", SW_UebrPA:"Übriger Personalaufwand",
-  BO_Lohn:"Lohnaufwand", BO_SV:"Sozialversicherungen", BO_UebrPA:"Übriger Personalaufwand",
+  SW_Lohn:"Lohnaufwand", SW_SV:"Arbeitgeberbeiträge", SW_UebrPA:"Übriger Personalaufwand",
+  BO_Lohn:"Lohnaufwand", BO_SV:"Arbeitgeberbeiträge", BO_UebrPA:"Übriger Personalaufwand",
   G_Raum:"Raumaufwand", G_URE:"Unterhalt, Reparaturen, Ersatz", G_Fahrzeug:"Fahrzeug- und Transportaufwand",
   G_Versich:"Sachversicherungen, Abgaben, Gebühren", G_Energie:"Energie- und Entsorgungsaufwand",
   G_VerwIT:"Verwaltungs- und Informatikaufwand", G_Werbung:"Werbe- und Repräsentationsaufwand",
@@ -2475,7 +2478,7 @@ const FB_PLAN = [
   ["c","DLTOT","Total Ertrag netto", r => r.ERTRAG_BRUTTO + r.SW_Erloesmind + r.BO_Erloesmind],
   ["g","PA","Personalaufwand",["P_Lohn","P_SV","P_UebrPA"]],
   ["d2","P_Lohn","Lohnaufwand",["SW_Lohn","BO_Lohn"],1],
-  ["d2","P_SV","Sozialversicherungen",["SW_SV","BO_SV"],1],
+  ["d2","P_SV","Arbeitgeberbeiträge",["SW_SV","BO_SV"],1],
   ["d2","P_UebrPA","Übriger Personalaufwand",["SW_UebrPA","BO_UebrPA"],1],
   ["c","BETOT","Bruttoertrag TOTAL", r => r.DLTOT - r.PA],
   ["g","BETRIEB","Betriebsaufwand",["G_Raum","G_URE","G_Fahrzeug","G_Versich","G_Energie","G_VerwIT","G_Werbung","G_Sonstig"]],
@@ -3708,7 +3711,7 @@ function renderFbMgmt(el, ctx) {
         }).join("")}
       </tbody>
     </table></div>
-    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">Lizenzen = Erlösstrom Software, BPO = Erlösstrom Backoffice (je mit eigenem Budget). Total Lohnaufwand = Personalaufwand beider Gesellschaften (Löhne, Sozialversicherungen, übriger PA); Total Opex = Betriebsaufwand. Total Ertrag − Lohnaufwand − Opex = EBITDA. Details pro Gesellschaft: Hauptansicht → Personalaufwand aufklappen.</div>
+    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">Lizenzen = Erlösstrom Software, BPO = Erlösstrom Backoffice (je mit eigenem Budget). Total Lohnaufwand = Personalaufwand beider Gesellschaften (Löhne, Arbeitgeberbeiträge, übriger PA); Total Opex = Betriebsaufwand. Total Ertrag − Lohnaufwand − Opex = EBITDA. Details pro Gesellschaft: Hauptansicht → Personalaufwand aufklappen.</div>
   `;
 }
 
@@ -10682,6 +10685,30 @@ const VIEW_LABELS_FOR_PROFILE = ALL_VIEWS.map(key => ({
   label: key === "profiles" ? "Profile (Admin)" : (VIEW_TITLES[key] || key)
 }));
 
+/* Gruppen und Reihenfolge exakt wie im Menü links (aus dem Sidebar-DOM gelesen),
+   damit die Profilverwaltung dieselbe Struktur zeigt. Views, die im Menü fehlen
+   würden, landen in «Weitere». */
+function profileViewGroups() {
+  const groups = [];
+  const seen = new Set();
+  document.querySelectorAll("nav .nav-group").forEach(g => {
+    const h = g.querySelector(".nav-group-h");
+    const name = h ? h.textContent.replace(/[▾▸]/g, "").trim() : "Menü";
+    const views = [];
+    g.querySelectorAll("button[data-view]").forEach(b => {
+      const key = b.getAttribute("data-view");
+      if (!ALL_VIEWS.includes(key) || seen.has(key)) return;
+      seen.add(key);
+      const lbl = VIEW_LABELS_FOR_PROFILE.find(x => x.key === key);
+      views.push({ key, label: lbl ? lbl.label : key });
+    });
+    if (views.length) groups.push({ name, views });
+  });
+  const rest = VIEW_LABELS_FOR_PROFILE.filter(v => !seen.has(v.key));
+  if (rest.length) groups.push({ name: "Weitere", views: rest });
+  return groups;
+}
+
 function renderProfiles(el) {
   // Zusatz-Aktionen im Topbar
   document.getElementById("view-actions").innerHTML = `
@@ -10719,10 +10746,15 @@ function renderProfiles(el) {
           ` : profiles.map(p => {
             const views = Array.isArray(p.AllowedViews) ? p.AllowedViews
               : (typeof p.AllowedViews === "string" ? p.AllowedViews.split(/[,;]/).map(s => s.trim()).filter(Boolean) : []);
-            const viewLabels = views.map(v => {
-              const found = VIEW_LABELS_FOR_PROFILE.find(x => x.key === v);
-              return found ? found.label : v;
-            });
+            // Anzeige gruppiert und sortiert wie das Menü links
+            const grp = profileViewGroups();
+            const viewGroupsHtml = grp.map(g => {
+              const hit = g.views.filter(v => views.includes(v.key));
+              if (!hit.length) return "";
+              const all = hit.length === g.views.length;
+              return `<div style="margin:2px 0"><span style="color:var(--text-faint);font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin-right:6px">${escape(g.name)}</span>${all ? `<span style="display:inline-block;background:var(--bg-elev);padding:2px 7px;border-radius:3px;margin:1px 3px 1px 0;color:var(--accent)">alle</span>` : hit.map(v => `<span style="display:inline-block;background:var(--bg-elev);padding:2px 7px;border-radius:3px;margin:1px 3px 1px 0">${escape(v.label)}</span>`).join("")}</div>`;
+            }).join("");
+            const unknown = views.filter(v => !VIEW_LABELS_FOR_PROFILE.some(x => x.key === v));
             const displayEmail = p.Email || (p.UserPerson && p.UserPerson.email) || "(kein Email)";
             const roleBadge = p.Role === "Admin"
               ? `<span style="background:rgba(184,233,134,0.15);color:var(--accent);padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">Admin</span>`
@@ -10734,7 +10766,7 @@ function renderProfiles(el) {
                 <td style="color:var(--text-dim);font-size:12px">
                   ${views.length === 0 ? `<span style="color:var(--warn)">— (kein Zugriff)</span>`
                     : (views.length >= ALL_VIEWS.length - 1 ? `<span style="color:var(--accent)">Alle Bereiche</span>`
-                      : viewLabels.map(l => `<span style="display:inline-block;background:var(--bg-elev);padding:2px 7px;border-radius:3px;margin:1px 3px 1px 0">${escape(l)}</span>`).join(""))}
+                      : viewGroupsHtml + (unknown.length ? `<div style="color:var(--text-faint)">unbekannt: ${unknown.map(escape).join(", ")}</div>` : ""))}
                 </td>
                 <td style="text-align:right">
                   <button class="btn btn-sm" onclick="openProfileModal(${p.id})">Bearbeiten</button>
@@ -10784,14 +10816,23 @@ function openProfileModal(profileId) {
           <button type="button" onclick="toggleAllViews(true)" style="float:right;font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer">Alle</button>
           <button type="button" onclick="toggleAllViews(false)" style="float:right;font-size:11px;color:var(--text-faint);background:none;border:none;cursor:pointer;margin-right:12px">Keine</button>
         </label>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--bg);padding:12px;border:1px solid var(--border);border-radius:4px">
-          ${VIEW_LABELS_FOR_PROFILE.map(v => `
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:4px 6px;border-radius:3px;font-size:13px">
-              <input type="checkbox" class="profile-view-cb" value="${v.key}" ${currentViews.includes(v.key) ? "checked" : ""}
-                style="cursor:pointer;accent-color:var(--accent);width:auto;margin:0">
-              <span>${escape(v.label)}</span>
-            </label>
-          `).join("")}
+        <div style="background:var(--bg);padding:12px;border:1px solid var(--border);border-radius:4px;max-height:60vh;overflow:auto">
+          ${profileViewGroups().map((g, gi) => `
+            <div style="margin-bottom:${gi === 0 ? 0 : 10}px;padding-top:${gi === 0 ? 0 : 10}px;${gi === 0 ? "" : "border-top:1px solid var(--border-soft)"}">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);margin-bottom:4px">
+                <input type="checkbox" class="profile-group-cb" data-group="${gi}" ${g.views.every(v => currentViews.includes(v.key)) ? "checked" : ""} onchange="toggleViewGroup(${gi}, this.checked)"
+                  style="cursor:pointer;accent-color:var(--accent);width:auto;margin:0" title="Ganze Gruppe an/aus">
+                <span>${escape(g.name)}</span>
+              </label>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;padding-left:22px">
+              ${g.views.map(v => `
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:3px 6px;border-radius:3px;font-size:13px">
+                  <input type="checkbox" class="profile-view-cb" data-group="${gi}" value="${v.key}" ${currentViews.includes(v.key) ? "checked" : ""} onchange="syncViewGroupCb(${gi})"
+                    style="cursor:pointer;accent-color:var(--accent);width:auto;margin:0">
+                  <span>${escape(v.label)}</span>
+                </label>`).join("")}
+              </div>
+            </div>`).join("")}
         </div>
       </div>
   `;
@@ -10802,7 +10843,16 @@ function openProfileModal(profileId) {
   ]);
 }
 
+function toggleViewGroup(gi, select) {
+  document.querySelectorAll(`.profile-view-cb[data-group="${gi}"]`).forEach(cb => cb.checked = select);
+}
+function syncViewGroupCb(gi) {
+  const cbs = Array.from(document.querySelectorAll(`.profile-view-cb[data-group="${gi}"]`));
+  const g = document.querySelector(`.profile-group-cb[data-group="${gi}"]`);
+  if (g) g.checked = cbs.length > 0 && cbs.every(cb => cb.checked);
+}
 function toggleAllViews(select) {
+  document.querySelectorAll(".profile-group-cb").forEach(cb => cb.checked = select);
   document.querySelectorAll(".profile-view-cb").forEach(cb => cb.checked = select);
 }
 
