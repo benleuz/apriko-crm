@@ -9,13 +9,14 @@
      Jahreslohn = Lohn × 12 × Pensum · Total Lohn = Jahreslohn × (1 + AG%)
      Total Lohnkosten = Total Lohn + Spesen + Weiterbildung
    Übergabe in den Budgetvergleich (fb-Positionen des Jahres):
-     Apriko AG → SW_Lohn / SW_SV / SW_UebrPA · Maverix AG → BO_Lohn / BO_SV / BO_UebrPA
+     über Kreuz wie fbZuordnung: Apriko AG → BO_Lohn / BO_SV / BO_UebrPA · Maverix AG → SW_*
    Abhängigkeiten aus index.html: cache, fbParse, fbSaveItem, deleteItem,
    reload, escape, toast, render, showModal, closeModal, currentUser. */
 
-const PA_VERSION = "1.95.0";
+const PA_VERSION = "1.97.0";
 const PA_GES = ["Apriko AG", "Maverix AG"];
-const PA_FB_KEYS = { "Apriko AG": { lohn: "SW_Lohn", sv: "SW_SV", uebr: "SW_UebrPA" }, "Maverix AG": { lohn: "BO_Lohn", sv: "BO_SV", uebr: "BO_UebrPA" } };
+/* Budgetvergleich rechnet Personal ÜBER KREUZ (fbZuordnung): Maverix-Löhne = SW_*, Apriko-Löhne = BO_* */
+const PA_FB_KEYS = { "Apriko AG": { lohn: "BO_Lohn", sv: "BO_SV", uebr: "BO_UebrPA" }, "Maverix AG": { lohn: "SW_Lohn", sv: "SW_SV", uebr: "SW_UebrPA" } };
 const PA_SALT = "apriko-pa-2026";
 
 const paState = { year: 2027, unlocked: sessionStorage.getItem("pa-unlocked") === "1", busy: false, pwError: "", sort: "g" };
