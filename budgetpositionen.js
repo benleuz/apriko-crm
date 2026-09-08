@@ -10,9 +10,9 @@
    Abhängigkeiten: jahresbudget.js (jbBuild, jbSaveRow, jbFindRow, jbPos*, jbFmt, jbNum, JB_*),
    index.html (fbSaveItem, reload, escape, toast, render, FB_PLAN, FB_LABELS, FB_SRC). */
 
-const BP_VERSION = "1.106.0";
+const BP_VERSION = "1.107.0";
 const BP_MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
-const BP_FAELL = [["m", "monatlich (÷12)"], ["q", "quartalsweise (÷4)"], ["e", "einmalig im Monat"], ["h", "halbjährlich (÷2)"], ["r", "Monat von – bis"]];
+const BP_FAELL = [["m", "monatlich (÷12)"], ["q", "quartalsweise (÷4)"], ["e", "einmalig im Monat"], ["h", "halbjährlich (÷2)"], ["r", "von – bis"]];
 
 const bpState = { year: 2027, ges: "Apriko AG", q: "", showEmpty: true, open: {}, buch: {} };
 /* Vorjahres-Buchungen je Monat summieren (Datum «dd.mm.yy» oder «dd.mm.yyyy» in b[0]) */
@@ -134,10 +134,10 @@ function renderBudgetpositionen(el) {
     const kontoRow = `
       <tr style="border-top:1px solid var(--border-soft);background:var(--bg-elev);cursor:pointer" onclick="bpToggle('${escape(bid).replace(/'/g, "\\'")}')" title="Klicken: Positionen ${open ? "zuklappen" : "aufklappen"}">
         <td style="padding:4px 6px;white-space:nowrap;font-weight:600"><span style="display:inline-block;width:12px;color:var(--accent);font-size:9px">${open ? "▼" : "▶"}</span>${escape(r.kt)} <span style="font-weight:400">${escape(r.b)}</span>${r.man ? ` <span style="color:var(--text-faint);font-size:10px">manuell</span>` : ""}</td>
-        <td style="padding:4px 6px;font-size:11px;color:var(--text-faint);white-space:nowrap">${jbHasPos(r) ? r.pos.length + " Pos." : `<span title="Ohne Positionen gilt der Wert aus dem Jahresbudget (Hochrechnung bzw. Überschreibung), gleichmässig ÷12">Vorschlag ${jbFmt(jbRowBudget(r))} ÷ 12</span>`}
+        <td colspan="3" style="padding:4px 6px;font-size:11px;color:var(--text-faint);white-space:nowrap">${jbHasPos(r) ? r.pos.length + " Pos." : `<span title="Ohne Positionen gilt der Wert aus dem Jahresbudget (Hochrechnung bzw. Überschreibung), gleichmässig ÷12">Vorschlag ${jbFmt(jbRowBudget(r))} ÷ 12</span>`}
           <span style="margin-left:8px" title="Ist ${basis} (wie importiert) → Hochrechnung">Ist ${basis}: ${r.ist === null ? "—" : jbFmt(r.ist)} → ${jbFmt(r.hoch)}</span>
           ${buch ? ` <span style="cursor:pointer;color:var(--accent);margin-left:6px" onclick="event.stopPropagation();bpToggleBuch('${escape(bid).replace(/'/g, "\\'")}')" title="Buchungen ${basis} ${openB ? "zuklappen" : "anzeigen"}">${openB ? "▼" : "▶"} ${buch.length} Buchungen ${basis}</span>` : ""}</td>
-        <td></td><td></td>
+        <td></td>
         ${kontoM.map(v => tdm(v, "font-weight:600")).join("")}
         ${tdm(kontoJahr, "font-weight:700")}
         <td style="padding:2px 6px;white-space:nowrap"><span class="btn btn-sm" style="padding:0 6px;font-size:10px" onclick="event.stopPropagation();bpPosAdd(${gi(r.g, r.kt)})">＋ Position</span></td>
@@ -148,20 +148,21 @@ function renderBudgetpositionen(el) {
       return `
       <tr>
         <td style="padding:2px 6px 2px 22px"><input data-bp="${escape(r.g + "|" + r.kt)}" value="${escape(p.t || "")}" placeholder="Text (z.B. Google Cloud)" style="width:100%;min-width:180px;font-size:11.5px;padding:2px 6px" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'t',this.value)"></td>
+        <td style="padding:2px 6px"><input value="${escape(p.n || "")}" placeholder="Notiz …" style="width:100%;min-width:160px;font-size:11px;padding:2px 6px;${p.n ? "" : "color:var(--text-faint)"}" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'n',this.value)"></td>
         <td style="padding:2px 4px;white-space:nowrap"><select style="font-size:10.5px;padding:1px 2px" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'f',this.value)">${BP_FAELL.map(([k, l]) => `<option value="${k}" ${k === f ? "selected" : ""}>${l}</option>`).join("")}</select>
           ${f === "e" || f === "q" || f === "h" ? ` ${sel("sm", 1, 12, parseInt(p.sm, 10) || 1)}` : f === "r" ? ` ${sel("sm", 1, 12, parseInt(p.sm, 10) || 1)}–${sel("em", 1, 12, parseInt(p.em, 10) || 12)}` : ""}</td>
         <td style="text-align:right;white-space:nowrap"><input value="${p.v ? Math.round(p.v) : ""}" placeholder="Jahr" title="Jahresbetrag" style="width:84px;text-align:right;font-family:var(--font-mono);font-size:11.5px;padding:2px 6px" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'v',this.value)"></td>
         <td style="font-size:10px;color:var(--text-faint);white-space:nowrap;padding:2px 4px">${bpFaellText(p)}</td>
         ${mo.map(v => tdm(v, "color:var(--text-dim)")).join("")}
         ${tdm(mo.reduce((s, v) => s + v, 0), "color:var(--text-dim)")}
-        <td style="padding:2px 6px"><div style="display:flex;gap:6px;align-items:center"><input value="${escape(p.n || "")}" placeholder="Notiz …" style="width:150px;font-size:11px;padding:2px 6px;${p.n ? "" : "color:var(--text-faint)"}" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'n',this.value)"><span style="cursor:pointer;color:var(--danger);font-size:11px" onclick="jbPosDel(${gi(r.g, r.kt)},${i})" title="Position entfernen">✕</span></div></td>
+        <td style="padding:2px 6px;text-align:center"><span style="cursor:pointer;color:var(--danger);font-size:11px" onclick="jbPosDel(${gi(r.g, r.kt)},${i})" title="Position entfernen">✕</span></td>
       </tr>`;
     }).join("");
     const vj = buch ? bpBuchMonate(buch, jbFkt(r.key)) : null;
     const vjRow = vj ? `
       <tr style="background:rgba(127,127,127,.04)">
         <td style="padding:2px 6px 2px 22px;font-size:10.5px;color:var(--text-faint);white-space:nowrap">Vorjahr ${basis} nach Monat <span style="opacity:.7">(${buch.length} Buchungen${vj.rest ? ", ohne Datum " + jbFmt(vj.rest) : ""})</span></td>
-        <td></td><td></td><td></td>
+        <td></td><td></td><td></td><td></td>
         ${vj.m.map(v => tdm(v, "color:var(--text-faint);font-style:italic")).join("")}
         ${tdm(vj.m.reduce((s, v) => s + v, 0) + vj.rest, "color:var(--text-faint);font-style:italic")}
         <td></td>
@@ -186,15 +187,16 @@ function renderBudgetpositionen(el) {
       <table style="width:100%;font-size:12px;border-collapse:collapse">
         <tr style="color:var(--text-dim);font-size:10.5px">
           <th style="text-align:left;padding:4px 6px">Konto (Abacus) · Text</th>
+          <th style="text-align:left;padding:4px 6px">Notiz</th>
           <th style="text-align:left;padding:4px 4px">Fällt an</th>
           <th style="text-align:right;padding:4px 6px">Betrag/Jahr</th>
           <th style="text-align:left;padding:4px 4px">Monate</th>
           ${BP_MONATE.map(mn => `<th style="text-align:right;padding:4px 4px">${mn}</th>`).join("")}
           <th style="text-align:right;padding:4px 4px">Total</th>
-          <th style="text-align:left;padding:4px 6px">Notiz</th></tr>
+          <th></th></tr>
         ${body || `<tr><td colspan="19" class="empty">Keine Konten für ${escape(ges)} ${y}. Ist-Daten ${y - 1} importieren oder «＋ Konto».</td></tr>`}
         <tr style="border-top:2px solid var(--border);font-weight:700;background:var(--bg-elev)">
-          <td style="padding:6px">Total ${escape(ges)}</td><td></td><td></td><td></td>
+          <td style="padding:6px">Total ${escape(ges)}</td><td></td><td></td><td></td><td></td>
           ${totalM.map(v => tdm(v)).join("")}${tdm(totalJahr)}<td></td></tr>
       </table>
       <div style="font-size:10px;color:var(--text-faint);margin-top:8px">Betrag = Jahresbetrag; die Fälligkeit verteilt ihn auf die Monate (monatlich ÷12, quartalsweise ÷4 ab gewähltem Monat, einmalig, halbjährlich ÷2, von–bis gleichmässig). Konto-Zeile anklicken (▶) zeigt die Positionen; «＋ Position» klappt automatisch auf. Die kursive Zeile «Vorjahr nach Monat» verteilt die Vorjahresbuchungen auf die Monate (Ist, nicht hochgerechnet); «▶ n Buchungen» zeigt sie einzeln. Konten ohne Positionen zeigen den Wert aus dem Jahresbudget ÷12. Positionen und Beträge sind dieselben wie im Jahresbudget — Änderungen wirken in beiden Ansichten. Die Monatssummen unten sind die Aufwand-Seite des künftigen Liquiditätsplans. · Budgetpositionen v${BP_VERSION}</div>
