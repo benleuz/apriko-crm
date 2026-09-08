@@ -19,7 +19,7 @@
    budgetRows, budgetChfOf, budgetIsSaaS, budgetErloes, BUDGET_MONTH_FIELDS,
    deleteItem, reload, escape, toast, render, currentView. */
 
-const JB_VERSION = "1.103.0";
+const JB_VERSION = "1.104.0";
 const JB_GES = ["Apriko AG", "Maverix AG"];
 const JB_PERSONAL = new Set(["SW_Lohn", "SW_SV", "SW_UebrPA", "BO_Lohn", "BO_SV", "BO_UebrPA"]);
 const JB_ERTRAG = new Set(["SW_Ertrag", "BO_Ertrag"]);
@@ -220,19 +220,14 @@ function renderJahresbudget(el) {
         ${td(r.ist === null ? `<span style="color:var(--text-faint)">${r.src ? jbFmt(m.istKey[r.key] || 0) : ""}</span>` : jbFmt(r.ist), "color:var(--text-dim);font-size:11.5px")}
         ${td(`<span style="color:var(--text-dim)">${jbFmt(r.hoch)}</span>`, "font-size:11.5px")}
         <td style="text-align:right;white-space:nowrap">${r.editable
-          ? hasPos ? `<span style="font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--accent)" title="Summe der ${r.pos.length} Einzelpositionen">${jbFmt(jbPosSum(r))}</span> <span style="color:var(--text-faint);font-size:10px">Σ ${r.pos.length} Pos.</span>`
+          ? hasPos ? `<span style="font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--accent)" title="Summe der ${r.pos.length} Positionen (erfasst im Menü Budgetpositionen)">${jbFmt(jbPosSum(r))}</span>`
             : `<input value="${r.bud === null ? "" : Math.round(r.bud)}" placeholder="${Math.round(r.hoch)}" style="width:100px;text-align:right;font-family:var(--font-mono);font-size:12px;padding:3px 6px;${over ? "font-weight:600;border-color:var(--accent)" : "color:var(--text-dim)"}" title="${over ? "Überschrieben — leeren = zurück zum Vorschlag" : "Vorschlag (Hochrechnung); Wert eintippen zum Überschreiben"}" onchange="jbSetVal(${gi(r.g, r.kt)},this.value)">${over || r.man ? `<span style="cursor:pointer;color:var(--text-faint);margin-left:4px" title="${r.man ? "Konto entfernen" : "Zurück zum Vorschlag"}" onclick="jbResetRow(${gi(r.g, r.kt)})">↺</span>` : ""}`
           : `<span style="font-family:var(--font-mono);font-size:12px">${jbFmt(r.bud)}</span>`}</td>
         ${td(r.editable ? delta(jbRowBudget(r), r.hoch) : "", "font-size:11px")}
-        <td style="padding:3px 6px;vertical-align:top">${r.editable ? `
-          <div style="display:grid;grid-template-columns:minmax(150px,1fr) 90px minmax(120px,1fr) 16px;gap:3px 6px;align-items:center">
-            ${(r.pos || []).map((p, i) => `
-              <input data-pos="${escape(bid)}" data-f="t" value="${escape(p.t || "")}" placeholder="Position (z.B. Google Cloud)" style="font-size:11.5px;padding:2px 6px" onchange="jbPosSet(${gi(r.g, r.kt)},${i},'t',this.value)">
-              <input data-pos="${escape(bid)}" data-f="v" value="${p.v ? Math.round(p.v) : ""}" placeholder="0" style="text-align:right;font-family:var(--font-mono);font-size:11.5px;padding:2px 6px" onchange="jbPosSet(${gi(r.g, r.kt)},${i},'v',this.value)">
-              <input value="${escape(p.n || "")}" placeholder="Notiz …" style="font-size:11px;padding:2px 6px;${p.n ? "" : "color:var(--text-faint)"}" onchange="jbPosSet(${gi(r.g, r.kt)},${i},'n',this.value)">
-              <span style="cursor:pointer;color:var(--danger);font-size:11px;text-align:center" onclick="jbPosDel(${gi(r.g, r.kt)},${i})" title="Position entfernen">✕</span>`).join("")}
-            <span class="btn btn-sm" style="padding:0 6px;font-size:10px;grid-column:1;justify-self:start" onclick="jbPosAdd(${gi(r.g, r.kt)})" title="Einzelposition mit Betrag und Notiz ergänzen — das Konto-Budget wird dann aus den Positionen summiert">＋ Position</span>
-          </div>` : ""}</td>
+        <td style="padding:3px 6px;vertical-align:top;font-size:11px">${hasPos ? `
+          <span style="cursor:pointer;color:var(--accent)" onclick="jbTogglePos('${escape(bid).replace(/'/g, "\\'")}')" title="Details ${jbState.pos[bid] ? "zuklappen" : "anzeigen"}">${jbState.pos[bid] ? "▾" : "▸"} ${r.pos.length} Position${r.pos.length > 1 ? "en" : ""}</span>
+          ${jbState.pos[bid] ? `<div style="display:grid;grid-template-columns:minmax(140px,1fr) 80px minmax(100px,1fr);gap:1px 8px;margin-top:3px;color:var(--text-dim)">${r.pos.map(p => `<span>${escape(p.t || "—")}</span><span style="text-align:right;font-family:var(--font-mono)">${jbFmt(p.v || 0)}</span><span style="color:var(--text-faint)">${escape(p.n || "")}</span>`).join("")}</div>` : ""}`
+          : r.editable ? `<span style="color:var(--text-faint)">—</span>` : ""}</td>
         <td style="padding:3px 6px;vertical-align:top">${r.editable ? `<input value="${escape(r.note)}" placeholder="Notiz zum Konto …" style="width:100%;min-width:140px;font-size:11.5px;padding:3px 6px;${r.note ? "" : "color:var(--text-faint)"}" onchange="jbSetNote(${gi(r.g, r.kt)},this.value)">` : ""}</td>
       </tr>
       ${openB ? buch.map(b => `<tr><td colspan="7" style="padding:2px 8px 2px 58px;font-family:var(--font-mono);font-size:10px;color:var(--text-faint);border-bottom:1px dotted var(--border)">
@@ -290,10 +285,10 @@ function renderJahresbudget(el) {
           <th style="text-align:right;padding:4px 6px">Hochrechnung<br><span style="font-weight:400">H1 × 2 / Jahr × 1</span></th>
           <th style="text-align:right;padding:4px 6px">Budget ${y}</th>
           <th style="text-align:right;padding:4px 6px">Δ zur Hochr.</th>
-          <th style="text-align:left;padding:4px 6px;min-width:380px">Positionen ${y}<br><span style="font-weight:400">Text · Betrag · Notiz</span></th>
+          <th style="text-align:left;padding:4px 6px;min-width:220px">Positionen ${y}<br><span style="font-weight:400">aus Menü «Budgetpositionen»</span></th>
           <th style="text-align:left;padding:4px 6px">Notiz / je Gesellschaft</th></tr>
         ${body}
       </table>
-      <div style="font-size:10px;color:var(--text-faint);margin-top:8px">Aufwand positiv dargestellt. Positionen aufklappen (▶) zeigt Gesellschaft und Konto; Budgetfeld leer = Vorschlag aus der Hochrechnung gilt, eingetippter Wert überschreibt (↺ setzt zurück), Notiz je Konto. «＋ Position» legt Einzelpositionen (Text, Betrag, Notiz) unter dem Konto an — dann ist das Konto-Budget die Summe der Positionen. ▶ vor einem Konto zeigt die einzelnen Buchungen ${basis}. Ertrag SaaS/BPO kommt aus dem Ertragsbudget ${y}, Personalaufwand aus «Budget Personalaufwand» (beides nur Ansicht). «→ Budgetvergleich ${y}» schreibt alle übrigen Positionen als Budget-Positionen (1/12). · Jahresbudget v${JB_VERSION}</div>
+      <div style="font-size:10px;color:var(--text-faint);margin-top:8px">Aufwand positiv dargestellt. Positionen aufklappen (▶) zeigt Gesellschaft und Konto; Budgetfeld leer = Vorschlag aus der Hochrechnung gilt, eingetippter Wert überschreibt (↺ setzt zurück), Notiz je Konto. Einzelpositionen werden im Menü «Budgetpositionen» erfasst (mit Fälligkeit) und hier nur als Total und aufklappbare Details angezeigt — hat ein Konto Positionen, ist deren Summe das Konto-Budget. ▶ vor einem Konto zeigt die einzelnen Buchungen ${basis}. Ertrag SaaS/BPO kommt aus dem Ertragsbudget ${y}, Personalaufwand aus «Budget Personalaufwand» (beides nur Ansicht). «→ Budgetvergleich ${y}» schreibt alle übrigen Positionen als Budget-Positionen (1/12). · Jahresbudget v${JB_VERSION}</div>
     </div>`;
 }
