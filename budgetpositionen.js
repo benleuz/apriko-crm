@@ -10,7 +10,7 @@
    Abhängigkeiten: jahresbudget.js (jbBuild, jbSaveRow, jbFindRow, jbPos*, jbFmt, jbNum, JB_*),
    index.html (fbSaveItem, reload, escape, toast, render, FB_PLAN, FB_LABELS, FB_SRC). */
 
-const BP_VERSION = "1.107.0";
+const BP_VERSION = "1.110.0";
 const BP_MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 const BP_FAELL = [["m", "monatlich (÷12)"], ["q", "quartalsweise (÷4)"], ["e", "einmalig im Monat"], ["h", "halbjährlich (÷2)"], ["r", "von – bis"]];
 
@@ -100,7 +100,7 @@ function renderBudgetpositionen(el) {
   jbState.year = bpState.year;
   document.getElementById("view-actions").innerHTML = `
     <button class="btn btn-sm" onclick="bpAddKonto()">＋ Konto</button>
-    <button class="btn btn-sm" onclick="bpState.showEmpty=!bpState.showEmpty;render()" style="${bpState.showEmpty ? "" : "background:var(--accent);color:#fff"}" title="Konten ohne Positionen ausblenden">nur mit Positionen</button>
+    <button class="btn btn-sm" onclick="bpState.showEmpty=!bpState.showEmpty;render()" style="${bpState.showEmpty ? "" : "background:var(--accent);color:#fff"}" title="Nur Konten ohne Positionen (noch offen) zeigen">⚠ nur offene</button>
     <button class="btn btn-sm" onclick="bpToggleAll(true)" title="Alle Konten aufklappen">▾ alle</button>
     <button class="btn btn-sm" onclick="bpToggleAll(false)" title="Alle Konten zuklappen">▸ alle</button>
     <button class="btn btn-sm" onclick="bpExport()">⇩ CSV</button>`;
@@ -112,7 +112,7 @@ function renderBudgetpositionen(el) {
   const buchMap = fbBuchYearCache[basis] || {};
   const q = bpState.q.trim().toLowerCase();
   const hit = r => !q || (r.kt + " " + r.b + " " + r.posLabel + " " + (r.pos || []).map(p => (p.t || "") + " " + (p.n || "")).join(" ")).toLowerCase().includes(q);
-  const shown = rows.filter(r => hit(r) && (bpState.showEmpty || jbHasPos(r)));
+  const shown = rows.filter(r => hit(r) && (bpState.showEmpty || !jbHasPos(r)));
   const years = jbYears();
   const gi = (g, kt) => `'${escape(g).replace(/'/g, "\\'")}','${escape(kt)}'`;
   const fmt = v => Math.round(v) === 0 ? "" : Math.round(v).toLocaleString("de-CH");
@@ -124,7 +124,7 @@ function renderBudgetpositionen(el) {
   const body = shown.map(r => {
     const kontoM = Array(12).fill(0);
     if (jbHasPos(r)) r.pos.forEach(p => bpMonths(p).forEach((v, i) => kontoM[i] += v));
-    else { const b = jbRowBudget(r); for (let i = 0; i < 12; i++) kontoM[i] = b / 12; }
+    // ohne Positionen: 0 (offen)
     kontoM.forEach((v, i) => totalM[i] += v); const kontoJahr = kontoM.reduce((s, v) => s + v, 0); totalJahr += kontoJahr; posCount += (r.pos || []).length;
     const posHead = r.posLabel !== lastPos ? `<tr><td colspan="19" style="padding:8px 6px 3px;font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;border-top:1px solid var(--border)">${escape(r.posLabel)}</td></tr>` : "";
     lastPos = r.posLabel;
@@ -134,7 +134,7 @@ function renderBudgetpositionen(el) {
     const kontoRow = `
       <tr style="border-top:1px solid var(--border-soft);background:var(--bg-elev);cursor:pointer" onclick="bpToggle('${escape(bid).replace(/'/g, "\\'")}')" title="Klicken: Positionen ${open ? "zuklappen" : "aufklappen"}">
         <td style="padding:4px 6px;white-space:nowrap;font-weight:600"><span style="display:inline-block;width:12px;color:var(--accent);font-size:9px">${open ? "▼" : "▶"}</span>${escape(r.kt)} <span style="font-weight:400">${escape(r.b)}</span>${r.man ? ` <span style="color:var(--text-faint);font-size:10px">manuell</span>` : ""}</td>
-        <td colspan="3" style="padding:4px 6px;font-size:11px;color:var(--text-faint);white-space:nowrap">${jbHasPos(r) ? r.pos.length + " Pos." : `<span title="Ohne Positionen gilt der Wert aus dem Jahresbudget (Hochrechnung bzw. Überschreibung), gleichmässig ÷12">Vorschlag ${jbFmt(jbRowBudget(r))} ÷ 12</span>`}
+        <td colspan="3" style="padding:4px 6px;font-size:11px;color:var(--text-faint);white-space:nowrap">${jbHasPos(r) ? r.pos.length + " Pos." : `<span style="color:var(--warn)" title="Noch keine Positionen — zählt mit 0">⚠ offen</span>`}
           <span style="margin-left:8px" title="Ist ${basis} (wie importiert) → Hochrechnung">Ist ${basis}: ${r.ist === null ? "—" : jbFmt(r.ist)} → ${jbFmt(r.hoch)}</span>
           ${buch ? ` <span style="cursor:pointer;color:var(--accent);margin-left:6px" onclick="event.stopPropagation();bpToggleBuch('${escape(bid).replace(/'/g, "\\'")}')" title="Buchungen ${basis} ${openB ? "zuklappen" : "anzeigen"}">${openB ? "▼" : "▶"} ${buch.length} Buchungen ${basis}</span>` : ""}</td>
         <td></td>
@@ -180,7 +180,7 @@ function renderBudgetpositionen(el) {
       ${model.hasIst ? "" : `<span style="font-size:12px;color:var(--danger)">Keine Ist-Daten ${y - 1} — Konten stammen nur aus manuellen Ergänzungen</span>`}
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
-      <div class="card stat-card"><div class="stat-label">${escape(ges)} · Aufwand ${y}</div><div class="stat-value">${jbFmt(totalJahr)}</div><div style="font-size:11px;color:var(--text-faint)">${shown.length} Konten · ${posCount} Positionen</div></div>
+      <div class="card stat-card"><div class="stat-label">${escape(ges)} · Aufwand ${y}</div><div class="stat-value">${jbFmt(totalJahr)}</div><div style="font-size:11px;color:var(--text-faint)">${shown.length} Konten · ${posCount} Positionen${(() => { const o = rows.filter(r => !jbHasPos(r)).length; return o ? ` · <span style="color:var(--warn)">${o} offen</span>` : " · alle erfasst"; })()}</div></div>
       <div class="card stat-card"><div class="stat-label">Ø pro Monat</div><div class="stat-value">${jbFmt(totalJahr / 12)}</div><div style="font-size:11px;color:var(--text-faint)">Spitze ${BP_MONATE[totalM.indexOf(Math.max(...totalM))]} ${jbFmt(Math.max(...totalM))}</div></div>
     </div>
     <div class="card" style="padding:12px 14px;overflow-x:auto">
@@ -199,6 +199,6 @@ function renderBudgetpositionen(el) {
           <td style="padding:6px">Total ${escape(ges)}</td><td></td><td></td><td></td><td></td>
           ${totalM.map(v => tdm(v)).join("")}${tdm(totalJahr)}<td></td></tr>
       </table>
-      <div style="font-size:10px;color:var(--text-faint);margin-top:8px">Betrag = Jahresbetrag; die Fälligkeit verteilt ihn auf die Monate (monatlich ÷12, quartalsweise ÷4 ab gewähltem Monat, einmalig, halbjährlich ÷2, von–bis gleichmässig). Konto-Zeile anklicken (▶) zeigt die Positionen; «＋ Position» klappt automatisch auf. Die kursive Zeile «Vorjahr nach Monat» verteilt die Vorjahresbuchungen auf die Monate (Ist, nicht hochgerechnet); «▶ n Buchungen» zeigt sie einzeln. Konten ohne Positionen zeigen den Wert aus dem Jahresbudget ÷12. Positionen und Beträge sind dieselben wie im Jahresbudget — Änderungen wirken in beiden Ansichten. Die Monatssummen unten sind die Aufwand-Seite des künftigen Liquiditätsplans. · Budgetpositionen v${BP_VERSION}</div>
+      <div style="font-size:10px;color:var(--text-faint);margin-top:8px">Alle Beträge positiv (Aufwand wie Erlösminderung), negativ = Gutschrift. Betrag = Jahresbetrag; die Fälligkeit verteilt ihn auf die Monate (monatlich ÷12, quartalsweise ÷4 ab gewähltem Monat, einmalig, halbjährlich ÷2, von–bis gleichmässig). Konto-Zeile anklicken (▶) zeigt die Positionen; «＋ Position» klappt automatisch auf. Die kursive Zeile «Vorjahr nach Monat» verteilt die Vorjahresbuchungen auf die Monate (Ist, nicht hochgerechnet); «▶ n Buchungen» zeigt sie einzeln. Konten ohne Positionen sind «⚠ offen» und zählen mit 0 — die Zeile «Vorjahr nach Monat» und «Ist → Hochrechnung» helfen beim Erfassen. Positionen und Beträge sind dieselben wie im Jahresbudget — Änderungen wirken in beiden Ansichten. Die Monatssummen unten sind die Aufwand-Seite des künftigen Liquiditätsplans. · Budgetpositionen v${BP_VERSION}</div>
     </div>`;
 }

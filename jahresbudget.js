@@ -19,7 +19,7 @@
    budgetRows, budgetChfOf, budgetIsSaaS, budgetErloes, BUDGET_MONTH_FIELDS,
    deleteItem, reload, escape, toast, render, currentView. */
 
-const JB_VERSION = "1.107.0";
+const JB_VERSION = "1.110.0";
 const JB_GES = ["Apriko AG", "Maverix AG"];
 const JB_PERSONAL = new Set(["SW_Lohn", "SW_SV", "SW_UebrPA", "BO_Lohn", "BO_SV", "BO_UebrPA"]);
 const JB_ERTRAG = new Set(["SW_Ertrag", "BO_Ertrag"]);
@@ -29,10 +29,16 @@ const JB_PA_GES = { SW_Lohn: "Maverix AG", SW_SV: "Maverix AG", SW_UebrPA: "Mave
 function jbGesNorm(g) { return String(g || "").toLowerCase().replace(/[^a-z0-9äöü]/g, ""); }
 function jbSameGes(a, b) { return jbGesNorm(a) === jbGesNorm(b); }
 function jbGesCanon(g) { return JB_GES.find(x => jbSameGes(x, g)) || g; }
-const jbState = { year: 2027, open: {}, buch: {}, pos: {}, busy: false, onlyChanged: false, q: "" };
+const jbState = { year: 2027, open: {}, buch: {}, pos: {}, busy: false, onlyChanged: false, q: "", view: "jahr", mGes: "all" };
+const JB_MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 
 /* ---------- Hilfen ---------- */
-function jbFkt(key) { return FB_AUFWAND.has(key) ? -1 : 1; }           // bexio → Anzeige
+/* Anzeige-Vorzeichen: ALLES ausser Ertrag positiv (auch Erlösminderung «./. Hosting/Software»); negativ = Gutschrift.
+   bexio-Ist ist bei Aufwand/Erlösminderung negativ → × −1. */
+function jbFkt(key) { return JB_ERTRAG.has(key) ? 1 : -1; }
+/* Erlösminderungs-Positionen (nicht in FB_AUFWAND, kein Ertrag) müssen für die ER-Kette (fbCompute) negativ übergeben werden */
+function jbIsErloesmind(key) { return !JB_ERTRAG.has(key) && !FB_AUFWAND.has(key); }
+function jbErSign(key) { return jbIsErloesmind(key) ? -1 : 1; }
 function jbFmt(v) { return Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH"); }
 function jbNum(v) { const n = parseFloat(String(v == null ? "" : v).replace(/['’\s]/g, "").replace(",", ".")); return isNaN(n) ? null : n; }
 function jbItems(year) { return cache.budget.map(it => fbParse(it, "jb")).filter(d => d && d.y == year); }
@@ -46,7 +52,9 @@ function jbErtragsbudget(year) {
   const saas = rows.filter(budgetIsSaaS).reduce((s, b) => s + tot(b), 0);
   const bpo = rows.filter(b => !budgetIsSaaS(b)).reduce((s, b) => s + tot(b), 0);
   const erloes = budgetErloes(year).reduce((s, v) => s + v, 0);
-  return { saas, bpo, erloes, n: rows.length };
+  const saasM = BUDGET_MONTH_FIELDS.map(f => rows.filter(budgetIsSaaS).reduce((s, b) => s + budgetChfOf(b, b[f]), 0));
+  const bpoM = BUDGET_MONTH_FIELDS.map(f => rows.filter(b => !budgetIsSaaS(b)).reduce((s, b) => s + budgetChfOf(b, b[f]), 0));
+  return { saas, bpo, erloes, n: rows.length, saasM, bpoM };
 }
 
 /* Zeilenmodell: je Position (Key) → Zeilen {g, kt, b, ist, p, hoch, bud, note, id, man, editable} */
@@ -81,12 +89,12 @@ function jbBuild(year) {
     push(key, { key, g: d.g, kt: d.kt, b: d.b || "", ist: 0, hoch: 0, p: "—", id: d.id, bud: d.v !== null && d.v !== undefined ? parseFloat(d.v) : null, note: d.n || "", pos: Array.isArray(d.pos) ? d.pos : [], man: true, editable: true });
   });
   // Ertrag aus Ertragsbudget (beide Ströme über Apriko AG)
-  push("SW_Ertrag", { key: "SW_Ertrag", g: "Apriko AG", kt: "34xx", b: "Ertragsbudget " + year + " · SaaS/Lizenzen", ist: null, hoch: eb.saas, p: "EB", bud: eb.saas, note: "", editable: false, src: "Ertragsbudget" });
-  push("BO_Ertrag", { key: "BO_Ertrag", g: "Apriko AG", kt: "3400", b: "Ertragsbudget " + year + " · BPO", ist: null, hoch: eb.bpo, p: "EB", bud: eb.bpo, note: "", editable: false, src: "Ertragsbudget" });
+  push("SW_Ertrag", { key: "SW_Ertrag", g: "Apriko AG", kt: "34xx", b: "Ertragsbudget " + year + " · SaaS/Lizenzen", ist: null, hoch: eb.saas, p: "EB", bud: eb.saas, note: "", editable: false, src: "Ertragsbudget", months: eb.saasM });
+  push("BO_Ertrag", { key: "BO_Ertrag", g: "Apriko AG", kt: "3400", b: "Ertragsbudget " + year + " · BPO", ist: null, hoch: eb.bpo, p: "EB", bud: eb.bpo, note: "", editable: false, src: "Ertragsbudget", months: eb.bpoM });
   // Personalaufwand aus fb-Positionen (Menüpunkt Budget Personalaufwand)
   JB_PERSONAL.forEach(k => {
     const v = (fbY[k] || []).reduce((s, x) => s + x, 0);
-    push(k, { key: k, g: JB_PA_GES[k], kt: k.endsWith("Lohn") ? "50xx" : k.endsWith("SV") ? "57xx" : "58xx/59xx", b: "Budget Personalaufwand " + year, ist: null, hoch: v, p: "PA", bud: v, note: "", editable: false, src: "Personalaufwand" });
+    push(k, { key: k, g: JB_PA_GES[k], kt: k.endsWith("Lohn") ? "50xx" : k.endsWith("SV") ? "57xx" : "58xx/59xx", b: "Budget Personalaufwand " + year, ist: null, hoch: v, p: "PA", bud: v, note: "", editable: false, src: "Personalaufwand", months: (fbY[k] || Array(12).fill(0)).map(x => x || 0) });
   });
   Object.values(byKey).forEach(a => a.sort((x, y) => (x.g + x.kt).localeCompare(y.g + y.kt)));
   // Ist-Basis je Personal-/Ertragskey zur Info (Hochrechnung Basisjahr)
@@ -96,7 +104,15 @@ function jbBuild(year) {
 }
 function jbPosSum(r) { return (r.pos || []).reduce((s, p) => s + (parseFloat(p.v) || 0), 0); }
 function jbHasPos(r) { return !!(r.pos && r.pos.length); }
-function jbRowBudget(r) { if (jbHasPos(r)) return jbPosSum(r); return r.bud !== null && r.bud !== undefined ? r.bud : r.hoch; }
+/* Budget einer Kontozeile = Σ Positionen (Menü Budgetpositionen). Ohne Positionen = 0 (offen) — keine Hochrechnung, kein ÷12. */
+function jbRowBudget(r) { if (!r.editable) return r.bud || 0; return jbHasPos(r) ? jbPosSum(r) : 0; }
+function jbRowOpen(r) { return r.editable && !jbHasPos(r); }
+/* Monatswerte einer Zeile: Ertrag/Personal aus Quelle, Positionen nach Fälligkeit (bpMonths), sonst Budget ÷ 12 */
+function jbRowMonths(r) {
+  if (r.months) return r.months;
+  if (jbHasPos(r) && typeof bpMonths === "function") { const out = Array(12).fill(0); r.pos.forEach(p => bpMonths(p).forEach((v, i) => out[i] += v)); return out; }
+  return Array(12).fill(0);   // ohne Positionen: offen → 0
+}
 
 /* ---------- Persistenz ---------- */
 async function jbSaveRow(r, patch) {
@@ -160,7 +176,7 @@ function jbToggleBuch(id) { jbState.buch[id] = !jbState.buch[id]; render(); }
 async function jbTransfer() {
   const y = jbState.year, m = jbBuild(y);
   const sums = {};
-  Object.entries(m.byKey).forEach(([k, rows]) => { if (JB_PERSONAL.has(k)) return; sums[k] = rows.reduce((s, r) => s + jbRowBudget(r), 0); });
+  Object.entries(m.byKey).forEach(([k, rows]) => { if (JB_PERSONAL.has(k)) return; sums[k] = rows.reduce((s, r) => s + jbRowBudget(r), 0) * jbErSign(k); });
   const keys = Object.keys(sums).filter(k => FB_LABELS[k]);
   if (!confirm("Budgetvergleich " + y + ": " + keys.length + " Positionen (ohne Personalaufwand) überschreiben? Monatsverteilung 1/12.")) return;
   jbState.busy = true; render();
@@ -184,7 +200,9 @@ function jbExport() {
 function renderJahresbudget(el) {
   const y = jbState.year;
   document.getElementById("view-actions").innerHTML = `
-    <button class="btn btn-sm" onclick="jbState.onlyChanged=!jbState.onlyChanged;render()" style="${jbState.onlyChanged ? "background:var(--accent);color:#fff" : ""}" title="Nur überschriebene/kommentierte Konten">✎ nur angepasst</button>
+    <button class="btn btn-sm" style="${jbState.view === "jahr" ? "background:var(--accent);color:#fff" : ""}" onclick="jbState.view='jahr';render()">Jahr</button>
+    <button class="btn btn-sm" style="${jbState.view === "monate" ? "background:var(--accent);color:#fff" : ""}" onclick="jbState.view='monate';render()">Monate</button>
+    <button class="btn btn-sm" onclick="jbState.onlyChanged=!jbState.onlyChanged;render()" style="${jbState.onlyChanged ? "background:var(--accent);color:#fff" : ""}" title="Nur Konten ohne Positionen (noch offen)">⚠ nur offene</button>
     <button class="btn btn-sm" onclick="jbExport()">⇩ CSV</button>
     <button class="btn btn-sm btn-primary" onclick="jbTransfer()" title="Alle Positionen ausser Personalaufwand als fb-Positionen ins Budgetvergleich-Jahr schreiben">→ Budgetvergleich ${y}</button>`;
   if (jbState.busy) { el.innerHTML = `<div class="full-loading"><div class="loading"></div></div>`; return; }
@@ -196,15 +214,16 @@ function renderJahresbudget(el) {
   const q = jbState.q.trim().toLowerCase();
   const hit = r => !q || (r.g + " " + r.kt + " " + r.b + " " + r.note + " " + (FB_LABELS[r.key] || "")).toLowerCase().includes(q);
   const hit2 = r => hit(r) || (r.pos || []).some(p => ((p.t || "") + " " + (p.n || "")).toLowerCase().includes(q));
-  const visible = r => hit2(r) && (!jbState.onlyChanged || (r.bud !== null && r.editable) || r.note || jbHasPos(r));
+  const visible = r => hit2(r) && (!jbState.onlyChanged || jbRowOpen(r));
 
   // Positionswerte (Budget & Hochrechnung) → EBITDA-Kette
-  const sumBud = k => (m.byKey[k] || []).reduce((s, r) => s + jbRowBudget(r), 0);
-  const sumHoch = k => (m.byKey[k] || []).reduce((s, r) => s + (r.hoch || 0), 0);
+  const sumBud = k => (m.byKey[k] || []).reduce((s, r) => s + jbRowBudget(r), 0) * jbErSign(k);
+  const sumHoch = k => (m.byKey[k] || []).reduce((s, r) => s + (r.hoch || 0), 0) * jbErSign(k);
   const vb = fbCompute(sumBud), vh = fbCompute(sumHoch);
-  const gesBud = g => k => (m.byKey[k] || []).filter(r => jbSameGes(r.g, g)).reduce((s, r) => s + jbRowBudget(r), 0);
+  const gesBud = g => k => (m.byKey[k] || []).filter(r => jbSameGes(r.g, g)).reduce((s, r) => s + jbRowBudget(r), 0) * jbErSign(k);
   const vg = {}; JB_GES.forEach(g => vg[g] = fbCompute(gesBud(g)));
 
+  if (jbState.view === "monate") { renderJahresbudgetMonate(el, { y, basis, m, years, visible }); return; }
   const td = (h, extra) => `<td style="text-align:right;font-family:var(--font-mono);white-space:nowrap;${extra || ""}">${h}</td>`;
   const delta = (b, h) => { const d = b - h; return Math.round(d) === 0 ? "" : `<span style="color:${d > 0 ? "var(--danger)" : "var(--ok, #3a3)"}">${d > 0 ? "+" : ""}${jbFmt(d)}</span>`; };
   const detailRows = key => (m.byKey[key] || []).filter(visible).map(r => {
@@ -212,7 +231,7 @@ function renderJahresbudget(el) {
     const buch = buchMap[bid] && buchMap[bid].buch && buchMap[bid].buch.length ? buchMap[bid].buch : null;
     const openB = buch && jbState.buch[bid];
     const hasPos = r.editable && jbHasPos(r);
-    const over = r.editable && r.bud !== null && !hasPos;
+    const over = false;
     const gi = (g, kt) => `'${escape(g).replace(/'/g, "\\'")}','${escape(kt)}'`;
     return `
       <tr style="border-top:1px solid var(--border-soft);${over ? "background:rgba(127,127,127,.06)" : ""}">
@@ -221,7 +240,7 @@ function renderJahresbudget(el) {
         ${td(`<span style="color:var(--text-dim)">${jbFmt(r.hoch)}</span>`, "font-size:11.5px")}
         <td style="text-align:right;white-space:nowrap">${r.editable
           ? hasPos ? `<span style="font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--accent)" title="Summe der ${r.pos.length} Positionen (erfasst im Menü Budgetpositionen)">${jbFmt(jbPosSum(r))}</span>`
-            : `<input value="${r.bud === null ? "" : Math.round(r.bud)}" placeholder="${Math.round(r.hoch)}" style="width:100px;text-align:right;font-family:var(--font-mono);font-size:12px;padding:3px 6px;${over ? "font-weight:600;border-color:var(--accent)" : "color:var(--text-dim)"}" title="${over ? "Überschrieben — leeren = zurück zum Vorschlag" : "Vorschlag (Hochrechnung); Wert eintippen zum Überschreiben"}" onchange="jbSetVal(${gi(r.g, r.kt)},this.value)">${over || r.man ? `<span style="cursor:pointer;color:var(--text-faint);margin-left:4px" title="${r.man ? "Konto entfernen" : "Zurück zum Vorschlag"}" onclick="jbResetRow(${gi(r.g, r.kt)})">↺</span>` : ""}`
+            : `<span style="font-size:11px;color:var(--warn)" title="Noch keine Positionen im Menü Budgetpositionen erfasst — zählt mit 0">⚠ offen</span>${r.man ? `<span style="cursor:pointer;color:var(--text-faint);margin-left:4px" title="Konto entfernen" onclick="jbResetRow(${gi(r.g, r.kt)})">✕</span>` : ""}`
           : `<span style="font-family:var(--font-mono);font-size:12px">${jbFmt(r.bud)}</span>`}</td>
         ${td(r.editable ? delta(jbRowBudget(r), r.hoch) : "", "font-size:11px")}
         <td style="padding:3px 6px;vertical-align:top;font-size:11px">${hasPos ? `
@@ -237,18 +256,19 @@ function renderJahresbudget(el) {
   const posRow = (key, label, indent, bold, srcKeys) => {
     const keys = srcKeys || [key];
     const n = keys.reduce((s, k) => s + (m.byKey[k] || []).filter(visible).length, 0);
-    const changed = keys.reduce((s, k) => s + (m.byKey[k] || []).filter(r => r.editable && (r.bud !== null || r.note || jbHasPos(r))).length, 0);
+    const changed = keys.reduce((s, k) => s + (m.byKey[k] || []).filter(jbRowOpen).length, 0);
     const open = jbState.open[key];
     const canAdd = !keys.some(k => JB_PERSONAL.has(k) || JB_ERTRAG.has(k));
+    const sg = keys.every(jbIsErloesmind) ? -1 : 1;   // Erlösminderung positiv anzeigen
     return `
       <tr style="border-top:1px solid var(--border);cursor:pointer;${bold ? "font-weight:600" : ""}" onclick="jbToggle('${key}')">
-        <td style="padding:6px 6px 6px ${indent}px;white-space:nowrap"><span style="color:var(--accent);font-size:9px;display:inline-block;width:12px">${n ? (open ? "▼" : "▶") : ""}</span>${escape(label)} <span style="color:var(--text-faint);font-weight:400;font-size:10.5px">${n ? n + " Konten" : ""}${changed ? ` · <span style="color:var(--accent)">${changed} angepasst</span>` : ""}</span>${canAdd && open ? ` <span class="btn btn-sm" style="padding:0 6px;font-size:10px;margin-left:6px" onclick="event.stopPropagation();jbAddKonto('${keys[0]}')" title="Konto ohne Ist-Basis ergänzen">＋ Konto</span>` : ""}</td>
+        <td style="padding:6px 6px 6px ${indent}px;white-space:nowrap"><span style="color:var(--accent);font-size:9px;display:inline-block;width:12px">${n ? (open ? "▼" : "▶") : ""}</span>${escape(label)} <span style="color:var(--text-faint);font-weight:400;font-size:10.5px">${n ? n + " Konten" : ""}${changed ? ` · <span style="color:var(--warn)">${changed} offen</span>` : ""}</span>${canAdd && open ? ` <span class="btn btn-sm" style="padding:0 6px;font-size:10px;margin-left:6px" onclick="event.stopPropagation();jbAddKonto('${keys[0]}')" title="Konto ohne Ist-Basis ergänzen">＋ Konto</span>` : ""}</td>
         ${td(`<span style="color:var(--text-faint)">${jbFmt(keys.reduce((s, k) => s + (m.byKey[k] || []).reduce((a, r) => a + (r.ist || 0), 0), 0))}</span>`, "font-size:11.5px")}
-        ${td(`<span style="color:var(--text-dim)">${jbFmt(vh[key])}</span>`)}
-        ${td(`<b>${jbFmt(vb[key])}</b>`)}
-        ${td(delta(vb[key], vh[key]), "font-size:11px")}
+        ${td(`<span style="color:var(--text-dim)">${jbFmt(vh[key] * sg)}</span>`)}
+        ${td(`<b>${jbFmt(vb[key] * sg)}</b>`)}
+        ${td(delta(vb[key] * sg, vh[key] * sg), "font-size:11px")}
         <td></td>
-        <td style="font-size:10.5px;color:var(--text-faint)">${JB_GES.map(g => `${g.split(" ")[0]} ${jbFmt(vg[g][key])}`).join(" · ")}</td>
+        <td style="font-size:10.5px;color:var(--text-faint)">${JB_GES.map(g => `${g.split(" ")[0]} ${jbFmt(vg[g][key] * sg)}`).join(" · ")}</td>
       </tr>
       ${open ? keys.map(detailRows).join("") : ""}`;
   };
@@ -274,7 +294,7 @@ function renderJahresbudget(el) {
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
       <div class="card stat-card"><div class="stat-label">Ertrag netto ${y}</div><div class="stat-value">${jbFmt(vb.DLTOT)}</div><div style="font-size:11px;color:var(--text-faint)">Ertragsbudget: SaaS ${jbFmt(m.eb.saas)} · BPO ${jbFmt(m.eb.bpo)}${m.eb.erloes ? ` · Erlösmind. dort ${jbFmt(m.eb.erloes)}` : ""}</div></div>
       <div class="card stat-card"><div class="stat-label">Personalaufwand ${y}</div><div class="stat-value">${jbFmt(vb.PA)}</div><div style="font-size:11px;color:var(--text-faint)">aus Budget Personalaufwand${vb.PA ? "" : " — noch nicht übertragen"}</div></div>
-      <div class="card stat-card"><div class="stat-label">Betriebsaufwand ${y}</div><div class="stat-value">${jbFmt(vb.BETRIEB)}</div><div style="font-size:11px;color:var(--text-faint)">Hochrechnung ${basis}: ${jbFmt(vh.BETRIEB)}</div></div>
+      <div class="card stat-card"><div class="stat-label">Betriebsaufwand ${y}</div><div class="stat-value">${jbFmt(vb.BETRIEB)}</div><div style="font-size:11px;color:var(--text-faint)">Hochrechnung ${basis}: ${jbFmt(vh.BETRIEB)}${(() => { const o = Object.values(m.byKey).flat().filter(jbRowOpen).length; return o ? ` · <span style="color:var(--warn)">${o} Konten offen</span>` : " · alle Konten erfasst"; })()}</div></div>
       <div class="card stat-card"><div class="stat-label">EBITDA ${y}</div><div class="stat-value" style="color:${vb.EBITDA < 0 ? "var(--danger)" : "inherit"}">${jbFmt(vb.EBITDA)}</div><div style="font-size:11px;color:var(--text-faint)">${JB_GES.map(g => `${g.split(" ")[0]} ${jbFmt(vg[g].EBITDA)}`).join(" · ")}</div></div>
     </div>
     <div class="card" style="padding:12px 14px;overflow-x:auto">
@@ -289,6 +309,53 @@ function renderJahresbudget(el) {
           <th style="text-align:left;padding:4px 6px">Notiz / je Gesellschaft</th></tr>
         ${body}
       </table>
-      <div style="font-size:10px;color:var(--text-faint);margin-top:8px">Aufwand positiv dargestellt. Positionen aufklappen (▶) zeigt Gesellschaft und Konto; Budgetfeld leer = Vorschlag aus der Hochrechnung gilt, eingetippter Wert überschreibt (↺ setzt zurück), Notiz je Konto. Einzelpositionen werden im Menü «Budgetpositionen» erfasst (mit Fälligkeit) und hier nur als Total und aufklappbare Details angezeigt — hat ein Konto Positionen, ist deren Summe das Konto-Budget. ▶ vor einem Konto zeigt die einzelnen Buchungen ${basis}. Ertrag SaaS/BPO kommt aus dem Ertragsbudget ${y}, Personalaufwand aus «Budget Personalaufwand» (beides nur Ansicht). «→ Budgetvergleich ${y}» schreibt alle übrigen Positionen als Budget-Positionen (1/12). · Jahresbudget v${JB_VERSION}</div>
+      <div style="font-size:10px;color:var(--text-faint);margin-top:8px">Alles ausser Ertrag positiv dargestellt (auch Erlösminderung); negativer Betrag = Gutschrift. Positionen aufklappen (▶) zeigt Gesellschaft und Konto; Budget je Konto = Summe der im Menü «Budgetpositionen» erfassten Positionen (hier nur Total und aufklappbare Details). Konten ohne Positionen zählen mit 0 und sind als «⚠ offen» markiert; die Hochrechnung dient nur als Referenz. Notiz je Konto. ▶ vor einem Konto zeigt die einzelnen Buchungen ${basis}. Ertrag SaaS/BPO kommt aus dem Ertragsbudget ${y}, Personalaufwand aus «Budget Personalaufwand» (beides nur Ansicht). «→ Budgetvergleich ${y}» schreibt alle übrigen Positionen als Budget-Positionen (1/12). · Jahresbudget v${JB_VERSION}</div>
+    </div>`;
+}
+
+/* ---------- Monatsansicht ---------- */
+function renderJahresbudgetMonate(el, ctx) {
+  const { y, basis, m, years, visible } = ctx;
+  const gesOk = r => jbState.mGes === "all" || jbSameGes(r.g, jbState.mGes);
+  const rowsOf = k => (m.byKey[k] || []).filter(r => gesOk(r) && visible(r));
+  // Positionswerte je Monat → EBITDA-Kette je Monat
+  const perMonth = [];
+  for (let i = 0; i < 12; i++) perMonth.push(fbCompute(k => rowsOf(k).reduce((s, r) => s + (jbRowMonths(r)[i] || 0), 0) * jbErSign(k)));
+  const yearVal = fbCompute(k => rowsOf(k).reduce((s, r) => s + jbRowBudget(r), 0) * jbErSign(k));
+  const fmt = v => Math.round(v) === 0 ? "" : Math.round(v).toLocaleString("de-CH");
+  const tdm = (v, extra) => `<td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;padding:3px 4px;white-space:nowrap;${extra || ""}">${fmt(v)}</td>`;
+  const line = (label, vals, tot, style, indent, toggle) => `<tr style="${style || ""}" ${toggle ? `onclick="jbToggle('${toggle}')" style="cursor:pointer;${style || ""}"` : ""}>
+      <td style="padding:4px 6px 4px ${indent || 6}px;white-space:nowrap">${toggle ? `<span style="color:var(--accent);font-size:9px;display:inline-block;width:12px">${jbState.open[toggle] ? "▼" : "▶"}</span>` : ""}${label}</td>
+      ${vals.map(v => tdm(v)).join("")}${tdm(tot, "font-weight:600")}</tr>`;
+  const detail = keys => keys.map(k => rowsOf(k).map(r => { const mo = jbRowMonths(r); return line(`<span style="font-size:11px;color:var(--text-dim)">${escape(r.g)} · <b>${escape(r.kt)}</b> ${escape(r.b)}${jbHasPos(r) ? ` <span style="color:var(--accent)">(${r.pos.length} Pos.)</span>` : r.src ? ` <span style="color:var(--accent)">← ${r.src}</span>` : ""}</span>`, mo, jbRowBudget(r), "border-top:1px solid var(--border-soft)", 34); }).join("")).join("");
+  const body = FB_PLAN.map(row => {
+    const k = row[1];
+    if (row[0] === "d" || row[0] === "d2") {
+      const keys = row[0] === "d2" ? row[3] : [k];
+      const n = keys.reduce((s, kk) => s + rowsOf(kk).length, 0);
+      const sg = keys.every(jbIsErloesmind) ? -1 : 1;
+      return line(`${escape(row[0] === "d2" ? row[2] : (FB_LABELS[k] || k))} <span style="color:var(--text-faint);font-size:10.5px">${n ? n + " Konten" : ""}</span>`, perMonth.map(pm => pm[k] * sg), yearVal[k] * sg, "border-top:1px solid var(--border)", row[0] === "d2" || row[2] ? 22 : 6, n ? k : null) + (jbState.open[k] ? detail(keys) : "");
+    }
+    if (row[0] === "g") return line(`<b>${escape(row[2])}</b>`, perMonth.map(pm => pm[k]), yearVal[k], "border-top:1px solid var(--border);font-weight:600");
+    if (row[0] === "c") return line(`<b>${escape(k === "RESULT" ? "Jahresgewinn / (-verlust)" : row[2])}</b>`, perMonth.map(pm => pm[k]), yearVal[k], "border-top:2px solid var(--border);background:var(--bg-elev);font-weight:" + (["EBITDA", "RESULT"].includes(k) ? "700" : "600"));
+    return "";
+  }).join("");
+  el.innerHTML = `
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <label style="font-size:12px;color:var(--text-dim)">Budgetjahr <select onchange="jbSetYear(this.value)" style="padding:4px 6px;font-size:12px;margin-left:4px">${years.map(v => `<option ${v === y ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+      <div style="display:flex;gap:4px">${[["all", "Total"], ...JB_GES.map(g => [g, g])].map(([id, l]) => `<button class="btn btn-sm" style="${jbState.mGes === id ? "background:var(--accent);color:#fff" : ""}" onclick="jbState.mGes='${id}';render()">${escape(l)}</button>`).join("")}</div>
+      <input type="search" placeholder="Suche Konto, Bezeichnung, Notiz …" value="${escape(jbState.q)}" style="font-size:12px;padding:4px 8px;width:240px" oninput="jbState.q=this.value;render()">
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+      <div class="card stat-card"><div class="stat-label">EBITDA ${y}${jbState.mGes !== "all" ? " · " + escape(jbState.mGes) : ""}</div><div class="stat-value" style="color:${yearVal.EBITDA < 0 ? "var(--danger)" : "inherit"}">${jbFmt(yearVal.EBITDA)}</div><div style="font-size:11px;color:var(--text-faint)">Bester Monat ${JB_MONATE[perMonth.map(p => p.EBITDA).indexOf(Math.max(...perMonth.map(p => p.EBITDA)))]} · schwächster ${JB_MONATE[perMonth.map(p => p.EBITDA).indexOf(Math.min(...perMonth.map(p => p.EBITDA)))]}</div></div>
+      <div class="card stat-card"><div class="stat-label">Ertrag netto</div><div class="stat-value">${jbFmt(yearVal.DLTOT)}</div><div style="font-size:11px;color:var(--text-faint)">Ø ${jbFmt(yearVal.DLTOT / 12)} / Monat</div></div>
+      <div class="card stat-card"><div class="stat-label">Aufwand (Personal + Betrieb)</div><div class="stat-value">${jbFmt(yearVal.PA + yearVal.BETRIEB)}</div><div style="font-size:11px;color:var(--text-faint)">Ø ${jbFmt((yearVal.PA + yearVal.BETRIEB) / 12)} / Monat</div></div>
+    </div>
+    <div class="card" style="padding:12px 14px;overflow-x:auto">
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <tr style="color:var(--text-dim);font-size:10.5px"><th style="text-align:left;padding:4px 6px">Position</th>${JB_MONATE.map(mn => `<th style="text-align:right;padding:4px 4px">${mn}</th>`).join("")}<th style="text-align:right;padding:4px 4px">Jahr ${y}</th></tr>
+        ${body}
+      </table>
+      <div style="font-size:10px;color:var(--text-faint);margin-top:8px">Monatsverteilung: Ertrag aus dem Ertragsbudget je Monat, Personalaufwand aus den übertragenen Monatswerten, Konten nach der Fälligkeit ihrer Positionen (Menü Budgetpositionen); Konten ohne Positionen zählen mit 0. Alles ausser Ertrag positiv dargestellt; negativ = Gutschrift. · Jahresbudget v${JB_VERSION}</div>
     </div>`;
 }
