@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.90.0";
+const LC_VERSION = "1.93.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -40,6 +40,9 @@ const LC_REF = {
 const LC_NICHT_PFLICHTIG = (code, label) => (code >= 3600 && code <= 3699) || code === 2030 || /Taggeld|Kinderzulage|Familienzulage|Ausbildungszulage|Geburtszulage/i.test(label || "");
 /* Quellensteuer: Satz ist individuell (Hochrechnung + Tabelle) — keine Satzprüfung */
 const LC_QST = r => r.code === 5400 || /\bQST\b|Quellensteuer/i.test(r.label || "");
+/* Abzüge mit legitim unterschiedlichen Sätzen — keine Satzabweichungs-Meldung, im Kontoblatt «individuell»:
+   BVG (Alter), NBU (Branche), FAR (GAV), QST (Hochrechnung/Tabelle) */
+const LC_SATZ_FREI = r => LC_REF.BVG.codes.includes(r.code) || LC_REF.BVG.key.test(r.label || "") || LC_REF.NBU.codes.includes(r.code) || LC_REF.NBU.key.test(r.label || "") || r.code === 5110 || /\bFAR\b/i.test(r.label || "") || LC_QST(r);
 /* swissstaffing Stiftung 2. Säule, Plan TEMP BASIC (gültig ab 01.01.2026): versicherter Stundenlohn = min(AHV-Stundenlohn, 41.50) − Koordinationsabzug, mindestens 1.75 */
 const LC_BVG = { maxStundenlohn: 41.50, minVersichert: 1.75 };
 const LC_TOTAL_CODES = new Set([4900, 5500, 5900, 6500, 6900, 7900, 8900, 9900]);
@@ -465,7 +468,7 @@ function lcCheckAll(slips) {
     // Satz weicht vom häufigsten Satz ab (Abzüge 5000–5499; BVG altersabhängig, NBU branchenabhängig, QST individuell → ausgenommen)
     for (const r of abz) {
       const m = satzMode[r.code];
-      if (LC_REF.BVG.codes.includes(r.code) || LC_REF.BVG.key.test(r.label) || LC_REF.NBU.codes.includes(r.code) || LC_REF.NBU.key.test(r.label) || LC_QST(r)) continue; // BVG altersabhängig, NBU branchenabhängig
+      if (LC_SATZ_FREI(r)) continue; // BVG altersabhängig, NBU branchenabhängig, FAR GAV-abhängig, QST individuell
       if (m && r.ansatz !== null && m.n >= 3 && !lcNear(r.ansatz, m.satz, 0.0001) && !Object.values(LC_REF).some(ref => ref.codes.includes(r.code) && ref.satz !== null))
         add(s, "gelb", "Satz", r.code + " " + r.label + ": " + lcFmtPct(r.ansatz) + ", üblich " + lcFmtPct(m.satz) + " (" + m.n + "×).");
     }
@@ -704,7 +707,7 @@ function renderLohncheck(el) {
         <th style="text-align:right;padding:4px 8px">Belege</th><th style="text-align:right;padding:4px 8px">MA</th>
         <th style="text-align:right;padding:4px 8px">Anzahl Σ</th><th style="text-align:right;padding:4px 8px">Basis Σ</th><th style="text-align:right;padding:4px 8px">Ansatz</th><th style="text-align:right;padding:4px 8px">Betrag Σ</th><th style="text-align:right;padding:4px 8px">Berechnet</th><th style="text-align:left;padding:4px 8px">Kontrolle</th></tr>
       ${K.filter(e => !lcState.q.trim() || !anyRowHit || lcHit(e.code + " " + e.label) || lcHit(lcFmt(e.betrag)) || S.some(s => s.rows.some(r => r.code === e.code && lcRowHit(r)))).map(e => {
-        const saetze = Object.keys(e.saetze); const satz = saetze.length === 1 ? lcFmtPct(parseFloat(saetze[0])) : saetze.length > 1 ? saetze.length + " versch." : ""; const satzOk = LC_QST(e) || LC_REF.BVG.codes.includes(e.code) || LC_REF.NBU.codes.includes(e.code);
+        const saetze = Object.keys(e.saetze); const satz = saetze.length === 1 ? lcFmtPct(parseFloat(saetze[0])) : saetze.length > 1 ? saetze.length + " versch." : ""; const satzOk = LC_SATZ_FREI(e);
         return `<tr style="border-top:1px solid var(--border);${e.isTotal ? "font-weight:700" : ""};${e.level ? "color:var(--text-dim)" : ""}">
           <td style="padding:5px 8px 5px 0;font-family:var(--font-mono)">${e.code}</td>
           <td style="padding:5px 8px 5px ${e.level ? 18 : 0}px">${e.level ? "↳ " : ""}${escape(e.label)}</td>
