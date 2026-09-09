@@ -23,12 +23,12 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.111.0"></script>
-<script src="apriko-api.js?v=1.111.0"></script>
-<script src="lohncheck.js?v=1.111.0"></script>
-<script src="personalbudget.js?v=1.111.0"></script>
-<script src="jahresbudget.js?v=1.111.0"></script>
-<script src="budgetpositionen.js?v=1.111.0"></script>
+<script src="apriko-filters.js?v=1.113.0"></script>
+<script src="apriko-api.js?v=1.113.0"></script>
+<script src="lohncheck.js?v=1.113.0"></script>
+<script src="personalbudget.js?v=1.113.0"></script>
+<script src="jahresbudget.js?v=1.113.0"></script>
+<script src="budgetpositionen.js?v=1.113.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -970,7 +970,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.111.0</span> · <span id="app-build-date">09.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.113.0</span> · <span id="app-build-date">09.09.2026</span>
     </div>
   </aside>
 
@@ -4106,6 +4106,11 @@ function renderBudget(el) {
 
 /* ---------- Dashboard ---------- */
 function renderDashboard(el) {
+  // Für die E-Mail-Knöpfe: Zusatz-Stammdaten (Entscheidungsträger/User) im Hintergrund laden, dann einmal neu zeichnen
+  if (crmStamm === null && typeof siteId !== "undefined" && siteId) {
+    crmLoadStamm().then(() => { if (currentView === "dashboard") render(); });
+  }
+  const emailCounts = crmStamm !== null ? crmCustomerEmailCounts(filters.dashboardEmailScope) : null;
   const open = cache.deals.filter(d => !["Won","Lost"].includes(d.Stage));
   const totalOpen = open.reduce((s,d) => s + (parseFloat(d.Value) || 0), 0);
   const openLicenses = open.reduce((s,d) => s + (parseInt(d.Licenses) || 0), 0);
@@ -4138,6 +4143,23 @@ function renderDashboard(el) {
       <div class="stat">
         <div class="stat-label">Aufgaben offen</div>
         <div class="stat-value">${openTasks.length}${overdueTasks.length ? ` <span style="font-size:12px;color:var(--danger)">(${overdueTasks.length} überfällig)</span>` : ""}</div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-h">
+        <span>E-Mail an Kunden <span style="font-weight:400;color:var(--text-faint);font-size:11px">${emailCounts ? emailCounts.firmen + " Kunden hinterlegt" : ""}</span></span>
+        <div class="scope-toggle">
+          <button class="${filters.dashboardEmailScope === "alle" ? "active" : ""}" onclick="setScope('dashboardEmailScope', 'alle')">Alle</button>
+          <button class="${filters.dashboardEmailScope === "saas" ? "active" : ""}" onclick="setScope('dashboardEmailScope', 'saas')">Nur SaaS</button>
+          <button class="${filters.dashboardEmailScope === "bpo" ? "active" : ""}" onclick="setScope('dashboardEmailScope', 'bpo')">Nur BPO</button>
+        </div>
+      </div>
+      <div style="padding:12px 16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-sm" onclick="crmCopyCustomerEmails('alle')" title="E-Mail-Adressen in die Zwischenablage kopieren — danach in Outlook/Gmail ins Bcc-Feld einfügen (Strg+V)">✉ An alle${emailCounts ? " (" + emailCounts.alle + ")" : ""}</button>
+        <button class="btn btn-sm" onclick="crmCopyCustomerEmails('entscheid')" title="E-Mail-Adressen in die Zwischenablage kopieren — danach in Outlook/Gmail ins Bcc-Feld einfügen (Strg+V)">✉ An Entscheidungsträger${emailCounts ? " (" + emailCounts.entscheid + ")" : ""}</button>
+        <button class="btn btn-sm" onclick="crmCopyCustomerEmails('user')" title="E-Mail-Adressen in die Zwischenablage kopieren — danach in Outlook/Gmail ins Bcc-Feld einfügen (Strg+V)">✉ An User${emailCounts ? " (" + emailCounts.user + ")" : ""}</button>
+        <span style="font-size:11px;color:var(--text-faint);margin-left:4px">Kopiert die E-Mail-Adressen der Kunden (Kennzeichnung «Ist Kunde») in die Zwischenablage — danach eine neue Mail öffnen und mit Strg+V ins Bcc-Feld einfügen. Adressen werden pro Firma unter «Firma bearbeiten» gepflegt.</span>
       </div>
     </div>
 
@@ -11077,6 +11099,66 @@ function renderActivityList(acts) {
    CRUD Forms
    =========================================================== */
 function newCompany() { editCompany(null); }
+/* ---------- Kunden-E-Mails (Entscheidungsträger / User) sammeln & in die Zwischenablage kopieren ---------- */
+// Roh-Text (Komma/Semikolon/Zeilenumbruch-getrennt) → bereinigte, komma-getrennte Liste für die Speicherung
+function crmNormEmails(raw) {
+  return crmParseEmails(raw).join(", ");
+}
+// Roh-Text → Array eindeutiger, gültig aussehender E-Mail-Adressen (kleingeschrieben)
+function crmParseEmails(raw) {
+  return [...new Set(
+    String(raw || "").split(/[,;\n]+/).map(s => s.trim().toLowerCase()).filter(s => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s))
+  )];
+}
+function crmCompanyMatchesScope(companyId, scope) {
+  if (scope === "alle") return true;
+  const custs = cache.customers.filter(x => x.CompanyId == companyId);
+  if (scope === "saas") return custs.some(x => segmentChargesSaaS(x.Segment));
+  if (scope === "bpo") return custs.some(x => segmentNeedsBPO(x.Segment));
+  return true;
+}
+function crmCustomerEmailCounts(scope) {
+  const sc = scope || filters.dashboardEmailScope || "alle";
+  const custs = cache.companies.filter(c => c.IsCustomer && crmCompanyMatchesScope(c.id, sc));
+  const out = { alle: new Set(), entscheid: new Set(), user: new Set(), firmen: custs.length };
+  custs.forEach(c => {
+    const s = (crmStamm && crmStamm[String(c.id)]) || {};
+    crmParseEmails(s.entscheid).forEach(e => { out.entscheid.add(e); out.alle.add(e); });
+    crmParseEmails(s.user).forEach(e => { out.user.add(e); out.alle.add(e); });
+  });
+  return { alle: out.alle.size, entscheid: out.entscheid.size, user: out.user.size, firmen: out.firmen };
+}
+async function crmCopyCustomerEmails(kind) {
+  if (crmStamm === null) { await crmLoadStamm(); }
+  const scope = filters.dashboardEmailScope || "alle";
+  const custs = cache.companies.filter(c => c.IsCustomer && crmCompanyMatchesScope(c.id, scope));
+  let emails = [];
+  custs.forEach(c => {
+    const s = (crmStamm && crmStamm[String(c.id)]) || {};
+    if (kind === "alle" || kind === "entscheid") emails.push(...crmParseEmails(s.entscheid));
+    if (kind === "alle" || kind === "user") emails.push(...crmParseEmails(s.user));
+  });
+  emails = [...new Set(emails)].sort();
+  if (!emails.length) {
+    const scopeLbl = scope === "saas" ? " (Filter: nur SaaS-Kunden)" : scope === "bpo" ? " (Filter: nur BPO-Kunden)" : "";
+    toast("Keine E-Mail-Adressen hinterlegt" + scopeLbl + " — bei den Firmen unter «Entscheidungsträger» / «User» eintragen.", true);
+    return;
+  }
+  const text = emails.join("; ");
+  const done = () => toast(emails.length + " E-Mail-Adresse" + (emails.length === 1 ? "" : "n") + " kopiert — bereit zum Einfügen in Bcc (Strg+V).");
+  try {
+    await navigator.clipboard.writeText(text);
+    done();
+  } catch (e) {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    try { document.execCommand("copy"); done(); }
+    catch (e2) { toast("Kopieren fehlgeschlagen: " + e2.message, true); }
+    document.body.removeChild(ta);
+  }
+}
+
 function editCompany(id) {
   crmLoadStamm();
   const c = id ? cache.companies.find(x => x.id == id) : {};
@@ -11103,6 +11185,10 @@ function editCompany(id) {
       <datalist id="ansprech-emails">
         ${[...new Set([myEmail(), ...cache.customers.map(x => x.Owner), ...Object.values(crmAnsprech || {})].filter(Boolean).map(e => e.toLowerCase()))].sort().map(e => `<option value="${escape(e)}">`).join("")}
       </datalist>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Entscheidungsträger (E-Mails, komma-getrennt)</label><textarea id="f-entscheid" rows="2" placeholder="anna@kunde.ch, max@kunde.ch">${escape((crmStamm && crmStamm[String(c.id)] && crmStamm[String(c.id)].entscheid) || "")}</textarea></div>
+      <div class="field"><label>User (E-Mails, komma-getrennt)</label><textarea id="f-user" rows="2" placeholder="user1@kunde.ch, user2@kunde.ch">${escape((crmStamm && crmStamm[String(c.id)] && crmStamm[String(c.id)].user) || "")}</textarea></div>
     </div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
     <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-iscustomer" ${c.IsCustomer?"checked":""} style="width:auto;margin:0" onchange="document.getElementById('f-winprob-row').style.display=this.checked?'none':'block'"> Ist Kunde (zahlt monatlich)</label></div>
@@ -11140,12 +11226,19 @@ async function saveCompany(id) {
       }
     }
     const strasseNeu = val("f-street");
+    const entscheidNeu = crmNormEmails(val("f-entscheid"));
+    const userNeu = crmNormEmails(val("f-user"));
     if (compId != null && crmStamm !== null) {
       const key = String(compId);
-      const alt = (crmStamm[key] && crmStamm[key].strasse) || "";
-      if (strasseNeu !== alt) {
-        if (strasseNeu) crmStamm[key] = { ...(crmStamm[key] || {}), strasse: strasseNeu };
-        else if (crmStamm[key]) delete crmStamm[key].strasse;
+      const altS = (crmStamm[key] && crmStamm[key].strasse) || "";
+      const altE = (crmStamm[key] && crmStamm[key].entscheid) || "";
+      const altU = (crmStamm[key] && crmStamm[key].user) || "";
+      if (strasseNeu !== altS || entscheidNeu !== altE || userNeu !== altU) {
+        const merged = { ...(crmStamm[key] || {}) };
+        if (strasseNeu) merged.strasse = strasseNeu; else delete merged.strasse;
+        if (entscheidNeu) merged.entscheid = entscheidNeu; else delete merged.entscheid;
+        if (userNeu) merged.user = userNeu; else delete merged.user;
+        if (Object.keys(merged).length) crmStamm[key] = merged; else delete crmStamm[key];
         await crmSaveStamm();
       }
     }
@@ -11464,6 +11557,7 @@ const filters = {
   budgetYear: new Date().getFullYear() + 1,   // Ertragsbudget: Planjahr / Budgetvergleich: Jahr
   tasksScope: "mine",
   dashboardTasksScope: "mine",
+  dashboardEmailScope: "alle",   // "alle" | "saas" | "bpo" — Filter für die Kunden-E-Mail-Knöpfe
   revenueMode: "month",       // "month" oder "customer"
   revenueYear: new Date().getFullYear(),
   revenueMonth: new Date().getMonth() + 1,
