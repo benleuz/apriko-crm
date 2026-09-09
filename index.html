@@ -23,12 +23,12 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.121.0"></script>
-<script src="apriko-api.js?v=1.121.0"></script>
-<script src="lohncheck.js?v=1.121.0"></script>
-<script src="personalbudget.js?v=1.121.0"></script>
-<script src="jahresbudget.js?v=1.121.0"></script>
-<script src="budgetpositionen.js?v=1.121.0"></script>
+<script src="apriko-filters.js?v=1.124.0"></script>
+<script src="apriko-api.js?v=1.124.0"></script>
+<script src="lohncheck.js?v=1.124.0"></script>
+<script src="personalbudget.js?v=1.124.0"></script>
+<script src="jahresbudget.js?v=1.124.0"></script>
+<script src="budgetpositionen.js?v=1.124.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -970,7 +970,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.121.0</span> · <span id="app-build-date">09.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.124.0</span> · <span id="app-build-date">09.09.2026</span>
     </div>
   </aside>
 
@@ -12185,16 +12185,22 @@ async function rpApiPlacementsFor(personId){
      BEISPIEL (roher Wert) gilt, nicht die Schema-Beschreibung. */
   /* Gruppe (Position 7): Pflicht UND JSON-Array — ["G1"] (empirisch). */
   var VAR = {
+    // DOKU-BEISPIEL (models-Service, GET/POST /Query, Parameter "Filters"): das OpenAPI-Schema
+    // selbst gibt als Beispielwert "name|=|Doe|text|false|false|Group1" an — Wert UNQUOTIERT,
+    // Typ klein "text", Gruppe als BLOSSER String "Group1" (kein JSON-Array!). Das weicht von der
+    // bisherigen Annahme (Gruppe als ["G1"]) ab, unter der ALLE bisherigen Versuche fehlschlugen
+    // (json: 0 Treffer, raw/rawlower: HTTP 500, guidJson/guidRaw: HTTP 400, pascal: 0 Treffer) —
+    // dieser Fund kommt direkt aus der Apriko-eigenen Spec, nicht aus weiterem Raten.
+    docText:       function(id){ return 'employeeId|=|' + String(id) + '|text|false|false|G1'; },
+    docTextQuoted: function(id){ return 'employeeId|=|' + JSON.stringify(id) + '|text|false|false|G1'; },
     json:      function(id){ return 'employeeId|=|' + JSON.stringify(id) + '|Text|false|false|["G1"]'; },
     raw:       function(id){ return 'employeeId|=|' + String(id) + '|Text|false|false|["G1"]'; },
     rawlower:  function(id){ return 'employeeId|=|' + String(id) + '|text|false|false|["G1"]'; },
-    // Weitere Versuche (json/raw/rawlower scheiterten am 09.09.2026 bei einer realen Person: json → 0
-    // Treffer, raw/rawlower → HTTP 500) — Feldtyp "Guid" statt "Text" bzw. Feldname in PascalCase.
     guidJson:  function(id){ return 'employeeId|=|' + JSON.stringify(id) + '|Guid|false|false|["G1"]'; },
     guidRaw:   function(id){ return 'employeeId|=|' + String(id) + '|Guid|false|false|["G1"]'; },
     pascal:    function(id){ return 'EmployeeId|=|' + JSON.stringify(id) + '|Text|false|false|["G1"]'; }
   };
-  var alle = ['json', 'raw', 'rawlower', 'guidJson', 'guidRaw', 'pascal'];
+  var alle = ['docText', 'docTextQuoted', 'json', 'raw', 'rawlower', 'guidJson', 'guidRaw', 'pascal'];
   var pref = localStorage.getItem('apriko-filter-format');
   var fmts = alle.indexOf(pref) >= 0 ? [pref].concat(alle.filter(function(f){ return f !== pref; })) : alle;
   var letzterFehler = null, sauberLeer = false, protokoll = [];
@@ -12336,34 +12342,81 @@ async function rpApiSelectPerson(idx, ocrName){
       }
       var ein = e.entryDate ? new Date(e.entryDate) : null;
       var aus = e.withdrawalDate ? new Date(e.withdrawalDate) : null;
-      list.push({ e: e, kundeName: kn,
-        zeitOk: (!ein || !bis || ein <= bis) && (!aus || !von || aus >= von),
-        kundeOk: !!(rpApiState.firmaName && kn && rpApiNameMatch(kn, rpApiState.firmaName)) });
+      var zeitOk = (!ein || !bis || ein <= bis) && (!aus || !von || aus >= von);
+      var kundeOk = !!(rpApiState.firmaName && kn && rpApiNameMatch(kn, rpApiState.firmaName));
+      // Trefferwahrscheinlichkeit: Zeitraum überlappt + Kunde passt = hohe Sicherheit (95%),
+      // nur eins von beiden = mittel, keins von beiden = niedrig — grob, aber nützlich zum Sortieren.
+      var score = (zeitOk ? 65 : 0) + (kundeOk ? 30 : 0) + (zeitOk && !aus ? 5 : 0);
+      score = Math.max(5, Math.min(95, score || 5));
+      list.push({ e: e, kundeName: kn, zeitOk: zeitOk, kundeOk: kundeOk, score: score });
     }
-    list.sort(function(a, b){
-      var s = (b.zeitOk * 2 + b.kundeOk) - (a.zeitOk * 2 + a.kundeOk);
-      if(s) return s;
-      return new Date(b.e.entryDate || 0) - new Date(a.e.entryDate || 0);
+    list.sort(function(a, b){ return b.score - a.score || (new Date(b.e.entryDate || 0) - new Date(a.e.entryDate || 0)); });
+    // Nur Einsätze rund um den Rapportzeitraum zeigen (±2 Monate) — altes/zukünftiges Zeugs blendet die
+    // Liste sonst nur zu. Ergibt der Filter nichts, wird ungefiltert gezeigt (nie leer werfen).
+    var FENSTER_TAGE = 61;
+    var fensterVon = von ? new Date(von.getTime() - FENSTER_TAGE * 86400000) : null;
+    var fensterBis = bis ? new Date(bis.getTime() + FENSTER_TAGE * 86400000) : null;
+    var imFenster = list.filter(function(x){
+      var ein2 = x.e.entryDate ? new Date(x.e.entryDate) : null;
+      var aus2 = x.e.withdrawalDate ? new Date(x.e.withdrawalDate) : null;
+      return (!fensterBis || !ein2 || ein2 <= fensterBis) && (!fensterVon || !aus2 || aus2 >= fensterVon);
     });
-    rpApiState.einsaetze = list;
-    rpApiState.einsatzId = list.length ? list[0].e.id : null;
+    rpApiState.einsaetzeAlle = list;
+    rpApiState.einsaetze = imFenster.length ? imFenster : list;
+    rpApiState.gefiltert = imFenster.length > 0 && imFenster.length < list.length;
+    rpApiState.zeigeAlle = false;
+    rpApiState.einsatzId = rpApiState.einsaetze.length ? rpApiState.einsaetze[0].e.id : null;
+    rpApiState.pName = pName;
     rpApiRender();
   } catch(e){
     box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> Einsätze nicht ladbar — ' + esc((e && e.message) || String(e)).slice(0, 220);
   }
 }
 function rpApiSelectEinsatz(id){ rpApiState.einsatzId = id; rpApiRender(); }
+function rpApiToggleAlle(){
+  rpApiState.zeigeAlle = !rpApiState.zeigeAlle;
+  if(rpApiState.zeigeAlle){
+    rpApiState.einsaetze = rpApiState.einsaetzeAlle;
+  } else {
+    var von = rpApiState.von, bis = rpApiState.bis, FENSTER_TAGE = 61;
+    var fensterVon = von ? new Date(von.getTime() - FENSTER_TAGE * 86400000) : null;
+    var fensterBis = bis ? new Date(bis.getTime() + FENSTER_TAGE * 86400000) : null;
+    var imFenster = rpApiState.einsaetzeAlle.filter(function(x){
+      var ein2 = x.e.entryDate ? new Date(x.e.entryDate) : null;
+      var aus2 = x.e.withdrawalDate ? new Date(x.e.withdrawalDate) : null;
+      return (!fensterBis || !ein2 || ein2 <= fensterBis) && (!fensterVon || !aus2 || aus2 >= fensterVon);
+    });
+    rpApiState.einsaetze = imFenster.length ? imFenster : rpApiState.einsaetzeAlle;
+  }
+  if(!rpApiState.einsaetze.some(function(x){ return String(x.e.id) === String(rpApiState.einsatzId); })){
+    rpApiState.einsatzId = rpApiState.einsaetze.length ? rpApiState.einsaetze[0].e.id : null;
+  }
+  rpApiRender();
+}
 
 /* «Einsatz übernehmen & weiter»: aus dem gewählten Apriko-Einsatz automatisch die passende Branche
    setzen (falls der GAV-Name eindeutig auf eine der lokalen GAV-Kacheln passt), die Konditionen/
    Zulagen aus dem Einsatz sichtbar hinterlegen, die GAV-Eckwerte laden und direkt zu Schritt 3
    (Prüfen und korrigieren) springen — ohne dass man den GAV nochmal manuell im Web sucht. */
-function rpApiUebernehmen(){
+async function rpApiUebernehmen(){
   var st = rpApiState;
   var sel = (st.einsaetze || []).filter(function(x){ return String(x.e.id) === String(st.einsatzId); })[0] || (st.einsaetze || [])[0];
   if(!sel){ return; }
   var beste = sel.e;
   var gavApi = beste.tempDataLabourStaffingAgreementName || '';
+  /* PLZ/Ort/Kanton des Einsatzorts direkt aus der Einsatzliste laden (WorkLocationAddress) statt
+     manuell erfassen zu müssen — spart den Bestätigungsdialog "Keine PLZ eingegeben". Nur setzen,
+     wenn das PLZ-Feld noch leer ist (manuelle Eingabe hat Vorrang). */
+  var plzFeld = $('rpPlz');
+  if(beste.workLocationId && plzFeld && !String(plzFeld.value || '').trim()){
+    try {
+      var wl = await AprikoApi.staffing.getWorkLocationAddress(beste.workLocationId);
+      if(wl && wl.zipCode){
+        plzFeld.value = wl.zipCode;
+        toast && toast('Einsatzort übernommen: ' + wl.zipCode + (wl.city ? ' ' + wl.city : '') + (wl.canton && wl.canton !== 'None' ? ' (' + wl.canton + ')' : ''));
+      }
+    } catch(wle){ /* kein Einsatzort hinterlegt oder nicht ladbar — PLZ bleibt leer, Dialog greift wie bisher */ }
+  }
   var brancheSel = $('rpBranche');
   var gavMatch = null;
   if(gavApi && brancheSel){
@@ -12422,15 +12475,19 @@ function rpApiRender(){
       esc((st.protokoll || []).join(' · ') || 'ID-Filter + Volltext leer') + ') — Personen-ID: <code>' + esc(String(person.id || '')) + '</code>';
     return;
   }
-  var einDrop = '<select onchange="rpApiSelectEinsatz(this.value)" style="max-width:420px">' +
+  var kurzName = (st.pName || '').split(' ').slice(-1)[0] || st.pName || '';
+  var einDrop = '<select onchange="rpApiSelectEinsatz(this.value)" style="max-width:480px">' +
     st.einsaetze.map(function(x){
       var e = x.e;
-      var lbl = 'Nr ' + (e.placementNumber || e.id) + (e.jobTitle ? ' · ' + e.jobTitle : '') +
-        (x.kundeName ? ' · ' + x.kundeName : '') +
+      var lbl = kurzName + ' · ' + (x.kundeName || '– Kunde unbekannt –') + ' · Einsatz Nr ' + (e.placementNumber || e.id) + ' · ' + x.score + '%' +
+        (e.jobTitle ? ' · ' + e.jobTitle : '') +
         ' · ' + (e.entryDate ? new Date(e.entryDate).toLocaleDateString('de-CH') : '?') + '–' + (e.withdrawalDate ? new Date(e.withdrawalDate).toLocaleDateString('de-CH') : 'laufend') +
-        (x.zeitOk ? '' : ' ⚠ ausserhalb Zeitraum') + (x.kundeOk ? ' ✓ Kunde' : '');
+        (x.zeitOk ? '' : ' ⚠ ausserhalb Zeitraum');
       return '<option value="' + esc(String(e.id)) + '"' + (String(e.id) === String(st.einsatzId) ? ' selected' : '') + '>' + esc(lbl) + '</option>';
-    }).join('') + '</select>';
+    }).join('') + '</select>' +
+    (st.einsaetzeAlle && st.einsaetzeAlle.length > st.einsaetze.length
+      ? ' <a href="#" onclick="rpApiToggleAlle();return false" style="font-size:11px;color:var(--rp-grey)">(' + (st.einsaetzeAlle.length - st.einsaetze.length) + ' weitere ausserhalb ±2 Monate — alle ' + st.einsaetzeAlle.length + ' anzeigen)</a>'
+      : (st.zeigeAlle ? ' <a href="#" onclick="rpApiToggleAlle();return false" style="font-size:11px;color:var(--rp-grey)">(nur die ' + (st.gefiltert ? '' : '') + 'nahen Einsätze anzeigen)</a>' : ''));
 
   var sel = st.einsaetze.filter(function(x){ return String(x.e.id) === String(st.einsatzId); })[0] || st.einsaetze[0];
   var beste = sel.e, kundeName = sel.kundeName;

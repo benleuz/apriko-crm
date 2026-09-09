@@ -330,6 +330,12 @@
     },
     getStaffLease: function (id) {
       return request("staffing", "/StaffLeasePlacements/" + encodeURIComponent(id));
+    },
+    /* Einsatzort-Adresse (verifiziert 09.09.2026 gegen die staffing-Spec: WorkLocationAddress
+       mit zipCode/canton/city/street) — liefert PLZ/Kanton direkt aus dem Einsatz, ohne dass
+       er manuell erfasst werden muss. */
+    getWorkLocationAddress: function (id) {
+      return request("staffing", "/WorkLocationAddresses/" + encodeURIComponent(id));
     }
   };
 
