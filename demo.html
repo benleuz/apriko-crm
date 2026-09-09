@@ -23,12 +23,12 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.114.0"></script>
-<script src="apriko-api.js?v=1.114.0"></script>
-<script src="lohncheck.js?v=1.114.0"></script>
-<script src="personalbudget.js?v=1.114.0"></script>
-<script src="jahresbudget.js?v=1.114.0"></script>
-<script src="budgetpositionen.js?v=1.114.0"></script>
+<script src="apriko-filters.js?v=1.116.0"></script>
+<script src="apriko-api.js?v=1.116.0"></script>
+<script src="lohncheck.js?v=1.116.0"></script>
+<script src="personalbudget.js?v=1.116.0"></script>
+<script src="jahresbudget.js?v=1.116.0"></script>
+<script src="budgetpositionen.js?v=1.116.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -970,7 +970,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.114.0</span> · <span id="app-build-date">09.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.116.0</span> · <span id="app-build-date">09.09.2026</span>
     </div>
   </aside>
 
@@ -12015,6 +12015,11 @@ function rpDbInit(){
     };
     if(cfg.gateway && !/^https?:\/\//i.test(cfg.gateway)) cfg.gateway = 'https://' + cfg.gateway;
     if(cfg.target && !/^https?:\/\//i.test(cfg.target)) cfg.target = 'https://' + cfg.target;
+    // Häufige Verwechslung: in «Instanz» versehentlich den Token-Host (…id.apriko.app) statt des
+    // Daten-Hosts eingetragen — automatisch auf den Daten-Host zurückkorrigieren (das «.id.» ist nur
+    // für den Token-Bezug relevant und wird von rpIdHost() selbst daraus abgeleitet).
+    var idFix = /^(https?:\/\/)([a-z0-9-]+)\.id\.apriko\.app$/i.exec(cfg.target || '');
+    if(idFix){ cfg.target = idFix[1] + idFix[2] + '.apriko.app'; if(t) t.value = cfg.target; toast('Instanz korrigiert zu ' + cfg.target + ' — «…id.apriko.app» ist nur der Token-Host, wird automatisch abgeleitet.'); }
     if(cfg.user && cfg.pass){ cfg.token = ''; cfg.tokenExp = 0; }   // frisch holen mit neuen Zugangsdaten
     localStorage.setItem(RP_DB_KEY, JSON.stringify(cfg));
     rpDbStatus();
@@ -12226,6 +12231,7 @@ async function rpApiMatch(maName, firmaName, vonStr, bisStr){
   var box = rpApiBox();
   if(!box || !maName) return;
   box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> suche «' + esc(maName) + '» …';
+  rpApiState.gefundenUeberEinsatz = false;
   try {
     var q = await AprikoApi.models.query({ query: maName, entityTypes: 'IndividualPerson', pageIndex: 0, pageSize: 8, resolveReferences: false });
     var roh = ((q && q.results) || []).map(AprikoApi.models.hitData);
@@ -12234,11 +12240,33 @@ async function rpApiMatch(maName, firmaName, vonStr, bisStr){
     });
     rpApiState.personen = passend.length ? passend : roh;   // ähnliche Treffer zur Auswahl anbieten
     rpApiState.unsicher = !passend.length;
+    /* Personen-Volltextsuche leer oder unsicher? → über die Einsatzliste (StaffLeasePlacement) suchen.
+       Deren Volltextindex deckt teils Namen ab, die die reine Personensuche nicht findet (z.B. bei
+       Schreibvarianten). Aus den Treffern die employeeId ziehen und die Person darüber nachladen. */
+    if(!rpApiState.personen.length){
+      box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> kein Mitarbeiter zu «' + esc(maName) + '» in der Personensuche — versuche über die Einsatzliste …';
+      try {
+        var qp = await AprikoApi.models.query({ query: maName, entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 25, resolveReferences: false });
+        var phits = ((qp && qp.results) || []).map(AprikoApi.models.hitData);
+        var ids = [];
+        phits.forEach(function(h){ if(h.employeeId && ids.indexOf(h.employeeId) < 0) ids.push(h.employeeId); });
+        var gefunden = [];
+        for(var gi = 0; gi < ids.length && gi < 5; gi++){
+          try { var per = await AprikoApi.people.getIndividual(ids[gi]); if(per) gefunden.push(per); } catch(ge){ /* einzelne ID übersprungen */ }
+        }
+        var passend2 = gefunden.filter(function(p){
+          return rpApiNameMatch([p.firstName, p.lastName].filter(Boolean).join(' '), maName);
+        });
+        rpApiState.personen = passend2.length ? passend2 : gefunden;
+        rpApiState.unsicher = !passend2.length;
+        rpApiState.gefundenUeberEinsatz = rpApiState.personen.length > 0;
+      } catch(ee){ /* Einsatzlisten-Suche ebenfalls ohne Treffer/Fehler — unten wird das gemeldet */ }
+    }
     rpApiState.firmaName = firmaName || '';
     rpApiState.von = rpDate(vonStr); rpApiState.bis = rpDate(bisStr || vonStr);
     rpApiState.vonStr = vonStr || ''; rpApiState.bisStr = bisStr || vonStr || '';
     if(!rpApiState.personen.length){
-      box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> kein Mitarbeiter zu «' + esc(maName) + '» gefunden — Angaben unten bitte manuell prüfen.';
+      box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> kein Mitarbeiter zu «' + esc(maName) + '» gefunden — weder Personensuche noch Einsatzliste liefern einen Treffer. Angaben unten bitte manuell prüfen.';
       return;
     }
     await rpApiSelectPerson(0, maName);
@@ -12300,7 +12328,8 @@ function rpApiRender(){
       return '<option value="' + i + '"' + (i === st.personIdx ? ' selected' : '') + '>' + esc(nm) + (p.personNumber ? ' (Nr ' + esc(String(p.personNumber)) + ')' : '') + '</option>';
     }).join('') + '</select>';
   var kopf = '🔌 <b>Apriko-Abgleich</b>' + (st.unsicher ? ' <span style="color:#c62828">— kein sicherer Namenstreffer, bitte wählen:</span>' : ':') + ' ' + maDrop +
-    (st.personen.length > 1 && !st.unsicher ? ' <span style="color:var(--rp-grey);font-size:11px">(' + st.personen.length + ' ähnliche Treffer)</span>' : '');
+    (st.personen.length > 1 && !st.unsicher ? ' <span style="color:var(--rp-grey);font-size:11px">(' + st.personen.length + ' ähnliche Treffer)</span>' : '') +
+    (st.gefundenUeberEinsatz ? ' <span style="color:var(--rp-grey);font-size:11px">(über Einsatzliste gefunden, nicht über die Personensuche)</span>' : '');
 
   if(!st.einsaetze.length){
     box.innerHTML = kopf + '<br>Keine Einsätze zu dieser Person gefunden (' +
