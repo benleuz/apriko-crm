@@ -23,12 +23,12 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.120.0"></script>
-<script src="apriko-api.js?v=1.120.0"></script>
-<script src="lohncheck.js?v=1.120.0"></script>
-<script src="personalbudget.js?v=1.120.0"></script>
-<script src="jahresbudget.js?v=1.120.0"></script>
-<script src="budgetpositionen.js?v=1.120.0"></script>
+<script src="apriko-filters.js?v=1.121.0"></script>
+<script src="apriko-api.js?v=1.121.0"></script>
+<script src="lohncheck.js?v=1.121.0"></script>
+<script src="personalbudget.js?v=1.121.0"></script>
+<script src="jahresbudget.js?v=1.121.0"></script>
+<script src="budgetpositionen.js?v=1.121.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -970,7 +970,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.120.0</span> · <span id="app-build-date">09.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.121.0</span> · <span id="app-build-date">09.09.2026</span>
     </div>
   </aside>
 
@@ -12354,6 +12354,48 @@ async function rpApiSelectPerson(idx, ocrName){
 }
 function rpApiSelectEinsatz(id){ rpApiState.einsatzId = id; rpApiRender(); }
 
+/* «Einsatz übernehmen & weiter»: aus dem gewählten Apriko-Einsatz automatisch die passende Branche
+   setzen (falls der GAV-Name eindeutig auf eine der lokalen GAV-Kacheln passt), die Konditionen/
+   Zulagen aus dem Einsatz sichtbar hinterlegen, die GAV-Eckwerte laden und direkt zu Schritt 3
+   (Prüfen und korrigieren) springen — ohne dass man den GAV nochmal manuell im Web sucht. */
+function rpApiUebernehmen(){
+  var st = rpApiState;
+  var sel = (st.einsaetze || []).filter(function(x){ return String(x.e.id) === String(st.einsatzId); })[0] || (st.einsaetze || [])[0];
+  if(!sel){ return; }
+  var beste = sel.e;
+  var gavApi = beste.tempDataLabourStaffingAgreementName || '';
+  var brancheSel = $('rpBranche');
+  var gavMatch = null;
+  if(gavApi && brancheSel){
+    for(var i = 0; i < brancheSel.options.length; i++){
+      var key = brancheSel.options[i].value;
+      if(GAV[key] && rpApiNameMatch(gavApi, GAV[key].name)){ gavMatch = key; break; }
+    }
+    if(gavMatch) brancheSel.value = gavMatch;
+  }
+  var bc = beste.basicPlacementCompensation || {};
+  var addl = beste.additionalPlacementCompensations || [];
+  var lohnTeile = [];
+  if(typeof bc.basicPlacementSalary === 'number') lohnTeile.push('Grundlohn ' + bc.basicPlacementSalary.toFixed(2));
+  if(typeof bc.basicPlacementRate === 'number') lohnTeile.push('Tarif ' + bc.basicPlacementRate.toFixed(2));
+  if(typeof bc.marginPercentage === 'number') lohnTeile.push('Marge ' + bc.marginPercentage.toFixed(1) + '%');
+  var spesen = addl.map(function(a){
+    var tt = [];
+    if(typeof a.salary === 'number') tt.push(a.salary.toFixed(2) + ' Lohn');
+    if(typeof a.rate === 'number') tt.push(a.rate.toFixed(2) + ' Tarif');
+    return esc(a.name || a.displayName || 'Zulage') + (tt.length ? ' (' + tt.join(' / ') + ')' : '');
+  });
+  window.__rpEinsatzKonditionen =
+    '<div style="margin-top:10px;padding:8px 12px;background:#EEF2FF;border-left:3px solid #4F46E5;border-radius:3px;color:#312E81;font-size:12px">' +
+    '<b>Konditionen laut Apriko-Einsatz Nr ' + esc(String(beste.placementNumber || beste.id)) + '</b>' +
+    (gavApi ? '<br>GAV: ' + esc(gavApi) + (gavMatch ? ' ✓ automatisch als Branche übernommen' : ' — keine passende Branche gefunden, bitte oben manuell wählen') : '') +
+    (lohnTeile.length ? '<br>' + lohnTeile.join(' · ') : '') +
+    '<br>Zulagen/Spesen: ' + (spesen.length ? spesen.join(', ') : 'keine zusätzlichen am Einsatz hinterlegt') +
+    '</div>';
+  if(typeof loadGav === 'function') loadGav();
+}
+if (typeof window !== 'undefined') window.rpApiUebernehmen = rpApiUebernehmen;
+
 function rpApiRender(){
   var box = rpApiBox(); if(!box) return;
   var st = rpApiState;
@@ -12415,6 +12457,7 @@ function rpApiRender(){
   var warn = !sel.zeitOk ? '<br><span style="color:#c62828">⚠ Dieser Einsatz überlappt den Rapportzeitraum ' + esc(st.vonStr) + ' – ' + esc(st.bisStr) + ' nicht — Zeitraum-Erkennung oder Auswahl prüfen.</span>' : '';
   var confidence = (sel.zeitOk && sel.kundeOk) ? ' <span style="color:#2e7d32;font-size:11px">✓ Zeitraum und Einsatzbetrieb passen — hohe Sicherheit</span>' : '';
 
+  var uebernahmeBtn = '<div style="margin-top:10px"><button type="button" class="rp-btn rp-btn-dark" onclick="rpApiUebernehmen()">✓ Einsatz übernehmen &amp; weiter</button></div>';
   box.innerHTML = kopf + unverifiedBanner + '<br>Einsatz: ' + einDrop +
     (st.einsaetze.length > 1 ? ' <span style="color:var(--rp-grey);font-size:11px">(' + st.einsaetze.length + ' Einsätze — passendste zuerst)</span>' : '') + confidence + '<br>' +
     '<b>Einsatz gefunden ✓</b> — Nr ' + esc(String(beste.placementNumber || beste.id)) +
@@ -12424,7 +12467,8 @@ function rpApiRender(){
     (lohnTeile.length ? 'Konditionen: ' + lohnTeile.join(' · ') + '<br>' : '') +
     (spesen.length ? 'Zulagen/Spesen laut Einsatz: ' + spesen.join(', ') : 'Keine zusätzlichen Zulagen am Einsatz hinterlegt.') +
     (st.fmt ? '<br><span style="color:var(--rp-grey);font-size:11px">Filter-Serialisierung «' + st.fmt + '» funktioniert (offener Punkt 1 der API-Doku).</span>' : '') +
-    (st.viaText ? '<br><span style="color:var(--rp-grey);font-size:11px">Einsätze via Volltextsuche' + (st.textVerifiziert ? ', über die Personen-ID verifiziert' : ' — Personen-ID nicht bestätigt, bitte Beleg prüfen') + '; ID-Filter: ' + esc((st.protokoll || []).join(' · ')) + '.</span>' : '');
+    (st.viaText ? '<br><span style="color:var(--rp-grey);font-size:11px">Einsätze via Volltextsuche' + (st.textVerifiziert ? ', über die Personen-ID verifiziert' : ' — Personen-ID nicht bestätigt, bitte Beleg prüfen') + '; ID-Filter: ' + esc((st.protokoll || []).join(' · ')) + '.</span>' : '') +
+    uebernahmeBtn;
 }
 if (typeof window !== 'undefined'){ window.rpApiSelectPerson = rpApiSelectPerson; window.rpApiSelectEinsatz = rpApiSelectEinsatz; window.rpDbTest = rpDbTest; window.rpDbInit = rpDbInit; }
 if (typeof window !== 'undefined') window.rpApiMatch = rpApiMatch;   // für Tests/Debugging erreichbar
@@ -14015,7 +14059,8 @@ function loadGav(){
     $('rpFacts').innerHTML = rows.map(function(r){
       return '<div class="rp-fact"><dt>'+esc(r[0])+'</dt><dd>'+esc(r[1])+'</dd></div>'; }).join('');
     $('rpSrc').innerHTML = 'Quelle: <code>'+esc(gav.quelle)+'</code>' +
-      (warning ? '<div style="margin-top:8px;padding:8px 12px;background:#FEF3C7;border-left:3px solid #F59E0B;border-radius:3px;color:#78350F;font-size:12px"><b>Hinweis:</b> '+esc(warning)+'</div>' : '');
+      (warning ? '<div style="margin-top:8px;padding:8px 12px;background:#FEF3C7;border-left:3px solid #F59E0B;border-radius:3px;color:#78350F;font-size:12px"><b>Hinweis:</b> '+esc(warning)+'</div>' : '') +
+      (window.__rpEinsatzKonditionen || '');
     b.textContent='Eckwerte neu laden'; b.disabled=false;
     renderTable();
     // Ersten Beleg automatisch anzeigen
