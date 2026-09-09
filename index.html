@@ -23,12 +23,12 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.119.0"></script>
-<script src="apriko-api.js?v=1.119.0"></script>
-<script src="lohncheck.js?v=1.119.0"></script>
-<script src="personalbudget.js?v=1.119.0"></script>
-<script src="jahresbudget.js?v=1.119.0"></script>
-<script src="budgetpositionen.js?v=1.119.0"></script>
+<script src="apriko-filters.js?v=1.120.0"></script>
+<script src="apriko-api.js?v=1.120.0"></script>
+<script src="lohncheck.js?v=1.120.0"></script>
+<script src="personalbudget.js?v=1.120.0"></script>
+<script src="jahresbudget.js?v=1.120.0"></script>
+<script src="budgetpositionen.js?v=1.120.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -970,7 +970,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.119.0</span> · <span id="app-build-date">09.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.120.0</span> · <span id="app-build-date">09.09.2026</span>
     </div>
   </aside>
 
@@ -12222,11 +12222,16 @@ async function rpApiPlacementsFor(personId){
    Suchart, die den Mitarbeiter zuverlässig findet. Danach hart über die
    Personen-ID verifiziert, damit kein fremder Einsatz durchrutscht. */
 async function rpApiPlacementsByText(maName, personId, firmaName){
-  var q = firmaName ? (maName + ' ' + firmaName) : maName;
-  var r = await AprikoApi.models.query({ query: q, entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 100, resolveReferences: false });
-  var rows = ((r && r.results) || []).map(AprikoApi.models.hitData);
-  var mitId = rows.filter(function(e){ return e.employeeId === personId; });
-  return { rows: mitId.length ? mitId : rows, verifiziert: mitId.length > 0 };
+  var versuche = firmaName ? [maName + ' ' + firmaName, maName] : [maName];
+  for(var i = 0; i < versuche.length; i++){
+    var r = await AprikoApi.models.query({ query: versuche[i], entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 100, resolveReferences: false });
+    var rows = ((r && r.results) || []).map(AprikoApi.models.hitData);
+    if(rows.length){
+      var mitId = rows.filter(function(e){ return e.employeeId === personId; });
+      return { rows: mitId.length ? mitId : rows, verifiziert: mitId.length > 0, engererSuchbegriff: i === 0 };
+    }
+  }
+  return { rows: [], verifiziert: false };
 }
 /* Abgleich-Zustand für die Auswahl-Dropdowns */
 var rpApiState = { personen: [], personIdx: 0, einsaetze: [], einsatzId: null, von: null, bis: null, firmaName: '', unsicher: false, fmt: null, viaText: false, protokoll: [] };
@@ -12252,9 +12257,12 @@ async function rpApiMatch(maName, firmaName, vonStr, bisStr){
     if(!rpApiState.personen.length){
       box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> kein Mitarbeiter zu «' + esc(maName) + '» in der Personensuche — versuche über die Einsatzliste …';
       try {
-        var qpQuery = firmaName ? (maName + ' ' + firmaName) : maName;
-        var qp = await AprikoApi.models.query({ query: qpQuery, entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 50, resolveReferences: false });
-        var phits = ((qp && qp.results) || []).map(AprikoApi.models.hitData);
+        var qpVersuche = firmaName ? [maName + ' ' + firmaName, maName] : [maName];
+        var phits = [];
+        for(var qi = 0; qi < qpVersuche.length && !phits.length; qi++){
+          var qp = await AprikoApi.models.query({ query: qpVersuche[qi], entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 50, resolveReferences: false });
+          phits = ((qp && qp.results) || []).map(AprikoApi.models.hitData);
+        }
         var ids = [];
         phits.forEach(function(h){ if(h.employeeId && ids.indexOf(h.employeeId) < 0) ids.push(h.employeeId); });
         var gefunden = [];
