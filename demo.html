@@ -23,12 +23,12 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.116.0"></script>
-<script src="apriko-api.js?v=1.116.0"></script>
-<script src="lohncheck.js?v=1.116.0"></script>
-<script src="personalbudget.js?v=1.116.0"></script>
-<script src="jahresbudget.js?v=1.116.0"></script>
-<script src="budgetpositionen.js?v=1.116.0"></script>
+<script src="apriko-filters.js?v=1.119.0"></script>
+<script src="apriko-api.js?v=1.119.0"></script>
+<script src="lohncheck.js?v=1.119.0"></script>
+<script src="personalbudget.js?v=1.119.0"></script>
+<script src="jahresbudget.js?v=1.119.0"></script>
+<script src="budgetpositionen.js?v=1.119.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -970,7 +970,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.116.0</span> · <span id="app-build-date">09.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.119.0</span> · <span id="app-build-date">09.09.2026</span>
     </div>
   </aside>
 
@@ -12185,11 +12185,16 @@ async function rpApiPlacementsFor(personId){
      BEISPIEL (roher Wert) gilt, nicht die Schema-Beschreibung. */
   /* Gruppe (Position 7): Pflicht UND JSON-Array — ["G1"] (empirisch). */
   var VAR = {
-    json:     function(id){ return 'employeeId|=|' + JSON.stringify(id) + '|Text|false|false|["G1"]'; },
-    raw:      function(id){ return 'employeeId|=|' + String(id) + '|Text|false|false|["G1"]'; },
-    rawlower: function(id){ return 'employeeId|=|' + String(id) + '|text|false|false|["G1"]'; }
+    json:      function(id){ return 'employeeId|=|' + JSON.stringify(id) + '|Text|false|false|["G1"]'; },
+    raw:       function(id){ return 'employeeId|=|' + String(id) + '|Text|false|false|["G1"]'; },
+    rawlower:  function(id){ return 'employeeId|=|' + String(id) + '|text|false|false|["G1"]'; },
+    // Weitere Versuche (json/raw/rawlower scheiterten am 09.09.2026 bei einer realen Person: json → 0
+    // Treffer, raw/rawlower → HTTP 500) — Feldtyp "Guid" statt "Text" bzw. Feldname in PascalCase.
+    guidJson:  function(id){ return 'employeeId|=|' + JSON.stringify(id) + '|Guid|false|false|["G1"]'; },
+    guidRaw:   function(id){ return 'employeeId|=|' + String(id) + '|Guid|false|false|["G1"]'; },
+    pascal:    function(id){ return 'EmployeeId|=|' + JSON.stringify(id) + '|Text|false|false|["G1"]'; }
   };
-  var alle = ['json', 'raw', 'rawlower'];
+  var alle = ['json', 'raw', 'rawlower', 'guidJson', 'guidRaw', 'pascal'];
   var pref = localStorage.getItem('apriko-filter-format');
   var fmts = alle.indexOf(pref) >= 0 ? [pref].concat(alle.filter(function(f){ return f !== pref; })) : alle;
   var letzterFehler = null, sauberLeer = false, protokoll = [];
@@ -12216,8 +12221,9 @@ async function rpApiPlacementsFor(personId){
 /* Fallback: Einsätze per Volltextsuche zum Mitarbeiternamen — dieselbe
    Suchart, die den Mitarbeiter zuverlässig findet. Danach hart über die
    Personen-ID verifiziert, damit kein fremder Einsatz durchrutscht. */
-async function rpApiPlacementsByText(maName, personId){
-  var r = await AprikoApi.models.query({ query: maName, entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 25, resolveReferences: false });
+async function rpApiPlacementsByText(maName, personId, firmaName){
+  var q = firmaName ? (maName + ' ' + firmaName) : maName;
+  var r = await AprikoApi.models.query({ query: q, entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 100, resolveReferences: false });
   var rows = ((r && r.results) || []).map(AprikoApi.models.hitData);
   var mitId = rows.filter(function(e){ return e.employeeId === personId; });
   return { rows: mitId.length ? mitId : rows, verifiziert: mitId.length > 0 };
@@ -12246,7 +12252,8 @@ async function rpApiMatch(maName, firmaName, vonStr, bisStr){
     if(!rpApiState.personen.length){
       box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> kein Mitarbeiter zu «' + esc(maName) + '» in der Personensuche — versuche über die Einsatzliste …';
       try {
-        var qp = await AprikoApi.models.query({ query: maName, entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 25, resolveReferences: false });
+        var qpQuery = firmaName ? (maName + ' ' + firmaName) : maName;
+        var qp = await AprikoApi.models.query({ query: qpQuery, entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 50, resolveReferences: false });
         var phits = ((qp && qp.results) || []).map(AprikoApi.models.hitData);
         var ids = [];
         phits.forEach(function(h){ if(h.employeeId && ids.indexOf(h.employeeId) < 0) ids.push(h.employeeId); });
@@ -12262,11 +12269,32 @@ async function rpApiMatch(maName, firmaName, vonStr, bisStr){
         rpApiState.gefundenUeberEinsatz = rpApiState.personen.length > 0;
       } catch(ee){ /* Einsatzlisten-Suche ebenfalls ohne Treffer/Fehler — unten wird das gemeldet */ }
     }
+    /* Immer noch nichts? Handschrift/Scan verfälscht meist den Vornamen, der Nachname ist stabiler —
+       letztes Wort des Namens allein suchen (Personen- UND Einsatzliste) und dem Anwender zur Auswahl
+       vorlegen, statt endgültig aufzugeben. */
+    if(!rpApiState.personen.length){
+      var teile = String(maName).trim().split(/\s+/).filter(Boolean);
+      var nachname = teile.length > 1 ? teile[teile.length - 1] : '';
+      if(nachname && nachname.length > 2){
+        box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> kein Treffer zu «' + esc(maName) + '» — versuche nur Nachname «' + esc(nachname) + '» …';
+        try {
+          var qn = await AprikoApi.models.query({ query: nachname, entityTypes: 'IndividualPerson', pageIndex: 0, pageSize: 15, resolveReferences: false });
+          var rohN = ((qn && qn.results) || []).map(AprikoApi.models.hitData).filter(function(p){
+            return rpApiNorm([p.firstName, p.lastName].filter(Boolean).join(' ')).indexOf(rpApiNorm(nachname)) >= 0;
+          });
+          if(rohN.length){
+            rpApiState.personen = rohN;
+            rpApiState.unsicher = true;
+            rpApiState.gefundenUeberNachname = true;
+          }
+        } catch(en){ /* auch das ohne Treffer/Fehler — unten wird final gemeldet */ }
+      }
+    }
     rpApiState.firmaName = firmaName || '';
     rpApiState.von = rpDate(vonStr); rpApiState.bis = rpDate(bisStr || vonStr);
     rpApiState.vonStr = vonStr || ''; rpApiState.bisStr = bisStr || vonStr || '';
     if(!rpApiState.personen.length){
-      box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> kein Mitarbeiter zu «' + esc(maName) + '» gefunden — weder Personensuche noch Einsatzliste liefern einen Treffer. Angaben unten bitte manuell prüfen.';
+      box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> kein Mitarbeiter zu «' + esc(maName) + '» gefunden — weder Personensuche noch Einsatzliste noch Nachnamen-Suche liefern einen Treffer. Angaben unten bitte manuell prüfen.';
       return;
     }
     await rpApiSelectPerson(0, maName);
@@ -12287,7 +12315,7 @@ async function rpApiSelectPerson(idx, ocrName){
     var pl = await rpApiPlacementsFor(person.id);
     rpApiState.fmt = pl.fmt; rpApiState.protokoll = pl.protokoll || []; rpApiState.viaText = false;
     if(!pl.rows.length){
-      var tf = await rpApiPlacementsByText(ocrName || pName, person.id);
+      var tf = await rpApiPlacementsByText(ocrName || pName, person.id, rpApiState.firmaName);
       if(tf.rows.length){ pl = { rows: tf.rows }; rpApiState.viaText = true; rpApiState.textVerifiziert = tf.verifiziert; }
     }
     // Kundennamen auflösen + sortieren: Überlappung + Kunden-Match zuerst, dann jüngste
@@ -12329,7 +12357,15 @@ function rpApiRender(){
     }).join('') + '</select>';
   var kopf = '🔌 <b>Apriko-Abgleich</b>' + (st.unsicher ? ' <span style="color:#c62828">— kein sicherer Namenstreffer, bitte wählen:</span>' : ':') + ' ' + maDrop +
     (st.personen.length > 1 && !st.unsicher ? ' <span style="color:var(--rp-grey);font-size:11px">(' + st.personen.length + ' ähnliche Treffer)</span>' : '') +
-    (st.gefundenUeberEinsatz ? ' <span style="color:var(--rp-grey);font-size:11px">(über Einsatzliste gefunden, nicht über die Personensuche)</span>' : '');
+    (st.gefundenUeberEinsatz ? ' <span style="color:var(--rp-grey);font-size:11px">(über Einsatzliste gefunden, nicht über die Personensuche)</span>' : '') +
+    (st.gefundenUeberNachname ? ' <span style="color:#c62828;font-size:11px">(nur über Nachname gefunden — Vorname im Beleg/OCR vermutlich falsch, bitte wählen)</span>' : '');
+  var unverifiedBanner = (st.viaText && !st.textVerifiziert)
+    ? '<div style="margin:8px 0;padding:7px 10px;background:#FEF2F2;border-left:3px solid #c62828;border-radius:3px;font-size:12px;color:#7f1d1d">' +
+      '⚠ <b>Nicht über die Personen-ID bestätigt:</b> Die Einsatzliste konnte nicht direkt nach dieser Person gefiltert werden (ID-Filter: ' +
+      esc((st.protokoll || []).join(' · ') || 'fehlgeschlagen') + '). Die unten vorausgewählte Liste stammt aus einer Volltextsuche und kann ' +
+      'auch Einsätze anderer Personen enthalten, oder den richtigen Einsatz auslassen. Bitte im Dropdown den passenden Einsatz von Hand prüfen ' +
+      'und bei Zweifel den Original-Beleg/Apriko direkt konsultieren.</div>'
+    : '';
 
   if(!st.einsaetze.length){
     box.innerHTML = kopf + '<br>Keine Einsätze zu dieser Person gefunden (' +
@@ -12369,9 +12405,10 @@ function rpApiRender(){
     return esc(a.name || a.displayName || 'Zulage') + (t.length ? ' (' + t.join(' / ') + ')' : '');
   });
   var warn = !sel.zeitOk ? '<br><span style="color:#c62828">⚠ Dieser Einsatz überlappt den Rapportzeitraum ' + esc(st.vonStr) + ' – ' + esc(st.bisStr) + ' nicht — Zeitraum-Erkennung oder Auswahl prüfen.</span>' : '';
+  var confidence = (sel.zeitOk && sel.kundeOk) ? ' <span style="color:#2e7d32;font-size:11px">✓ Zeitraum und Einsatzbetrieb passen — hohe Sicherheit</span>' : '';
 
-  box.innerHTML = kopf + '<br>Einsatz: ' + einDrop +
-    (st.einsaetze.length > 1 ? ' <span style="color:var(--rp-grey);font-size:11px">(' + st.einsaetze.length + ' Einsätze — passendste zuerst)</span>' : '') + '<br>' +
+  box.innerHTML = kopf + unverifiedBanner + '<br>Einsatz: ' + einDrop +
+    (st.einsaetze.length > 1 ? ' <span style="color:var(--rp-grey);font-size:11px">(' + st.einsaetze.length + ' Einsätze — passendste zuerst)</span>' : '') + confidence + '<br>' +
     '<b>Einsatz gefunden ✓</b> — Nr ' + esc(String(beste.placementNumber || beste.id)) +
     (beste.jobTitle ? ' · ' + esc(beste.jobTitle) : '') +
     (kundeName ? ' bei <b>' + esc(kundeName) + '</b>' : '') + warn + '<br>' +
