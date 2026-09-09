@@ -23,12 +23,12 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.110.0"></script>
-<script src="apriko-api.js?v=1.110.0"></script>
-<script src="lohncheck.js?v=1.110.0"></script>
-<script src="personalbudget.js?v=1.110.0"></script>
-<script src="jahresbudget.js?v=1.110.0"></script>
-<script src="budgetpositionen.js?v=1.110.0"></script>
+<script src="apriko-filters.js?v=1.111.0"></script>
+<script src="apriko-api.js?v=1.111.0"></script>
+<script src="lohncheck.js?v=1.111.0"></script>
+<script src="personalbudget.js?v=1.111.0"></script>
+<script src="jahresbudget.js?v=1.111.0"></script>
+<script src="budgetpositionen.js?v=1.111.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -970,7 +970,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.110.0</span> · <span id="app-build-date">08.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.111.0</span> · <span id="app-build-date">09.09.2026</span>
     </div>
   </aside>
 
@@ -11999,13 +11999,31 @@ async function rpDbEnsureToken(force){
   }
   var body = new URLSearchParams();
   body.set('grant_type', 'password'); body.set('username', c.user); body.set('password', c.pass);
-  var res2 = await fetch(c.gateway + tokenPath, { method: 'POST', headers: hdr, body: body.toString() });
-  var txt = await res2.text(); var tj = null; try { tj = JSON.parse(txt); } catch(e4){}
+  /* Bevorzugt: der Proxy holt das Token selbst (/__token) — er macht die Discovery auf der Zielinstanz
+     und ruft den gefundenen token_endpoint direkt auf, auch wenn der auf einem anderen Host liegt.
+     Fällt der Proxy-Endpunkt aus (alter Proxy), geht es wie bisher über den Pfad am Gateway. */
+  var res2, txt, tj = null, usedUrl = c.gateway + tokenPath, viaProxy = false;
+  try {
+    res2 = await fetch(c.gateway + '/__token', { method: 'POST', headers: hdr, body: body.toString() });
+    if(res2.status !== 404 || !res2.headers.get('X-Gateway-Error')){ viaProxy = true; usedUrl = res2.headers.get('X-Token-Endpoint') || (c.gateway + '/__token'); }
+  } catch(e0){ res2 = null; }
+  if(!viaProxy){
+    try { res2 = await fetch(c.gateway + tokenPath, { method: 'POST', headers: hdr, body: body.toString() }); }
+    catch(e1){
+      var eN = new Error('Token-Anfrage kam nicht durch (' + e1.message + ') an ' + usedUrl + ' — Proxy schläft, Port nicht «public» oder CORS/Preflight blockiert. Codespace öffnen, 1 Min warten, erneut testen.');
+      eN.kind = 'gateway-unreachable'; throw eN;
+    }
+  }
+  txt = await res2.text(); try { tj = JSON.parse(txt); } catch(e4){}
   if(!res2.ok || !tj || !tj.access_token){
-    var err = (tj && (tj.error_description || tj.error)) || txt.slice(0, 160) || ('HTTP ' + res2.status);
-    var e5 = new Error('Anmeldung fehlgeschlagen: ' + err +
-      (/client/i.test(err) ? ' — der Identity-Server verlangt offenbar eine client_id: beim Apriko-Team erfragen.' : ' — Benutzername/Passwort prüfen.'));
-    e5.kind = 'auth';
+    var err = (tj && (tj.error_description || tj.error)) || txt.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160) || ('HTTP ' + res2.status);
+    var hint = /invalid_client|unauthorized_client|client/i.test(err) ? ' — der Identity-Server verlangt eine client_id: beim Apriko-Team erfragen.'
+             : /invalid_scope/i.test(err) ? ' — ein Scope wird verlangt: beim Apriko-Team erfragen.'
+             : /invalid_grant/i.test(err) ? ' — Benutzername/Passwort falsch oder Benutzer nicht auf dieser Instanz.'
+             : (res2.status === 404 || res2.status === 405 || /<html|Not Allowed|Not Found/i.test(txt)) ? ' — Token-URL falsch (kein Identity-Server unter dieser Adresse).'
+             : ' — Benutzername/Passwort prüfen.';
+    var e5 = new Error('Anmeldung fehlgeschlagen (HTTP ' + res2.status + ' von ' + usedUrl + '): ' + err + hint);
+    e5.kind = /invalid_grant|invalid_client|invalid_scope|unauthorized/i.test(err) ? 'auth' : 'upstream-unreachable';
     throw e5;
   }
   c = rpDbCfg();   // frisch lesen, dann Token + Ablauf + gefundenen Endpunkt merken
