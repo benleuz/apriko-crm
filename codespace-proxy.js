@@ -120,8 +120,12 @@ async function handle(req, res) {
     if (/^\//.test(tokenUrl)) tokenUrl = APRIKO_BASE + tokenUrl;
     let host = ""; try { host = new URL(tokenUrl).hostname; } catch (e) {}
     if (!/\.apriko\.app$/i.test(host)) return gatewayError(res, cors, 403, "Token-Endpunkt ausserhalb apriko.app: " + tokenUrl);
+    // grant_type wird vom Client vorgegeben (heute: client_credentials mit client_id/client_secret/scope
+    // gemäss Apriko-Vorgabe; Password-Grant bleibt als Fallback für andere Instanzen erhalten).
+    const grantType = form.get("grant_type") || "password";
     const body = new URLSearchParams();
-    body.set("grant_type", "password"); body.set("username", form.get("username") || ""); body.set("password", form.get("password") || "");
+    body.set("grant_type", grantType);
+    if (grantType === "password") { body.set("username", form.get("username") || ""); body.set("password", form.get("password") || ""); }
     if (form.get("client_id")) body.set("client_id", form.get("client_id"));
     if (form.get("client_secret")) body.set("client_secret", form.get("client_secret"));
     if (form.get("scope")) body.set("scope", form.get("scope"));

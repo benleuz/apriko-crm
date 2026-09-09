@@ -23,12 +23,12 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.113.0"></script>
-<script src="apriko-api.js?v=1.113.0"></script>
-<script src="lohncheck.js?v=1.113.0"></script>
-<script src="personalbudget.js?v=1.113.0"></script>
-<script src="jahresbudget.js?v=1.113.0"></script>
-<script src="budgetpositionen.js?v=1.113.0"></script>
+<script src="apriko-filters.js?v=1.114.0"></script>
+<script src="apriko-api.js?v=1.114.0"></script>
+<script src="lohncheck.js?v=1.114.0"></script>
+<script src="personalbudget.js?v=1.114.0"></script>
+<script src="jahresbudget.js?v=1.114.0"></script>
+<script src="budgetpositionen.js?v=1.114.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -970,7 +970,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.113.0</span> · <span id="app-build-date">09.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.114.0</span> · <span id="app-build-date">09.09.2026</span>
     </div>
   </aside>
 
@@ -1004,8 +1004,8 @@
           <div style="display:grid;grid-template-columns:1.2fr 1.2fr 1fr 1fr auto;gap:8px;align-items:end;margin-top:8px">
             <div><label style="font-size:10.5px;color:var(--rp-grey)">Gateway-/Proxy-URL</label><input id="rpDbGateway" placeholder="https://…-8787.app.github.dev" style="width:100%"></div>
             <div><label style="font-size:10.5px;color:var(--rp-grey)">Instanz (Ziel-Datenbank)</label><input id="rpDbTarget" placeholder="https://kunde.apriko.app — leer = Standard" style="width:100%"></div>
-            <div><label style="font-size:10.5px;color:var(--rp-grey)">API-Benutzername</label><input id="rpDbUser" autocomplete="off" style="width:100%"></div>
-            <div><label style="font-size:10.5px;color:var(--rp-grey)">API-Passwort</label><input id="rpDbPass" type="password" autocomplete="new-password" style="width:100%"></div>
+            <div><label style="font-size:10.5px;color:var(--rp-grey)">Client-ID</label><input id="rpDbUser" autocomplete="off" style="width:100%" placeholder="vom Apriko-Team"></div>
+            <div><label style="font-size:10.5px;color:var(--rp-grey)">Client-Secret</label><input id="rpDbPass" type="password" autocomplete="new-password" style="width:100%" placeholder="vom Apriko-Team"></div>
             <button type="button" class="rp-btn" id="rpDbSave">Speichern & testen</button>
           </div>
           <details style="margin-top:6px"><summary style="font-size:10.5px;color:var(--rp-grey);cursor:pointer">Stattdessen fertiges Token einfügen (fortgeschritten)</summary>
@@ -12047,7 +12047,7 @@ async function rpDbTest(){
   var alleOk = st.gateway.status === 'ok' && st.upstream.status === 'ok' && st.token.status === 'ok';
   var hint = '';
   if(st.gateway.status === 'fail') hint = ' <span style="color:#c62828;font-size:11px">— Proxy nicht erreichbar (Codespace eingeschlafen? Öffnen und Proxy starten, dann hier «Speichern & testen»).</span>';
-  else if(st.token.status === 'fail') hint = ' <span style="color:#c62828;font-size:11px">— ' + (c.user ? 'Anmeldung abgelehnt: Benutzername/Passwort prüfen (Details am Chip).' : 'Token ungültig/abgelaufen: neues Token eintragen und speichern.') + '</span>';
+  else if(st.token.status === 'fail') hint = ' <span style="color:#c62828;font-size:11px">— ' + (c.user ? 'Anmeldung abgelehnt: Client-ID/Client-Secret prüfen (Details am Chip).' : 'Token ungültig/abgelaufen: neues Token eintragen und speichern.') + '</span>';
   else if(st.upstream.status === 'fail') hint = ' <span style="color:#c62828;font-size:11px">— Proxy läuft, aber die Apriko-Instanz antwortet nicht (Ziel auf der Allowlist?).</span>';
   out.innerHTML = chip('Gateway', st.gateway) + chip('Apriko-Instanz', st.upstream) + chip('Token', st.token) +
     ' <span style="color:var(--rp-grey);font-size:11px">(' + quelle + ')</span>' + hint;
@@ -12063,46 +12063,48 @@ function rpDbStatus(){
   if(c.gateway && (c.token || (c.user && c.pass))) el.textContent = '— eigene Verbindung aktiv' + (c.target ? ' → ' + c.target.replace(/^https?:\/\//, '') : '');
   else el.textContent = '— nutzt die POC-Verbindung';
 }
-/* Token automatisch beziehen (OAuth2 Password-Grant, wie es die
-   Apriko-API für Kunden vorsieht: Benutzer + Passwort → Token-Endpunkt
-   → Zugangsschlüssel) und bei Ablauf selbst erneuern (60s-Puffer).
-   Läuft über den Proxy; der lässt /connect/token und die
-   Discovery-Pfade durch und leitet per X-Apriko-Target zur richtigen
-   Instanz. */
+/* Token automatisch beziehen und bei Ablauf selbst erneuern (60s-Puffer).
+   Gemäss Apriko-Vorgabe (Client-Credentials-Grant, bestätigt vom Dev-Team):
+     POST https://<instanz-präfix>.id.apriko.app/connect/token
+     grant_type=client_credentials&client_id=…&client_secret=…&scope=api.external
+   Das Feld heisst im CRM weiterhin «API-Benutzername/-Passwort» (c.user/c.pass),
+   die Werte sind aber die Client-ID und das Client-Secret des ClientLogin.
+   Der Instanz-Präfix wird aus dem Feld «Instanz (Ziel-Datenbank)» abgeleitet
+   (https://worknet.apriko.app → worknet.id.apriko.app). Läuft über den Proxy
+   (/__token), der die client_id/client_secret/scope 1:1 an die Ziel-URL weiterleitet. */
+function rpIdHost(target){
+  var m = /^https?:\/\/([a-z0-9-]+)\.apriko\.app/i.exec(String(target || ''));
+  return m ? m[1] + '.id.apriko.app' : '';
+}
 async function rpDbEnsureToken(force){
   var c = rpDbCfg();
   if(!(c.user && c.pass)) return c.token || null;   // Legacy: fest eingetragenes Token
   if(!force && c.token && c.tokenExp && Date.now() < c.tokenExp - 60000) return c.token;
   var hdr = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' };
   if(c.target) hdr['X-Apriko-Target'] = c.target;
-  // Token-Endpunkt: gecacht, sonst per Discovery suchen, sonst Standardpfad
-  var tokenPath = c.tokenUrl || '';
-  if(!tokenPath){
-    var kandidaten = ['/api/id/.well-known/openid-configuration', '/.well-known/openid-configuration', '/identity/.well-known/openid-configuration'];
-    for(var i = 0; i < kandidaten.length && !tokenPath; i++){
-      try {
-        var res = await fetch(c.gateway + kandidaten[i], { headers: c.target ? { Accept: 'application/json', 'X-Apriko-Target': c.target } : { Accept: 'application/json' } });
-        if(res.ok){ var j = await res.json();
-          if(j.token_endpoint){
-            // Discovery liefert die absolute Instanz-URL — wir brauchen den PFAD am Gateway
-            try { tokenPath = new URL(j.token_endpoint).pathname; } catch(e2){ tokenPath = j.token_endpoint; }
-          } }
-      } catch(e3){ /* nächster Kandidat */ }
-    }
-    if(!tokenPath) tokenPath = '/connect/token';
-  }
+  var idHost = rpIdHost(c.target);
   var body = new URLSearchParams();
-  body.set('grant_type', 'password'); body.set('username', c.user); body.set('password', c.pass);
-  /* Bevorzugt: der Proxy holt das Token selbst (/__token) — er macht die Discovery auf der Zielinstanz
-     und ruft den gefundenen token_endpoint direkt auf, auch wenn der auf einem anderen Host liegt.
-     Fällt der Proxy-Endpunkt aus (alter Proxy), geht es wie bisher über den Pfad am Gateway. */
-  var res2, txt, tj = null, usedUrl = c.gateway + tokenPath, viaProxy = false;
+  var usedUrl;
+  if(idHost){
+    // Bekanntes Schema: Client-Credentials auf dem <präfix>.id.apriko.app-Host
+    usedUrl = 'https://' + idHost + '/connect/token';
+    body.set('token_url', usedUrl);
+    body.set('grant_type', 'client_credentials');
+    body.set('client_id', c.user);
+    body.set('client_secret', c.pass);
+    body.set('scope', 'api.external');
+  } else {
+    // Fallback für Instanzen ausserhalb *.apriko.app: alter Password-Grant-Weg mit Discovery
+    usedUrl = c.gateway + (c.tokenUrl || '/connect/token');
+    body.set('grant_type', 'password'); body.set('username', c.user); body.set('password', c.pass);
+  }
+  var res2, txt, tj = null, viaProxy = false;
   try {
     res2 = await fetch(c.gateway + '/__token', { method: 'POST', headers: hdr, body: body.toString() });
-    if(res2.status !== 404 || !res2.headers.get('X-Gateway-Error')){ viaProxy = true; usedUrl = res2.headers.get('X-Token-Endpoint') || (c.gateway + '/__token'); }
+    if(res2.status !== 404 || !res2.headers.get('X-Gateway-Error')){ viaProxy = true; usedUrl = res2.headers.get('X-Token-Endpoint') || usedUrl; }
   } catch(e0){ res2 = null; }
   if(!viaProxy){
-    try { res2 = await fetch(c.gateway + tokenPath, { method: 'POST', headers: hdr, body: body.toString() }); }
+    try { res2 = await fetch(usedUrl, { method: 'POST', headers: hdr, body: body.toString() }); }
     catch(e1){
       var eN = new Error('Token-Anfrage kam nicht durch (' + e1.message + ') an ' + usedUrl + ' — Proxy schläft, Port nicht «public» oder CORS/Preflight blockiert. Codespace öffnen, 1 Min warten, erneut testen.');
       eN.kind = 'gateway-unreachable'; throw eN;
@@ -12111,19 +12113,19 @@ async function rpDbEnsureToken(force){
   txt = await res2.text(); try { tj = JSON.parse(txt); } catch(e4){}
   if(!res2.ok || !tj || !tj.access_token){
     var err = (tj && (tj.error_description || tj.error)) || txt.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160) || ('HTTP ' + res2.status);
-    var hint = /invalid_client|unauthorized_client|client/i.test(err) ? ' — der Identity-Server verlangt eine client_id: beim Apriko-Team erfragen.'
-             : /invalid_scope/i.test(err) ? ' — ein Scope wird verlangt: beim Apriko-Team erfragen.'
-             : /invalid_grant/i.test(err) ? ' — Benutzername/Passwort falsch oder Benutzer nicht auf dieser Instanz.'
+    var hint = /invalid_client|unauthorized_client/i.test(err) ? ' — Client-ID/Client-Secret prüfen.'
+             : /invalid_scope/i.test(err) ? ' — Scope api.external wird nicht akzeptiert: beim Apriko-Team prüfen.'
+             : /invalid_grant/i.test(err) ? ' — Zugangsdaten falsch oder Client nicht auf dieser Instanz.'
              : (res2.status === 404 || res2.status === 405 || /<html|Not Allowed|Not Found/i.test(txt)) ? ' — Token-URL falsch (kein Identity-Server unter dieser Adresse).'
-             : ' — Benutzername/Passwort prüfen.';
+             : ' — Client-ID/Client-Secret prüfen.';
     var e5 = new Error('Anmeldung fehlgeschlagen (HTTP ' + res2.status + ' von ' + usedUrl + '): ' + err + hint);
     e5.kind = /invalid_grant|invalid_client|invalid_scope|unauthorized/i.test(err) ? 'auth' : 'upstream-unreachable';
     throw e5;
   }
-  c = rpDbCfg();   // frisch lesen, dann Token + Ablauf + gefundenen Endpunkt merken
+  c = rpDbCfg();   // frisch lesen, dann Token + Ablauf merken
   c.token = tj.access_token;
   c.tokenExp = tj.expires_in ? Date.now() + tj.expires_in * 1000 : Date.now() + 10 * 60 * 1000;
-  c.tokenUrl = tokenPath;
+  c.tokenUrl = idHost ? '' : (c.tokenUrl || '/connect/token');
   localStorage.setItem(RP_DB_KEY, JSON.stringify(c));
   return c.token;
 }
