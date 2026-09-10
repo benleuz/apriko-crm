@@ -35,7 +35,7 @@
    Abhängigkeiten: index.html (graph, siteId, escape, toast, render, val,
    showModal, closeModal, cache.companies, getToken). */
 
-const LCT_VERSION = "1.147.0";
+const LCT_VERSION = "1.150.0";
 const LCT_DIR = "CRM-Budgetdaten";
 const LCT_DOC_DIR = "LCT-Dokumente";
 
@@ -87,7 +87,8 @@ function lctLeer() {
   return { customExtra: [], customOverrides: {}, customRemoved: [], periods: {}, documents: [] };
 }
 function lctNeueLohnperiode(hinweisVorbelegt) {
-  return { laeufe: [lctNeuerLaufObjekt()], bemerkungPeriode: "", hinweisFolgemonat: hinweisVorbelegt || "", documents: [] };
+  return { laeufe: [lctNeuerLaufObjekt()], bemerkungPeriode: "", hinweisFolgemonat: hinweisVorbelegt || "",
+    hinweisFolgemonatBearbeitet: false, documents: [] };
 }
 function lctNeuerLaufObjekt() {
   return { items: {} };
@@ -100,6 +101,14 @@ function lctMigrierePeriode(per) {
   if (typeof per.bemerkungPeriode !== "string") per.bemerkungPeriode = "";
   if (typeof per.hinweisFolgemonat !== "string") per.hinweisFolgemonat = "";
   if (!Array.isArray(per.documents)) per.documents = [];
+  if (typeof per.hinweisFolgemonatBearbeitet !== "boolean") {
+    // Heuristik für Altdaten ohne dieses Feld: ist bereits ein Text drin, konservativ als
+    // "vom User bearbeitet" einstufen (nicht überschreiben, könnte echter User-Text sein).
+    // Ist es leer, als "noch nicht bearbeitet" einstufen — genau der hier gemeldete Bug
+    // (Übernahme blieb aus, weil die Periode schon mit leerem Hinweis existierte) wird so
+    // rückwirkend behoben: leere Alt-Perioden ziehen ab sofort wieder nach.
+    per.hinweisFolgemonatBearbeitet = !!per.hinweisFolgemonat.trim();
+  }
   if (Array.isArray(per.laeufe)) {
     per.laeufe.forEach(l => {
       if (typeof l.bemerkungPeriode === "string" && l.bemerkungPeriode.trim() && !per.bemerkungPeriode) per.bemerkungPeriode = l.bemerkungPeriode;
@@ -210,12 +219,20 @@ function lctPeriode(anlegenWennFehlt) {
   const ym = lctState.monat;
   if (!k.periods[ym]) {
     if (!anlegenWennFehlt) return null;
+    k.periods[ym] = lctNeueLohnperiode("");
+  }
+  const per = k.periods[ym];
+  // Übernahme JEDES MAL prüfen, nicht nur beim erstmaligen Anlegen — sonst bleibt die
+  // Weiterführung stecken, sobald die Periode einmal (auch mit leerem Hinweis) existiert,
+  // z.B. weil sie vorher schon geöffnet wurde, bevor der Hinweis im Vormonat gesetzt wurde.
+  // Nur wenn der User dieses Feld in DIESER Periode noch nie selbst bearbeitet hat.
+  if (!per.hinweisFolgemonatBearbeitet) {
     const vorher = lctMonatVorher(ym);
     const pv = k.periods[vorher];
-    const hinweis = (pv && (pv.hinweisFolgemonat || "").trim()) ? pv.hinweisFolgemonat : "";
-    k.periods[ym] = lctNeueLohnperiode(hinweis);
+    const hinweisVorher = (pv && (pv.hinweisFolgemonat || "").trim()) ? pv.hinweisFolgemonat : "";
+    if (hinweisVorher !== per.hinweisFolgemonat) per.hinweisFolgemonat = hinweisVorher;
   }
-  return k.periods[ym];
+  return per;
 }
 
 /* ---------- Rendering ---------- */
@@ -278,8 +295,12 @@ function lctRenderBody(el) {
       <div class="panel">
         <div class="panel-h" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <span>Lohnläufe — ${escape(lctMonatLabel(lctState.monat))}</span>
-          <div style="display:flex;gap:6px;margin-left:auto">
-            ${per.laeufe.map((l, i) => `<button class="btn btn-sm ${i === lctState.laufIdx ? "btn-primary" : ""}" onclick="lctWaehleLauf(${i})">${i + 1}. Lohnlauf</button>`).join("")}
+          <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
+            ${per.laeufe.map((l, i) => `
+              <span style="display:inline-flex;align-items:center;gap:2px">
+                <button class="btn btn-sm ${i === lctState.laufIdx ? "btn-primary" : ""}" onclick="lctWaehleLauf(${i})">${i + 1}. Lohnlauf</button>
+                ${per.laeufe.length > 1 ? `<button class="btn btn-sm" onclick="lctLohnlaufLoeschen(${i})" title="${i + 1}. Lohnlauf löschen" style="padding:2px 6px;color:#c62828">✕</button>` : ""}
+              </span>`).join("")}
             <button class="btn btn-sm" onclick="lctNeuerLauf()" title="Neuen Lohnlauf mit denselben Kontrollpunkten anlegen">＋</button>
           </div>
         </div>
@@ -291,8 +312,12 @@ function lctRenderBody(el) {
               ${g.items.map(it => {
                 const st = lauf.items[it.id] || { checked: false, bemerkung: "" };
                 return `
-                <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+                <div id="lct-row-${it.id}" class="lct-row"
+                  ${it.kundenspezifisch ? `draggable="true" ondragstart="lctDragStart(event,'${it.id}')" ondragend="lctDragEnd(event)"` : ""}
+                  ondragover="lctDragOver(event)" ondragleave="lctDragLeave(event)" ondrop="lctDrop(event,'${it.id}')"
+                  style="padding:8px 0;border-bottom:1px solid var(--border);border-top:2px solid transparent">
                   <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+                    ${it.kundenspezifisch ? `<span style="cursor:grab;color:var(--text-faint);margin-top:2px;user-select:none" title="Zum Verschieben ziehen">⠿</span>` : ""}
                     <input type="checkbox" ${st.checked ? "checked" : ""} onchange="lctToggle('${it.id}',this.checked)" style="margin-top:3px;width:auto">
                     <span style="flex:1">${escape(it.text)}${it.kundenspezifisch ? ` <span style="font-size:10px;color:var(--accent,#5ad275)">· kundenspezifisch</span>` : ""}</span>
                     <span style="display:flex;gap:4px">
@@ -377,6 +402,36 @@ async function lctNeuerLauf() {
   render();
   try { await lctSaveKunde(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
 }
+/* Löscht einen Lohnlauf inkl. seiner Checkbox-Status und Checkbox-Bemerkungen (die anderen
+   Lohnläufe derselben Periode sowie die periodenbezogenen Bemerkungsfelder/Dokumente sind
+   nicht betroffen). Der letzte verbleibende Lohnlauf einer Periode ist nicht löschbar — jede
+   Periode braucht mindestens einen. */
+function lctLohnlaufLoeschen(i) {
+  const per = lctPeriode(true);
+  if (per.laeufe.length <= 1) { toast("Der letzte Lohnlauf einer Periode kann nicht gelöscht werden.", true); return; }
+  window.__lctPendingLaufLoeschen = i;
+  showModal("Lohnlauf löschen", `
+    <p style="margin-bottom:14px">${i + 1}. Lohnlauf wirklich löschen? Angekreuzte Kontrollpunkte und Bemerkungen dieses Lohnlaufs gehen dabei verloren.</p>
+    <p style="font-size:12px;color:var(--text-dim)">Bemerkungsfelder und Dokumente der Periode sind davon nicht betroffen.</p>
+  `, [
+    `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
+    `<button class="btn btn-primary" onclick="closeModal();lctLohnlaufLoeschenAusfuehren()" style="background:#c62828;border-color:#c62828">Löschen</button>`
+  ]);
+}
+async function lctLohnlaufLoeschenAusfuehren() {
+  const i = window.__lctPendingLaufLoeschen; window.__lctPendingLaufLoeschen = null;
+  if (i == null) return;
+  const per = lctPeriode(true);
+  if (per.laeufe.length <= 1) return;
+  per.laeufe.splice(i, 1);
+  // Aktiven Tab korrekt mitführen: wird ein Lohnlauf VOR dem aktiven gelöscht, muss der Index
+  // um 1 sinken, damit derselbe Lohnlauf aktiv bleibt (nicht nur am Ende clampen — das würde
+  // in diesem Fall auf den falschen Lohnlauf springen, per Test gefunden).
+  if (i < lctState.laufIdx) lctState.laufIdx--;
+  else if (lctState.laufIdx >= per.laeufe.length) lctState.laufIdx = per.laeufe.length - 1;
+  render();
+  try { await lctSaveKunde(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+}
 async function lctToggle(itemId, checked) {
   const lauf = lctPeriode(true).laeufe[lctState.laufIdx];
   lauf.items[itemId] = lauf.items[itemId] || { checked: false, bemerkung: "" };
@@ -395,6 +450,10 @@ async function lctBemerkung(itemId, text) {
 async function lctSetPeriodeFeld(feld, text) {
   const per = lctPeriode(true);
   per[feld] = text;
+  // Sobald der User dieses Feld selbst anfasst — auch um es zu LEEREN — gilt es ab hier als
+  // bewusste Entscheidung und wird nicht mehr automatisch vom Vormonat überschrieben. Genau
+  // das verhindert, dass ein aktiv gelöschter Hinweis im nächsten Monat wieder auftaucht.
+  if (feld === "hinweisFolgemonat") per.hinweisFolgemonatBearbeitet = true;
   try { await lctSaveKunde(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
   if (feld === "hinweisFolgemonat") render();
 }
@@ -522,6 +581,64 @@ async function lctVerschieben(itemId, richtung) {
   } else {
     const untereGrenze = merged[neuIdx].order;
     const obereGrenze = neuIdx < merged.length - 1 ? merged[neuIdx + 1].order : untereGrenze + 2;
+    neueOrder = (untereGrenze + obereGrenze) / 2;
+  }
+  extra.order = neueOrder;
+  render();
+  try { await lctSaveKunde(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+}
+
+/* ---------- Drag & Drop (Alternative zu ↑/↓, direktes Ansteuern der Zielposition) ----------
+   Nur kundenspezifische Punkte sind ziehbar (draggable="true"), aber JEDER Punkt — auch
+   Standard-Punkte — ist ein gültiges Ablegeziel, damit man frei dazwischen einsortieren kann.
+   Wiederverwendet dieselbe Mittelpunkt-Einordnung wie lctVerschieben: nur der gezogene Punkt
+   bekommt eine neue order-Zahl, alles andere bleibt unangetastet. */
+let lctDragItemId = null;
+function lctDragStart(ev, itemId) {
+  lctDragItemId = itemId;
+  ev.dataTransfer.effectAllowed = "move";
+  try { ev.dataTransfer.setData("text/plain", itemId); } catch (e) { /* manche Browser brauchen das trotzdem gesetzt */ }
+}
+function lctDragEnd(ev) {
+  lctDragItemId = null;
+  document.querySelectorAll(".lct-row").forEach(el => { el.style.borderTopColor = "transparent"; el.style.borderBottomColor = "transparent"; });
+}
+function lctDragOver(ev) {
+  if (!lctDragItemId) return;
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = "move";
+  const row = ev.currentTarget;
+  const rect = row.getBoundingClientRect();
+  const oben = (ev.clientY - rect.top) < rect.height / 2;
+  row.style.borderTopColor = oben ? "var(--accent,#5ad275)" : "transparent";
+  row.style.borderBottomColor = oben ? "transparent" : "var(--accent,#5ad275)";
+}
+function lctDragLeave(ev) {
+  ev.currentTarget.style.borderTopColor = "transparent";
+  ev.currentTarget.style.borderBottomColor = "transparent";
+}
+async function lctDrop(ev, zielId) {
+  ev.preventDefault();
+  const itemId = lctDragItemId;
+  lctDragItemId = null;
+  ev.currentTarget.style.borderTopColor = "transparent";
+  ev.currentTarget.style.borderBottomColor = "transparent";
+  if (!itemId || itemId === zielId) return;
+  const extra = lctState.kunde.customExtra.find(x => x.id === itemId);
+  if (!extra) return;   // nur kundenspezifische Punkte lassen sich verschieben
+  const rect = ev.currentTarget.getBoundingClientRect();
+  const oben = (ev.clientY - rect.top) < rect.height / 2;
+  const merged = lctEffektiveItems();
+  const zielIdx = merged.findIndex(x => x.id === zielId);
+  if (zielIdx < 0) return;
+  let neueOrder;
+  if (oben) {
+    const obereGrenze = merged[zielIdx].order;
+    const untereGrenze = zielIdx > 0 ? merged[zielIdx - 1].order : obereGrenze - 2;
+    neueOrder = (obereGrenze + untereGrenze) / 2;
+  } else {
+    const untereGrenze = merged[zielIdx].order;
+    const obereGrenze = zielIdx < merged.length - 1 ? merged[zielIdx + 1].order : untereGrenze + 2;
     neueOrder = (untereGrenze + obereGrenze) / 2;
   }
   extra.order = neueOrder;
