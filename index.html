@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.149.0"></script>
-<script src="apriko-api.js?v=1.149.0"></script>
-<script src="lohncheck.js?v=1.149.0"></script>
-<script src="personalbudget.js?v=1.149.0"></script>
-<script src="jahresbudget.js?v=1.149.0"></script>
-<script src="budgetpositionen.js?v=1.149.0"></script>
-<script src="lohnchecklistetemp.js?v=1.149.0"></script>
+<script src="apriko-filters.js?v=1.151.0"></script>
+<script src="apriko-api.js?v=1.151.0"></script>
+<script src="lohncheck.js?v=1.151.0"></script>
+<script src="personalbudget.js?v=1.151.0"></script>
+<script src="jahresbudget.js?v=1.151.0"></script>
+<script src="budgetpositionen.js?v=1.151.0"></script>
+<script src="lohnchecklistetemp.js?v=1.151.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.149.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.151.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -1079,6 +1079,9 @@
                     <option value="gebaeude">Gebäudetechnik (suissetec)</option>
                     <option value="maler">Malergewerbe (LMV Maler/Gipser)</option>
                     <option value="pvl">Kein vorrangiger GAV</option>
+                    <option value="baselAusbau">GAV Basler Ausbaugewerbe (BS)</option>
+                    <option value="reinigung">GAV Reinigungsbranche D-CH</option>
+                    <option value="gastgewerbe">L-GAV Gastgewerbe</option>
                   </select></div>
               </div>
           </div>
@@ -11961,6 +11964,56 @@ var GAV = {
     // LMV Maler/Gipser gilt schweizweit inkl. BS
     kantone: ['ZH','BE','LU','UR','SZ','OW','NW','GL','ZG','FR','SO','BS','BL','SH','AR','AI','SG','GR','AG','TG','TI','VD','VS','NE','GE','JU'],
     quelle: 'LMV Maler und Gipser · SMGV / Unia / Syna 2024-2026'
+  },
+  /* Die folgenden drei Kacheln stammen bewusst von tempdata.ch (tempservice.ch), NICHT von
+     gav-service.ch/Unia direkt — tempdata.ch ist die für den Personalverleih (GAV Personalverleih,
+     Art. 20 AVG/48a AVV) aufbereitete, allgemeinverbindliche Quelle; recherchiert und eingebaut
+     10.09.2026. */
+  baselAusbau: {
+    name: 'GAV für das Basler Ausbaugewerbe (BS)',
+    modell: 'Jahresarbeitszeit 2\'200 h (≈183.33 h/Monat); Wochenarbeitszeit variabel 35-47 h',
+    sollTag: null,            // Jahresmodell, kein fixes Tagessoll
+    sollHerkunft: 'Jährliche Bruttosollarbeitszeit 2\'200 h ÷ 12 = 183.33 h/Monat (Art. 20/31)',
+    ueberstundenBis: 47,      // zuschlagsfreie Überstunden bis 47h/Woche (Freizeitausgleich)
+    tagesGrenze: null,
+    zuschlagSatz: 25,         // % Zeitzuschlag über 47h/Woche, Ausgleich bis 31.3. Folgejahr
+    konto: 'Jahresarbeitszeit 2\'200 h; bis 47 h/Wo zuschlagsfrei (Freizeitausgleich), darüber 25% Zeitzuschlag. Ferien 8.33% (<50J) / 10.64% (≥50J); Feiertagsentschädigung 3.59% (Stundenlohn); Vollzugsbeitrag 0.7% AN + 0.7% AG; Frühpensionierung 1.2%/1.25%/1.3% (2025/26/27) je AN+AG; BVG-Koordinationsabzug CHF 12.10/h (swissstaffing 2. Säule)',
+    zulage: 0,
+    zulageAb: null,
+    mittag: 50.00,            // CHF Pauschale/Tag bei auswärtiger Verpflegung (alternativ CHF 200.-/Monat pauschal)
+    kantone: ['BS'],
+    quelle: 'tempdata.ch (tempservice.ch) · Personalverleih Basler Ausbaugewerbe (BS), Version 15, gültig ab 01.09.2026 — https://www.tempservice.ch/de/tempdata/detail.php?cid=455001&vid=15&eid=14392'
+  },
+  reinigung: {
+    name: 'GAV Reinigungsbranche Deutschschweiz',
+    modell: 'Stundenlohn nach Kategorie (Unterhalts-/Spezial-/Spital-/Fahrzeugreinigung, je Stufe I/II)',
+    sollTag: null,
+    sollHerkunft: 'Kategorien-abhängiger Stundenlohn, kein einheitliches Wochenmodell zentral geregelt',
+    ueberstundenBis: null,    // maximale Wochenarbeitszeit ist einzelvertraglich geregelt
+    tagesGrenze: null,
+    zuschlagSatz: 25,         // % bei Überstunden, die bis 30.4. Folgejahr nicht kompensiert wurden
+    konto: 'Mindestlöhne 2026 CHF 21.40-24.90/h je Kategorie (volle Tabelle: tempdata.ch); Überstunden bis 30.4. Folgejahr kompensierbar, danach 25% Zuschlag; 13. Monatslohn 100% ab 3 Mt. Anstellung; Feiertage: 3.6% (Spezial/Spital/Fahrzeug) bzw. 1.5% (Unterhalt) auf Stundenlohn; Vollzugsbeitrag 0.35% total (0.3% AN + 0.05% AG)',
+    zulage: 0,
+    zulageAb: null,
+    mittag: null,
+    // AVE-Kantone der erleichterten Fassung <6 MA
+    kantone: ['ZH','BE','LU','UR','SZ','OW','NW','GL','ZG','SO','BS','BL','SH','AR','AI','SG','GR','AG','TG'],
+    quelle: 'tempdata.ch (tempservice.ch) · Personalverleih Reinigung D-CH für Unternehmen mit weniger als 6 Mitarbeitenden, Version 10, gültig ab 01.05.2026 — https://www.tempservice.ch/de/tempdata/detail.php?cid=185006&vid=10&eid=14281'
+  },
+  gastgewerbe: {
+    name: 'L-GAV Gastgewerbe',
+    modell: 'Wochenarbeitszeit 42 h',
+    sollTag: 8.4,             // 42h / 5 Tage
+    sollHerkunft: 'L-GAV Gastgewerbe · 42 h/Woche · schweizweit',
+    ueberstundenBis: null,    // L-GAV-Überzeitregeln sind komplexer als ein einfacher Wochenwert — im Einzelfall prüfen
+    tagesGrenze: null,
+    zuschlagSatz: null,
+    konto: 'Basislohn + Zuschläge: Ferien 10.65% (25 Arbeitstage), Feiertage 2.27%, 13. Monatslohn 8.33% (Basis 42h-Woche); Mindestlohn nach Kategorie Ia-IV, volle Tabelle auf tempdata.ch/l-gav.ch; kantonale Mindestlöhne (z.B. GE) gehen vor, falls höher',
+    zulage: 0,
+    zulageAb: null,
+    mittag: null,
+    kantone: null,            // gilt schweizweit
+    quelle: 'tempdata.ch (tempservice.ch) · Personalverleih Gastgewerbe, Version 16 — https://www.tempservice.ch/de/tempdata/detail.php?cid=700001&vid=16&eid=14306 · Mindestlöhne 2026: GastroSuisse/hotelleriesuisse/Unia/Syna (l-gav.ch)'
   }
 };
 
@@ -12802,7 +12855,11 @@ var GAV_STICHWORTE = {
   elektro: ['elektro'],
   gebaeude: ['gebäudetechnik', 'gebaeudetechnik', 'suissetec', 'heizung', 'sanitär', 'sanitaer', 'lüftung', 'lueftung'],
   maler: ['maler', 'gipser'],
-  pvl: []
+  pvl: [],   // BEWUSST leer: 'personalverleih' als Stichwort würde JEDES tempdata.ch-GAV treffen (alle heissen dort 'Personalverleih <Branche>') — per Test gefunden. GAV.pvl.name = 'GAV Personalverleih' wird bereits über rpApiNameMatch (exakter Namensvergleich) korrekt erkannt, ohne dieses Risiko.
+  // Ab hier: von tempdata.ch (nicht gav-service.ch/Unia) recherchiert, siehe GAV-Objekt oben.
+  baselAusbau: ['basler ausbaugewerbe'],   // zwei Wörter bewusst — 'basel' allein wäre zu unspezifisch (viele andere Basel-GAV)
+  reinigung: ['reinigung'],
+  gastgewerbe: ['gastgewerbe']
 };
 function rpApiGavMatchesBranche(gavApi, key){
   if(!GAV[key]) return false;
@@ -12859,17 +12916,21 @@ async function rpApiUebernehmen(){
     return '<div style="margin-top:10px;padding:8px 12px;background:#ECFDF5;border-left:3px solid #059669;border-radius:3px;color:#065f46;font-size:12px">' +
       '<b>✓ Eckwerte laut Apriko-tempdata</b> (' + quelle + ', GAV: ' + esc(gavApi) + ')<br>' + teile.join(' · ') + '</div>';
   }
+  var tempDataFehler = [];
+  var TD_CACHE_KEY = 'lct-tempdata-cache-v1';   // dauerhafter Cache erfolgreich abgefragter GAV-Eckwerte
+  function tdCacheLesen(){ try { return JSON.parse(localStorage.getItem(TD_CACHE_KEY) || '{}'); } catch(e){ return {}; } }
+  function tdCacheSchreiben(c){ try { localStorage.setItem(TD_CACHE_KEY, JSON.stringify(c)); } catch(e){} }
+  var tdCacheKey = rpApiNorm(gavApi);
   // 1. Versuch: die Version-ID direkt am Einsatz (präzise, inkl. den am Einsatz hinterlegten Auswahlwerten)
   if(beste.tempDataLabourStaffingAgreementVersionId){
     try {
       var ms = await AprikoApi.staffing.getTempDataMinimumSalary(beste.tempDataLabourStaffingAgreementVersionId, beste.tempDataLabourStaffingAgreementVersionValuesIds);
       if(ms) tempDataHtml = rpApiFormatMinSalary(ms, 'live recherchiert über den Einsatz');
-    } catch(tde){ /* nicht verfügbar über diesen Weg — 2. Versuch unten */ }
-  }
+      else tempDataFehler.push('Weg 1 (Einsatz-Version): keine Daten zurückgegeben');
+    } catch(tde){ tempDataFehler.push('Weg 1 (Einsatz-Version): ' + ((tde && tde.message) || String(tde)).slice(0,120)); }
+  } else { tempDataFehler.push('Weg 1: keine Version-ID am Einsatz hinterlegt'); }
   // 2. Versuch: nur die Agreement-ID (ohne Version) am Einsatz — Agreement selbst holen, daraus die
-  // aktuell aktive Version herausfiltern und DEREN MinimumSalary abfragen. Deckt Fälle ab, in denen
-  // der einzelne Einsatz keine spezifische Version-ID trägt, das GAV als solches aber bekannt ist —
-  // genau der Fall "GAV für das Basler Ausbaugewerbe (BS)", das lokal nicht hinterlegt war.
+  // aktuell aktive Version herausfiltern und DEREN MinimumSalary abfragen.
   if(!tempDataHtml && beste.tempDataLabourStaffingAgreementId){
     try {
       var agreement = await AprikoApi.staffing.getTempDataLabourStaffingAgreement(beste.tempDataLabourStaffingAgreementId);
@@ -12878,8 +12939,27 @@ async function rpApiUebernehmen(){
       if(aktive && aktive.id){
         var ms2 = await AprikoApi.staffing.getTempDataMinimumSalary(aktive.id, null);
         if(ms2) tempDataHtml = rpApiFormatMinSalary(ms2, 'live recherchiert über das GAV direkt, aktuelle Version');
-      }
-    } catch(tde2){ /* auch dieser Weg nicht verfügbar — Rückfall auf lokale Tabelle/Blockade */ }
+        else tempDataFehler.push('Weg 2 (GAV-Version): keine Daten zurückgegeben');
+      } else { tempDataFehler.push('Weg 2: GAV gefunden, aber keine aktive Version darin'); }
+    } catch(tde2){ tempDataFehler.push('Weg 2 (GAV direkt): ' + ((tde2 && tde2.message) || String(tde2)).slice(0,120)); }
+  } else if(!tempDataHtml) { tempDataFehler.push('Weg 2: keine Agreement-ID am Einsatz hinterlegt'); }
+  // 3. Versuch: dauerhafter lokaler Cache — sobald ein GAV EINMAL live erfolgreich abgefragt wurde
+  // (bei irgendeinem Einsatz, irgendwann), wird es hier automatisch gespeichert (siehe unten) und
+  // steht ab dann sofort zur Verfügung, auch wenn ein späterer Einsatz keine brauchbaren IDs trägt.
+  if(!tempDataHtml && tdCacheKey){
+    var tdCache = tdCacheLesen();
+    if(tdCache[tdCacheKey]){
+      tempDataHtml = rpApiFormatMinSalary(tdCache[tdCacheKey].ms, 'aus lokalem Cache, zuletzt live bestätigt ' + new Date(tdCache[tdCacheKey].when).toLocaleDateString('de-CH'));
+    } else {
+      tempDataFehler.push('Weg 3: noch nie erfolgreich für dieses GAV abgefragt, kein Cache vorhanden');
+    }
+  }
+  // Erfolgreiche Live-Abfrage (Weg 1 oder 2) automatisch in den Cache übernehmen — das ist das
+  // "herunterladen und einbauen": sobald es einmal klappt, bleibt es dauerhaft verfügbar.
+  if(tempDataHtml && tdCacheKey && (typeof ms !== 'undefined' && ms || typeof ms2 !== 'undefined' && ms2)){
+    var tdCacheNeu = tdCacheLesen();
+    tdCacheNeu[tdCacheKey] = { ms: (typeof ms !== 'undefined' && ms) || ms2, when: Date.now(), gavName: gavApi };
+    tdCacheSchreiben(tdCacheNeu);
   }
   var bc = beste.basicPlacementCompensation || {};
   var addl = beste.additionalPlacementCompensations || [];
@@ -12915,7 +12995,9 @@ async function rpApiUebernehmen(){
       srcEl.hidden = false;
       srcEl.innerHTML = '<div style="padding:8px 12px;background:#FEF2F2;border-left:3px solid #c62828;border-radius:3px;color:#7f1d1d;font-size:12px">' +
         '⚠ <b>Kein lokales Regelwerk für „' + esc(gavApi) + '"</b> — die Auswahl oben rechts (' + esc((GAV[brancheSel.value] || {}).name || brancheSel.value) + ') darf hierfür NICHT verwendet werden. ' +
-        'Bitte die Eckwerte für dieses GAV separat recherchieren, bevor mit der Prüfung fortgefahren wird.</div>' +
+        'Bitte die Eckwerte für dieses GAV separat recherchieren, bevor mit der Prüfung fortgefahren wird.' +
+        (tempDataFehler.length ? '<br><span style="font-size:11px;opacity:.8">tempdata-Diagnose: ' + esc(tempDataFehler.join(' · ')) + '</span>' : '') +
+        '</div>' +
         window.__rpEinsatzKonditionen;
     }
     return;   // loadGav() bewusst NICHT aufgerufen — kein stilles Weiterlaufen mit falscher Branche
