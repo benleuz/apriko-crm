@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.144.0"></script>
-<script src="apriko-api.js?v=1.144.0"></script>
-<script src="lohncheck.js?v=1.144.0"></script>
-<script src="personalbudget.js?v=1.144.0"></script>
-<script src="jahresbudget.js?v=1.144.0"></script>
-<script src="budgetpositionen.js?v=1.144.0"></script>
-<script src="lohnchecklistetemp.js?v=1.144.0"></script>
+<script src="apriko-filters.js?v=1.145.0"></script>
+<script src="apriko-api.js?v=1.145.0"></script>
+<script src="lohncheck.js?v=1.145.0"></script>
+<script src="personalbudget.js?v=1.145.0"></script>
+<script src="jahresbudget.js?v=1.145.0"></script>
+<script src="budgetpositionen.js?v=1.145.0"></script>
+<script src="lohnchecklistetemp.js?v=1.145.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.144.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.145.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12323,6 +12323,20 @@ function rpRosterToStorage(r){
   try { localStorage.setItem(ROSTER_KEY, JSON.stringify(r)); } catch(e){ /* localStorage evtl. voll — Cache bleibt nur im Speicher */ }
 }
 
+/* Schreibt eine Fortschrittsmeldung sowohl in den rpApiBox()-Kasten (Rapport-Seite) als auch
+   — falls das Einsatzliste-Popup gerade offen ist — direkt ins Popup selbst. Ohne das war der
+   Fortschritt beim Laden über den "Jetzt laden"/"neu laden"-Knopf im Popup unsichtbar: die
+   Meldungen gingen in den (dahinterliegenden, nicht sichtbaren) Rapport-Kasten, während der
+   Anwender auf das Popup schaute, das erst nach komplettem Abschluss neu gezeichnet wird. */
+function rpApiProgress(html){
+  var box = rpApiBox();
+  if(box) box.innerHTML = html;
+  var modalEl = document.getElementById('modal');
+  if(modalEl && modalEl.classList.contains('open')){
+    var mb = document.getElementById('modal-body');
+    if(mb) mb.innerHTML = '<div style="padding:20px 0">' + html + '</div>';
+  }
+}
 async function rpApiLoadRoster(force){
   /* WICHTIG: rpApiUse() konfiguriert AprikoApi (Gateway/Target/Token-Callback) frisch. Wird diese
      Funktion über "Jetzt laden"/"neu laden" direkt angeklickt (ohne vorherigen rpApiMatch-Aufruf,
@@ -12354,7 +12368,7 @@ async function rpApiLoadRoster(force){
        weil Booleans im Suchindex normalerweise nicht als analysiertes Textfeld behandelt werden.
        Klappt das, ist die Liste i.d.R. winzig gegenüber der kompletten Historie. Klappt es nicht
        (0 Treffer/Fehler), automatisch Rückfall auf die volle Paginierung weiter unten. */
-    if(box) box.innerHTML = '🔌 <b>Einsatzliste:</b> versuche gezielt nur aktive Einsätze zu holen …';
+    rpApiProgress('🔌 <b>Einsatzliste:</b> versuche gezielt nur aktive Einsätze zu holen …');
     try {
       var aktivR = await AprikoApi.models.query({
         query: '', entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 500, resolveReferences: false,
@@ -12376,7 +12390,8 @@ async function rpApiLoadRoster(force){
     var ROSTER_PAGE_SIZE = 500;   // grössere Seiten = weniger Anfragen hintereinander durch den Tunnel
     for(var pi = 0; ladeMethode === 'liste' && pi < ROSTER_MAX_SEITEN; pi++){
       var sekunden = Math.round((Date.now() - ladeStart) / 1000);
-      if(box) box.innerHTML = '🔌 <b>Einsatzliste wird geladen</b> — Seite ' + (pi + 1) + ' (' + placements.length + ' Einsätze bisher, ' + sekunden + 's) — einmalig, danach ' + ROSTER_TTL_MIN + ' Min. aus dem Cache …';
+      var seitenMsg = '🔌 <b>Einsatzliste wird geladen</b> — Seite ' + (pi + 1) + ' (' + placements.length + ' Einsätze bisher, ' + sekunden + 's) — einmalig, danach ' + ROSTER_TTL_MIN + ' Min. aus dem Cache …';
+      rpApiProgress(seitenMsg);
       var rows;
       var seitenStart = Date.now();
       try { rows = await AprikoApi.staffing.listStaffLease(pi, ROSTER_PAGE_SIZE); }
@@ -12385,12 +12400,12 @@ async function rpApiLoadRoster(force){
       placements = placements.concat(rows);
       // Warnung, falls eine einzelne Seite selbst schon sehr lange braucht (z.B. Tunnel-Latenz) —
       // hilft zu unterscheiden zwischen "viele Seiten nötig" und "jede Seite einzeln ist langsam".
-      if(box && (Date.now() - seitenStart) > 4000){
-        box.innerHTML += '<br><span style="color:var(--rp-grey);font-size:11px">Seite ' + (pi + 1) + ' brauchte ' + Math.round((Date.now() - seitenStart) / 1000) + 's — der Proxy/Tunnel ist hier der Flaschenhals, nicht die Anzahl Seiten.</span>';
+      if((Date.now() - seitenStart) > 4000){
+        rpApiProgress(seitenMsg + '<br><span style="color:var(--rp-grey);font-size:11px">Seite ' + (pi + 1) + ' brauchte ' + Math.round((Date.now() - seitenStart) / 1000) + 's — der Proxy/Tunnel ist hier der Flaschenhals, nicht die Anzahl Seiten.</span>');
       }
     }
     var ladeSekundenGesamt = Math.round((Date.now() - ladeStart) / 1000);
-    if(ladeFehler && box){ box.innerHTML = '🔌 <b>Einsatzliste:</b> Laden fehlgeschlagen nach ' + ladeSekundenGesamt + 's — ' + esc(ladeFehler).slice(0, 300); }
+    if(ladeFehler){ rpApiProgress('🔌 <b>Einsatzliste:</b> Laden fehlgeschlagen nach ' + ladeSekundenGesamt + 's — ' + esc(ladeFehler).slice(0, 300)); }
     var imFenster = placements.filter(function(p){
       var ein = p.entryDate ? new Date(p.entryDate) : null;
       var aus = p.withdrawalDate ? new Date(p.withdrawalDate) : null;
@@ -12406,7 +12421,7 @@ async function rpApiLoadRoster(force){
       if(p.customerId && kuIds.indexOf(p.customerId) < 0) kuIds.push(p.customerId);
     });
     var aufloeseStart = Date.now();
-    if(box) box.innerHTML = '🔌 <b>Einsatzliste geladen</b> (' + ladeSekundenGesamt + 's, ' + placements.length + ' Einsätze total, ' + imFenster.length + ' im Fenster) — löse ' + maIds.length + ' Mitarbeitende und ' + kuIds.length + ' Kunden auf …';
+    rpApiProgress('🔌 <b>Einsatzliste geladen</b> (' + ladeSekundenGesamt + 's, ' + placements.length + ' Einsätze total, ' + imFenster.length + ' im Fenster) — löse ' + maIds.length + ' Mitarbeitende und ' + kuIds.length + ' Kunden auf …');
     /* Parallel statt nacheinander — bei z.B. 100 Mitarbeitenden + 30 Kunden macht das den
        Unterschied zwischen 1-2 Minuten (130 Anfragen nacheinander) und ein paar Sekunden
        (nur so viele Batches wie nötig). Begrenzte Parallelität (RP_KONKURRENZ gleichzeitig),
@@ -12437,10 +12452,8 @@ async function rpApiLoadRoster(force){
       })
     ]);
     var aufloeseSekunden = Math.round((Date.now() - aufloeseStart) / 1000);
-    if(box){
-      box.innerHTML = '🔌 <b>Einsatzliste fertig geladen</b> — ' + Object.keys(mitarbeiter).length + ' Mitarbeitende, ' + Object.keys(kunden).length + ' Kunden.<br>' +
-        '<span style="color:var(--rp-grey);font-size:11px">Zeit: ' + ladeSekundenGesamt + 's Liste laden (' + placements.length + ' Einsätze, Methode: ' + (ladeMethode === 'aktiv-filter' ? 'gezielter Aktiv-Filter' : 'komplette Liste paginiert') + ') + ' + aufloeseSekunden + 's Namen auflösen.</span>';
-    }
+    rpApiProgress('🔌 <b>Einsatzliste fertig geladen</b> — ' + Object.keys(mitarbeiter).length + ' Mitarbeitende, ' + Object.keys(kunden).length + ' Kunden.<br>' +
+      '<span style="color:var(--rp-grey);font-size:11px">Zeit: ' + ladeSekundenGesamt + 's Liste laden (' + placements.length + ' Einsätze, Methode: ' + (ladeMethode === 'aktiv-filter' ? 'gezielter Aktiv-Filter' : 'komplette Liste paginiert') + ') + ' + aufloeseSekunden + 's Namen auflösen.</span>');
     rpRoster = { loadedAt: Date.now(), tage: ROSTER_TAGE, seiten: Math.min(ROSTER_MAX_SEITEN, placements.length ? Math.ceil(placements.length / ROSTER_PAGE_SIZE) : 0), mitarbeiter: mitarbeiter, kunden: kunden, ladeFehler: ladeFehler };
     if(!ladeFehler) rpRosterToStorage(rpRoster);   // Fehlversuche nicht dauerhaft cachen — nur echte Erfolge
     rpRosterLoading = null;
@@ -12740,7 +12753,7 @@ function rpApiFilterRoster(q){
   });
 }
 async function rpApiRefreshRoster(){
-  var box = rpApiBox(); if(box) box.innerHTML = '🔌 <b>Einsatzliste wird neu geladen …</b>';
+  rpApiProgress('🔌 <b>Einsatzliste wird neu geladen …</b>');
   await rpApiLoadRoster(true);
   if(rpApiState.lastArgs) rpApiMatch.apply(null, rpApiState.lastArgs);
 }
