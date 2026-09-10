@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.145.0"></script>
-<script src="apriko-api.js?v=1.145.0"></script>
-<script src="lohncheck.js?v=1.145.0"></script>
-<script src="personalbudget.js?v=1.145.0"></script>
-<script src="jahresbudget.js?v=1.145.0"></script>
-<script src="budgetpositionen.js?v=1.145.0"></script>
-<script src="lohnchecklistetemp.js?v=1.145.0"></script>
+<script src="apriko-filters.js?v=1.146.0"></script>
+<script src="apriko-api.js?v=1.146.0"></script>
+<script src="lohncheck.js?v=1.146.0"></script>
+<script src="personalbudget.js?v=1.146.0"></script>
+<script src="jahresbudget.js?v=1.146.0"></script>
+<script src="budgetpositionen.js?v=1.146.0"></script>
+<script src="lohnchecklistetemp.js?v=1.146.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.145.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.146.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12369,17 +12369,25 @@ async function rpApiLoadRoster(force){
        Klappt das, ist die Liste i.d.R. winzig gegenüber der kompletten Historie. Klappt es nicht
        (0 Treffer/Fehler), automatisch Rückfall auf die volle Paginierung weiter unten. */
     rpApiProgress('🔌 <b>Einsatzliste:</b> versuche gezielt nur aktive Einsätze zu holen …');
+    var aktivDiagnose = '';
+    /* WICHTIG: query darf hier nicht '' sein — eine leere Anfrage lieferte in einem früheren Test
+       bereits 0 Treffer, unabhängig von etwaigen Filtern (offenbar wird ohne Suchtext die ganze
+       Match-Stufe übersprungen). Deshalb query-Feld hier ganz weglassen (undefined), nicht ''. */
     try {
       var aktivR = await AprikoApi.models.query({
-        query: '', entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 500, resolveReferences: false,
+        entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 500, resolveReferences: false,
         filters: 'isActivePendingVacantOrSinceRecentlyInactive|=|true|text|false|false|G1'
       });
       var aktivRows = ((aktivR && aktivR.results) || []).map(AprikoApi.models.hitData);
       if(aktivRows.length){
         placements = aktivRows;
         ladeMethode = 'aktiv-filter';
+        aktivDiagnose = aktivRows.length + ' Treffer über Aktiv-Filter';
+      } else {
+        aktivDiagnose = '0 Treffer über Aktiv-Filter — Rückfall auf komplette Liste';
       }
-    } catch(afe){ /* Filter nicht unterstützt oder Fehler — Rückfall unten */ }
+    } catch(afe){ aktivDiagnose = 'Aktiv-Filter fehlgeschlagen (' + esc((afe && afe.message) || String(afe)).slice(0,150) + ') — Rückfall auf komplette Liste'; }
+    rpApiProgress('🔌 <b>Einsatzliste:</b> ' + esc(aktivDiagnose) + (ladeMethode === 'liste' ? ' — lade nun komplette Liste …' : ''));
     // Bulk-Abruf über den echten Listen-Endpunkt (GET /StaffLeasePlacements, staffing-Service) —
     // NICHT über /models/Query: eine leere Volltextsuche ("") liefert dort 0 Treffer statt "alles",
     // das war der Fehler (gefunden 10.09.: "0 Mitarbeitende · 0 Einsätze"). Der Listen-Endpunkt
@@ -12388,7 +12396,8 @@ async function rpApiLoadRoster(force){
     // eine Seite leer ist oder der Sicherheitsdeckel greift. Sortierreihenfolge ist nicht
     // dokumentiert, deshalb wird über alle gelieferten Seiten client-seitig nach Datum gefiltert.
     var ROSTER_PAGE_SIZE = 500;   // grössere Seiten = weniger Anfragen hintereinander durch den Tunnel
-    for(var pi = 0; ladeMethode === 'liste' && pi < ROSTER_MAX_SEITEN; pi++){
+    var ROSTER_MAX_SEKUNDEN = 30;   // harte Zeitbremse — lieber unvollständig als endlos warten
+    for(var pi = 0; ladeMethode === 'liste' && pi < ROSTER_MAX_SEITEN && (Date.now() - ladeStart) < ROSTER_MAX_SEKUNDEN * 1000; pi++){
       var sekunden = Math.round((Date.now() - ladeStart) / 1000);
       var seitenMsg = '🔌 <b>Einsatzliste wird geladen</b> — Seite ' + (pi + 1) + ' (' + placements.length + ' Einsätze bisher, ' + sekunden + 's) — einmalig, danach ' + ROSTER_TTL_MIN + ' Min. aus dem Cache …';
       rpApiProgress(seitenMsg);
@@ -12405,6 +12414,7 @@ async function rpApiLoadRoster(force){
       }
     }
     var ladeSekundenGesamt = Math.round((Date.now() - ladeStart) / 1000);
+    var zeitlimitErreicht = (ladeMethode === 'liste' && !ladeFehler && ladeSekundenGesamt >= ROSTER_MAX_SEKUNDEN);
     if(ladeFehler){ rpApiProgress('🔌 <b>Einsatzliste:</b> Laden fehlgeschlagen nach ' + ladeSekundenGesamt + 's — ' + esc(ladeFehler).slice(0, 300)); }
     var imFenster = placements.filter(function(p){
       var ein = p.entryDate ? new Date(p.entryDate) : null;
@@ -12453,8 +12463,9 @@ async function rpApiLoadRoster(force){
     ]);
     var aufloeseSekunden = Math.round((Date.now() - aufloeseStart) / 1000);
     rpApiProgress('🔌 <b>Einsatzliste fertig geladen</b> — ' + Object.keys(mitarbeiter).length + ' Mitarbeitende, ' + Object.keys(kunden).length + ' Kunden.<br>' +
-      '<span style="color:var(--rp-grey);font-size:11px">Zeit: ' + ladeSekundenGesamt + 's Liste laden (' + placements.length + ' Einsätze, Methode: ' + (ladeMethode === 'aktiv-filter' ? 'gezielter Aktiv-Filter' : 'komplette Liste paginiert') + ') + ' + aufloeseSekunden + 's Namen auflösen.</span>');
-    rpRoster = { loadedAt: Date.now(), tage: ROSTER_TAGE, seiten: Math.min(ROSTER_MAX_SEITEN, placements.length ? Math.ceil(placements.length / ROSTER_PAGE_SIZE) : 0), mitarbeiter: mitarbeiter, kunden: kunden, ladeFehler: ladeFehler };
+      '<span style="color:var(--rp-grey);font-size:11px">Zeit: ' + ladeSekundenGesamt + 's Liste laden (' + placements.length + ' Einsätze, Methode: ' + (ladeMethode === 'aktiv-filter' ? 'gezielter Aktiv-Filter' : 'komplette Liste paginiert') + ') + ' + aufloeseSekunden + 's Namen auflösen.</span>' +
+      (zeitlimitErreicht ? '<br><span style="color:#c62828;font-size:11px">⚠ 30s-Zeitlimit erreicht — Liste ist möglicherweise unvollständig (nur die ersten ' + placements.length + ' geladenen Einsätze berücksichtigt).</span>' : ''));
+    rpRoster = { loadedAt: Date.now(), tage: ROSTER_TAGE, seiten: Math.min(ROSTER_MAX_SEITEN, placements.length ? Math.ceil(placements.length / ROSTER_PAGE_SIZE) : 0), mitarbeiter: mitarbeiter, kunden: kunden, ladeFehler: ladeFehler, zeitlimitErreicht: zeitlimitErreicht };
     if(!ladeFehler) rpRosterToStorage(rpRoster);   // Fehlversuche nicht dauerhaft cachen — nur echte Erfolge
     rpRosterLoading = null;
     return rpRoster;
