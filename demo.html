@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.157.0"></script>
-<script src="apriko-api.js?v=1.157.0"></script>
-<script src="lohncheck.js?v=1.157.0"></script>
-<script src="personalbudget.js?v=1.157.0"></script>
-<script src="jahresbudget.js?v=1.157.0"></script>
-<script src="budgetpositionen.js?v=1.157.0"></script>
-<script src="lohnchecklistetemp.js?v=1.157.0"></script>
+<script src="apriko-filters.js?v=1.161.0"></script>
+<script src="apriko-api.js?v=1.161.0"></script>
+<script src="lohncheck.js?v=1.161.0"></script>
+<script src="personalbudget.js?v=1.161.0"></script>
+<script src="jahresbudget.js?v=1.161.0"></script>
+<script src="budgetpositionen.js?v=1.161.0"></script>
+<script src="lohnchecklistetemp.js?v=1.161.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.157.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.161.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -1126,6 +1126,7 @@
           <ul class="rp-notes" id="rpNotes"></ul>
           <div class="rp-actions">
             <button class="rp-btn" id="rpConfirm">Werte bestätigen und berechnen</button>
+            <button class="rp-btn rp-btn-ghost" id="rpConfirmAll" title="Bestätigt alle markierten Felder mit dem aktuell angezeigten Wert — vorher gegen den Beleg rechts prüfen, ändert nichts an den Werten selbst">✓ Alle markierten Werte wie angezeigt bestätigen</button>
             <span class="rp-hint" id="rpFlags" style="margin-top:0"></span>
           </div>
         </div>
@@ -12876,6 +12877,22 @@ var GAV_STICHWORTE = {
   reinigung: ['reinigung'],
   gastgewerbe: ['gastgewerbe']
 };
+/* Rate/Salary-Werte am Einsatz (BasicPlacementRate, BasicPlacementSalary, AdditionalPlacementRate,
+   AdditionalPlacementSalary) sind laut API-Schema VERSCHACHTELTE Objekte mit .value und .unit
+   (Hour/Day/Month/Year/...), NICHT einfache Zahlenfelder direkt am Compensation-Objekt. Frühere
+   Version prüfte fälschlich "typeof bc.basicPlacementRate === 'number'" — das ist ein Objekt, nie
+   eine Zahl, darum wurde hinterlegte Konditionen (u.a. eine vertragliche Verpflegungspauschale wie
+   "CHF 1.08 pro Stunde") nie angezeigt. AdditionalPlacementCompensation hat zusätzlich noch flache
+   rate/salary-Felder als Fallback — beide Quellen werden geprüft, verschachtelt zuerst (genauer,
+   inkl. Einheit). Gefunden und behoben 10.09.2026. */
+var RP_RATE_UNIT_LABEL = { Hour: '/Std.', Day: '/Tag', Month: '/Monat', Year: '/Jahr', Kilometer: '/km', SquareMeter: '/m²', Percentage: '%', Factor: 'x' };
+function rpApiRateText(verschachtelt, flacherWert){
+  var val = (verschachtelt && typeof verschachtelt.value === 'number') ? verschachtelt.value
+    : (typeof flacherWert === 'number' ? flacherWert : null);
+  if(val === null) return null;
+  var einheit = (verschachtelt && verschachtelt.unit && RP_RATE_UNIT_LABEL[verschachtelt.unit]) || '';
+  return 'CHF ' + val.toFixed(2) + einheit;
+}
 function rpApiGavMatchesBranche(gavApi, key){
   if(!GAV[key]) return false;
   if(rpApiNameMatch(gavApi, GAV[key].name)) return true;
@@ -12923,10 +12940,19 @@ async function rpApiUebernehmen(){
     var teile = [];
     if(typeof ms.monthSalary === 'number' && ms.monthSalary) teile.push('Monatslohn ' + ms.monthSalary.toFixed(2));
     if(typeof ms.basicSalary === 'number' && ms.basicSalary) teile.push('Grundlohn ' + ms.basicSalary.toFixed(2));
-    if(ms.has13thMonthSalary && typeof ms.pct13thMonthSalary === 'number') teile.push('13. Monatslohn ' + ms.pct13thMonthSalary.toFixed(2) + '%');
+    // 13. Monatslohn / Ferien / Feiertage: manche GAVs liefern das als Prozentsatz, andere als
+    // fixen CHF-Betrag (compensation13thSalary/vacationCompensation/publicHolidaysCompensation) —
+    // beide Varianten prüfen, sonst wird bei GAVs mit CHF-Beträgen fälschlich "keine Daten" gemeldet.
+    if(ms.has13thMonthSalary && typeof ms.pct13thMonthSalary === 'number' && ms.pct13thMonthSalary) teile.push('13. Monatslohn ' + ms.pct13thMonthSalary.toFixed(2) + '%');
+    else if(ms.has13thMonthSalary && typeof ms.compensation13thSalary === 'number' && ms.compensation13thSalary) teile.push('13. Monatslohn CHF ' + ms.compensation13thSalary.toFixed(2));
     if(typeof ms.pctVacationCompensation === 'number' && ms.pctVacationCompensation) teile.push('Ferienentschädigung ' + ms.pctVacationCompensation.toFixed(2) + '%');
+    else if(typeof ms.vacationCompensation === 'number' && ms.vacationCompensation) teile.push('Ferienentschädigung CHF ' + ms.vacationCompensation.toFixed(2));
     if(typeof ms.pctHolidaysCompensation === 'number' && ms.pctHolidaysCompensation) teile.push('Feiertagsentschädigung ' + ms.pctHolidaysCompensation.toFixed(2) + '%');
+    else if(typeof ms.publicHolidaysCompensation === 'number' && ms.publicHolidaysCompensation) teile.push('Feiertagsentschädigung CHF ' + ms.publicHolidaysCompensation.toFixed(2));
     if(typeof ms.vacationDays === 'number' && ms.vacationDays) teile.push(ms.vacationDays + ' Ferientage');
+    if(typeof ms.publicHolidays === 'number' && ms.publicHolidays) teile.push(ms.publicHolidays + ' Feiertage');
+    if(ms.hasERWContribution && typeof ms.erwContribution === 'number' && ms.erwContribution) teile.push('AG-Beitrag CHF ' + ms.erwContribution.toFixed(2));
+    if(typeof ms.ereContribution === 'number' && ms.ereContribution) teile.push('AN-Beitrag CHF ' + ms.ereContribution.toFixed(2));
     if(!teile.length) return '';
     return '<div style="margin-top:10px;padding:8px 12px;background:#ECFDF5;border-left:3px solid #059669;border-radius:3px;color:#065f46;font-size:12px">' +
       '<b>✓ Eckwerte laut Apriko-tempdata</b> (' + quelle + ', GAV: ' + esc(gavApi) + ')<br>' + teile.join(' · ') + '</div>';
@@ -12979,13 +13005,17 @@ async function rpApiUebernehmen(){
   var bc = beste.basicPlacementCompensation || {};
   var addl = beste.additionalPlacementCompensations || [];
   var lohnTeile = [];
-  if(typeof bc.basicPlacementSalary === 'number') lohnTeile.push('Grundlohn ' + bc.basicPlacementSalary.toFixed(2));
-  if(typeof bc.basicPlacementRate === 'number') lohnTeile.push('Tarif ' + bc.basicPlacementRate.toFixed(2));
+  var grundlohnTxt = rpApiRateText(bc.basicPlacementSalary, null);
+  if(grundlohnTxt) lohnTeile.push('Grundlohn ' + grundlohnTxt);
+  var tarifTxt = rpApiRateText(bc.basicPlacementRate, null);
+  if(tarifTxt) lohnTeile.push('Tarif ' + tarifTxt);
   if(typeof bc.marginPercentage === 'number') lohnTeile.push('Marge ' + bc.marginPercentage.toFixed(1) + '%');
   var spesen = addl.map(function(a){
     var tt = [];
-    if(typeof a.salary === 'number') tt.push(a.salary.toFixed(2) + ' Lohn');
-    if(typeof a.rate === 'number') tt.push(a.rate.toFixed(2) + ' Tarif');
+    var salTxt = rpApiRateText(a.additionalPlacementSalary, a.salary);
+    if(salTxt) tt.push(salTxt + ' Lohn');
+    var rateTxt = rpApiRateText(a.additionalPlacementRate, a.rate);
+    if(rateTxt) tt.push(rateTxt);
     return esc(a.name || a.displayName || 'Zulage') + (tt.length ? ' (' + tt.join(' / ') + ')' : '');
   });
   /* Der Einsatz aus Apriko ist die alleinige Quelle für den GAV — die Branche oben rechts wird nie
@@ -12997,9 +13027,14 @@ async function rpApiUebernehmen(){
     '<b>Konditionen laut Apriko-Einsatz Nr ' + esc(String(beste.placementNumber || beste.id)) + '</b>' +
     (gavApi ? '<br>GAV: ' + esc(gavApi) + (gavMatch ? ' ✓ als Branche übernommen (massgeblich, nicht die Auswahl oben)' : '') : '') +
     (lohnTeile.length ? '<br>' + lohnTeile.join(' · ') : '') +
-    '<br>Zulagen/Spesen: ' + (spesen.length ? spesen.join(', ') : 'keine zusätzlichen am Einsatz hinterlegt') +
     (plzHinweis ? '<br><span style="color:#92400E">⚠ ' + esc(plzHinweis) + '</span>' : '') +
-    '</div>' + tempDataHtml;
+    '</div>' +
+    (spesen.length ?
+      '<div style="margin-top:8px;padding:8px 12px;background:#FFFBEB;border-left:3px solid #D97706;border-radius:3px;color:#78350F;font-size:12px">' +
+      '<b>⚠ Vertragliche Zulage(n)/Spesen laut Einsatz — gehen dem GAV-Standard vor:</b><br>' + spesen.join('<br>') +
+      '</div>'
+      : '<div style="margin-top:8px;padding:6px 12px;color:var(--rp-grey);font-size:11px">Keine zusätzlichen Zulagen am Einsatz hinterlegt.</div>') +
+    tempDataHtml;
   var s3K = $('rpS3Konditionen');
   if(s3K) s3K.innerHTML = window.__rpEinsatzKonditionen;   // gleich sichtbar bei der Prüfung in Schritt 3, nicht nur oben bei Schritt 2
   if(gavApi && !gavMatch && !tempDataHtml){
@@ -13009,7 +13044,7 @@ async function rpApiUebernehmen(){
     if(srcEl){
       srcEl.hidden = false;
       srcEl.innerHTML = '<div style="padding:8px 12px;background:#FEF2F2;border-left:3px solid #c62828;border-radius:3px;color:#7f1d1d;font-size:12px">' +
-        '⚠ <b>Kein lokales Regelwerk für „' + esc(gavApi) + '"</b> — die Auswahl oben rechts (' + esc((GAV[brancheSel.value] || {}).name || brancheSel.value) + ') darf hierfür NICHT verwendet werden. ' +
+        '⚠ <b>Kein lokales Regelwerk für „' + esc(gavApi) + '"</b> — massgeblich ist ausschliesslich der GAV laut Apriko-Einsatz, nie eine manuelle Auswahl. ' +
         'Bitte die Eckwerte für dieses GAV separat recherchieren, bevor mit der Prüfung fortgefahren wird.' +
         (tempDataFehler.length ? '<br><span style="font-size:11px;opacity:.8">tempdata-Diagnose: ' + esc(tempDataFehler.join(' · ')) + '</span>' : '') +
         '</div>' +
@@ -13096,13 +13131,17 @@ function rpApiRender(){
      per Stichwort-Erkennung oder tempdata) passiert erst beim Klick auf "Einsatz übernehmen". */
   var gavZeile = gavApi ? 'GAV laut Einsatz: <b>' + esc(gavApi) + '</b>' : '';
   var lohnTeile = [];
-  if(typeof bc.basicPlacementSalary === 'number') lohnTeile.push('Grundlohn ' + bc.basicPlacementSalary.toFixed(2));
-  if(typeof bc.basicPlacementRate === 'number') lohnTeile.push('Tarif ' + bc.basicPlacementRate.toFixed(2));
+  var grundlohnTxt2 = rpApiRateText(bc.basicPlacementSalary, null);
+  if(grundlohnTxt2) lohnTeile.push('Grundlohn ' + grundlohnTxt2);
+  var tarifTxt2 = rpApiRateText(bc.basicPlacementRate, null);
+  if(tarifTxt2) lohnTeile.push('Tarif ' + tarifTxt2);
   if(typeof bc.marginPercentage === 'number') lohnTeile.push('Marge ' + bc.marginPercentage.toFixed(1) + '%');
   var spesen = addl.map(function(a){
     var t = [];
-    if(typeof a.salary === 'number') t.push(a.salary.toFixed(2) + ' Lohn');
-    if(typeof a.rate === 'number') t.push(a.rate.toFixed(2) + ' Tarif');
+    var salTxt2 = rpApiRateText(a.additionalPlacementSalary, a.salary);
+    if(salTxt2) t.push(salTxt2 + ' Lohn');
+    var rateTxt2 = rpApiRateText(a.additionalPlacementRate, a.rate);
+    if(rateTxt2) t.push(rateTxt2);
     return esc(a.name || a.displayName || 'Zulage') + (t.length ? ' (' + t.join(' / ') + ')' : '');
   });
   var warn = !sel.zeitOk ? '<br><span style="color:#c62828">⚠ Dieser Einsatz überlappt den Rapportzeitraum ' + esc(st.vonStr) + ' – ' + esc(st.bisStr) + ' nicht — Zeitraum-Erkennung oder Auswahl prüfen.</span>' : '';
@@ -13367,6 +13406,16 @@ window.initRapport = function(){
       return;
     }
     berechnen(); unlock($('rpS4')); $('rpS4').scrollIntoView({behavior:'smooth',block:'start'}); });
+  // Statt jedes markierte Feld einzeln per Doppelklick bestätigen zu müssen: EIN Klick bestätigt
+  // alle aktuell markierten Felder mit dem gerade angezeigten Wert. Ändert keine Werte — nur die
+  // Markierung fällt weg, genau wie beim Doppelklick auf ein einzelnes Feld, nur für alle auf einmal.
+  $('rpConfirmAll').addEventListener('click',function(){
+    var betroffen = zeilen.filter(function(r){ return r.kstFlag || r.istFlag; }).length;
+    if(!betroffen){ $('rpFlags').textContent = 'Alle Markierungen geprüft'; return; }
+    if(!confirm(betroffen + ' markierte Feld(er) wie angezeigt bestätigen? Bitte vorher gegen den Beleg rechts geprüft haben.')) return;
+    zeilen.forEach(function(r){ r.kstFlag = null; r.istFlag = null; });
+    renderTable(); countFlags();
+  });
   $('rpCsv').addEventListener('click',function(){ dl(buildCsv(),'rapport.csv','text/csv;charset=utf-8'); });
   $('rpXml').addEventListener('click',function(){ dl(buildXml(),'rapport.xml','application/xml;charset=utf-8'); });
   $('rpPeek').addEventListener('click',function(){
