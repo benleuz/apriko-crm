@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.152.0"></script>
-<script src="apriko-api.js?v=1.152.0"></script>
-<script src="lohncheck.js?v=1.152.0"></script>
-<script src="personalbudget.js?v=1.152.0"></script>
-<script src="jahresbudget.js?v=1.152.0"></script>
-<script src="budgetpositionen.js?v=1.152.0"></script>
-<script src="lohnchecklistetemp.js?v=1.152.0"></script>
+<script src="apriko-filters.js?v=1.155.0"></script>
+<script src="apriko-api.js?v=1.155.0"></script>
+<script src="lohncheck.js?v=1.155.0"></script>
+<script src="personalbudget.js?v=1.155.0"></script>
+<script src="jahresbudget.js?v=1.155.0"></script>
+<script src="budgetpositionen.js?v=1.155.0"></script>
+<script src="lohnchecklistetemp.js?v=1.155.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.152.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.155.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -11981,7 +11981,7 @@ var GAV = {
     konto: 'Jahresarbeitszeit 2\'200 h; bis 47 h/Wo zuschlagsfrei (Freizeitausgleich), darüber 25% Zeitzuschlag. Ferien 8.33% (<50J) / 10.64% (≥50J); Feiertagsentschädigung 3.59% (Stundenlohn); Vollzugsbeitrag 0.7% AN + 0.7% AG; Frühpensionierung 1.2%/1.25%/1.3% (2025/26/27) je AN+AG; BVG-Koordinationsabzug CHF 12.10/h (swissstaffing 2. Säule)',
     zulage: 0,
     zulageAb: null,
-    mittag: 50.00,            // CHF Pauschale/Tag bei auswärtiger Verpflegung (alternativ CHF 200.-/Monat pauschal)
+    mittag: null,              // BEWUSST deaktiviert: die echte Regel ist eine MONATSPAUSCHALE (CHF 200.-/Monat, unabhängig von Tagesstunden, nur bei Absenzen anteilig gekürzt) plus eine SEPARATE Tagespauschale (CHF 50.-/Tag) NUR bei auswärtiger Übernachtung. Das aktuelle mittag-Feld kann nur "CHF X ab Y Std. Präsenz" abbilden — würde bei jedem normalen Arbeitstag fälschlich CHF 50.- auslösen. Bis das Rechenmodell eine Monatspauschale unterstützt, muss diese Spesenart manuell geprüft/erfasst werden (siehe konto-Text).
     kantone: ['BS'],
     quelle: 'tempdata.ch (tempservice.ch) · Personalverleih Basler Ausbaugewerbe (BS), Version 15, gültig ab 01.09.2026 — https://www.tempservice.ch/de/tempdata/detail.php?cid=455001&vid=15&eid=14392'
   },
@@ -12416,6 +12416,12 @@ async function rpApiLoadRoster(force){
     var ladeMethode = 'liste';
     var ladeFehler = null;
     var ladeStart = Date.now();
+    // Nur diese state-Werte sind für uns relevant (per Screenshot 10.09.2026 markiert): Vermittelt,
+    // Aktiv, sowie deren gekündigt/gesperrt-Varianten. Alles andere (Entwurf, Veröffentlicht,
+    // Zurückgezogen, Storniert, Archiviert, alle Inaktiv-Varianten, «Keine Angabe») fällt sofort raus.
+    // Werte exakt aus dem PlacementState-Enum der OpenAPI-Spec (nicht die deutschen UI-Labels).
+    // MUSS vor dem Aktiv-Filter-Versuch unten definiert sein, der sie bereits verwendet.
+    var RP_RELEVANTE_STATES = ['Placed','Active','TerminatedPlaced','TerminatedActive','LockedPlaced','LockedActive'];
     /* ZUERST versuchen: gezielt nur aktuell offene/aktive Einsätze holen (Feld
        isActivePendingVacantOrSinceRecentlyInactive, boolesch) statt alles zu paginieren — bei
        einem Boolean ist die Trefferchance höher als beim gescheiterten employeeId-Text-Filter,
@@ -12433,10 +12439,13 @@ async function rpApiLoadRoster(force){
         filters: 'isActivePendingVacantOrSinceRecentlyInactive|=|true|text|false|false|G1'
       });
       var aktivRows = ((aktivR && aktivR.results) || []).map(AprikoApi.models.hitData);
+      // Auch hier den state-Filter anwenden — der Feldname sagt "...OrSinceRecentlyInactive",
+      // könnte also auch kürzlich inaktive Einsätze mitliefern, die uns laut Vorgabe nicht interessieren.
+      aktivRows = aktivRows.filter(function(p){ return RP_RELEVANTE_STATES.indexOf(p.state) >= 0; });
       if(aktivRows.length){
         placements = aktivRows;
         ladeMethode = 'aktiv-filter';
-        aktivDiagnose = aktivRows.length + ' Treffer über Aktiv-Filter';
+        aktivDiagnose = aktivRows.length + ' Treffer über Aktiv-Filter (nach state-Filter)';
       } else {
         aktivDiagnose = '0 Treffer über Aktiv-Filter — Rückfall auf komplette Liste';
       }
@@ -12460,6 +12469,11 @@ async function rpApiLoadRoster(force){
       try { rows = await AprikoApi.staffing.listStaffLease(pi, ROSTER_PAGE_SIZE); }
       catch(e){ ladeFehler = (e && e.message) || String(e); break; }
       if(!rows || !rows.length) break;
+      // Nur relevante Status behalten (state-Feld, siehe RP_RELEVANTE_STATES) — der Rest (Entwurf,
+      // Storniert, Archiviert, Inaktiv-Varianten usw.) interessiert nicht und wird sofort verworfen,
+      // statt unnötig Mitarbeitende/Kunden dafür aufzulösen. Direkt nach dem Abruf gefiltert, nicht
+      // erst am Ende — reduziert Speicher und die Auflösungsmenge auf das Wesentliche.
+      rows = rows.filter(function(p){ return RP_RELEVANTE_STATES.indexOf(p.state) >= 0; });
       placements = placements.concat(rows);
       // Warnung, falls eine einzelne Seite selbst schon sehr lange braucht (z.B. Tunnel-Latenz) —
       // hilft zu unterscheiden zwischen "viele Seiten nötig" und "jede Seite einzeln ist langsam".
@@ -14104,6 +14118,12 @@ function buildRapportOcrPrompt(heuteStr, aktuellesJahr, istJanFeb, belegKurz){
       'A) WOCHEN-RAPPORT (handschriftlich, ~5-7 Zeilen): Ein Tag pro Zeile mit Datum, Kostenstelle, Stunden.\n' +
       'B) MONATS-/PERIODEN-RAPPORT (digital, tabellarisch): Header oben mit Personalnummer und Name (z.B. "Stundenblatt von 90237 Ngama Jonathan Pharel" oder "4575 Mathot Anthony"). Zeitraum-Angabe (z.B. "Periode von 09.08.2026 bis 15.08.2026"). Dann eine breite Tabelle mit AUFTRAG- oder LEISTUNGSART-Zeilen (z.B. "261245 Neubadstr. 95, Basel / Meier", "1205 Montage") und TAG-SPALTEN 09, 10, 11, ... 31. Jede Zelle enthält die Stunden dieses Tages für diesen Auftrag.\n' +
       'C) WOCHENRASTER (Vordruck, handschriftlich ausgefüllt, z.B. "Arbeitsrapport" von Verleihern wie increo/worknet): Die WOCHENTAGE Montag…Sonntag sind SPALTEN, die KATEGORIEN sind ZEILEN — typischerweise "Datum", "Kostenstelle", "Normalstunden", "Überzeit 125%", "Überzeit 150%", "Reisezeit", "Verpflegungsspesen", "Reisespesen", ganz rechts eine Spalte "Total". Oben Felder für Kunde/Einsatzbetrieb, Mitarbeiter, Berater, KW; unten das GAV-Feld und Unterschriften.\n\n' +
+      'D) TAGES-BLOCK MIT MEHRZEILIGER BAUSTELLEN-ADRESSE (Vordruck z.B. "Wochen-Arbeitsrapport"): Pro Tag EIN Zeilenblock mit Auftrag Nr./Branche, Std.-Art, Normalstunden — UND darunter, in derselben Tagesbox, mehrere kurze Textzeilen wie eine Strasse, ein Firmenname, ein Lagername (z.B. "Siegerstrasse 12" / "Basel Prodega" / "Regionallager"). Das sind DREI ZEILEN EINER EINZIGEN ADRESSE, keine drei Buchungen — sie gehören zum EINEN Auftrag/Kostenstelle dieses Tages und beschreiben nur WO gearbeitet wurde.\n\n' +
+
+      'GANZ WICHTIG — ADRESSTEXT IST KEINE EIGENE BUCHUNG (gilt für ALLE Formate, besonders A und D):\n' +
+      '- Eine Baustellen-/Kunden-Adresse (Strassenname, Ortsname, Firmenname, Lagerbezeichnung), die unter oder neben der Kostenstelle eines Tages steht, ist REINER BESCHREIBUNGSTEXT für den EINEN Auftrag dieses Tages — nie eine eigene JSON-Zeile.\n' +
+      '- Pro Tag EXAKT EINE Zeile pro tatsächlich unterschiedlicher Kostenstelle. Wenn du versucht bist, eine zweite Zeile für denselben Tag mit denselben Ist-Stunden zu erzeugen: STOPP — das ist mit sehr hoher Wahrscheinlichkeit genau dieser Fehler (Adresse als Buchung missverstanden). Nur dann eine echte zweite Zeile, wenn am selben Tag eine ANDERE, separat ausgefüllte Kostenstelle mit EIGENEN, unterschiedlichen Stunden existiert.\n' +
+      '- Das Feld "beleg" in jeder Zeile ist IMMER exakt der vorgegebene Platzhalter (siehe JSON-Beispiel unten) — NIEMALS eine Adresse, ein Ortsname oder sonst extrahierter Text. Wenn du versucht bist, dort etwas anderes als den Platzhalter einzusetzen, ist das ein sicheres Zeichen, dass du gerade fälschlich eine Adresse als Buchung behandelst.\n\n' +
 
       'WICHTIGE HINWEISE FÜR WOCHENRASTER (Format C):\n' +
       '1. Lies die Tabelle SPALTENWEISE, ein Wochentag = eine Spalte. Für jeden Tag: Datum-Zelle, Kostenstellen-Zelle, Normalstunden-Zelle.\n' +
@@ -14167,7 +14187,7 @@ function buildRapportOcrPrompt(heuteStr, aktuellesJahr, istJanFeb, belegKurz){
       '- Wenn du ein Jahr aus dem Beleg nimmst, das weiter als 1 Jahr in der Vergangenheit liegt: setze istFlag "low" (auch wenn die Zahl klar aussieht), weil das sehr unwahrscheinlich ist.\n' +
       '- Bei Monatsrapporten: Jahr aus dem Zeitraum-Header übernehmen.\n\n' +
       'WEITERE REGELN:\n' +
-      '- rapportTotal: die auf dem Beleg gedruckte/geschriebene Gesamtsumme der Arbeitsstunden (Total-Spalte oder Total-Zeile), als Dezimalzahl; null wenn keine vorhanden.\n' +
+      '- rapportTotal: SUCHE AKTIV danach, auch wenn er klein, an den Rand gequetscht oder handschriftlich unscheinbar ist (z.B. "GESAMT-TOTAL", "Total", "Total Std.", eine unterstrichene Summenzahl am Fuss der Tabelle). Fast jeder Wochen-/Periodenrapport hat irgendwo eine Gesamtsumme — wenn du auf den ersten Blick keine siehst, schau nochmals gezielt am unteren Tabellenrand und neben der letzten Spalte nach, bevor du null zurückgibst. Als Dezimalzahl; nur null wenn wirklich keine vorhanden ist, nicht weil du nicht genau genug geschaut hast — dieser Wert ist die einzige unabhängige Gegenprobe für die ganze Extraktion.\n' +
       '- Wochentag zweistellig: Mo/Di/Mi/Do/Fr/Sa/So.\n' +
       '- Ist-Stunden immer als Dezimalzahl (8.0 nicht "8:00"). Nur Tage mit >0 Stunden aufnehmen.\n' +
       '- kst: Numerische Kennung ("261245", "1205"), NICHT Beschreibung, NICHT Personalnummer des Mitarbeiters. Leer wenn wirklich keine da ist.\n' +
@@ -14260,11 +14280,14 @@ function ocrMergeLesungen(a, b){
   if(!a.mitarbeiter && b.mitarbeiter) a.mitarbeiter = b.mitarbeiter;
   return a;
 }
-/* Stimmt die Summe der erkannten Stunden mit dem Rapport-Total überein? */
+/* Stimmt die Summe der erkannten Stunden mit dem Rapport-Total überein?
+   WICHTIG: unterscheidet "geprüft und korrekt" von "nichts zum Prüfen da" — beides als simples
+   true/false zurückzugeben hätte den Fall "kein Rapport-Total gefunden" fälschlich wie "geprüft,
+   passt" aussehen lassen. Gibt ein Objekt zurück statt eines Booleans. */
 function ocrKontrolleOk(out){
-  if(!out || typeof out.rapportTotal !== 'number') return true;   // keine Kontrollsumme → nichts zu prüfen
+  if(!out || typeof out.rapportTotal !== 'number') return { geprueft: false, ok: true };
   var sum = (out.rawZeilen || []).reduce(function(a, r){ return a + (r.absent ? 0 : (parseFloat(r.ist) || 0)); }, 0);
-  return Math.abs(sum - out.rapportTotal) < 0.01;
+  return { geprueft: true, ok: Math.abs(sum - out.rapportTotal) < 0.01 };
 }
 async function callClaudeOcr(key, b64, sendAsPdf, prompt, model){
   var mediaBlock = sendAsPdf
@@ -14287,6 +14310,29 @@ async function callClaudeOcr(key, b64, sendAsPdf, prompt, model){
       }]
     })
   });
+}
+
+/* Sicherheitsnetz gegen einen wiederkehrenden Erkennungsfehler (gefunden 10.09.2026): das
+   Vision-Modell verwechselt gelegentlich eine mehrzeilige Baustellen-Adresse unter der
+   Kostenstelle eines Tages mit einer ZWEITEN Buchung und dupliziert dabei die Ist-Stunden
+   (z.B. "45.00 h" wird zu "90.00 h", weil jeder Tag doppelt gezählt wird). Erkennungsmerkmal,
+   unabhängig vom Prompt-Erfolg: zwei Zeilen am SELBEN Tag mit der SELBEN (auf Ziffern
+   normalisierten) Kostenstelle und den SELBEN Ist-Stunden — das kann nie eine echte zweite,
+   eigenständige Buchung sein. Wird die erste behalten, die zweite verworfen. */
+function rpDedupZeilen(rawZeilen){
+  var gesehen = {};
+  var entfernt = 0;
+  var out = (rawZeilen || []).filter(function(z){
+    if(z.absent) return true;   // Absenz-Zeilen (Ferien/Krankheit/etc.) nie betroffen, immer behalten
+    var kstNorm = String(z.kst || '').replace(/[^0-9]/g, '');
+    var istNum = typeof z.ist === 'number' ? z.ist : parseFloat(String(z.ist).replace(',', '.'));
+    if(!kstNorm || !isFinite(istNum)) return true;   // ohne Kostenstelle/Ist keine sichere Aussage möglich
+    var key = String(z.datum || '') + '|' + kstNorm + '|' + istNum.toFixed(2);
+    if(gesehen[key]){ entfernt++; return false; }
+    gesehen[key] = true;
+    return true;
+  });
+  return { zeilen: out, entfernt: entfernt };
 }
 
 /* Claude-Antwort parsen: Markdown-Fences strippen, JSON extrahieren
@@ -14407,10 +14453,22 @@ async function scanWithClaude(){
       var d = rpDate(r.datum);
       if(d && (d.getDay() === 0 || d.getDay() === 6)){ r.istFlag = 'low'; r.note = (r.note ? r.note + ' · ' : '') + 'Wochenend-Buchung — bitte am Beleg bestätigen'; }
     });
-    // Kontrollsumme: Abweichung → alle Arbeitszeilen prüfpflichtig
-    if(!ocrKontrolleOk(ocr)){
+    // Duplikat-Bereinigung VOR der Kontrollsumme, sonst würde die Summe fälschlich gegen die
+    // verdoppelten Rohdaten geprüft (siehe rpDedupZeilen-Kommentar oben).
+    var dedupResult = rpDedupZeilen(ocr.rawZeilen);
+    ocr.rawZeilen = dedupResult.zeilen;
+    if(dedupResult.entfernt > 0){
+      ocrMarkAll(ocr, dedupResult.entfernt + ' doppelt erkannte Zeile(n) automatisch entfernt (Adresse als Buchung missverstanden) — bitte gegen den Beleg prüfen');
+    }
+    // Kontrollsumme: Abweichung → alle Arbeitszeilen prüfpflichtig. Immer versuchen zu prüfen —
+    // wurde gar kein Rapport-Total gefunden, ist das selbst meldenswert (statt stillschweigend
+    // als "passt schon" durchzugehen), damit man weiss: hier wurde NICHT gegengeprüft.
+    var kontrolle = ocrKontrolleOk(ocr);
+    if(kontrolle.geprueft && !kontrolle.ok){
       var summe = (ocr.rawZeilen || []).reduce(function(a, r){ return a + (r.absent ? 0 : (parseFloat(r.ist) || 0)); }, 0);
       ocrMarkAll(ocr, 'Summe ' + nf(summe) + ' h ≠ Rapport-Total ' + nf(ocr.rapportTotal) + ' h');
+    } else if(!kontrolle.geprueft){
+      ocrMarkAll(ocr, 'Kein Rapport-Total auf dem Beleg gefunden — Summe konnte NICHT gegengeprüft werden, bitte manuell mit dem Beleg abgleichen');
     }
     if(typeof ocr.rapportTotal === 'number'){ window.__rpRapportTotal = (window.__rpRapportTotal || 0) + ocr.rapportTotal; }
     var rawZeilen = ocr.rawZeilen, mitarbeiter = ocr.mitarbeiter, firma = ocr.firma,
