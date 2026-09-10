@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.162.0"></script>
-<script src="apriko-api.js?v=1.162.0"></script>
-<script src="lohncheck.js?v=1.162.0"></script>
-<script src="personalbudget.js?v=1.162.0"></script>
-<script src="jahresbudget.js?v=1.162.0"></script>
-<script src="budgetpositionen.js?v=1.162.0"></script>
-<script src="lohnchecklistetemp.js?v=1.162.0"></script>
+<script src="apriko-filters.js?v=1.163.0"></script>
+<script src="apriko-api.js?v=1.163.0"></script>
+<script src="lohncheck.js?v=1.163.0"></script>
+<script src="personalbudget.js?v=1.163.0"></script>
+<script src="jahresbudget.js?v=1.163.0"></script>
+<script src="budgetpositionen.js?v=1.163.0"></script>
+<script src="lohnchecklistetemp.js?v=1.163.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.162.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.163.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -13042,7 +13042,10 @@ async function rpApiUebernehmen(){
     esc('basicPlacementCompensation: ' + JSON.stringify(beste.basicPlacementCompensation || null, null, 1) +
       '\n\nadditionalPlacementCompensations (' + ((beste.additionalPlacementCompensations || []).length) + ' Einträge): ' +
       JSON.stringify(beste.additionalPlacementCompensations || [], null, 1)) +
-    '</pre></details>' +
+    '</pre>' +
+    '<button type="button" class="rp-btn-sm" style="margin-top:6px" onclick="rpApiSucheAdditionalComp(\'' + esc(beste.id) + '\')">🔍 Zusätzlich im dedizierten Endpunkt /AdditionalPlacementCompensations suchen</button>' +
+    '<div id="rpAddCompResult" style="margin-top:6px"></div>' +
+    '</details>' +
     tempDataHtml;
   var s3K = $('rpS3Konditionen');
   if(s3K) s3K.innerHTML = window.__rpEinsatzKonditionen;   // gleich sichtbar bei der Prüfung in Schritt 3, nicht nur oben bei Schritt 2
@@ -15291,6 +15294,41 @@ function dl(txt,name,typ){
   URL.revokeObjectURL(u);
 }
 
+/* Sucht gezielt im dedizierten Endpunkt /AdditionalPlacementCompensations nach Einträgen zu einer
+   bestimmten placementId — für den Fall, dass das eingebettete additionalPlacementCompensations-
+   Feld am StaffLeasePlacement selbst nicht vollständig mitgeliefert wird (Verdacht von 10.09.2026).
+   Kein Server-Filter nach placementId verfügbar, daher Pagination mit Zeitbudget (wie beim Roster). */
+async function rpApiSucheAdditionalComp(placementId){
+  var el = document.getElementById('rpAddCompResult');
+  if(!el) return;
+  el.innerHTML = '<span style="color:var(--rp-grey);font-size:11px">Suche läuft …</span>';
+  var start = Date.now(), zeitbudgetMs = 25000, pageSize = 200, pageIndex = 0, geprueft = 0, treffer = [], seiten = 0;
+  try {
+    while(Date.now() - start < zeitbudgetMs){
+      var res = await AprikoApi.staffing.listAdditionalPlacementCompensations(pageIndex, pageSize);
+      var rows = (res && res.results) ? res.results.map(AprikoApi.models.hitData) : (Array.isArray(res) ? res : []);
+      if(!rows || !rows.length) break;
+      seiten++; geprueft += rows.length;
+      rows.forEach(function(r){ if(String(r.placementId) === String(placementId)) treffer.push(r); });
+      el.innerHTML = '<span style="color:var(--rp-grey);font-size:11px">Suche läuft … ' + seiten + ' Seite(n), ' + geprueft + ' Datensätze geprüft, ' + treffer.length + ' Treffer bisher</span>';
+      if(rows.length < pageSize) break;   // letzte Seite erreicht
+      pageIndex++;
+    }
+  } catch(e){
+    el.innerHTML = '<span style="color:#c62828;font-size:11px">Fehler bei der Suche: ' + esc((e && e.message) || String(e)) + '</span>';
+    return;
+  }
+  var dauer = ((Date.now() - start) / 1000).toFixed(1);
+  if(treffer.length){
+    el.innerHTML = '<div style="color:#065f46;font-size:11px;margin-bottom:4px"><b>✓ ' + treffer.length + ' Treffer</b> nach ' + seiten + ' Seite(n) / ' + geprueft + ' Datensätzen (' + dauer + 's):</div>' +
+      '<pre style="white-space:pre-wrap;word-break:break-all;background:#ECFDF5;border:1px solid #A7F3D0;border-radius:3px;padding:6px;font-size:11px">' +
+      esc(JSON.stringify(treffer, null, 1)) + '</pre>';
+  } else {
+    el.innerHTML = '<span style="color:var(--rp-grey);font-size:11px">Keine Treffer nach ' + seiten + ' Seite(n) / ' + geprueft + ' Datensätzen (' + dauer + 's)' +
+      (Date.now() - start >= zeitbudgetMs ? ' — Zeitbudget erreicht, evtl. gibt es noch mehr Seiten' : ' — alle Seiten durchsucht') + '.</span>';
+  }
+}
+
 /* WICHTIG: Das ganze Rapport-Modul steckt in dieser IIFE (siehe Kopf-Kommentar oben: "nach aussen
    nur window.initRapport"). Jede Funktion, die per inline onclick/onchange/oninput="..." aus dem
    HTML aufgerufen wird, MUSS deshalb hier — noch INNERHALB der Kapsel, vor dem schliessenden })() —
@@ -15307,6 +15345,7 @@ window.rpApiSelectPerson = rpApiSelectPerson;
 window.rpApiSetManual = rpApiSetManual;
 window.rpApiUebernehmen = rpApiUebernehmen;
 window.rpApiLoadRoster = rpApiLoadRoster;
+window.rpApiSucheAdditionalComp = rpApiSucheAdditionalComp;
 
 })();
 

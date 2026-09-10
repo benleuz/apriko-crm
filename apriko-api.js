@@ -337,6 +337,15 @@
     getWorkLocationAddress: function (id) {
       return request("staffing", "/WorkLocationAddresses/" + encodeURIComponent(id));
     },
+    /* Dedizierter Endpunkt für AdditionalPlacementCompensations, unabhängig vom eingebetteten
+       additionalPlacementCompensations-Feld am StaffLeasePlacement selbst — für den Fall, dass
+       dieses Feld nicht immer vollständig mitgeliefert wird. Kein Server-Filter nach placementId
+       verfügbar, muss client-seitig durchsucht werden (siehe rpApiSucheAdditionalComp). */
+    listAdditionalPlacementCompensations: function (pageIndex, pageSize) {
+      return request("staffing", "/AdditionalPlacementCompensations", {
+        query: { pageIndex: pageIndex || 0, pageSize: pageSize || 200 }
+      });
+    },
     /* Echte tempdata-Recherche (verifiziert 10.09.2026 gegen die staffing-Spec): liefert die
        offiziellen Mindestlohn-/Eckwerte (Basislohn, 13. Monatslohn %, Ferien-/Feiertags-
        entschädigung %, Ferientage) direkt aus Apriko's tempdata-Integration — keine geratenen
@@ -399,6 +408,28 @@
     return state;
   }
 
+  /* payrollaccounting (10.09.2026, EXPERIMENTELL — Verknüpfungslogik zur Placement-ID noch nicht
+     live verifiziert): eigener Service neben staffing, gleicher Host/Token, nur anderer Pfad
+     (/api/payrollaccounting). EmploymentAssignment trägt eine Referenz-ID, die vermutlich der
+     StaffLeasePlacement-ID entspricht (Muster wie placementReferenceId in staffing) — darüber
+     lassen sich verknüpfte QuantitySalaryComponents finden. Keine Server-Filter nach Referenz-ID
+     verfügbar — muss über Pagination client-seitig gesucht werden. */
+  var payrollaccounting = {
+    listEmploymentAssignments: function (pageIndex, pageSize) {
+      return request("payrollaccounting", "/EmploymentAssignments", {
+        query: { pageIndex: pageIndex || 0, pageSize: pageSize || 100 }
+      });
+    },
+    getEmploymentAssignment: function (id) {
+      return request("payrollaccounting", "/EmploymentAssignments/" + encodeURIComponent(id));
+    },
+    listQuantitySalaryComponents: function (pageIndex, pageSize) {
+      return request("payrollaccounting", "/QuantitySalaryComponents", {
+        query: { pageIndex: pageIndex || 0, pageSize: pageSize || 100 }
+      });
+    }
+  };
+
   var api = {
     configure: configure,
     isConfigured: isConfigured,
@@ -408,6 +439,7 @@
     selfTest: selfTest,
     people: people,
     staffing: staffing,
+    payrollaccounting: payrollaccounting,
     models: models,
     extractMessages: extractMessages
   };
