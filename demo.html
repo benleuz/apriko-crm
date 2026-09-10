@@ -23,12 +23,12 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.132.0"></script>
-<script src="apriko-api.js?v=1.132.0"></script>
-<script src="lohncheck.js?v=1.132.0"></script>
-<script src="personalbudget.js?v=1.132.0"></script>
-<script src="jahresbudget.js?v=1.132.0"></script>
-<script src="budgetpositionen.js?v=1.132.0"></script>
+<script src="apriko-filters.js?v=1.133.0"></script>
+<script src="apriko-api.js?v=1.133.0"></script>
+<script src="lohncheck.js?v=1.133.0"></script>
+<script src="personalbudget.js?v=1.133.0"></script>
+<script src="jahresbudget.js?v=1.133.0"></script>
+<script src="budgetpositionen.js?v=1.133.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -970,7 +970,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.132.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.133.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -1018,7 +1018,8 @@
       <!-- 1 Upload -->
       <div class="rp-card">
         <div class="rp-card-head"><div class="rp-step">1</div><h3>Rapporte hochladen</h3>
-          <div class="rp-sub">Foto, Scan oder PDF</div></div>
+          <div class="rp-sub">Foto, Scan oder PDF</div>
+          <button type="button" class="rp-btn" style="margin-left:12px" onclick="rpApiShowRoster()" title="Zeigt die im Hintergrund geladene Einsatzliste (Mitarbeitende, Kunden, Einsätze der letzten 2 Monate)">📋 Einsatzliste ansehen</button></div>
         <div class="rp-card-body">
           <div class="rp-drop" id="rpDrop" tabindex="0" role="button" aria-label="Dateien auswählen">
             <strong>Dateien hierhin ziehen</strong>
@@ -12600,6 +12601,63 @@ async function rpApiSelectPerson(idx, ocrName){
   } catch(e){
     box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> Einsätze nicht ladbar — ' + esc((e && e.message) || String(e)).slice(0, 220);
   }
+}
+/* Zeigt die aufbereitete Einsatzliste (Roster-Cache) in einem Modal — gruppiert nach Mitarbeiter,
+   mit Kunde/Zeitraum je Einsatz, durchsuchbar nach Name/Firma. Reiner Lese-/Kontroll-Zweck, damit
+   nachvollziehbar ist, was das Tool beim automatischen Abgleich zur Verfügung hat. */
+function rpApiShowRoster(){
+  var body;
+  if(!rpRoster){
+    body = '<p style="color:var(--rp-grey)">Einsatzliste ist noch nicht geladen — falls eine Apriko-Verbindung eingerichtet ist, wird sie beim Öffnen dieser Ansicht automatisch im Hintergrund geladen. Bitte kurz warten und nochmal versuchen.</p>' +
+      '<button type="button" class="rp-btn" onclick="rpApiLoadRoster(false).then(rpApiShowRoster)">Jetzt laden</button>';
+    showModal('Einsatzliste', body);
+    return;
+  }
+  var altMin = Math.round((Date.now() - rpRoster.loadedAt) / 60000);
+  var mitIds = Object.keys(rpRoster.mitarbeiter);
+  var gesamtEinsaetze = mitIds.reduce(function(n, id){ return n + (rpRoster.mitarbeiter[id].placements || []).length; }, 0);
+  var zeilen = [];
+  mitIds.forEach(function(id){
+    var m = rpRoster.mitarbeiter[id];
+    var name = [m.firstName, m.lastName].filter(Boolean).join(' ') || id;
+    (m.placements || []).forEach(function(p){
+      var kn = rpApiRosterKundeName(p.customerId) || (p.customerId ? p.customerId : '–');
+      zeilen.push({
+        name: name, nr: m.personNumber || '', kunde: kn,
+        von: p.entryDate ? new Date(p.entryDate).toLocaleDateString('de-CH') : '?',
+        bis: p.withdrawalDate ? new Date(p.withdrawalDate).toLocaleDateString('de-CH') : 'laufend',
+        einsatzNr: p.placementNumber || p.id, gav: p.tempDataLabourStaffingAgreementName || '',
+        suchtext: (name + ' ' + kn).toLowerCase()
+      });
+    });
+  });
+  zeilen.sort(function(a, b){ return a.name.localeCompare(b.name, 'de-CH'); });
+  var rowsHtml = zeilen.map(function(z){
+    return '<tr class="rp-roster-row" data-such="' + esc(z.suchtext) + '">' +
+      '<td>' + esc(z.name) + (z.nr ? ' <span style="color:var(--rp-grey);font-size:11px">(Nr ' + esc(String(z.nr)) + ')</span>' : '') + '</td>' +
+      '<td>' + esc(z.kunde) + '</td>' +
+      '<td>Nr ' + esc(String(z.einsatzNr)) + '</td>' +
+      '<td>' + esc(z.von) + ' – ' + esc(z.bis) + '</td>' +
+      '<td style="font-size:11.5px;color:var(--rp-grey)">' + esc(z.gav) + '</td>' +
+    '</tr>';
+  }).join('');
+  body = '<div style="margin-bottom:8px;font-size:12.5px;color:var(--rp-grey)">' +
+      Object.keys(rpRoster.mitarbeiter).length + ' Mitarbeitende · ' + gesamtEinsaetze + ' Einsätze · letzte ' + (rpRoster.tage || ROSTER_TAGE) + ' Tage · geladen vor ' + altMin + ' Min.' +
+      ' <a href="#" onclick="rpApiLoadRoster(true).then(rpApiShowRoster);return false">(neu laden)</a></div>' +
+    '<input type="text" id="rpRosterSuche" placeholder="Suche nach Name oder Kunde …" style="width:100%;margin-bottom:8px;padding:6px 10px;border:1px solid var(--rp-border,#ddd);border-radius:5px" oninput="rpApiFilterRoster(this.value)">' +
+    '<div style="max-height:55vh;overflow:auto">' +
+    '<table style="width:100%;border-collapse:collapse;font-size:13px" id="rpRosterTabelle">' +
+      '<thead><tr style="text-align:left;border-bottom:1px solid var(--rp-border,#ddd)">' +
+        '<th style="padding:4px 6px">Mitarbeiter</th><th style="padding:4px 6px">Kunde</th><th style="padding:4px 6px">Einsatz</th><th style="padding:4px 6px">Zeitraum</th><th style="padding:4px 6px">GAV</th>' +
+      '</tr></thead><tbody>' + (rowsHtml || '<tr><td colspan="5" style="color:var(--rp-grey);padding:10px 6px">Keine Einsätze im Fenster gefunden.</td></tr>') + '</tbody>' +
+    '</table></div>';
+  showModal('Einsatzliste (letzte ' + (rpRoster.tage || ROSTER_TAGE) + ' Tage)', body);
+}
+function rpApiFilterRoster(q){
+  var qq = String(q || '').toLowerCase().trim();
+  document.querySelectorAll('.rp-roster-row').forEach(function(tr){
+    tr.style.display = !qq || (tr.getAttribute('data-such') || '').indexOf(qq) >= 0 ? '' : 'none';
+  });
 }
 async function rpApiRefreshRoster(){
   var box = rpApiBox(); if(box) box.innerHTML = '🔌 <b>Einsatzliste wird neu geladen …</b>';
