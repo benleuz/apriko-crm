@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.148.0"></script>
-<script src="apriko-api.js?v=1.148.0"></script>
-<script src="lohncheck.js?v=1.148.0"></script>
-<script src="personalbudget.js?v=1.148.0"></script>
-<script src="jahresbudget.js?v=1.148.0"></script>
-<script src="budgetpositionen.js?v=1.148.0"></script>
-<script src="lohnchecklistetemp.js?v=1.148.0"></script>
+<script src="apriko-filters.js?v=1.149.0"></script>
+<script src="apriko-api.js?v=1.149.0"></script>
+<script src="lohncheck.js?v=1.149.0"></script>
+<script src="personalbudget.js?v=1.149.0"></script>
+<script src="jahresbudget.js?v=1.149.0"></script>
+<script src="budgetpositionen.js?v=1.149.0"></script>
+<script src="lohnchecklistetemp.js?v=1.149.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.148.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.149.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12847,23 +12847,39 @@ async function rpApiUebernehmen(){
      lokalen Branchen-Tabelle fehlt (z.B. regionale GAVs wie "Basler Ausbaugewerbe") — sourced
      direkt aus Apriko, nicht geraten. */
   var tempDataHtml = '';
+  function rpApiFormatMinSalary(ms, quelle){
+    var teile = [];
+    if(typeof ms.monthSalary === 'number' && ms.monthSalary) teile.push('Monatslohn ' + ms.monthSalary.toFixed(2));
+    if(typeof ms.basicSalary === 'number' && ms.basicSalary) teile.push('Grundlohn ' + ms.basicSalary.toFixed(2));
+    if(ms.has13thMonthSalary && typeof ms.pct13thMonthSalary === 'number') teile.push('13. Monatslohn ' + ms.pct13thMonthSalary.toFixed(2) + '%');
+    if(typeof ms.pctVacationCompensation === 'number' && ms.pctVacationCompensation) teile.push('Ferienentschädigung ' + ms.pctVacationCompensation.toFixed(2) + '%');
+    if(typeof ms.pctHolidaysCompensation === 'number' && ms.pctHolidaysCompensation) teile.push('Feiertagsentschädigung ' + ms.pctHolidaysCompensation.toFixed(2) + '%');
+    if(typeof ms.vacationDays === 'number' && ms.vacationDays) teile.push(ms.vacationDays + ' Ferientage');
+    if(!teile.length) return '';
+    return '<div style="margin-top:10px;padding:8px 12px;background:#ECFDF5;border-left:3px solid #059669;border-radius:3px;color:#065f46;font-size:12px">' +
+      '<b>✓ Eckwerte laut Apriko-tempdata</b> (' + quelle + ', GAV: ' + esc(gavApi) + ')<br>' + teile.join(' · ') + '</div>';
+  }
+  // 1. Versuch: die Version-ID direkt am Einsatz (präzise, inkl. den am Einsatz hinterlegten Auswahlwerten)
   if(beste.tempDataLabourStaffingAgreementVersionId){
     try {
       var ms = await AprikoApi.staffing.getTempDataMinimumSalary(beste.tempDataLabourStaffingAgreementVersionId, beste.tempDataLabourStaffingAgreementVersionValuesIds);
-      if(ms){
-        var teile = [];
-        if(typeof ms.monthSalary === 'number' && ms.monthSalary) teile.push('Monatslohn ' + ms.monthSalary.toFixed(2));
-        if(typeof ms.basicSalary === 'number' && ms.basicSalary) teile.push('Grundlohn ' + ms.basicSalary.toFixed(2));
-        if(ms.has13thMonthSalary && typeof ms.pct13thMonthSalary === 'number') teile.push('13. Monatslohn ' + ms.pct13thMonthSalary.toFixed(2) + '%');
-        if(typeof ms.pctVacationCompensation === 'number' && ms.pctVacationCompensation) teile.push('Ferienentschädigung ' + ms.pctVacationCompensation.toFixed(2) + '%');
-        if(typeof ms.pctHolidaysCompensation === 'number' && ms.pctHolidaysCompensation) teile.push('Feiertagsentschädigung ' + ms.pctHolidaysCompensation.toFixed(2) + '%');
-        if(typeof ms.vacationDays === 'number' && ms.vacationDays) teile.push(ms.vacationDays + ' Ferientage');
-        if(teile.length){
-          tempDataHtml = '<div style="margin-top:10px;padding:8px 12px;background:#ECFDF5;border-left:3px solid #059669;border-radius:3px;color:#065f46;font-size:12px">' +
-            '<b>✓ Eckwerte laut Apriko-tempdata</b> (live recherchiert, GAV: ' + esc(gavApi) + ')<br>' + teile.join(' · ') + '</div>';
-        }
+      if(ms) tempDataHtml = rpApiFormatMinSalary(ms, 'live recherchiert über den Einsatz');
+    } catch(tde){ /* nicht verfügbar über diesen Weg — 2. Versuch unten */ }
+  }
+  // 2. Versuch: nur die Agreement-ID (ohne Version) am Einsatz — Agreement selbst holen, daraus die
+  // aktuell aktive Version herausfiltern und DEREN MinimumSalary abfragen. Deckt Fälle ab, in denen
+  // der einzelne Einsatz keine spezifische Version-ID trägt, das GAV als solches aber bekannt ist —
+  // genau der Fall "GAV für das Basler Ausbaugewerbe (BS)", das lokal nicht hinterlegt war.
+  if(!tempDataHtml && beste.tempDataLabourStaffingAgreementId){
+    try {
+      var agreement = await AprikoApi.staffing.getTempDataLabourStaffingAgreement(beste.tempDataLabourStaffingAgreementId);
+      var versionen = (agreement && agreement.agreementVersions) || [];
+      var aktive = versionen.find(function(v){ return v.isActive; }) || versionen[versionen.length - 1];
+      if(aktive && aktive.id){
+        var ms2 = await AprikoApi.staffing.getTempDataMinimumSalary(aktive.id, null);
+        if(ms2) tempDataHtml = rpApiFormatMinSalary(ms2, 'live recherchiert über das GAV direkt, aktuelle Version');
       }
-    } catch(tde){ /* tempdata nicht verfügbar für diese Version — Rückfall auf lokale Tabelle/Blockade */ }
+    } catch(tde2){ /* auch dieser Weg nicht verfügbar — Rückfall auf lokale Tabelle/Blockade */ }
   }
   var bc = beste.basicPlacementCompensation || {};
   var addl = beste.additionalPlacementCompensations || [];

@@ -348,6 +348,13 @@
     },
     getTempDataSelectionCriterias: function (versionId) {
       return request("staffing", "/TempDataLabourStaffingAgreementVersions/" + encodeURIComponent(versionId) + "/SelectionCriterias");
+    },
+    /* Fallback, falls der Einsatz selbst keine Version-ID trägt: das GAV (Agreement) direkt holen —
+       liefert agreementVersions eingebettet, daraus die aktuell aktive Version herausfiltern und
+       deren MinimumSalary abfragen. So lässt sich ein GAV auch unabhängig vom einzelnen Einsatz
+       "auf tempdata recherchieren", solange wenigstens die Agreement-ID bekannt ist. */
+    getTempDataLabourStaffingAgreement: function (id) {
+      return request("staffing", "/TempDataLabourStaffingAgreements/" + encodeURIComponent(id));
     }
   };
 
