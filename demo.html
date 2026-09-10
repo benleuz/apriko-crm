@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.141.0"></script>
-<script src="apriko-api.js?v=1.141.0"></script>
-<script src="lohncheck.js?v=1.141.0"></script>
-<script src="personalbudget.js?v=1.141.0"></script>
-<script src="jahresbudget.js?v=1.141.0"></script>
-<script src="budgetpositionen.js?v=1.141.0"></script>
-<script src="lohnchecklistetemp.js?v=1.141.0"></script>
+<script src="apriko-filters.js?v=1.142.0"></script>
+<script src="apriko-api.js?v=1.142.0"></script>
+<script src="lohncheck.js?v=1.142.0"></script>
+<script src="personalbudget.js?v=1.142.0"></script>
+<script src="jahresbudget.js?v=1.142.0"></script>
+<script src="budgetpositionen.js?v=1.142.0"></script>
+<script src="lohnchecklistetemp.js?v=1.142.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.141.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.142.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12377,16 +12377,35 @@ async function rpApiLoadRoster(force){
       if(p.customerId && kuIds.indexOf(p.customerId) < 0) kuIds.push(p.customerId);
     });
     if(box) box.innerHTML = '🔌 <b>Einsatzliste geladen:</b> ' + imFenster.length + ' Einsätze — löse ' + maIds.length + ' Mitarbeitende und ' + kuIds.length + ' Kunden auf …';
+    /* Parallel statt nacheinander — bei z.B. 100 Mitarbeitenden + 30 Kunden macht das den
+       Unterschied zwischen 1-2 Minuten (130 Anfragen nacheinander) und ein paar Sekunden
+       (nur so viele Batches wie nötig). Begrenzte Parallelität (RP_KONKURRENZ gleichzeitig),
+       damit Proxy/API nicht mit hunderten gleichzeitigen Anfragen überflutet werden. */
     var mitarbeiter = {};
-    for(var mi = 0; mi < maIds.length; mi++){
-      try { var per = await AprikoApi.people.getIndividual(maIds[mi]); if(per) mitarbeiter[maIds[mi]] = { firstName: per.firstName, lastName: per.lastName, personNumber: per.personNumber, placements: byMa[maIds[mi]] }; }
-      catch(e){ /* einzelne Person übersprungen */ }
-    }
     var kunden = {};
-    for(var ki = 0; ki < kuIds.length; ki++){
-      var kr2 = await rpApiResolveKunde(kuIds[ki]);
-      if(kr2.name) kunden[kuIds[ki]] = { businessName: kr2.name };
+    var RP_KONKURRENZ = 8;
+    async function rpParallel(ids, worker){
+      var pos = 0;
+      async function arbeiter(){
+        while(pos < ids.length){
+          var idx = pos++; var id = ids[idx];
+          try { await worker(id); } catch(e){ /* einzelnes Element übersprungen */ }
+        }
+      }
+      var arbeiterListe = [];
+      for(var wi = 0; wi < Math.min(RP_KONKURRENZ, ids.length); wi++) arbeiterListe.push(arbeiter());
+      await Promise.all(arbeiterListe);
     }
+    await Promise.all([
+      rpParallel(maIds, async function(id){
+        var per = await AprikoApi.people.getIndividual(id);
+        if(per) mitarbeiter[id] = { firstName: per.firstName, lastName: per.lastName, personNumber: per.personNumber, placements: byMa[id] };
+      }),
+      rpParallel(kuIds, async function(id){
+        var kr2 = await rpApiResolveKunde(id);
+        if(kr2.name) kunden[id] = { businessName: kr2.name };
+      })
+    ]);
     rpRoster = { loadedAt: Date.now(), tage: ROSTER_TAGE, seiten: Math.min(ROSTER_MAX_SEITEN, placements.length ? Math.ceil(placements.length / 100) : 0), mitarbeiter: mitarbeiter, kunden: kunden, ladeFehler: ladeFehler };
     if(!ladeFehler) rpRosterToStorage(rpRoster);   // Fehlversuche nicht dauerhaft cachen — nur echte Erfolge
     rpRosterLoading = null;
