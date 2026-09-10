@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.146.0"></script>
-<script src="apriko-api.js?v=1.146.0"></script>
-<script src="lohncheck.js?v=1.146.0"></script>
-<script src="personalbudget.js?v=1.146.0"></script>
-<script src="jahresbudget.js?v=1.146.0"></script>
-<script src="budgetpositionen.js?v=1.146.0"></script>
-<script src="lohnchecklistetemp.js?v=1.146.0"></script>
+<script src="apriko-filters.js?v=1.148.0"></script>
+<script src="apriko-api.js?v=1.148.0"></script>
+<script src="lohncheck.js?v=1.148.0"></script>
+<script src="personalbudget.js?v=1.148.0"></script>
+<script src="jahresbudget.js?v=1.148.0"></script>
+<script src="budgetpositionen.js?v=1.148.0"></script>
+<script src="lohnchecklistetemp.js?v=1.148.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.146.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.148.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12977,13 +12977,11 @@ function rpApiRender(){
   var gavApi = beste.tempDataLabourStaffingAgreementName || '';
   var bc = beste.basicPlacementCompensation || {};
   var addl = beste.additionalPlacementCompensations || [];
-  var gewaehlt = (typeof GAV !== 'undefined' && $('rpBranche') && GAV[$('rpBranche').value]) ? GAV[$('rpBranche').value].name : '';
-  var gavZeile = gavApi
-    ? 'GAV laut Einsatz: <b>' + esc(gavApi) + '</b>' +
-      (gewaehlt ? (rpApiNameMatch(gavApi, gewaehlt)
-        ? ' <span style="color:#2e7d32">✓ passt zum gewählten Regelwerk</span>'
-        : ' <span style="color:#c62828">⚠ gewähltes Regelwerk: ' + esc(gewaehlt) + ' — bitte prüfen</span>') : '')
-    : '';
+  /* Kein Vergleich mehr gegen die manuelle Branche-Auswahl — die ist standardmässig ausgeblendet
+     (siehe rpApiSetManual) und ihr Wert ist irrelevant/irreführend, solange man sie nicht sieht.
+     Massgeblich ist ausschliesslich der Einsatz aus der API; die echte Prüfung (lokale Tabelle
+     per Stichwort-Erkennung oder tempdata) passiert erst beim Klick auf "Einsatz übernehmen". */
+  var gavZeile = gavApi ? 'GAV laut Einsatz: <b>' + esc(gavApi) + '</b>' : '';
   var lohnTeile = [];
   if(typeof bc.basicPlacementSalary === 'number') lohnTeile.push('Grundlohn ' + bc.basicPlacementSalary.toFixed(2));
   if(typeof bc.basicPlacementRate === 'number') lohnTeile.push('Tarif ' + bc.basicPlacementRate.toFixed(2));
