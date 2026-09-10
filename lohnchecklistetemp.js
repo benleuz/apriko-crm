@@ -1,34 +1,46 @@
 /* ============ Checkliste Lohn Temp 2.0 (Workflows) ============
    Pro KUNDE + LOHNPERIODE (Monat) eine Checkliste mit einem oder mehreren
-   LOHNLÄUFEN. Jeder Lohnlauf hat dieselben Kontrollpunkte als Checkbox,
-   je mit eigenem Freitext-Bemerkungsfeld, plus zwei grosse Freitextfelder
-   pro Lohnlauf: «Bemerkungen aktuelle Lohnperiode» und «Hinweise für
-   Folgemonat». Kundenspezifische Kontrollpunkte (hinzufügen/ändern/
-   entfernen) gelten automatisch für alle künftigen Monate DIESES Kunden;
-   bei jeder Änderung fragt das Tool, ob sie stattdessen auf ALLE Kunden
-   (= Standard-Vorlage) übertragen werden soll. Dokumente hängen dauerhaft
-   am Kunden (nicht an Monat/Lauf). «Hinweise für Folgemonat» werden beim
-   Öffnen einer neuen Periode automatisch übernommen und bleiben sichtbar,
-   bis sie aktiv gelöscht werden.
+   LOHNLÄUFEN.
+
+   ZUORDNUNG (Stand nach Feedback vom 10.09.2026 — wichtig für die Struktur):
+   - Checkbox-Status + Bemerkung EINER Checkbox → gehört zum einzelnen LOHNLAUF.
+   - Die beiden grossen Freitextfelder «Bemerkungen aktuelle Lohnperiode» und
+     «Hinweise für Folgemonat» sowie die periodenbezogenen Dokumente/Bilder
+     → gehören zu KUNDE + PERIODE (Monat), NICHT zum einzelnen Lohnlauf.
+     Sie sind in JEDEM Lohnlauf derselben Periode identisch sichtbar/editierbar.
+   - «Hinweise für Folgemonat» wird automatisch MONAT FÜR MONAT weitergeführt
+     (nicht nur einmal in den nächsten Monat), bis der User ihn aktiv löscht.
+     Er erscheint gleichzeitig synchron an zwei Stellen: im Freitextfeld selbst
+     und als rote Hervorhebung oben bei der Kunde/Monat-Auswahl — beide zeigen
+     IMMER denselben aktuellen Inhalt (keine getrennte Kopie).
+   - Kundenspezifische Kontrollpunkte, Dokumente/Anleitungen (Kunde, dauerhaft)
+     und kundenspezifische Anpassungen der Standard-Checkliste (inkl. deren
+     Reihenfolge) → gehören dauerhaft zum KUNDEN, unabhängig von der Periode.
+   - Periodenbezogene Dokumente/Bilder → gehören zu KUNDE + PERIODE, sichtbar
+     in allen Lohnläufen dieser Periode, werden NICHT in den Folgemonat
+     übernommen (anders als die dauerhaften Kunden-Dokumente).
+   - Reihenfolge kundenspezifischer Kontrollpunkte ist frei verschiebbar
+     (auch zwischen Standard-Kontrollpunkten) und wird gespeichert; wird eine
+     Änderung «für alle Kunden» übernommen, wird auch die Reihenfolge Teil
+     der Standard-Checkliste.
 
    SPEICHERUNG: JSON-Dateien im SharePoint-Drive (NICHT die 255-Zeichen-
-   begrenzte Title-Spalte der «Budget»-Liste — die Freitextfelder hier
-   würden das sprengen). Ordner CRM-Budgetdaten (wie fb_notes_*.json):
+   begrenzte Title-Spalte der «Budget»-Liste). Ordner CRM-Budgetdaten:
      lct_standard.json          — globale Standard-Vorlage (Kontrollpunkte)
      lct_kunde_<companyId>.json — pro Kunde: Anpassungen, alle Perioden/
-                                   Lohnläufe, Dokumente
-   Dokument-Dateien selbst liegen unter CRM-Budgetdaten/LCT-Dokumente/<companyId>/.
+                                   Lohnläufe, dauerhafte Dokumente
+   Dokument-Dateien: CRM-Budgetdaten/LCT-Dokumente/<companyId>/ (dauerhaft)
+                      CRM-Budgetdaten/LCT-Dokumente/<companyId>/<YYYY-MM>/ (periodenbezogen)
 
    Abhängigkeiten: index.html (graph, siteId, escape, toast, render, val,
-   showModal, closeModal, cache.companies, FB_BUCH_DIR). */
+   showModal, closeModal, cache.companies, getToken). */
 
-const LCT_VERSION = "1.140.0";
+const LCT_VERSION = "1.147.0";
 const LCT_DIR = "CRM-Budgetdaten";
 const LCT_DOC_DIR = "LCT-Dokumente";
 
-/* Standard-Kontrollpunkte gemäss Anforderung — Gruppen 1–10, insgesamt 11 Checkboxen
-   (Gruppe 9 hat zwei). id ist stabil und wird referenziert (nie umbenennen, sonst
-   verlieren bestehende Lohnläufe den Bezug — stattdessen text bearbeiten). */
+/* Standard-Kontrollpunkte — Gruppen 1–10, insgesamt 11 Checkboxen (Gruppe 9 hat zwei).
+   id ist stabil und wird referenziert (nie umbenennen — stattdessen text bearbeiten). */
 const LCT_STANDARD_BASIS = [
   { id: "zl1", gruppe: "1. Zahlungslisten", text: "Zahlungslisten alle auf «ausgeführt» stellen, bevor Lohn gerechnet wird" },
   { id: "rap1", gruppe: "2. Rapporterfassung", text: "Alle Rapporte sind erfasst" },
@@ -45,12 +57,12 @@ const LCT_STANDARD_BASIS = [
 
 /* ---------- Laufender Zustand ---------- */
 const lctState = {
-  monat: null,           // "YYYY-MM"
+  monat: null,             // "YYYY-MM"
   kundeId: null,
-  laufIdx: 0,             // welcher Lohnlauf ist gerade sichtbar (0-basiert)
-  standard: null,          // { items:[...], updatedAt } — einmal geladen, bleibt im Speicher
+  laufIdx: 0,               // welcher Lohnlauf ist gerade sichtbar (0-basiert)
+  standard: null,            // { items:[...], updatedAt } — einmal geladen, bleibt im Speicher
   standardLoading: null,
-  kunde: null,            // aktuell geladene Kundendatei (siehe lctLeer())
+  kunde: null,              // aktuell geladene Kundendatei (siehe lctLeer())
   kundeLoading: null,
   neuerPunktText: ""
 };
@@ -73,6 +85,31 @@ function lctMonatVorher(ym) {
 
 function lctLeer() {
   return { customExtra: [], customOverrides: {}, customRemoved: [], periods: {}, documents: [] };
+}
+function lctNeueLohnperiode(hinweisVorbelegt) {
+  return { laeufe: [lctNeuerLaufObjekt()], bemerkungPeriode: "", hinweisFolgemonat: hinweisVorbelegt || "", documents: [] };
+}
+function lctNeuerLaufObjekt() {
+  return { items: {} };
+}
+/* Altdaten-Migration: frühe Testversion hatte bemerkungPeriode/hinweisFolgemonat/documents
+   fälschlich pro Lohnlauf statt pro Periode gespeichert (siehe Feedback 10.09.2026). Beim Laden
+   auf das neue Format heben, damit nichts verloren geht. */
+function lctMigrierePeriode(per) {
+  if (!per) return per;
+  if (typeof per.bemerkungPeriode !== "string") per.bemerkungPeriode = "";
+  if (typeof per.hinweisFolgemonat !== "string") per.hinweisFolgemonat = "";
+  if (!Array.isArray(per.documents)) per.documents = [];
+  if (Array.isArray(per.laeufe)) {
+    per.laeufe.forEach(l => {
+      if (typeof l.bemerkungPeriode === "string" && l.bemerkungPeriode.trim() && !per.bemerkungPeriode) per.bemerkungPeriode = l.bemerkungPeriode;
+      if (typeof l.hinweisFolgemonat === "string" && l.hinweisFolgemonat.trim() && !per.hinweisFolgemonat) per.hinweisFolgemonat = l.hinweisFolgemonat;
+      delete l.bemerkungPeriode; delete l.hinweisFolgemonat;
+    });
+  } else {
+    per.laeufe = [lctNeuerLaufObjekt()];
+  }
+  return per;
 }
 
 /* ---------- Laden ---------- */
@@ -123,6 +160,9 @@ async function lctLoadKunde(companyId, force) {
     data.customRemoved = data.customRemoved || [];
     data.periods = data.periods || {};
     data.documents = data.documents || [];
+    Object.keys(data.periods).forEach(ym => { data.periods[ym] = lctMigrierePeriode(data.periods[ym]); });
+    // order-Feld für Alt-Zusatzpunkte ohne order ergänzen (ans Ende, in Erstellungsreihenfolge)
+    data.customExtra.forEach((it, i) => { if (typeof it.order !== "number") it.order = 1000 + i; });
     data.__id = companyId;
     lctState.kunde = data;
     lctState.kundeLoading = null;
@@ -147,18 +187,23 @@ async function lctSaveKunde() {
   }
 }
 
-/* ---------- Effektive Kontrollpunkt-Liste: Standard minus entfernte, mit Überschreibungen, plus Zusätze ---------- */
+/* ---------- Effektive Kontrollpunkt-Liste ----------
+   Standard-Items behalten ihre Array-Position als Ordnungszahl (0,1,2,…).
+   Zusatzpunkte tragen ein eigenes order (float) und werden anhand dessen
+   zwischen die Standard-Items einsortiert — so lässt sich ein Zusatzpunkt
+   frei zwischen zwei beliebige Kontrollpunkte schieben (siehe lctVerschieben). */
 function lctEffektiveItems() {
   const std = (lctState.standard && lctState.standard.items) || LCT_STANDARD_BASIS;
   const k = lctState.kunde || lctLeer();
   const basis = std
     .filter(it => k.customRemoved.indexOf(it.id) < 0)
-    .map(it => k.customOverrides[it.id] ? Object.assign({}, it, { text: k.customOverrides[it.id] }) : it);
+    .map((it, i) => Object.assign({ order: i }, it, k.customOverrides[it.id] ? { text: k.customOverrides[it.id] } : {}));
   const extra = (k.customExtra || []).map(it => Object.assign({ kundenspezifisch: true }, it));
-  return basis.concat(extra);
+  return basis.concat(extra).sort((a, b) => a.order - b.order);
 }
 
-/* ---------- Periode / Lohnläufe sicherstellen (inkl. automatische Übernahme des Vormonat-Hinweises) ---------- */
+/* ---------- Periode / Lohnläufe sicherstellen (inkl. dauerhafter Monat-für-Monat-
+   Weiterführung des Folgemonat-Hinweises, bis der User ihn aktiv löscht) ---------- */
 function lctPeriode(anlegenWennFehlt) {
   const k = lctState.kunde;
   if (!k) return null;
@@ -166,29 +211,11 @@ function lctPeriode(anlegenWennFehlt) {
   if (!k.periods[ym]) {
     if (!anlegenWennFehlt) return null;
     const vorher = lctMonatVorher(ym);
-    let hinweis = "";
     const pv = k.periods[vorher];
-    if (pv && pv.laeufe && pv.laeufe.length) {
-      const letzterHinweis = pv.laeufe[pv.laeufe.length - 1].hinweisFolgemonat || "";
-      if (letzterHinweis.trim()) hinweis = letzterHinweis;
-    }
-    k.periods[ym] = { laeufe: [lctNeuerLaufObjekt(hinweis)] };
+    const hinweis = (pv && (pv.hinweisFolgemonat || "").trim()) ? pv.hinweisFolgemonat : "";
+    k.periods[ym] = lctNeueLohnperiode(hinweis);
   }
   return k.periods[ym];
-}
-function lctNeuerLaufObjekt(hinweisVorbelegt) {
-  return { items: {}, bemerkungPeriode: "", hinweisFolgemonat: hinweisVorbelegt || "" };
-}
-function lctVormonatHinweisAnzeige() {
-  // Zeigt den Hinweis aus dem Vormonat separat an (auch wenn schon ins Feld übernommen), damit
-  // der Ursprung klar ist — Anforderung: «Hinweis aus Vormonat» deutlich hervorgehoben, rot.
-  const k = lctState.kunde;
-  if (!k) return "";
-  const vorher = lctMonatVorher(lctState.monat);
-  const pv = k.periods[vorher];
-  if (!pv || !pv.laeufe || !pv.laeufe.length) return "";
-  const h = pv.laeufe[pv.laeufe.length - 1].hinweisFolgemonat || "";
-  return h.trim();
 }
 
 /* ---------- Rendering ---------- */
@@ -223,7 +250,9 @@ function lctRenderBody(el) {
   if (lctState.laufIdx >= per.laeufe.length) lctState.laufIdx = per.laeufe.length - 1;
   const lauf = per.laeufe[lctState.laufIdx];
   const items = lctEffektiveItems();
-  const vormonatHinweis = lctState.laufIdx === 0 ? lctVormonatHinweisAnzeige() : "";
+  // Hinweis aus Vormonat: EIN Feld (per.hinweisFolgemonat), zwei synchrone Anzeigen — Textarea unten
+  // und rote Box oben. Immer sichtbar, unabhängig davon welcher Lohnlauf gerade offen ist.
+  const hinweisAktuell = (per.hinweisFolgemonat || "").trim();
 
   // Gruppieren nach .gruppe für die Darstellung
   const gruppen = [];
@@ -235,13 +264,15 @@ function lctRenderBody(el) {
 
   const k = lctState.kunde;
   const doks = k.documents || [];
+  const perDoks = per.documents || [];
+  const kundeName = (lctKunden().find(c => c.id == lctState.kundeId) || {}).Title || "";
 
   el.innerHTML = `
     <div class="detail-grid" style="grid-template-columns:1fr">
-      ${vormonatHinweis ? `
+      ${hinweisAktuell ? `
         <div class="panel" style="border-left:4px solid #c62828;background:#FEF2F2">
-          <div class="panel-h" style="color:#7f1d1d">⚠ Hinweis aus Vormonat (${escape(lctMonatLabel(lctMonatVorher(lctState.monat)))})</div>
-          <div style="padding:12px 16px;color:#7f1d1d;font-size:13px;white-space:pre-wrap">${escape(vormonatHinweis)}</div>
+          <div class="panel-h" style="color:#7f1d1d">⚠ Hinweis aus Vormonat</div>
+          <div style="padding:12px 16px;color:#7f1d1d;font-size:13px;white-space:pre-wrap">${escape(hinweisAktuell)}</div>
         </div>` : ""}
 
       <div class="panel">
@@ -253,7 +284,7 @@ function lctRenderBody(el) {
           </div>
         </div>
         <div style="padding:14px 16px">
-          <div style="font-size:11px;color:var(--text-faint);margin-bottom:10px">Erledigte Arbeiten im Kontrollkästchen ankreuzen.</div>
+          <div style="font-size:11px;color:var(--text-faint);margin-bottom:10px">Erledigte Arbeiten im Kontrollkästchen ankreuzen. Bemerkungsfelder und Dokumente unten gelten für die ganze Periode — bei allen Lohnläufen gleich.</div>
           ${gruppen.map(g => `
             <div style="margin-bottom:14px">
               <div style="font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">${escape(g.name)}</div>
@@ -264,11 +295,13 @@ function lctRenderBody(el) {
                   <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
                     <input type="checkbox" ${st.checked ? "checked" : ""} onchange="lctToggle('${it.id}',this.checked)" style="margin-top:3px;width:auto">
                     <span style="flex:1">${escape(it.text)}${it.kundenspezifisch ? ` <span style="font-size:10px;color:var(--accent,#5ad275)">· kundenspezifisch</span>` : ""}</span>
-                    ${!it.kundenspezifisch || true ? `
                     <span style="display:flex;gap:4px">
+                      ${it.kundenspezifisch ? `
+                      <button class="btn btn-sm" onclick="lctVerschieben('${it.id}',-1)" title="Nach oben verschieben">↑</button>
+                      <button class="btn btn-sm" onclick="lctVerschieben('${it.id}',1)" title="Nach unten verschieben">↓</button>` : ""}
                       <button class="btn btn-sm" onclick="lctBearbeiten('${it.id}')" title="Text bearbeiten">✎</button>
                       <button class="btn btn-sm" onclick="lctEntfernen('${it.id}')" title="Entfernen">✕</button>
-                    </span>` : ""}
+                    </span>
                   </label>
                   ${it.hinweis ? `<div style="font-size:11px;color:var(--text-faint);margin:4px 0 0 26px">${escape(it.hinweis)}</div>` : ""}
                   <input type="text" placeholder="Bemerkung …" value="${escape(st.bemerkung || "")}"
@@ -287,18 +320,32 @@ function lctRenderBody(el) {
           </div>
 
           <div class="field" style="margin-top:16px">
-            <label>Bemerkungen / offene Punkte aktuelle Lohnperiode</label>
-            <textarea rows="3" onchange="lctSetFeld('bemerkungPeriode',this.value)">${escape(lauf.bemerkungPeriode || "")}</textarea>
+            <label>Bemerkungen / offene Punkte aktuelle Lohnperiode <span style="font-weight:400;color:var(--text-faint);font-size:11px">— gilt für die ganze Periode, nicht nur diesen Lohnlauf</span></label>
+            <textarea rows="3" onchange="lctSetPeriodeFeld('bemerkungPeriode',this.value)">${escape(per.bemerkungPeriode || "")}</textarea>
           </div>
           <div class="field" style="margin-top:10px">
-            <label>Hinweise / Bemerkungen für Folgemonat <span style="font-weight:400;color:var(--text-faint);font-size:11px">— wird automatisch in den nächsten Monat dieses Kunden übernommen, solange nicht gelöscht</span></label>
-            <textarea rows="3" onchange="lctSetFeld('hinweisFolgemonat',this.value)">${escape(lauf.hinweisFolgemonat || "")}</textarea>
+            <label>Hinweise / Bemerkungen für Folgemonat <span style="font-weight:400;color:var(--text-faint);font-size:11px">— wird automatisch Monat für Monat weitergeführt, bis aktiv gelöscht</span></label>
+            <textarea rows="3" onchange="lctSetPeriodeFeld('hinweisFolgemonat',this.value)">${escape(per.hinweisFolgemonat || "")}</textarea>
           </div>
         </div>
       </div>
 
       <div class="panel">
-        <div class="panel-h">Dokumente / Anleitungen für ${escape((lctKunden().find(c => c.id == lctState.kundeId) || {}).Title || "")} <span style="font-weight:400;color:var(--text-faint);font-size:11px">— dauerhaft, nicht an Monat gebunden</span></div>
+        <div class="panel-h">Dokumente für ${escape(kundeName)} / ${escape(lctMonatLabel(lctState.monat))} <span style="font-weight:400;color:var(--text-faint);font-size:11px">— nur diese Periode, in allen Lohnläufen sichtbar, wird NICHT in den Folgemonat übernommen</span></div>
+        <div style="padding:12px 16px">
+          ${perDoks.length ? perDoks.map((d, i) => `
+            <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+              <a href="${escape(d.url)}" target="_blank" style="flex:1">${escape(d.name)}</a>
+              <span style="font-size:11px;color:var(--text-faint)">${d.uploadedAt ? new Date(d.uploadedAt).toLocaleDateString("de-CH") : ""}</span>
+              <button class="btn btn-sm" onclick="lctPeriodeDokEntfernen(${i})">✕</button>
+            </div>`).join("") : `<div style="color:var(--text-faint);font-size:12px">Keine Dokumente für diese Periode hinterlegt.</div>`}
+          <input type="file" id="lct-perdok-file" style="display:none" onchange="lctPeriodeDokUpload(this)">
+          <button class="btn btn-sm" style="margin-top:10px" onclick="document.getElementById('lct-perdok-file').click()">📎 Dokument für diese Periode hochladen</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h">Dokumente / Anleitungen für ${escape(kundeName)} <span style="font-weight:400;color:var(--text-faint);font-size:11px">— dauerhaft, nicht an Monat gebunden</span></div>
         <div style="padding:12px 16px">
           ${doks.length ? doks.map((d, i) => `
             <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
@@ -325,7 +372,7 @@ async function lctSetKunde(id) {
 function lctWaehleLauf(i) { lctState.laufIdx = i; render(); }
 async function lctNeuerLauf() {
   const per = lctPeriode(true);
-  per.laeufe.push(lctNeuerLaufObjekt(""));
+  per.laeufe.push(lctNeuerLaufObjekt());
   lctState.laufIdx = per.laeufe.length - 1;
   render();
   try { await lctSaveKunde(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
@@ -342,11 +389,14 @@ async function lctBemerkung(itemId, text) {
   lauf.items[itemId].bemerkung = text;
   try { await lctSaveKunde(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
 }
-async function lctSetFeld(feld, text) {
-  const lauf = lctPeriode(true).laeufe[lctState.laufIdx];
-  lauf[feld] = text;
+/* Bemerkungsfelder gehören zur PERIODE (Kunde+Monat) — gelten für alle Lohnläufe gleich,
+   siehe Feedback 10.09.2026. Nach dem Ändern von hinweisFolgemonat neu zeichnen, damit die
+   rote Box oben sofort synchron mitzieht. */
+async function lctSetPeriodeFeld(feld, text) {
+  const per = lctPeriode(true);
+  per[feld] = text;
   try { await lctSaveKunde(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
-  if (feld === "hinweisFolgemonat") render();   // Anzeige "Hinweis aus Vormonat" bei anderen Perioden aktuell halten
+  if (feld === "hinweisFolgemonat") render();
 }
 
 /* Änderung an Kontrollpunkten: immer fragen, ob für alle Kunden (Standard) oder nur diesen. */
@@ -355,7 +405,7 @@ function lctFrageGlobal(beschreibung, weiterFn) {
     <p style="margin-bottom:14px">${escape(beschreibung)}</p>
     <p><b>Soll diese Änderung auf alle Kunden übertragen werden?</b></p>
     <p style="font-size:12px;color:var(--text-dim);margin-top:6px">
-      <b>Ja</b> → wird Teil der Standard-Checkliste und gilt künftig für alle Kunden.<br>
+      <b>Ja</b> → wird Teil der Standard-Checkliste (inkl. Reihenfolge) und gilt künftig für alle Kunden.<br>
       <b>Nein</b> → gilt nur für den aktuell ausgewählten Kunden.
     </p>
   `, [
@@ -380,7 +430,8 @@ async function lctHinzufuegenAusfuehren(global) {
     lctState.standard.items.push({ id, gruppe: "Zusätzlich", text });
     try { await lctSaveStandard(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
   } else {
-    lctState.kunde.customExtra.push({ id, gruppe: "Zusätzlich (kundenspezifisch)", text });
+    const maxOrder = Math.max(999, ...lctEffektiveItems().map(x => x.order));
+    lctState.kunde.customExtra.push({ id, gruppe: "Zusätzlich (kundenspezifisch)", text, order: maxOrder + 1 });
     try { await lctSaveKunde(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
   }
   lctState.neuerPunktText = "";
@@ -451,7 +502,34 @@ async function lctEntfernenAusfuehren(global) {
   render();
 }
 
-/* ---------- Dokumente ---------- */
+/* ---------- Reihenfolge kundenspezifischer Kontrollpunkte ----------
+   Verschiebt NUR den bewegten Zusatzpunkt (fractional/midpoint-Einordnung) — Standard-Items
+   und andere Zusatzpunkte bleiben unverändert. So kann ein Zusatzpunkt frei zwischen zwei
+   beliebige Kontrollpunkte geschoben werden, auch zwischen zwei Standard-Punkte. */
+async function lctVerschieben(itemId, richtung) {
+  const merged = lctEffektiveItems();
+  const idx = merged.findIndex(x => x.id === itemId);
+  if (idx < 0) return;
+  const neuIdx = idx + richtung;
+  if (neuIdx < 0 || neuIdx >= merged.length) return;
+  const extra = lctState.kunde.customExtra.find(x => x.id === itemId);
+  if (!extra) return;   // Standard-Items werden hier nicht verschoben
+  let neueOrder;
+  if (richtung < 0) {
+    const oberGrenze = merged[neuIdx].order;
+    const untereGrenze = neuIdx > 0 ? merged[neuIdx - 1].order : oberGrenze - 2;
+    neueOrder = (oberGrenze + untereGrenze) / 2;
+  } else {
+    const untereGrenze = merged[neuIdx].order;
+    const obereGrenze = neuIdx < merged.length - 1 ? merged[neuIdx + 1].order : untereGrenze + 2;
+    neueOrder = (untereGrenze + obereGrenze) / 2;
+  }
+  extra.order = neueOrder;
+  render();
+  try { await lctSaveKunde(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+}
+
+/* ---------- Dokumente: dauerhaft (Kunde) ---------- */
 async function lctDokUpload(input) {
   const file = input.files && input.files[0];
   if (!file) return;
@@ -481,6 +559,47 @@ async function lctDokUpload(input) {
 }
 async function lctDokEntfernen(idx) {
   lctState.kunde.documents.splice(idx, 1);
+  try { await lctSaveKunde(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  render();
+}
+
+/* ---------- Dokumente: periodenbezogen (Kunde + Monat, nicht in Folgemonat übernommen) ---------- */
+async function lctPeriodeDokUpload(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const companyId = lctState.kundeId, ym = lctState.monat;
+  const token = await getToken();
+  const folder = `${LCT_DOC_DIR}/${companyId}/${ym}`;
+  const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/drive/root:/${LCT_DIR}/${encodeURIComponent(folder)}/${encodeURIComponent(file.name)}:/content`;
+  const put = () => fetch(url, { method: "PUT", headers: { Authorization: "Bearer " + token }, body: file });
+  let res = await put();
+  if (!res.ok && (res.status === 404 || res.status === 400)) {
+    // Ordnerkette sicherstellen: LCT-Dokumente → <companyId> → <YYYY-MM>
+    await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/drive/root:/${LCT_DIR}:/children`, {
+      method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: LCT_DOC_DIR, folder: {}, "@microsoft.graph.conflictBehavior": "replace" })
+    }).catch(() => {});
+    await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/drive/root:/${LCT_DIR}/${encodeURIComponent(LCT_DOC_DIR)}:/children`, {
+      method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: String(companyId), folder: {}, "@microsoft.graph.conflictBehavior": "replace" })
+    }).catch(() => {});
+    await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/drive/root:/${LCT_DIR}/${encodeURIComponent(LCT_DOC_DIR)}/${encodeURIComponent(String(companyId))}:/children`, {
+      method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: ym, folder: {}, "@microsoft.graph.conflictBehavior": "replace" })
+    }).catch(() => {});
+    res = await put();
+  }
+  if (!res.ok) { toast("Hochladen fehlgeschlagen (HTTP " + res.status + ")", true); return; }
+  const item = await res.json();
+  const per = lctPeriode(true);
+  per.documents.push({ name: file.name, url: item.webUrl, uploadedAt: new Date().toISOString() });
+  try { await lctSaveKunde(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  input.value = "";
+  render();
+}
+async function lctPeriodeDokEntfernen(idx) {
+  const per = lctPeriode(true);
+  per.documents.splice(idx, 1);
   try { await lctSaveKunde(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
   render();
 }
