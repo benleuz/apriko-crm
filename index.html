@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.142.0"></script>
-<script src="apriko-api.js?v=1.142.0"></script>
-<script src="lohncheck.js?v=1.142.0"></script>
-<script src="personalbudget.js?v=1.142.0"></script>
-<script src="jahresbudget.js?v=1.142.0"></script>
-<script src="budgetpositionen.js?v=1.142.0"></script>
-<script src="lohnchecklistetemp.js?v=1.142.0"></script>
+<script src="apriko-filters.js?v=1.143.0"></script>
+<script src="apriko-api.js?v=1.143.0"></script>
+<script src="lohncheck.js?v=1.143.0"></script>
+<script src="personalbudget.js?v=1.143.0"></script>
+<script src="jahresbudget.js?v=1.143.0"></script>
+<script src="budgetpositionen.js?v=1.143.0"></script>
+<script src="lohnchecklistetemp.js?v=1.143.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.142.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.143.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12353,15 +12353,25 @@ async function rpApiLoadRoster(force){
     // eine Seite leer ist oder der Sicherheitsdeckel greift. Sortierreihenfolge ist nicht
     // dokumentiert, deshalb wird über alle gelieferten Seiten client-seitig nach Datum gefiltert.
     var ladeFehler = null;
+    var ladeStart = Date.now();
+    var ROSTER_PAGE_SIZE = 500;   // grössere Seiten = weniger Anfragen hintereinander durch den Tunnel
     for(var pi = 0; pi < ROSTER_MAX_SEITEN; pi++){
-      if(box) box.innerHTML = '🔌 <b>Einsatzliste wird geladen</b> (Seite ' + (pi + 1) + ') — einmalig, danach ' + ROSTER_TTL_MIN + ' Min. aus dem Cache …';
+      var sekunden = Math.round((Date.now() - ladeStart) / 1000);
+      if(box) box.innerHTML = '🔌 <b>Einsatzliste wird geladen</b> — Seite ' + (pi + 1) + ' (' + placements.length + ' Einsätze bisher, ' + sekunden + 's) — einmalig, danach ' + ROSTER_TTL_MIN + ' Min. aus dem Cache …';
       var rows;
-      try { rows = await AprikoApi.staffing.listStaffLease(pi, 100); }
+      var seitenStart = Date.now();
+      try { rows = await AprikoApi.staffing.listStaffLease(pi, ROSTER_PAGE_SIZE); }
       catch(e){ ladeFehler = (e && e.message) || String(e); break; }
       if(!rows || !rows.length) break;
       placements = placements.concat(rows);
+      // Warnung, falls eine einzelne Seite selbst schon sehr lange braucht (z.B. Tunnel-Latenz) —
+      // hilft zu unterscheiden zwischen "viele Seiten nötig" und "jede Seite einzeln ist langsam".
+      if(box && (Date.now() - seitenStart) > 4000){
+        box.innerHTML += '<br><span style="color:var(--rp-grey);font-size:11px">Seite ' + (pi + 1) + ' brauchte ' + Math.round((Date.now() - seitenStart) / 1000) + 's — der Proxy/Tunnel ist hier der Flaschenhals, nicht die Anzahl Seiten.</span>';
+      }
     }
-    if(ladeFehler && box){ box.innerHTML = '🔌 <b>Einsatzliste:</b> Laden fehlgeschlagen — ' + esc(ladeFehler).slice(0, 300); }
+    var ladeSekundenGesamt = Math.round((Date.now() - ladeStart) / 1000);
+    if(ladeFehler && box){ box.innerHTML = '🔌 <b>Einsatzliste:</b> Laden fehlgeschlagen nach ' + ladeSekundenGesamt + 's — ' + esc(ladeFehler).slice(0, 300); }
     var imFenster = placements.filter(function(p){
       var ein = p.entryDate ? new Date(p.entryDate) : null;
       var aus = p.withdrawalDate ? new Date(p.withdrawalDate) : null;
@@ -12376,7 +12386,8 @@ async function rpApiLoadRoster(force){
       }
       if(p.customerId && kuIds.indexOf(p.customerId) < 0) kuIds.push(p.customerId);
     });
-    if(box) box.innerHTML = '🔌 <b>Einsatzliste geladen:</b> ' + imFenster.length + ' Einsätze — löse ' + maIds.length + ' Mitarbeitende und ' + kuIds.length + ' Kunden auf …';
+    var aufloeseStart = Date.now();
+    if(box) box.innerHTML = '🔌 <b>Einsatzliste geladen</b> (' + ladeSekundenGesamt + 's, ' + placements.length + ' Einsätze total, ' + imFenster.length + ' im Fenster) — löse ' + maIds.length + ' Mitarbeitende und ' + kuIds.length + ' Kunden auf …';
     /* Parallel statt nacheinander — bei z.B. 100 Mitarbeitenden + 30 Kunden macht das den
        Unterschied zwischen 1-2 Minuten (130 Anfragen nacheinander) und ein paar Sekunden
        (nur so viele Batches wie nötig). Begrenzte Parallelität (RP_KONKURRENZ gleichzeitig),
@@ -12406,7 +12417,12 @@ async function rpApiLoadRoster(force){
         if(kr2.name) kunden[id] = { businessName: kr2.name };
       })
     ]);
-    rpRoster = { loadedAt: Date.now(), tage: ROSTER_TAGE, seiten: Math.min(ROSTER_MAX_SEITEN, placements.length ? Math.ceil(placements.length / 100) : 0), mitarbeiter: mitarbeiter, kunden: kunden, ladeFehler: ladeFehler };
+    var aufloeseSekunden = Math.round((Date.now() - aufloeseStart) / 1000);
+    if(box){
+      box.innerHTML = '🔌 <b>Einsatzliste fertig geladen</b> — ' + Object.keys(mitarbeiter).length + ' Mitarbeitende, ' + Object.keys(kunden).length + ' Kunden.<br>' +
+        '<span style="color:var(--rp-grey);font-size:11px">Zeit: ' + ladeSekundenGesamt + 's Liste laden (' + placements.length + ' Einsätze über mehrere Seiten) + ' + aufloeseSekunden + 's Namen auflösen.</span>';
+    }
+    rpRoster = { loadedAt: Date.now(), tage: ROSTER_TAGE, seiten: Math.min(ROSTER_MAX_SEITEN, placements.length ? Math.ceil(placements.length / ROSTER_PAGE_SIZE) : 0), mitarbeiter: mitarbeiter, kunden: kunden, ladeFehler: ladeFehler };
     if(!ladeFehler) rpRosterToStorage(rpRoster);   // Fehlversuche nicht dauerhaft cachen — nur echte Erfolge
     rpRosterLoading = null;
     return rpRoster;
