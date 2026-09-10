@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.151.0"></script>
-<script src="apriko-api.js?v=1.151.0"></script>
-<script src="lohncheck.js?v=1.151.0"></script>
-<script src="personalbudget.js?v=1.151.0"></script>
-<script src="jahresbudget.js?v=1.151.0"></script>
-<script src="budgetpositionen.js?v=1.151.0"></script>
-<script src="lohnchecklistetemp.js?v=1.151.0"></script>
+<script src="apriko-filters.js?v=1.152.0"></script>
+<script src="apriko-api.js?v=1.152.0"></script>
+<script src="lohncheck.js?v=1.152.0"></script>
+<script src="personalbudget.js?v=1.152.0"></script>
+<script src="jahresbudget.js?v=1.152.0"></script>
+<script src="budgetpositionen.js?v=1.152.0"></script>
+<script src="lohnchecklistetemp.js?v=1.152.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.151.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.152.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -11974,8 +11974,9 @@ var GAV = {
     modell: 'Jahresarbeitszeit 2\'200 h (≈183.33 h/Monat); Wochenarbeitszeit variabel 35-47 h',
     sollTag: null,            // Jahresmodell, kein fixes Tagessoll
     sollHerkunft: 'Jährliche Bruttosollarbeitszeit 2\'200 h ÷ 12 = 183.33 h/Monat (Art. 20/31)',
-    ueberstundenBis: 47,      // zuschlagsfreie Überstunden bis 47h/Woche (Freizeitausgleich)
-    tagesGrenze: null,
+    ueberstundenBis: 47,      // zuschlagsfreie Überstunden bis 47h/Woche (Freizeitausgleich) — sourced
+    normal: 42.31,             // errechnet aus 2'200 h/Jahr ÷ 52 Wochen (Quelle nennt kein fixes Wochenmass, nur das Jahresmass — Berechnungsgrundlage für sollOf()/Überstunden, nicht erfunden sondern hergeleitet)
+    tagesGrenze: 99,           // keine tägliche Überzeit-Schwelle im Quelltext gefunden — hoch angesetzt, damit dieser Teil der Rechnung real nie greift, statt eine geratene Zahl zu verwenden. Bei Bedarf im Originaltext (Art. 23/36) nachschlagen.
     zuschlagSatz: 25,         // % Zeitzuschlag über 47h/Woche, Ausgleich bis 31.3. Folgejahr
     konto: 'Jahresarbeitszeit 2\'200 h; bis 47 h/Wo zuschlagsfrei (Freizeitausgleich), darüber 25% Zeitzuschlag. Ferien 8.33% (<50J) / 10.64% (≥50J); Feiertagsentschädigung 3.59% (Stundenlohn); Vollzugsbeitrag 0.7% AN + 0.7% AG; Frühpensionierung 1.2%/1.25%/1.3% (2025/26/27) je AN+AG; BVG-Koordinationsabzug CHF 12.10/h (swissstaffing 2. Säule)',
     zulage: 0,
@@ -11989,9 +11990,10 @@ var GAV = {
     modell: 'Stundenlohn nach Kategorie (Unterhalts-/Spezial-/Spital-/Fahrzeugreinigung, je Stufe I/II)',
     sollTag: null,
     sollHerkunft: 'Kategorien-abhängiger Stundenlohn, kein einheitliches Wochenmodell zentral geregelt',
-    ueberstundenBis: null,    // maximale Wochenarbeitszeit ist einzelvertraglich geregelt
-    tagesGrenze: null,
-    zuschlagSatz: 25,         // % bei Überstunden, die bis 30.4. Folgejahr nicht kompensiert wurden
+    normal: 42,                // Reinigungs-GAV selbst nennt keine feste Wochenarbeitszeit — Fallback auf den GAV-Personalverleih-Standardwert (greift gemäss Art. 20 AVG, wenn der Branchen-GAV dazu nichts regelt)
+    ueberstundenBis: 99,      // «maximale wöchentliche Arbeitszeit» im Quelltext nicht beziffert — hoch angesetzt statt geraten, greift real praktisch nie
+    tagesGrenze: 99,          // keine tägliche Schwelle im Quelltext gefunden — siehe oben
+    zuschlagSatz: 25,         // % bei Überstunden, die bis 30.4. Folgejahr nicht kompensiert wurden — sourced
     konto: 'Mindestlöhne 2026 CHF 21.40-24.90/h je Kategorie (volle Tabelle: tempdata.ch); Überstunden bis 30.4. Folgejahr kompensierbar, danach 25% Zuschlag; 13. Monatslohn 100% ab 3 Mt. Anstellung; Feiertage: 3.6% (Spezial/Spital/Fahrzeug) bzw. 1.5% (Unterhalt) auf Stundenlohn; Vollzugsbeitrag 0.35% total (0.3% AN + 0.05% AG)',
     zulage: 0,
     zulageAb: null,
@@ -12005,9 +12007,8 @@ var GAV = {
     modell: 'Wochenarbeitszeit 42 h',
     sollTag: 8.4,             // 42h / 5 Tage
     sollHerkunft: 'L-GAV Gastgewerbe · 42 h/Woche · schweizweit',
-    ueberstundenBis: null,    // L-GAV-Überzeitregeln sind komplexer als ein einfacher Wochenwert — im Einzelfall prüfen
-    tagesGrenze: null,
-    zuschlagSatz: null,
+    zuschlagAb: 99,            // L-GAV-Überzeitregeln arbeiten mit Referenzperioden (Monate), nicht einer einfachen Wochenschwelle — hoch angesetzt statt geraten, damit die Sollzeit-Rechnung nicht mit einer falschen Zahl greift
+    zuschlagSatz: 25,          // ungeprüfter Platzhalter (übliches CH-Muster) — durch zuschlagAb:99 praktisch folgenlos, bis die echten L-GAV-Referenzperioden-Regeln nachgetragen sind
     konto: 'Basislohn + Zuschläge: Ferien 10.65% (25 Arbeitstage), Feiertage 2.27%, 13. Monatslohn 8.33% (Basis 42h-Woche); Mindestlohn nach Kategorie Ia-IV, volle Tabelle auf tempdata.ch/l-gav.ch; kantonale Mindestlöhne (z.B. GE) gehen vor, falls höher',
     zulage: 0,
     zulageAb: null,
