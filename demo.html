@@ -23,12 +23,12 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.128.0"></script>
-<script src="apriko-api.js?v=1.128.0"></script>
-<script src="lohncheck.js?v=1.128.0"></script>
-<script src="personalbudget.js?v=1.128.0"></script>
-<script src="jahresbudget.js?v=1.128.0"></script>
-<script src="budgetpositionen.js?v=1.128.0"></script>
+<script src="apriko-filters.js?v=1.129.0"></script>
+<script src="apriko-api.js?v=1.129.0"></script>
+<script src="lohncheck.js?v=1.129.0"></script>
+<script src="personalbudget.js?v=1.129.0"></script>
+<script src="jahresbudget.js?v=1.129.0"></script>
+<script src="budgetpositionen.js?v=1.129.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -970,7 +970,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.128.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.129.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12186,6 +12186,18 @@ function rpApiNameMatch(a, b){
   return a.indexOf(b) >= 0 || b.indexOf(a) >= 0 ||
     a.split(' ').filter(function(w){ return w.length > 2 && b.indexOf(w) >= 0; }).length >= 2;
 }
+/* Abgestufte Namensähnlichkeit (0..1) statt nur ja/nein — Nachname zählt stärker, weil er bei
+   Handschrift/OCR erfahrungsgemäss stabiler ist als der Vorname (siehe Wenciela/Mercida/Nercida-Fall). */
+function rpApiNameScore(kandidatName, ocrName){
+  var a = rpApiNorm(kandidatName).split(' ').filter(Boolean);
+  var b = rpApiNorm(ocrName).split(' ').filter(Boolean);
+  if(!a.length || !b.length) return 0;
+  var aLast = a[a.length - 1], bLast = b[b.length - 1];
+  var lastScore = aLast === bLast ? 1 : ((aLast.length > 2 && bLast.length > 2 && (aLast.indexOf(bLast) >= 0 || bLast.indexOf(aLast) >= 0)) ? 0.55 : 0);
+  var aFirst = a[0], bFirst = b[0];
+  var firstScore = aFirst === bFirst ? 1 : (aFirst[0] === bFirst[0] ? 0.35 : 0);
+  return lastScore * 0.65 + firstScore * 0.35;
+}
 /* Einsätze eines Mitarbeiters via Models-Query.
    OFFENER PUNKT 1 (Filter-Serialisierung, Doku widersprüchlich):
    probiert erst die gemerkte, sonst beide Varianten — JSON.stringify
@@ -12357,6 +12369,31 @@ function rpApiRosterFind(maName){
 function rpApiRosterKundeName(customerId){
   return rpRoster && rpRoster.kunden[customerId] ? rpRoster.kunden[customerId].businessName : '';
 }
+/* Bewertet ALLE Placements im Roster direkt gegen Name+Firma+Zeitraum — eine einzige Liste von
+   EINSÄTZEN mit %-Score, keine separate Personen-Auswahl davor nötig. Genau der vom Anwender
+   gewünschte Ablauf: Scan → Name/Firma/Datum → direkt Einsatz-Dropdown mit % absteigend sortiert. */
+function rpApiRosterScoreAll(maName, firmaName, von, bis){
+  var out = [];
+  if(!rpRoster) return out;
+  Object.keys(rpRoster.mitarbeiter).forEach(function(id){
+    var m = rpRoster.mitarbeiter[id];
+    var employeeName = [m.firstName, m.lastName].filter(Boolean).join(' ');
+    var ns = rpApiNameScore(employeeName, maName);
+    if(ns <= 0) return;   // kein erkennbarer Bezug zum gesuchten Namen — gar nicht erst aufnehmen
+    (m.placements || []).forEach(function(p){
+      var kn = rpApiRosterKundeName(p.customerId) || '';
+      var ein = p.entryDate ? new Date(p.entryDate) : null;
+      var aus = p.withdrawalDate ? new Date(p.withdrawalDate) : null;
+      var zeitOk = (!ein || !bis || ein <= bis) && (!aus || !von || aus >= von);
+      var kundeOk = !!(firmaName && kn && rpApiNameMatch(kn, firmaName));
+      var score = Math.round(ns * 55 + (zeitOk ? 30 : 0) + (kundeOk ? 15 : 0));
+      score = Math.max(1, Math.min(99, score));
+      out.push({ e: p, employeeId: id, employeeName: employeeName, kundeName: kn, zeitOk: zeitOk, kundeOk: kundeOk, score: score });
+    });
+  });
+  out.sort(function(a, b){ return b.score - a.score || (new Date(b.e.entryDate || 0) - new Date(a.e.entryDate || 0)); });
+  return out;
+}
 
 /* Abgleich-Zustand für die Auswahl-Dropdowns */
 var rpApiState = { personen: [], personIdx: 0, einsaetze: [], einsatzId: null, von: null, bis: null, firmaName: '', unsicher: false, fmt: null, viaText: false, protokoll: [] };
@@ -12375,17 +12412,36 @@ async function rpApiMatch(maName, firmaName, vonStr, bisStr){
        employeeId stammt direkt aus echten Placement-Datensätzen (nicht aus einer serverseitigen
        ID-Filterung, die bislang in keiner Formatvariante zuverlässig funktioniert hat). Erst wenn
        das nichts findet, greift die bisherige Kette (Personensuche → Volltext → Nachname). */
+    rpApiState.rosterModus = false;
     try {
       await rpApiLoadRoster(false);
-      var rosterTreffer = rpApiRosterFind(maName);
-      if(rosterTreffer.length){
-        rpApiState.personen = rosterTreffer;
-        rpApiState.unsicher = rosterTreffer.length > 1;
+      var von = rpDate(vonStr), bis = rpDate(bisStr || vonStr);
+      var scored = rpApiRosterScoreAll(maName, firmaName, von, bis);
+      if(scored.length){
         rpApiState.ausRoster = true;
+        rpApiState.rosterModus = true;
+        rpApiState.personen = [];   // kein separater Personen-Schritt — direkt Einsatz-Liste
         rpApiState.firmaName = firmaName || '';
-        rpApiState.von = rpDate(vonStr); rpApiState.bis = rpDate(bisStr || vonStr);
+        rpApiState.von = von; rpApiState.bis = bis;
         rpApiState.vonStr = vonStr || ''; rpApiState.bisStr = bisStr || vonStr || '';
-        await rpApiSelectPerson(0, maName);
+        var FENSTER_TAGE = 61;
+        var fensterVon = von ? new Date(von.getTime() - FENSTER_TAGE * 86400000) : null;
+        var fensterBis = bis ? new Date(bis.getTime() + FENSTER_TAGE * 86400000) : null;
+        var imFenster = scored.filter(function(x){
+          var ein2 = x.e.entryDate ? new Date(x.e.entryDate) : null;
+          var aus2 = x.e.withdrawalDate ? new Date(x.e.withdrawalDate) : null;
+          return (!fensterBis || !ein2 || ein2 <= fensterBis) && (!fensterVon || !aus2 || aus2 >= fensterVon);
+        });
+        var basis = imFenster.length ? imFenster : scored;
+        var top = basis.slice(0, 25);
+        rpApiState.einsaetzeAlle = basis;
+        rpApiState.einsaetze = top;
+        rpApiState.gefiltert = imFenster.length > 0 && imFenster.length < scored.length;
+        rpApiState.zeigeAlle = false;
+        rpApiState.einsatzId = top.length ? top[0].e.id : null;
+        rpApiState.pName = top.length ? top[0].employeeName : '';
+        rpApiState.unsicher = false;
+        rpApiRender();
         return;
       }
     } catch(re){ /* Roster nicht ladbar (z.B. keine Berechtigung) — normale Kette als Rückfall */ }
@@ -12625,16 +12681,24 @@ function rpApiRender(){
   var box = rpApiBox(); if(!box) return;
   var st = rpApiState;
   var person = st.personen[st.personIdx] || {};
-  var maDrop = '<select onchange="rpApiSelectPerson(+this.value)" style="max-width:260px">' +
-    st.personen.map(function(p, i){
-      var nm = [p.firstName, p.lastName].filter(Boolean).join(' ') || p.displayName || p.id;
-      return '<option value="' + i + '"' + (i === st.personIdx ? ' selected' : '') + '>' + esc(nm) + (p.personNumber ? ' (Nr ' + esc(String(p.personNumber)) + ')' : '') + '</option>';
-    }).join('') + '</select>';
-  var kopf = '🔌 <b>Apriko-Abgleich</b>' + (st.unsicher ? ' <span style="color:#c62828">— kein sicherer Namenstreffer, bitte wählen:</span>' : ':') + ' ' + maDrop +
-    (st.personen.length > 1 && !st.unsicher ? ' <span style="color:var(--rp-grey);font-size:11px">(' + st.personen.length + ' ähnliche Treffer)</span>' : '') +
-    (st.gefundenUeberEinsatz ? ' <span style="color:var(--rp-grey);font-size:11px">(über Einsatzliste gefunden, nicht über die Personensuche)</span>' : '') +
-    (st.gefundenUeberNachname ? ' <span style="color:#c62828;font-size:11px">(nur über Nachname gefunden — Vorname im Beleg/OCR vermutlich falsch, bitte wählen)</span>' : '') +
-    (st.ausRoster ? ' <span style="color:#2e7d32;font-size:11px">✓ aus Einsatzliste-Cache (letzte ' + ROSTER_TAGE + ' Tage), Personen-ID verifiziert</span> <a href="#" onclick="rpApiRefreshRoster();return false" style="font-size:11px;color:var(--rp-grey)">(neu laden)</a>' : '');
+  var kopf;
+  if(st.rosterModus){
+    // Roster-Modus: keine separate Personen-Auswahl — direkt eine Liste von EINSÄTZEN mit %-Score,
+    // jede Zeile trägt ihren eigenen Mitarbeiternamen (können auch verschiedene Personen sein, z.B.
+    // bei Namensvettern), sortiert nach Score. Auswahl passiert unten im Einsatz-Dropdown selbst.
+    kopf = '🔌 <b>Apriko-Abgleich</b> (aus Einsatzliste-Cache, letzte ' + ROSTER_TAGE + ' Tage) ' +
+      '<a href="#" onclick="rpApiRefreshRoster();return false" style="font-size:11px;color:var(--rp-grey)">(neu laden)</a>';
+  } else {
+    var maDrop = '<select onchange="rpApiSelectPerson(+this.value)" style="max-width:260px">' +
+      st.personen.map(function(p, i){
+        var nm = [p.firstName, p.lastName].filter(Boolean).join(' ') || p.displayName || p.id;
+        return '<option value="' + i + '"' + (i === st.personIdx ? ' selected' : '') + '>' + esc(nm) + (p.personNumber ? ' (Nr ' + esc(String(p.personNumber)) + ')' : '') + '</option>';
+      }).join('') + '</select>';
+    kopf = '🔌 <b>Apriko-Abgleich</b>' + (st.unsicher ? ' <span style="color:#c62828">— kein sicherer Namenstreffer, bitte wählen:</span>' : ':') + ' ' + maDrop +
+      (st.personen.length > 1 && !st.unsicher ? ' <span style="color:var(--rp-grey);font-size:11px">(' + st.personen.length + ' ähnliche Treffer)</span>' : '') +
+      (st.gefundenUeberEinsatz ? ' <span style="color:var(--rp-grey);font-size:11px">(über Einsatzliste gefunden, nicht über die Personensuche)</span>' : '') +
+      (st.gefundenUeberNachname ? ' <span style="color:#c62828;font-size:11px">(nur über Nachname gefunden — Vorname im Beleg/OCR vermutlich falsch, bitte wählen)</span>' : '');
+  }
   var unverifiedBanner = (st.viaText && !st.textVerifiziert)
     ? '<div style="margin:8px 0;padding:7px 10px;background:#FEF2F2;border-left:3px solid #c62828;border-radius:3px;font-size:12px;color:#7f1d1d">' +
       '⚠ <b>Nicht über die Personen-ID bestätigt:</b> Die Einsatzliste konnte nicht direkt nach dieser Person gefiltert werden (ID-Filter: ' +
@@ -12644,17 +12708,19 @@ function rpApiRender(){
     : '';
 
   if(!st.einsaetze.length){
-    box.innerHTML = kopf + '<br>Keine Einsätze zu dieser Person gefunden (' +
-      esc((st.protokoll || []).join(' · ') || 'ID-Filter + Volltext leer') + ') — Personen-ID: <code>' + esc(String(person.id || '')) + '</code>';
+    box.innerHTML = kopf + '<br>Kein Einsatz gefunden (' +
+      esc((st.protokoll || []).join(' · ') || (st.rosterModus ? 'kein Treffer im Einsatzliste-Cache' : 'ID-Filter + Volltext leer')) + ')' +
+      (person.id ? ' — Personen-ID: <code>' + esc(String(person.id)) + '</code>' : '');
     rpApiSetManual(true);
     return;
   }
   if(typeof rpApiUse === 'function' && rpApiUse()) rpApiSetManual(false);
   var kurzName = (st.pName || '').split(' ').slice(-1)[0] || st.pName || '';
-  var einDrop = '<select onchange="rpApiSelectEinsatz(this.value)" style="max-width:480px">' +
+  var einDrop = '<select onchange="rpApiSelectEinsatz(this.value)" style="max-width:520px">' +
     st.einsaetze.map(function(x){
       var e = x.e;
-      var lbl = kurzName + ' · ' + (x.kundeName || '– Kunde unbekannt –') + ' · Einsatz Nr ' + (e.placementNumber || e.id) + ' · ' + x.score + '%' +
+      var wer = st.rosterModus ? (x.employeeName || kurzName) : kurzName;
+      var lbl = wer + ' · ' + (x.kundeName || '– Kunde unbekannt –') + ' · Einsatz Nr ' + (e.placementNumber || e.id) + ' · ' + x.score + '%' +
         (e.jobTitle ? ' · ' + e.jobTitle : '') +
         ' · ' + (e.entryDate ? new Date(e.entryDate).toLocaleDateString('de-CH') : '?') + '–' + (e.withdrawalDate ? new Date(e.withdrawalDate).toLocaleDateString('de-CH') : 'laufend') +
         (x.zeitOk ? '' : ' ⚠ ausserhalb Zeitraum');
