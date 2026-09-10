@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.163.0"></script>
-<script src="apriko-api.js?v=1.163.0"></script>
-<script src="lohncheck.js?v=1.163.0"></script>
-<script src="personalbudget.js?v=1.163.0"></script>
-<script src="jahresbudget.js?v=1.163.0"></script>
-<script src="budgetpositionen.js?v=1.163.0"></script>
-<script src="lohnchecklistetemp.js?v=1.163.0"></script>
+<script src="apriko-filters.js?v=1.166.0"></script>
+<script src="apriko-api.js?v=1.166.0"></script>
+<script src="lohncheck.js?v=1.166.0"></script>
+<script src="personalbudget.js?v=1.166.0"></script>
+<script src="jahresbudget.js?v=1.166.0"></script>
+<script src="budgetpositionen.js?v=1.166.0"></script>
+<script src="lohnchecklistetemp.js?v=1.166.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.163.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.166.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -13034,17 +13034,20 @@ async function rpApiUebernehmen(){
       '<b>⚠ Vertragliche Zulage(n)/Spesen laut Einsatz — gehen dem GAV-Standard vor:</b><br>' + spesen.join('<br>') +
       '</div>'
       : '<div style="margin-top:8px;padding:6px 12px;color:var(--rp-grey);font-size:11px">Keine zusätzlichen Zulagen am Einsatz hinterlegt.</div>') +
+    // Direkt sichtbar, NICHT hinter der eingeklappten Diagnose versteckt (per Screenshot 10.09.2026
+    // gefunden — Button war da, aber niemand hat "Rohdaten (Diagnose)" aufgeklappt, um ihn zu sehen).
+    '<button type="button" class="rp-btn-sm" style="margin-top:8px" onclick="rpApiSucheAdditionalComp(\'' + esc(beste.id) + '\')">🔍 Zusätzlich im dedizierten Endpunkt /AdditionalPlacementCompensations suchen</button>' +
+    '<div style="font-size:10px;color:var(--rp-grey);margin-top:2px">Gesuchte placementId: <code>' + esc(beste.id) + '</code></div>' +
+    '<div id="rpAddCompResult" style="margin-top:6px"></div>' +
     // Diagnose-Rohdaten: zeigt exakt, was Apriko für diesen Einsatz zu Kondition/Zulagen liefert —
     // bei Verdacht "Feld wird nicht gefunden" hier reinschauen statt zu raten. Standardmässig
     // eingeklappt, damit es normalerweise nicht stört.
-    '<details style="margin-top:6px;font-size:11px;color:var(--rp-grey)"><summary style="cursor:pointer">Rohdaten (Diagnose)</summary>' +
+    '<details style="margin-top:8px;font-size:11px;color:var(--rp-grey)"><summary style="cursor:pointer">Rohdaten (Diagnose)</summary>' +
     '<pre style="white-space:pre-wrap;word-break:break-all;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:3px;padding:6px;margin-top:4px">' +
     esc('basicPlacementCompensation: ' + JSON.stringify(beste.basicPlacementCompensation || null, null, 1) +
       '\n\nadditionalPlacementCompensations (' + ((beste.additionalPlacementCompensations || []).length) + ' Einträge): ' +
       JSON.stringify(beste.additionalPlacementCompensations || [], null, 1)) +
     '</pre>' +
-    '<button type="button" class="rp-btn-sm" style="margin-top:6px" onclick="rpApiSucheAdditionalComp(\'' + esc(beste.id) + '\')">🔍 Zusätzlich im dedizierten Endpunkt /AdditionalPlacementCompensations suchen</button>' +
-    '<div id="rpAddCompResult" style="margin-top:6px"></div>' +
     '</details>' +
     tempDataHtml;
   var s3K = $('rpS3Konditionen');
@@ -15303,14 +15306,37 @@ async function rpApiSucheAdditionalComp(placementId){
   if(!el) return;
   el.innerHTML = '<span style="color:var(--rp-grey);font-size:11px">Suche läuft …</span>';
   var start = Date.now(), zeitbudgetMs = 25000, pageSize = 200, pageIndex = 0, geprueft = 0, treffer = [], seiten = 0;
+  var filterDiagnose = '';
+  var beispielIds = [];   // ein paar echte placementId-Werte aus den durchsuchten Datensätzen, zum
+                           // Format-Vergleich mit der gesuchten ID (siehe "Gesuchte placementId" oben)
+  // ZUERST versuchen: gezielt per Filter nach placementId suchen statt alles zu paginieren.
+  // WICHTIG: Ähnliche ID-Filter (z.B. employeeId) sind in diesem API bisher 10 von 10 Malen
+  // gescheitert (vermutlich als analysiertes Textfeld indexiert, kein Exact-Match möglich) — hier
+  // also nur ein Versuch, kein verlässlicher Weg. Klappt es nicht (0 Treffer oder Fehler), sofort
+  // Rückfall auf die volle Paginierung unten, ohne den User etwas davon merken zu lassen.
+  try {
+    var filterR = await AprikoApi.models.query({
+      entityTypes: 'AdditionalPlacementCompensation', pageIndex: 0, pageSize: 50, resolveReferences: false,
+      filters: 'placementId|=|' + placementId + '|text|false|false|G1'
+    });
+    var filterRows = ((filterR && filterR.results) || []).map(AprikoApi.models.hitData);
+    if(filterRows.length){
+      filterDiagnose = ' (über gezielten Filter, ohne Paginierung)';
+      treffer = filterRows;
+    }
+  } catch(fe){ /* Filter fehlgeschlagen — stumm auf Paginierung zurückfallen */ }
+  if(!treffer.length){
   try {
     while(Date.now() - start < zeitbudgetMs){
       var res = await AprikoApi.staffing.listAdditionalPlacementCompensations(pageIndex, pageSize);
       var rows = (res && res.results) ? res.results.map(AprikoApi.models.hitData) : (Array.isArray(res) ? res : []);
       if(!rows || !rows.length) break;
       seiten++; geprueft += rows.length;
-      rows.forEach(function(r){ if(String(r.placementId) === String(placementId)) treffer.push(r); });
-      el.innerHTML = '<span style="color:var(--rp-grey);font-size:11px">Suche läuft … ' + seiten + ' Seite(n), ' + geprueft + ' Datensätze geprüft, ' + treffer.length + ' Treffer bisher</span>';
+      rows.forEach(function(r){
+        if(String(r.placementId) === String(placementId)) treffer.push(r);
+        else if(beispielIds.length < 5 && r.placementId) beispielIds.push(r.placementId);
+      });
+      el.innerHTML = '<span style="color:var(--rp-grey);font-size:11px">Filter erfolglos, Volltext-Suche läuft … ' + seiten + ' Seite(n), ' + geprueft + ' Datensätze geprüft, ' + treffer.length + ' Treffer bisher</span>';
       if(rows.length < pageSize) break;   // letzte Seite erreicht
       pageIndex++;
     }
@@ -15318,14 +15344,16 @@ async function rpApiSucheAdditionalComp(placementId){
     el.innerHTML = '<span style="color:#c62828;font-size:11px">Fehler bei der Suche: ' + esc((e && e.message) || String(e)) + '</span>';
     return;
   }
+  }
   var dauer = ((Date.now() - start) / 1000).toFixed(1);
   if(treffer.length){
-    el.innerHTML = '<div style="color:#065f46;font-size:11px;margin-bottom:4px"><b>✓ ' + treffer.length + ' Treffer</b> nach ' + seiten + ' Seite(n) / ' + geprueft + ' Datensätzen (' + dauer + 's):</div>' +
+    el.innerHTML = '<div style="color:#065f46;font-size:11px;margin-bottom:4px"><b>✓ ' + treffer.length + ' Treffer</b>' + esc(filterDiagnose) + (filterDiagnose ? '' : (' nach ' + seiten + ' Seite(n) / ' + geprueft + ' Datensätzen')) + ' (' + dauer + 's):</div>' +
       '<pre style="white-space:pre-wrap;word-break:break-all;background:#ECFDF5;border:1px solid #A7F3D0;border-radius:3px;padding:6px;font-size:11px">' +
       esc(JSON.stringify(treffer, null, 1)) + '</pre>';
   } else {
-    el.innerHTML = '<span style="color:var(--rp-grey);font-size:11px">Keine Treffer nach ' + seiten + ' Seite(n) / ' + geprueft + ' Datensätzen (' + dauer + 's)' +
-      (Date.now() - start >= zeitbudgetMs ? ' — Zeitbudget erreicht, evtl. gibt es noch mehr Seiten' : ' — alle Seiten durchsucht') + '.</span>';
+    el.innerHTML = '<span style="color:var(--rp-grey);font-size:11px">Keine Treffer (Filter erfolglos, dann ' + seiten + ' Seite(n) / ' + geprueft + ' Datensätze durchsucht, ' + dauer + 's)' +
+      (Date.now() - start >= zeitbudgetMs ? ' — Zeitbudget erreicht, evtl. gibt es noch mehr Seiten' : ' — alle Seiten durchsucht') + '.</span>' +
+      (beispielIds.length ? '<div style="font-size:10px;color:var(--rp-grey);margin-top:4px">Format-Vergleich, echte placementId-Werte aus den durchsuchten Datensätzen:<br><code>' + beispielIds.map(esc).join('</code><br><code>') + '</code></div>' : '');
   }
 }
 
