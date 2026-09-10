@@ -23,12 +23,12 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.137.0"></script>
-<script src="apriko-api.js?v=1.137.0"></script>
-<script src="lohncheck.js?v=1.137.0"></script>
-<script src="personalbudget.js?v=1.137.0"></script>
-<script src="jahresbudget.js?v=1.137.0"></script>
-<script src="budgetpositionen.js?v=1.137.0"></script>
+<script src="apriko-filters.js?v=1.139.0"></script>
+<script src="apriko-api.js?v=1.139.0"></script>
+<script src="lohncheck.js?v=1.139.0"></script>
+<script src="personalbudget.js?v=1.139.0"></script>
+<script src="jahresbudget.js?v=1.139.0"></script>
+<script src="budgetpositionen.js?v=1.139.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -970,7 +970,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.137.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.139.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12318,10 +12318,21 @@ function rpRosterToStorage(r){
 }
 
 async function rpApiLoadRoster(force){
+  /* WICHTIG: rpApiUse() konfiguriert AprikoApi (Gateway/Target/Token-Callback) frisch. Wird diese
+     Funktion über "Jetzt laden"/"neu laden" direkt angeklickt (ohne vorherigen rpApiMatch-Aufruf,
+     der das selbst schon macht), lief die Konfiguration sonst womöglich ins Leere — mit der Folge,
+     dass fetch() eine falsche/leere URL bekommt und im Browser als "Failed to fetch" scheitert,
+     obwohl Proxy und Apriko-Instanz (siehe curl-Tests) einwandfrei erreichbar sind. Deshalb hier
+     IMMER zuerst sicherstellen, dass die Verbindung aktuell konfiguriert ist. */
+  if(typeof rpApiUse === 'function') rpApiUse();
+  // Ein fehlgeschlagener Versuch (ladeFehler gesetzt) zählt NICHT als gültiger Cache-Treffer —
+  // sonst würde z.B. ein Scan direkt danach denselben alten Fehler wiederverwenden, statt es
+  // automatisch nochmal zu versuchen (z.B. weil der Codespace beim ersten Versuch noch am
+  // Aufwachen war).
   if(!force){
-    if(rpRoster) return rpRoster;
+    if(rpRoster && !rpRoster.ladeFehler) return rpRoster;
     var cached = rpRosterFromStorage();
-    if(cached){ rpRoster = cached; return rpRoster; }
+    if(cached && !cached.ladeFehler){ rpRoster = cached; return rpRoster; }
   }
   if(rpRosterLoading) return rpRosterLoading;
   rpRosterLoading = (async function(){
@@ -12371,7 +12382,7 @@ async function rpApiLoadRoster(force){
       if(kr2.name) kunden[kuIds[ki]] = { businessName: kr2.name };
     }
     rpRoster = { loadedAt: Date.now(), tage: ROSTER_TAGE, seiten: Math.min(ROSTER_MAX_SEITEN, placements.length ? Math.ceil(placements.length / 100) : 0), mitarbeiter: mitarbeiter, kunden: kunden, ladeFehler: ladeFehler };
-    rpRosterToStorage(rpRoster);
+    if(!ladeFehler) rpRosterToStorage(rpRoster);   // Fehlversuche nicht dauerhaft cachen — nur echte Erfolge
     rpRosterLoading = null;
     return rpRoster;
   })();
@@ -13032,7 +13043,11 @@ window.initRapport = function(){
      unnötiger Netzwerk-Traffic bei wiederholtem Öffnen innerhalb der Cache-Gültigkeit. */
   try {
     if(typeof rpApiUse === 'function' && rpApiUse() && typeof rpApiLoadRoster === 'function'){
-      rpApiLoadRoster(false).catch(function(){ /* Fehlschlag ist ok — Rückfallkette greift beim Scan wie gehabt */ });
+      // 2s Verzögerung: falls der Codespace/Proxy gerade erst durch einen Klick woanders aufgeweckt
+      // wurde, hat er einen Moment Zeit, bevor die erste (grössere) Anfrage losgeht.
+      setTimeout(function(){
+        rpApiLoadRoster(false).catch(function(){ /* Fehlschlag ist ok — wird beim Scan automatisch nochmal versucht (kein Cache von Fehlversuchen) */ });
+      }, 2000);
     }
   } catch(rIe){ /* Roster-Vorladen ist Zusatznutzen, darf das Formular nie blockieren */ }
 
