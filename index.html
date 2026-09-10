@@ -23,12 +23,12 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.136.0"></script>
-<script src="apriko-api.js?v=1.136.0"></script>
-<script src="lohncheck.js?v=1.136.0"></script>
-<script src="personalbudget.js?v=1.136.0"></script>
-<script src="jahresbudget.js?v=1.136.0"></script>
-<script src="budgetpositionen.js?v=1.136.0"></script>
+<script src="apriko-filters.js?v=1.137.0"></script>
+<script src="apriko-api.js?v=1.137.0"></script>
+<script src="lohncheck.js?v=1.137.0"></script>
+<script src="personalbudget.js?v=1.137.0"></script>
+<script src="jahresbudget.js?v=1.137.0"></script>
+<script src="budgetpositionen.js?v=1.137.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -970,7 +970,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.136.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.137.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12335,14 +12335,16 @@ async function rpApiLoadRoster(force){
     // direkt als Array (keine Suchtreffer-Hülle wie bei /models/Query). Über mehrere Seiten, bis
     // eine Seite leer ist oder der Sicherheitsdeckel greift. Sortierreihenfolge ist nicht
     // dokumentiert, deshalb wird über alle gelieferten Seiten client-seitig nach Datum gefiltert.
+    var ladeFehler = null;
     for(var pi = 0; pi < ROSTER_MAX_SEITEN; pi++){
       if(box) box.innerHTML = '🔌 <b>Einsatzliste wird geladen</b> (Seite ' + (pi + 1) + ') — einmalig, danach ' + ROSTER_TTL_MIN + ' Min. aus dem Cache …';
       var rows;
       try { rows = await AprikoApi.staffing.listStaffLease(pi, 100); }
-      catch(e){ break; }
+      catch(e){ ladeFehler = (e && e.message) || String(e); break; }
       if(!rows || !rows.length) break;
       placements = placements.concat(rows);
     }
+    if(ladeFehler && box){ box.innerHTML = '🔌 <b>Einsatzliste:</b> Laden fehlgeschlagen — ' + esc(ladeFehler).slice(0, 300); }
     var imFenster = placements.filter(function(p){
       var ein = p.entryDate ? new Date(p.entryDate) : null;
       var aus = p.withdrawalDate ? new Date(p.withdrawalDate) : null;
@@ -12368,7 +12370,7 @@ async function rpApiLoadRoster(force){
       var kr2 = await rpApiResolveKunde(kuIds[ki]);
       if(kr2.name) kunden[kuIds[ki]] = { businessName: kr2.name };
     }
-    rpRoster = { loadedAt: Date.now(), tage: ROSTER_TAGE, seiten: Math.min(ROSTER_MAX_SEITEN, placements.length ? Math.ceil(placements.length / 100) : 0), mitarbeiter: mitarbeiter, kunden: kunden };
+    rpRoster = { loadedAt: Date.now(), tage: ROSTER_TAGE, seiten: Math.min(ROSTER_MAX_SEITEN, placements.length ? Math.ceil(placements.length / 100) : 0), mitarbeiter: mitarbeiter, kunden: kunden, ladeFehler: ladeFehler };
     rpRosterToStorage(rpRoster);
     rpRosterLoading = null;
     return rpRoster;
@@ -12615,6 +12617,9 @@ function rpApiShowRoster(){
     showModal('Einsatzliste', body);
     return;
   }
+  var fehlerBanner = rpRoster.ladeFehler
+    ? '<div style="margin-bottom:10px;padding:8px 12px;background:#FEF2F2;border-left:3px solid #c62828;border-radius:3px;color:#7f1d1d;font-size:12.5px">⚠ <b>Laden abgebrochen:</b> ' + esc(rpRoster.ladeFehler) + '</div>'
+    : '';
   var altMin = Math.round((Date.now() - rpRoster.loadedAt) / 60000);
   var mitIds = Object.keys(rpRoster.mitarbeiter);
   var gesamtEinsaetze = mitIds.reduce(function(n, id){ return n + (rpRoster.mitarbeiter[id].placements || []).length; }, 0);
@@ -12643,7 +12648,7 @@ function rpApiShowRoster(){
       '<td style="font-size:11.5px;color:var(--rp-grey)">' + esc(z.gav) + '</td>' +
     '</tr>';
   }).join('');
-  body = '<div style="margin-bottom:8px;font-size:12.5px;color:var(--rp-grey)">' +
+  body = fehlerBanner + '<div style="margin-bottom:8px;font-size:12.5px;color:var(--rp-grey)">' +
       Object.keys(rpRoster.mitarbeiter).length + ' Mitarbeitende · ' + gesamtEinsaetze + ' Einsätze · letzte ' + (rpRoster.tage || ROSTER_TAGE) + ' Tage · geladen vor ' + altMin + ' Min.' +
       ' <a href="#" onclick="rpApiLoadRoster(true).then(rpApiShowRoster);return false">(neu laden)</a></div>' +
     '<input type="text" id="rpRosterSuche" placeholder="Suche nach Name oder Kunde …" style="width:100%;margin-bottom:8px;padding:6px 10px;border:1px solid var(--rp-border,#ddd);border-radius:5px" oninput="rpApiFilterRoster(this.value)">' +
