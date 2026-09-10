@@ -23,12 +23,12 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.135.0"></script>
-<script src="apriko-api.js?v=1.135.0"></script>
-<script src="lohncheck.js?v=1.135.0"></script>
-<script src="personalbudget.js?v=1.135.0"></script>
-<script src="jahresbudget.js?v=1.135.0"></script>
-<script src="budgetpositionen.js?v=1.135.0"></script>
+<script src="apriko-filters.js?v=1.136.0"></script>
+<script src="apriko-api.js?v=1.136.0"></script>
+<script src="lohncheck.js?v=1.136.0"></script>
+<script src="personalbudget.js?v=1.136.0"></script>
+<script src="jahresbudget.js?v=1.136.0"></script>
+<script src="budgetpositionen.js?v=1.136.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -970,7 +970,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.135.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.136.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12328,17 +12328,19 @@ async function rpApiLoadRoster(force){
     var box = rpApiBox();
     var grenze = new Date(Date.now() - ROSTER_TAGE * 86400000);
     var placements = [];
-    // Bulk-Abruf über dieselbe Volltextsuche, die zuverlässig 200er liefert — mit leerer Anfrage
-    // (kein Namensfilter) über mehrere Seiten, bis eine Seite leer ist oder der Sicherheitsdeckel
-    // greift. Sortierreihenfolge ist nicht dokumentiert, deshalb wird über alle gelieferten Seiten
-    // client-seitig nach Datum gefiltert statt serverseitig auf ein Zeitfenster zu vertrauen.
+    // Bulk-Abruf über den echten Listen-Endpunkt (GET /StaffLeasePlacements, staffing-Service) —
+    // NICHT über /models/Query: eine leere Volltextsuche ("") liefert dort 0 Treffer statt "alles",
+    // das war der Fehler (gefunden 10.09.: "0 Mitarbeitende · 0 Einsätze"). Der Listen-Endpunkt
+    // braucht keine Suchanfrage, nur pageIndex/pageSize, und liefert die rohen Placement-Objekte
+    // direkt als Array (keine Suchtreffer-Hülle wie bei /models/Query). Über mehrere Seiten, bis
+    // eine Seite leer ist oder der Sicherheitsdeckel greift. Sortierreihenfolge ist nicht
+    // dokumentiert, deshalb wird über alle gelieferten Seiten client-seitig nach Datum gefiltert.
     for(var pi = 0; pi < ROSTER_MAX_SEITEN; pi++){
       if(box) box.innerHTML = '🔌 <b>Einsatzliste wird geladen</b> (Seite ' + (pi + 1) + ') — einmalig, danach ' + ROSTER_TTL_MIN + ' Min. aus dem Cache …';
-      var r;
-      try { r = await AprikoApi.models.query({ query: '', entityTypes: 'StaffLeasePlacement', pageIndex: pi, pageSize: 100, resolveReferences: false }); }
+      var rows;
+      try { rows = await AprikoApi.staffing.listStaffLease(pi, 100); }
       catch(e){ break; }
-      var rows = ((r && r.results) || []).map(AprikoApi.models.hitData);
-      if(!rows.length) break;
+      if(!rows || !rows.length) break;
       placements = placements.concat(rows);
     }
     var imFenster = placements.filter(function(p){
