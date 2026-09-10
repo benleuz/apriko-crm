@@ -23,12 +23,12 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.134.0"></script>
-<script src="apriko-api.js?v=1.134.0"></script>
-<script src="lohncheck.js?v=1.134.0"></script>
-<script src="personalbudget.js?v=1.134.0"></script>
-<script src="jahresbudget.js?v=1.134.0"></script>
-<script src="budgetpositionen.js?v=1.134.0"></script>
+<script src="apriko-filters.js?v=1.135.0"></script>
+<script src="apriko-api.js?v=1.135.0"></script>
+<script src="lohncheck.js?v=1.135.0"></script>
+<script src="personalbudget.js?v=1.135.0"></script>
+<script src="jahresbudget.js?v=1.135.0"></script>
+<script src="budgetpositionen.js?v=1.135.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -970,7 +970,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.134.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.135.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12772,7 +12772,7 @@ async function rpApiUebernehmen(){
   }
   if(typeof loadGav === 'function') loadGav();
 }
-if (typeof window !== 'undefined') window.rpApiUebernehmen = rpApiUebernehmen;
+
 
 function rpApiRender(){
   var box = rpApiBox(); if(!box) return;
@@ -14930,23 +14930,24 @@ function dl(txt,name,typ){
   URL.revokeObjectURL(u);
 }
 
+/* WICHTIG: Das ganze Rapport-Modul steckt in dieser IIFE (siehe Kopf-Kommentar oben: "nach aussen
+   nur window.initRapport"). Jede Funktion, die per inline onclick/onchange/oninput="..." aus dem
+   HTML aufgerufen wird, MUSS deshalb hier — noch INNERHALB der Kapsel, vor dem schliessenden })() —
+   explizit an window gehängt werden; sonst ist sie von aussen nicht sichtbar (nicht Hoisting-bedingt,
+   sondern weil sie schlicht in einem anderen, gekapselten Scope lebt). Das war die tatsächliche
+   Ursache des "rpApiShowRoster is not defined"-Fehlers am 10.09. — der vorherige Fix landete
+   fälschlich ausserhalb dieser Kapsel. */
+window.rpApiShowRoster = rpApiShowRoster;
+window.rpApiFilterRoster = rpApiFilterRoster;
+window.rpApiRefreshRoster = rpApiRefreshRoster;
+window.rpApiToggleAlle = rpApiToggleAlle;
+window.rpApiSelectEinsatz = rpApiSelectEinsatz;
+window.rpApiSelectPerson = rpApiSelectPerson;
+window.rpApiSetManual = rpApiSetManual;
+window.rpApiUebernehmen = rpApiUebernehmen;
+window.rpApiLoadRoster = rpApiLoadRoster;
+
 })();
-/* Sicherheitsnetz: alle per inline onclick="..." aufgerufenen Rapport-API-Funktionen zusätzlich
-   explizit an window hängen. Reine function-Deklarationen SOLLTEN dafür schon reichen (Hoisting),
-   aber ein Klick auf "Einsatzliste ansehen" hat am 10.09. einen ReferenceError geliefert, obwohl
-   die Funktion syntaktisch und strukturell korrekt auf oberster Ebene deklariert war — Ursache
-   ungeklärt. Diese Zeile steht bewusst GANZ AM ENDE des Skripts, damit alle referenzierten
-   Funktionen zu diesem Zeitpunkt garantiert bereits ausgewertet sind. */
-if (typeof window !== 'undefined') {
-  window.rpApiShowRoster = rpApiShowRoster;
-  window.rpApiFilterRoster = rpApiFilterRoster;
-  window.rpApiRefreshRoster = rpApiRefreshRoster;
-  window.rpApiToggleAlle = rpApiToggleAlle;
-  window.rpApiSelectEinsatz = rpApiSelectEinsatz;
-  window.rpApiSelectPerson = rpApiSelectPerson;
-  window.rpApiSetManual = rpApiSetManual;
-  window.rpApiUebernehmen = rpApiUebernehmen;
-}
 
 </script>
 </body>
