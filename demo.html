@@ -23,12 +23,12 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.129.0"></script>
-<script src="apriko-api.js?v=1.129.0"></script>
-<script src="lohncheck.js?v=1.129.0"></script>
-<script src="personalbudget.js?v=1.129.0"></script>
-<script src="jahresbudget.js?v=1.129.0"></script>
-<script src="budgetpositionen.js?v=1.129.0"></script>
+<script src="apriko-filters.js?v=1.132.0"></script>
+<script src="apriko-api.js?v=1.132.0"></script>
+<script src="lohncheck.js?v=1.132.0"></script>
+<script src="personalbudget.js?v=1.132.0"></script>
+<script src="jahresbudget.js?v=1.132.0"></script>
+<script src="budgetpositionen.js?v=1.132.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -970,7 +970,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.129.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.132.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12163,6 +12163,24 @@ function rpApiInitManualUI(){
   var vorhanden = typeof rpApiUse === 'function' && rpApiUse();
   rpApiSetManual(!vorhanden);
 }
+/* Kunde auflösen: zuerst als LegalPerson (Firma) versuchen, bei Fehlschlag als IndividualPerson
+   (Privatperson/Einzelfirma) nachfassen — nicht jeder "Kunde" einer Personalverleih-Agentur ist
+   zwingend eine AG/GmbH. Erst wenn BEIDES scheitert, wird aufgegeben (Fehler wird zurückgegeben,
+   damit er angezeigt werden kann statt still zu verschwinden). */
+async function rpApiResolveKunde(id){
+  try {
+    var c = await AprikoApi.people.getLegal(id);
+    var n = c && (c.businessName || c.displayName || '');
+    if(n) return { name: n, err: null };
+  } catch(e1){ var err1 = e1; }
+  try {
+    var p = await AprikoApi.people.getIndividual(id);
+    var n2 = p && [p.firstName, p.lastName].filter(Boolean).join(' ');
+    if(n2) return { name: n2, err: null };
+  } catch(e2){ var err2 = e2; }
+  var msg = (err1 && (err1.message || String(err1))) || (err2 && (err2.message || String(err2))) || 'Kunde weder als Firma noch als Person auflösbar';
+  return { name: '', err: String(msg).slice(0, 100) };
+}
 function rpApiBox(){
   var box = document.getElementById('rpApiBox');
   if(!box){
@@ -12344,8 +12362,8 @@ async function rpApiLoadRoster(force){
     }
     var kunden = {};
     for(var ki = 0; ki < kuIds.length; ki++){
-      try { var leg = await AprikoApi.people.getLegal(kuIds[ki]); if(leg) kunden[kuIds[ki]] = { businessName: leg.businessName || leg.displayName || '' }; }
-      catch(e){ /* einzelner Kunde übersprungen */ }
+      var kr2 = await rpApiResolveKunde(kuIds[ki]);
+      if(kr2.name) kunden[kuIds[ki]] = { businessName: kr2.name };
     }
     rpRoster = { loadedAt: Date.now(), tage: ROSTER_TAGE, seiten: Math.min(ROSTER_MAX_SEITEN, placements.length ? Math.ceil(placements.length / 100) : 0), mitarbeiter: mitarbeiter, kunden: kunden };
     rpRosterToStorage(rpRoster);
@@ -12388,7 +12406,7 @@ function rpApiRosterScoreAll(maName, firmaName, von, bis){
       var kundeOk = !!(firmaName && kn && rpApiNameMatch(kn, firmaName));
       var score = Math.round(ns * 55 + (zeitOk ? 30 : 0) + (kundeOk ? 15 : 0));
       score = Math.max(1, Math.min(99, score));
-      out.push({ e: p, employeeId: id, employeeName: employeeName, kundeName: kn, zeitOk: zeitOk, kundeOk: kundeOk, score: score });
+      out.push({ e: p, employeeId: id, employeeName: employeeName, kundeName: kn, kundeRaw: (!kn && p.customerId) ? p.customerId : '', zeitOk: zeitOk, kundeOk: kundeOk, score: score });
     });
   });
   out.sort(function(a, b){ return b.score - a.score || (new Date(b.e.entryDate || 0) - new Date(a.e.entryDate || 0)); });
@@ -12420,6 +12438,7 @@ async function rpApiMatch(maName, firmaName, vonStr, bisStr){
       if(scored.length){
         rpApiState.ausRoster = true;
         rpApiState.rosterModus = true;
+        rpApiState.kundeFehler = [];   // Kunden-Auflösung passiert schon beim Roster-Laden, hier nichts Neues
         rpApiState.personen = [];   // kein separater Personen-Schritt — direkt Einsatz-Liste
         rpApiState.firmaName = firmaName || '';
         rpApiState.von = von; rpApiState.bis = bis;
@@ -12541,10 +12560,13 @@ async function rpApiSelectPerson(idx, ocrName){
     // Kundennamen auflösen + sortieren: Überlappung + Kunden-Match zuerst, dann jüngste
     var von = rpApiState.von, bis = rpApiState.bis;
     var list = [];
+    var kundeFehler = [];
     for(var i = 0; i < pl.rows.length; i++){
       var e = pl.rows[i], kn = e.customerId ? rpApiRosterKundeName(e.customerId) : '';
       if(!kn && e.customerId){
-        try { var c = await AprikoApi.people.getLegal(e.customerId); kn = c.businessName || c.displayName || ''; } catch(e2){}
+        var kr = await rpApiResolveKunde(e.customerId);
+        kn = kr.name;
+        if(kr.err && kundeFehler.length < 3) kundeFehler.push(kr.err);
       }
       var ein = e.entryDate ? new Date(e.entryDate) : null;
       var aus = e.withdrawalDate ? new Date(e.withdrawalDate) : null;
@@ -12554,8 +12576,9 @@ async function rpApiSelectPerson(idx, ocrName){
       // nur eins von beiden = mittel, keins von beiden = niedrig — grob, aber nützlich zum Sortieren.
       var score = (zeitOk ? 65 : 0) + (kundeOk ? 30 : 0) + (zeitOk && !aus ? 5 : 0);
       score = Math.max(5, Math.min(95, score || 5));
-      list.push({ e: e, kundeName: kn, zeitOk: zeitOk, kundeOk: kundeOk, score: score });
+      list.push({ e: e, kundeName: kn, kundeRaw: (!kn && e.customerId) ? e.customerId : '', zeitOk: zeitOk, kundeOk: kundeOk, score: score });
     }
+    rpApiState.kundeFehler = kundeFehler;
     list.sort(function(a, b){ return b.score - a.score || (new Date(b.e.entryDate || 0) - new Date(a.e.entryDate || 0)); });
     // Nur Einsätze rund um den Rapportzeitraum zeigen (±2 Monate) — altes/zukünftiges Zeugs blendet die
     // Liste sonst nur zu. Ergibt der Filter nichts, wird ungefiltert gezeigt (nie leer werfen).
@@ -12609,6 +12632,22 @@ function rpApiToggleAlle(){
    setzen (falls der GAV-Name eindeutig auf eine der lokalen GAV-Kacheln passt), die Konditionen/
    Zulagen aus dem Einsatz sichtbar hinterlegen, die GAV-Eckwerte laden und direkt zu Schritt 3
    (Prüfen und korrigieren) springen — ohne dass man den GAV nochmal manuell im Web sucht. */
+/* Stichwort-Synonyme je lokaler GAV-Kachel — Apriko benennt GAVs oft anders als unsere Kacheln
+   (z.B. "Personalverleih Elektrobranche" statt "Elektrogewerbe (LGAV)"). rpApiNameMatch allein
+   (Token-Überlappung im vollen Namen) erkennt solche Varianten nicht; ein Stichwort-Treffer schon. */
+var GAV_STICHWORTE = {
+  bau: ['bauhauptgewerbe'],   // NICHT nur 'bau' — das matcht als Teilstring auch 'Ausbaugewerbe' etc. (echter Fehler, per Test gefunden)
+  elektro: ['elektro'],
+  gebaeude: ['gebäudetechnik', 'gebaeudetechnik', 'suissetec', 'heizung', 'sanitär', 'sanitaer', 'lüftung', 'lueftung'],
+  maler: ['maler', 'gipser'],
+  pvl: []
+};
+function rpApiGavMatchesBranche(gavApi, key){
+  if(!GAV[key]) return false;
+  if(rpApiNameMatch(gavApi, GAV[key].name)) return true;
+  var n = rpApiNorm(gavApi);
+  return (GAV_STICHWORTE[key] || []).some(function(w){ return n.indexOf(rpApiNorm(w)) >= 0; });
+}
 async function rpApiUebernehmen(){
   var st = rpApiState;
   var sel = (st.einsaetze || []).filter(function(x){ return String(x.e.id) === String(st.einsatzId); })[0] || (st.einsaetze || [])[0];
@@ -12633,7 +12672,7 @@ async function rpApiUebernehmen(){
   if(gavApi && brancheSel){
     for(var i = 0; i < brancheSel.options.length; i++){
       var key = brancheSel.options[i].value;
-      if(GAV[key] && rpApiNameMatch(gavApi, GAV[key].name)){ gavMatch = key; break; }
+      if(rpApiGavMatchesBranche(gavApi, key)){ gavMatch = key; break; }
     }
     if(gavMatch) brancheSel.value = gavMatch;
   }
@@ -12720,7 +12759,8 @@ function rpApiRender(){
     st.einsaetze.map(function(x){
       var e = x.e;
       var wer = st.rosterModus ? (x.employeeName || kurzName) : kurzName;
-      var lbl = wer + ' · ' + (x.kundeName || '– Kunde unbekannt –') + ' · Einsatz Nr ' + (e.placementNumber || e.id) + ' · ' + x.score + '%' +
+      var kuAnzeige = x.kundeName || (x.kundeRaw ? 'Kunde-ID ' + String(x.kundeRaw).slice(0, 8) + '… (Name nicht auflösbar)' : '– kein Kundenbezug im Datensatz –');
+      var lbl = wer + ' · ' + kuAnzeige + ' · Einsatz Nr ' + (e.placementNumber || e.id) + ' · ' + x.score + '%' +
         (e.jobTitle ? ' · ' + e.jobTitle : '') +
         ' · ' + (e.entryDate ? new Date(e.entryDate).toLocaleDateString('de-CH') : '?') + '–' + (e.withdrawalDate ? new Date(e.withdrawalDate).toLocaleDateString('de-CH') : 'laufend') +
         (x.zeitOk ? '' : ' ⚠ ausserhalb Zeitraum');
@@ -12765,6 +12805,7 @@ function rpApiRender(){
     (lohnTeile.length ? 'Konditionen: ' + lohnTeile.join(' · ') + '<br>' : '') +
     (spesen.length ? 'Zulagen/Spesen laut Einsatz: ' + spesen.join(', ') : 'Keine zusätzlichen Zulagen am Einsatz hinterlegt.') +
     (st.fmt ? '<br><span style="color:var(--rp-grey);font-size:11px">Filter-Serialisierung «' + st.fmt + '» funktioniert (offener Punkt 1 der API-Doku).</span>' : '') +
+    ((st.kundeFehler && st.kundeFehler.length) ? '<br><span style="color:#c62828;font-size:11px">Kundenname nicht auflösbar (people.getLegal): ' + esc(st.kundeFehler.join(' · ')) + '</span>' : '') +
     (st.ausRoster ? '<br><span style="color:var(--rp-grey);font-size:11px">Einsätze stammen aus dem Bulk-geladenen Roster — keine weitere Suche nötig, ID bereits bekannt.</span>' : '') +
     (st.viaText ? '<br><span style="color:var(--rp-grey);font-size:11px">Einsätze via Volltextsuche' + (st.textVerifiziert ? ', über die Personen-ID verifiziert' : ' — Personen-ID nicht bestätigt, bitte Beleg prüfen') + '; ID-Filter: ' + esc((st.protokoll || []).join(' · ')) + '.</span>' : '') +
     uebernahmeBtn;
@@ -12920,6 +12961,16 @@ function resetRapport(){
 }
 
 window.initRapport = function(){
+  /* Einsatzliste (Roster) schon beim Öffnen des Formulars laden — nicht erst nach dem Scan. Läuft
+     bei jedem Aufruf der Ansicht (auch wenn ready bereits true ist), damit der Cache aktuell bleibt;
+     rpApiLoadRoster() selbst prüft intern TTL/Speicher und lädt nur neu, wenn nötig — kein
+     unnötiger Netzwerk-Traffic bei wiederholtem Öffnen innerhalb der Cache-Gültigkeit. */
+  try {
+    if(typeof rpApiUse === 'function' && rpApiUse() && typeof rpApiLoadRoster === 'function'){
+      rpApiLoadRoster(false).catch(function(){ /* Fehlschlag ist ok — Rückfallkette greift beim Scan wie gehabt */ });
+    }
+  } catch(rIe){ /* Roster-Vorladen ist Zusatznutzen, darf das Formular nie blockieren */ }
+
   if(ready) return; ready=true;
 
   var drop=$('rpDrop'), picker=$('rpPicker');
