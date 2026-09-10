@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.157.0"></script>
-<script src="apriko-api.js?v=1.157.0"></script>
-<script src="lohncheck.js?v=1.157.0"></script>
-<script src="personalbudget.js?v=1.157.0"></script>
-<script src="jahresbudget.js?v=1.157.0"></script>
-<script src="budgetpositionen.js?v=1.157.0"></script>
-<script src="lohnchecklistetemp.js?v=1.157.0"></script>
+<script src="apriko-filters.js?v=1.159.0"></script>
+<script src="apriko-api.js?v=1.159.0"></script>
+<script src="lohncheck.js?v=1.159.0"></script>
+<script src="personalbudget.js?v=1.159.0"></script>
+<script src="jahresbudget.js?v=1.159.0"></script>
+<script src="budgetpositionen.js?v=1.159.0"></script>
+<script src="lohnchecklistetemp.js?v=1.159.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.157.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.159.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12923,10 +12923,19 @@ async function rpApiUebernehmen(){
     var teile = [];
     if(typeof ms.monthSalary === 'number' && ms.monthSalary) teile.push('Monatslohn ' + ms.monthSalary.toFixed(2));
     if(typeof ms.basicSalary === 'number' && ms.basicSalary) teile.push('Grundlohn ' + ms.basicSalary.toFixed(2));
-    if(ms.has13thMonthSalary && typeof ms.pct13thMonthSalary === 'number') teile.push('13. Monatslohn ' + ms.pct13thMonthSalary.toFixed(2) + '%');
+    // 13. Monatslohn / Ferien / Feiertage: manche GAVs liefern das als Prozentsatz, andere als
+    // fixen CHF-Betrag (compensation13thSalary/vacationCompensation/publicHolidaysCompensation) —
+    // beide Varianten prüfen, sonst wird bei GAVs mit CHF-Beträgen fälschlich "keine Daten" gemeldet.
+    if(ms.has13thMonthSalary && typeof ms.pct13thMonthSalary === 'number' && ms.pct13thMonthSalary) teile.push('13. Monatslohn ' + ms.pct13thMonthSalary.toFixed(2) + '%');
+    else if(ms.has13thMonthSalary && typeof ms.compensation13thSalary === 'number' && ms.compensation13thSalary) teile.push('13. Monatslohn CHF ' + ms.compensation13thSalary.toFixed(2));
     if(typeof ms.pctVacationCompensation === 'number' && ms.pctVacationCompensation) teile.push('Ferienentschädigung ' + ms.pctVacationCompensation.toFixed(2) + '%');
+    else if(typeof ms.vacationCompensation === 'number' && ms.vacationCompensation) teile.push('Ferienentschädigung CHF ' + ms.vacationCompensation.toFixed(2));
     if(typeof ms.pctHolidaysCompensation === 'number' && ms.pctHolidaysCompensation) teile.push('Feiertagsentschädigung ' + ms.pctHolidaysCompensation.toFixed(2) + '%');
+    else if(typeof ms.publicHolidaysCompensation === 'number' && ms.publicHolidaysCompensation) teile.push('Feiertagsentschädigung CHF ' + ms.publicHolidaysCompensation.toFixed(2));
     if(typeof ms.vacationDays === 'number' && ms.vacationDays) teile.push(ms.vacationDays + ' Ferientage');
+    if(typeof ms.publicHolidays === 'number' && ms.publicHolidays) teile.push(ms.publicHolidays + ' Feiertage');
+    if(ms.hasERWContribution && typeof ms.erwContribution === 'number' && ms.erwContribution) teile.push('AG-Beitrag CHF ' + ms.erwContribution.toFixed(2));
+    if(typeof ms.ereContribution === 'number' && ms.ereContribution) teile.push('AN-Beitrag CHF ' + ms.ereContribution.toFixed(2));
     if(!teile.length) return '';
     return '<div style="margin-top:10px;padding:8px 12px;background:#ECFDF5;border-left:3px solid #059669;border-radius:3px;color:#065f46;font-size:12px">' +
       '<b>✓ Eckwerte laut Apriko-tempdata</b> (' + quelle + ', GAV: ' + esc(gavApi) + ')<br>' + teile.join(' · ') + '</div>';
@@ -13009,7 +13018,7 @@ async function rpApiUebernehmen(){
     if(srcEl){
       srcEl.hidden = false;
       srcEl.innerHTML = '<div style="padding:8px 12px;background:#FEF2F2;border-left:3px solid #c62828;border-radius:3px;color:#7f1d1d;font-size:12px">' +
-        '⚠ <b>Kein lokales Regelwerk für „' + esc(gavApi) + '"</b> — die Auswahl oben rechts (' + esc((GAV[brancheSel.value] || {}).name || brancheSel.value) + ') darf hierfür NICHT verwendet werden. ' +
+        '⚠ <b>Kein lokales Regelwerk für „' + esc(gavApi) + '"</b> — massgeblich ist ausschliesslich der GAV laut Apriko-Einsatz, nie eine manuelle Auswahl. ' +
         'Bitte die Eckwerte für dieses GAV separat recherchieren, bevor mit der Prüfung fortgefahren wird.' +
         (tempDataFehler.length ? '<br><span style="font-size:11px;opacity:.8">tempdata-Diagnose: ' + esc(tempDataFehler.join(' · ')) + '</span>' : '') +
         '</div>' +
