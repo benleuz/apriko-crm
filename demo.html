@@ -23,12 +23,12 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.124.0"></script>
-<script src="apriko-api.js?v=1.124.0"></script>
-<script src="lohncheck.js?v=1.124.0"></script>
-<script src="personalbudget.js?v=1.124.0"></script>
-<script src="jahresbudget.js?v=1.124.0"></script>
-<script src="budgetpositionen.js?v=1.124.0"></script>
+<script src="apriko-filters.js?v=1.128.0"></script>
+<script src="apriko-api.js?v=1.128.0"></script>
+<script src="lohncheck.js?v=1.128.0"></script>
+<script src="personalbudget.js?v=1.128.0"></script>
+<script src="jahresbudget.js?v=1.128.0"></script>
+<script src="budgetpositionen.js?v=1.128.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -970,7 +970,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.124.0</span> · <span id="app-build-date">09.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.128.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -1069,7 +1069,7 @@
                   </div></div>
                 <div><label for="rpPlz">PLZ Einsatzort</label>
                   <input type="text" id="rpPlz" placeholder="z.B. 8003"></div>
-                <div><label for="rpBranche">Branche</label>
+                <div id="rpBrancheWrap"><label for="rpBranche">Branche</label>
                   <select id="rpBranche">
                     <option value="bau" selected>Bauhauptgewerbe</option>
                     <option value="elektro">Elektrogewerbe (LGAV)</option>
@@ -1079,7 +1079,8 @@
                   </select></div>
               </div>
           </div>
-          <div class="rp-actions"><button class="rp-btn rp-btn-dark" id="rpLoad">GAV-Eckwerte laden</button></div>
+          <div class="rp-actions" id="rpLoadWrap"><button class="rp-btn rp-btn-dark" id="rpLoad">GAV-Eckwerte laden</button></div>
+          <div id="rpManualToggle" style="display:none;margin:2px 0 6px"><a href="#" onclick="rpApiSetManual(true);return false" style="font-size:11px;color:var(--rp-grey)">GAV manuell setzen (ohne Apriko-Einsatz) …</a></div>
           <dl class="rp-facts" id="rpFacts" hidden></dl>
           <p class="rp-src" id="rpSrc" hidden></p>
         </div>
@@ -12148,6 +12149,20 @@ function rpApiUse(){
   AprikoApi.configure({ target: "" });
   return AprikoApi.isConfigured() && !!getAprikoToken();
 }
+/* Sobald eine Apriko-Verbindung eingerichtet ist, übernimmt die Einsatzliste GAV + PLZ automatisch —
+   die manuelle Branche-Auswahl und der separate «GAV-Eckwerte laden»-Button sind dann nur noch eine
+   Fehlerquelle (falsche Branche parallel zum echten Einsatz) und werden standardmässig ausgeblendet.
+   Ohne eingerichtete Verbindung bleibt es der einzige Weg und wird gezeigt. */
+function rpApiSetManual(zeigen){
+  var w1 = $('rpBrancheWrap'), w2 = $('rpLoadWrap'), t2 = $('rpManualToggle');
+  if(w1) w1.style.display = zeigen ? '' : 'none';
+  if(w2) w2.style.display = zeigen ? '' : 'none';
+  if(t2) t2.style.display = zeigen ? 'none' : (w1 ? '' : 'none');
+}
+function rpApiInitManualUI(){
+  var vorhanden = typeof rpApiUse === 'function' && rpApiUse();
+  rpApiSetManual(!vorhanden);
+}
 function rpApiBox(){
   var box = document.getElementById('rpApiBox');
   if(!box){
@@ -12198,9 +12213,13 @@ async function rpApiPlacementsFor(personId){
     rawlower:  function(id){ return 'employeeId|=|' + String(id) + '|text|false|false|["G1"]'; },
     guidJson:  function(id){ return 'employeeId|=|' + JSON.stringify(id) + '|Guid|false|false|["G1"]'; },
     guidRaw:   function(id){ return 'employeeId|=|' + String(id) + '|Guid|false|false|["G1"]'; },
-    pascal:    function(id){ return 'EmployeeId|=|' + JSON.stringify(id) + '|Text|false|false|["G1"]'; }
+    pascal:    function(id){ return 'EmployeeId|=|' + JSON.stringify(id) + '|Text|false|false|["G1"]'; },
+    // Hypothese: employeeId ist im Suchindex ein analysiertes Textfeld (deshalb Volltextsuche ok,
+    // aber Exact-Match-Filter 0 Treffer) — "Keyword" wäre der klassische ES/Lucene-Exact-Match-Typ.
+    keyword:      function(id){ return 'employeeId|=|' + String(id) + '|Keyword|false|false|["G1"]'; },
+    keywordLower: function(id){ return 'employeeId|=|' + String(id) + '|keyword|false|false|G1'; }
   };
-  var alle = ['docText', 'docTextQuoted', 'json', 'raw', 'rawlower', 'guidJson', 'guidRaw', 'pascal'];
+  var alle = ['docText', 'docTextQuoted', 'json', 'raw', 'rawlower', 'guidJson', 'guidRaw', 'pascal', 'keyword', 'keywordLower'];
   var pref = localStorage.getItem('apriko-filter-format');
   var fmts = alle.indexOf(pref) >= 0 ? [pref].concat(alle.filter(function(f){ return f !== pref; })) : alle;
   var letzterFehler = null, sauberLeer = false, protokoll = [];
@@ -12239,6 +12258,106 @@ async function rpApiPlacementsByText(maName, personId, firmaName){
   }
   return { rows: [], verifiziert: false };
 }
+/* ============ Einsatzliste-Roster (Bulk-Cache) ============
+   Idee: statt pro Scan mühsam über die kaputte/unverifizierte Suche nach EINER Person zu fischen,
+   einmal die Einsatzliste der letzten ROSTER_TAGE Tage komplett laden, daraus die eindeutigen
+   Mitarbeiter- und Kunden-IDs ziehen, deren Namen auflösen und ALLES lokal cachen. Ein Scan sucht
+   dann nur noch in dieser kleinen, bereits vollständig aufgelösten Liste — schnell, und die
+   employeeId ist garantiert korrekt (sie stammt direkt aus den geladenen Placement-Datensätzen,
+   nicht aus einer serverseitigen ID-Filterung, die bislang in keiner Formatvariante funktionierte).
+   Cache liegt im Speicher + localStorage (TTL siehe ROSTER_TTL_MIN), damit nicht jeder Scan neu lädt. */
+var ROSTER_TAGE = 61;              // ~2 Monate
+var ROSTER_TTL_MIN = 240;          // 4 Stunden, dann wird beim nächsten Scan neu geladen
+var ROSTER_MAX_SEITEN = 40;        // Sicherheitsdeckel (× pageSize 100 = max. 4000 Placements)
+var ROSTER_KEY = 'rp-api-roster-v1';
+var rpRoster = null;               // { loadedAt, mitarbeiter:{id:{firstName,lastName,placements:[]}}, kunden:{id:{businessName}} }
+var rpRosterLoading = null;        // laufendes Promise, damit nicht doppelt geladen wird
+
+function rpRosterFromStorage(){
+  try {
+    var raw = localStorage.getItem(ROSTER_KEY);
+    if(!raw) return null;
+    var d = JSON.parse(raw);
+    if(!d || !d.loadedAt || (Date.now() - d.loadedAt) > ROSTER_TTL_MIN * 60000) return null;
+    return d;
+  } catch(e){ return null; }
+}
+function rpRosterToStorage(r){
+  try { localStorage.setItem(ROSTER_KEY, JSON.stringify(r)); } catch(e){ /* localStorage evtl. voll — Cache bleibt nur im Speicher */ }
+}
+
+async function rpApiLoadRoster(force){
+  if(!force){
+    if(rpRoster) return rpRoster;
+    var cached = rpRosterFromStorage();
+    if(cached){ rpRoster = cached; return rpRoster; }
+  }
+  if(rpRosterLoading) return rpRosterLoading;
+  rpRosterLoading = (async function(){
+    var box = rpApiBox();
+    var grenze = new Date(Date.now() - ROSTER_TAGE * 86400000);
+    var placements = [];
+    // Bulk-Abruf über dieselbe Volltextsuche, die zuverlässig 200er liefert — mit leerer Anfrage
+    // (kein Namensfilter) über mehrere Seiten, bis eine Seite leer ist oder der Sicherheitsdeckel
+    // greift. Sortierreihenfolge ist nicht dokumentiert, deshalb wird über alle gelieferten Seiten
+    // client-seitig nach Datum gefiltert statt serverseitig auf ein Zeitfenster zu vertrauen.
+    for(var pi = 0; pi < ROSTER_MAX_SEITEN; pi++){
+      if(box) box.innerHTML = '🔌 <b>Einsatzliste wird geladen</b> (Seite ' + (pi + 1) + ') — einmalig, danach ' + ROSTER_TTL_MIN + ' Min. aus dem Cache …';
+      var r;
+      try { r = await AprikoApi.models.query({ query: '', entityTypes: 'StaffLeasePlacement', pageIndex: pi, pageSize: 100, resolveReferences: false }); }
+      catch(e){ break; }
+      var rows = ((r && r.results) || []).map(AprikoApi.models.hitData);
+      if(!rows.length) break;
+      placements = placements.concat(rows);
+    }
+    var imFenster = placements.filter(function(p){
+      var ein = p.entryDate ? new Date(p.entryDate) : null;
+      var aus = p.withdrawalDate ? new Date(p.withdrawalDate) : null;
+      return (!ein || ein <= new Date()) && (!aus || aus >= grenze);
+    });
+    var maIds = [], kuIds = [];
+    var byMa = {};
+    imFenster.forEach(function(p){
+      if(p.employeeId){
+        if(maIds.indexOf(p.employeeId) < 0) maIds.push(p.employeeId);
+        (byMa[p.employeeId] = byMa[p.employeeId] || []).push(p);
+      }
+      if(p.customerId && kuIds.indexOf(p.customerId) < 0) kuIds.push(p.customerId);
+    });
+    if(box) box.innerHTML = '🔌 <b>Einsatzliste geladen:</b> ' + imFenster.length + ' Einsätze — löse ' + maIds.length + ' Mitarbeitende und ' + kuIds.length + ' Kunden auf …';
+    var mitarbeiter = {};
+    for(var mi = 0; mi < maIds.length; mi++){
+      try { var per = await AprikoApi.people.getIndividual(maIds[mi]); if(per) mitarbeiter[maIds[mi]] = { firstName: per.firstName, lastName: per.lastName, personNumber: per.personNumber, placements: byMa[maIds[mi]] }; }
+      catch(e){ /* einzelne Person übersprungen */ }
+    }
+    var kunden = {};
+    for(var ki = 0; ki < kuIds.length; ki++){
+      try { var leg = await AprikoApi.people.getLegal(kuIds[ki]); if(leg) kunden[kuIds[ki]] = { businessName: leg.businessName || leg.displayName || '' }; }
+      catch(e){ /* einzelner Kunde übersprungen */ }
+    }
+    rpRoster = { loadedAt: Date.now(), tage: ROSTER_TAGE, seiten: Math.min(ROSTER_MAX_SEITEN, placements.length ? Math.ceil(placements.length / 100) : 0), mitarbeiter: mitarbeiter, kunden: kunden };
+    rpRosterToStorage(rpRoster);
+    rpRosterLoading = null;
+    return rpRoster;
+  })();
+  return rpRosterLoading;
+}
+
+/* Lokale Suche im Roster — kein Netzwerk-Roundtrip mehr nötig, employeeId ist bereits bekannt/korrekt. */
+function rpApiRosterFind(maName){
+  if(!rpRoster) return [];
+  var treffer = [];
+  Object.keys(rpRoster.mitarbeiter).forEach(function(id){
+    var m = rpRoster.mitarbeiter[id];
+    var name = [m.firstName, m.lastName].filter(Boolean).join(' ');
+    if(rpApiNameMatch(name, maName)) treffer.push({ id: id, firstName: m.firstName, lastName: m.lastName, personNumber: m.personNumber, placements: m.placements });
+  });
+  return treffer;
+}
+function rpApiRosterKundeName(customerId){
+  return rpRoster && rpRoster.kunden[customerId] ? rpRoster.kunden[customerId].businessName : '';
+}
+
 /* Abgleich-Zustand für die Auswahl-Dropdowns */
 var rpApiState = { personen: [], personIdx: 0, einsaetze: [], einsatzId: null, von: null, bis: null, firmaName: '', unsicher: false, fmt: null, viaText: false, protokoll: [] };
 
@@ -12247,9 +12366,29 @@ async function rpApiMatch(maName, firmaName, vonStr, bisStr){
   if(!rpApiUse()) return;   // weder Rapport-eigene noch POC-Verbindung eingerichtet
   var box = rpApiBox();
   if(!box || !maName) return;
+  rpApiState.lastArgs = [maName, firmaName, vonStr, bisStr];
   box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> suche «' + esc(maName) + '» …';
   rpApiState.gefundenUeberEinsatz = false;
+  rpApiState.ausRoster = false;
   try {
+    /* Zuerst im Roster (Bulk-Cache der Einsatzliste der letzten ~2 Monate) suchen — schnell, und die
+       employeeId stammt direkt aus echten Placement-Datensätzen (nicht aus einer serverseitigen
+       ID-Filterung, die bislang in keiner Formatvariante zuverlässig funktioniert hat). Erst wenn
+       das nichts findet, greift die bisherige Kette (Personensuche → Volltext → Nachname). */
+    try {
+      await rpApiLoadRoster(false);
+      var rosterTreffer = rpApiRosterFind(maName);
+      if(rosterTreffer.length){
+        rpApiState.personen = rosterTreffer;
+        rpApiState.unsicher = rosterTreffer.length > 1;
+        rpApiState.ausRoster = true;
+        rpApiState.firmaName = firmaName || '';
+        rpApiState.von = rpDate(vonStr); rpApiState.bis = rpDate(bisStr || vonStr);
+        rpApiState.vonStr = vonStr || ''; rpApiState.bisStr = bisStr || vonStr || '';
+        await rpApiSelectPerson(0, maName);
+        return;
+      }
+    } catch(re){ /* Roster nicht ladbar (z.B. keine Berechtigung) — normale Kette als Rückfall */ }
     var q = await AprikoApi.models.query({ query: maName, entityTypes: 'IndividualPerson', pageIndex: 0, pageSize: 8, resolveReferences: false });
     var roh = ((q && q.results) || []).map(AprikoApi.models.hitData);
     var passend = roh.filter(function(p){
@@ -12293,8 +12432,11 @@ async function rpApiMatch(maName, firmaName, vonStr, bisStr){
         box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> kein Treffer zu «' + esc(maName) + '» — versuche nur Nachname «' + esc(nachname) + '» …';
         try {
           var qn = await AprikoApi.models.query({ query: nachname, entityTypes: 'IndividualPerson', pageIndex: 0, pageSize: 15, resolveReferences: false });
+          var nnNorm = rpApiNorm(nachname);
           var rohN = ((qn && qn.results) || []).map(AprikoApi.models.hitData).filter(function(p){
-            return rpApiNorm([p.firstName, p.lastName].filter(Boolean).join(' ')).indexOf(rpApiNorm(nachname)) >= 0;
+            var ln = rpApiNorm(p.lastName || '');
+            // Nachname muss exakt passen oder als eigenes Wort beginnen (nie als Teilstring wie "Brun" in "Bruno")
+            return ln === nnNorm || ln.split(' ').indexOf(nnNorm) >= 0;
           });
           if(rohN.length){
             rpApiState.personen = rohN;
@@ -12309,6 +12451,7 @@ async function rpApiMatch(maName, firmaName, vonStr, bisStr){
     rpApiState.vonStr = vonStr || ''; rpApiState.bisStr = bisStr || vonStr || '';
     if(!rpApiState.personen.length){
       box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> kein Mitarbeiter zu «' + esc(maName) + '» gefunden — weder Personensuche noch Einsatzliste noch Nachnamen-Suche liefern einen Treffer. Angaben unten bitte manuell prüfen.';
+      rpApiSetManual(true);
       return;
     }
     await rpApiSelectPerson(0, maName);
@@ -12326,18 +12469,25 @@ async function rpApiSelectPerson(idx, ocrName){
   var pName = [person.firstName, person.lastName].filter(Boolean).join(' ');
   box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> lade Einsätze von ' + esc(pName) + ' …';
   try {
-    var pl = await rpApiPlacementsFor(person.id);
-    rpApiState.fmt = pl.fmt; rpApiState.protokoll = pl.protokoll || []; rpApiState.viaText = false;
-    if(!pl.rows.length){
-      var tf = await rpApiPlacementsByText(ocrName || pName, person.id, rpApiState.firmaName);
-      if(tf.rows.length){ pl = { rows: tf.rows }; rpApiState.viaText = true; rpApiState.textVerifiziert = tf.verifiziert; }
+    var pl;
+    if(person.placements){
+      // Kommt aus dem Roster — Placements sind bereits bekannt, kein weiterer Suchaufruf nötig
+      pl = { rows: person.placements };
+      rpApiState.fmt = null; rpApiState.protokoll = []; rpApiState.viaText = false; rpApiState.textVerifiziert = true;
+    } else {
+      pl = await rpApiPlacementsFor(person.id);
+      rpApiState.fmt = pl.fmt; rpApiState.protokoll = pl.protokoll || []; rpApiState.viaText = false;
+      if(!pl.rows.length){
+        var tf = await rpApiPlacementsByText(ocrName || pName, person.id, rpApiState.firmaName);
+        if(tf.rows.length){ pl = { rows: tf.rows }; rpApiState.viaText = true; rpApiState.textVerifiziert = tf.verifiziert; }
+      }
     }
     // Kundennamen auflösen + sortieren: Überlappung + Kunden-Match zuerst, dann jüngste
     var von = rpApiState.von, bis = rpApiState.bis;
     var list = [];
     for(var i = 0; i < pl.rows.length; i++){
-      var e = pl.rows[i], kn = '';
-      if(e.customerId){
+      var e = pl.rows[i], kn = e.customerId ? rpApiRosterKundeName(e.customerId) : '';
+      if(!kn && e.customerId){
         try { var c = await AprikoApi.people.getLegal(e.customerId); kn = c.businessName || c.displayName || ''; } catch(e2){}
       }
       var ein = e.entryDate ? new Date(e.entryDate) : null;
@@ -12371,6 +12521,11 @@ async function rpApiSelectPerson(idx, ocrName){
   } catch(e){
     box.innerHTML = '🔌 <b>Apriko-Abgleich:</b> Einsätze nicht ladbar — ' + esc((e && e.message) || String(e)).slice(0, 220);
   }
+}
+async function rpApiRefreshRoster(){
+  var box = rpApiBox(); if(box) box.innerHTML = '🔌 <b>Einsatzliste wird neu geladen …</b>';
+  await rpApiLoadRoster(true);
+  if(rpApiState.lastArgs) rpApiMatch.apply(null, rpApiState.lastArgs);
 }
 function rpApiSelectEinsatz(id){ rpApiState.einsatzId = id; rpApiRender(); }
 function rpApiToggleAlle(){
@@ -12438,13 +12593,30 @@ async function rpApiUebernehmen(){
     if(typeof a.rate === 'number') tt.push(a.rate.toFixed(2) + ' Tarif');
     return esc(a.name || a.displayName || 'Zulage') + (tt.length ? ' (' + tt.join(' / ') + ')' : '');
   });
+  /* Der Einsatz aus Apriko ist die alleinige Quelle für den GAV — die Branche oben rechts wird nie
+     stillschweigend übernommen. Passt der Einsatz-GAV zu einer lokal hinterlegten Branche, wird sie
+     automatisch gesetzt und die Eckwerte geladen; passt keine, wird NICHT mit einer möglicherweise
+     falschen Branche weitergefahren, sondern klar blockiert, bis das von Hand geklärt ist. */
   window.__rpEinsatzKonditionen =
     '<div style="margin-top:10px;padding:8px 12px;background:#EEF2FF;border-left:3px solid #4F46E5;border-radius:3px;color:#312E81;font-size:12px">' +
     '<b>Konditionen laut Apriko-Einsatz Nr ' + esc(String(beste.placementNumber || beste.id)) + '</b>' +
-    (gavApi ? '<br>GAV: ' + esc(gavApi) + (gavMatch ? ' ✓ automatisch als Branche übernommen' : ' — keine passende Branche gefunden, bitte oben manuell wählen') : '') +
+    (gavApi ? '<br>GAV: ' + esc(gavApi) + (gavMatch ? ' ✓ als Branche übernommen (massgeblich, nicht die Auswahl oben)' : '') : '') +
     (lohnTeile.length ? '<br>' + lohnTeile.join(' · ') : '') +
     '<br>Zulagen/Spesen: ' + (spesen.length ? spesen.join(', ') : 'keine zusätzlichen am Einsatz hinterlegt') +
     '</div>';
+  if(gavApi && !gavMatch){
+    toast && toast('GAV laut Einsatz „' + gavApi + '" ist in der lokalen GAV-Tabelle nicht hinterlegt — Eckwerte werden NICHT automatisch geladen (sonst würde die falsche Branche verwendet).', true);
+    var srcEl = $('rpSrc'), factsEl = $('rpFacts');
+    if(factsEl){ factsEl.hidden = true; factsEl.innerHTML = ''; }
+    if(srcEl){
+      srcEl.hidden = false;
+      srcEl.innerHTML = '<div style="padding:8px 12px;background:#FEF2F2;border-left:3px solid #c62828;border-radius:3px;color:#7f1d1d;font-size:12px">' +
+        '⚠ <b>Kein lokales Regelwerk für „' + esc(gavApi) + '"</b> — die Auswahl oben rechts (' + esc((GAV[brancheSel.value] || {}).name || brancheSel.value) + ') darf hierfür NICHT verwendet werden. ' +
+        'Bitte die Eckwerte für dieses GAV separat recherchieren, bevor mit der Prüfung fortgefahren wird.</div>' +
+        window.__rpEinsatzKonditionen;
+    }
+    return;   // loadGav() bewusst NICHT aufgerufen — kein stilles Weiterlaufen mit falscher Branche
+  }
   if(typeof loadGav === 'function') loadGav();
 }
 if (typeof window !== 'undefined') window.rpApiUebernehmen = rpApiUebernehmen;
@@ -12461,7 +12633,8 @@ function rpApiRender(){
   var kopf = '🔌 <b>Apriko-Abgleich</b>' + (st.unsicher ? ' <span style="color:#c62828">— kein sicherer Namenstreffer, bitte wählen:</span>' : ':') + ' ' + maDrop +
     (st.personen.length > 1 && !st.unsicher ? ' <span style="color:var(--rp-grey);font-size:11px">(' + st.personen.length + ' ähnliche Treffer)</span>' : '') +
     (st.gefundenUeberEinsatz ? ' <span style="color:var(--rp-grey);font-size:11px">(über Einsatzliste gefunden, nicht über die Personensuche)</span>' : '') +
-    (st.gefundenUeberNachname ? ' <span style="color:#c62828;font-size:11px">(nur über Nachname gefunden — Vorname im Beleg/OCR vermutlich falsch, bitte wählen)</span>' : '');
+    (st.gefundenUeberNachname ? ' <span style="color:#c62828;font-size:11px">(nur über Nachname gefunden — Vorname im Beleg/OCR vermutlich falsch, bitte wählen)</span>' : '') +
+    (st.ausRoster ? ' <span style="color:#2e7d32;font-size:11px">✓ aus Einsatzliste-Cache (letzte ' + ROSTER_TAGE + ' Tage), Personen-ID verifiziert</span> <a href="#" onclick="rpApiRefreshRoster();return false" style="font-size:11px;color:var(--rp-grey)">(neu laden)</a>' : '');
   var unverifiedBanner = (st.viaText && !st.textVerifiziert)
     ? '<div style="margin:8px 0;padding:7px 10px;background:#FEF2F2;border-left:3px solid #c62828;border-radius:3px;font-size:12px;color:#7f1d1d">' +
       '⚠ <b>Nicht über die Personen-ID bestätigt:</b> Die Einsatzliste konnte nicht direkt nach dieser Person gefiltert werden (ID-Filter: ' +
@@ -12473,8 +12646,10 @@ function rpApiRender(){
   if(!st.einsaetze.length){
     box.innerHTML = kopf + '<br>Keine Einsätze zu dieser Person gefunden (' +
       esc((st.protokoll || []).join(' · ') || 'ID-Filter + Volltext leer') + ') — Personen-ID: <code>' + esc(String(person.id || '')) + '</code>';
+    rpApiSetManual(true);
     return;
   }
+  if(typeof rpApiUse === 'function' && rpApiUse()) rpApiSetManual(false);
   var kurzName = (st.pName || '').split(' ').slice(-1)[0] || st.pName || '';
   var einDrop = '<select onchange="rpApiSelectEinsatz(this.value)" style="max-width:480px">' +
     st.einsaetze.map(function(x){
@@ -12524,6 +12699,7 @@ function rpApiRender(){
     (lohnTeile.length ? 'Konditionen: ' + lohnTeile.join(' · ') + '<br>' : '') +
     (spesen.length ? 'Zulagen/Spesen laut Einsatz: ' + spesen.join(', ') : 'Keine zusätzlichen Zulagen am Einsatz hinterlegt.') +
     (st.fmt ? '<br><span style="color:var(--rp-grey);font-size:11px">Filter-Serialisierung «' + st.fmt + '» funktioniert (offener Punkt 1 der API-Doku).</span>' : '') +
+    (st.ausRoster ? '<br><span style="color:var(--rp-grey);font-size:11px">Einsätze stammen aus dem Bulk-geladenen Roster — keine weitere Suche nötig, ID bereits bekannt.</span>' : '') +
     (st.viaText ? '<br><span style="color:var(--rp-grey);font-size:11px">Einsätze via Volltextsuche' + (st.textVerifiziert ? ', über die Personen-ID verifiziert' : ' — Personen-ID nicht bestätigt, bitte Beleg prüfen') + '; ID-Filter: ' + esc((st.protokoll || []).join(' · ')) + '.</span>' : '') +
     uebernahmeBtn;
 }
@@ -13981,6 +14157,7 @@ async function scanWithClaude(){
     b.textContent = 'Erneut auslesen';
     b.disabled = false;
     unlock($('rpS2'));
+    rpApiInitManualUI();
     collapseUploadCard();
     renderPreviewCol();
     $('rpS2').scrollIntoView({behavior:'smooth',block:'start'});
