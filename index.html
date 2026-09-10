@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.140.0"></script>
-<script src="apriko-api.js?v=1.140.0"></script>
-<script src="lohncheck.js?v=1.140.0"></script>
-<script src="personalbudget.js?v=1.140.0"></script>
-<script src="jahresbudget.js?v=1.140.0"></script>
-<script src="budgetpositionen.js?v=1.140.0"></script>
-<script src="lohnchecklistetemp.js?v=1.140.0"></script>
+<script src="apriko-filters.js?v=1.141.0"></script>
+<script src="apriko-api.js?v=1.141.0"></script>
+<script src="lohncheck.js?v=1.141.0"></script>
+<script src="personalbudget.js?v=1.141.0"></script>
+<script src="jahresbudget.js?v=1.141.0"></script>
+<script src="budgetpositionen.js?v=1.141.0"></script>
+<script src="lohnchecklistetemp.js?v=1.141.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.140.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.141.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -1095,6 +1095,7 @@
         <div style="font-size:11px;color:#c62828;margin-left:auto">Zwei unabhängige Lesungen — gelb = uneinig oder unsicher: Wert korrigieren, per Doppelklick bestätigen oder Zeile mit ✕ entfernen. Auswertung erst ohne offene Markierungen.</div>
           <div class="rp-sub">Markierte Felder gegen das Original abgleichen</div></div>
         <div class="rp-card-body">
+          <div id="rpS3Konditionen"></div>
           <div class="rp-legend">
             <span><i style="background:var(--rp-low);border:1px solid var(--rp-low-b)"></i>Unsichere Erkennung</span>
             <span><i style="background:var(--rp-mid);border:1px solid var(--rp-mid-b)"></i>Korrektur auf dem Beleg</span>
@@ -11538,6 +11539,8 @@ function showModal(title, body, footerButtons = []) {
 }
 function closeModal() {
   document.getElementById("modal").classList.remove("open");
+  var mb = document.querySelector("#modal .modal");
+  if(mb) mb.style.maxWidth = "";   // Breiten-Override (z.B. Einsatzliste) wieder zurücksetzen
 }
 function val(id) { return document.getElementById(id)?.value?.trim() || ""; }
 
@@ -12667,12 +12670,14 @@ function rpApiShowRoster(){
       ' <a href="#" onclick="rpApiLoadRoster(true).then(rpApiShowRoster);return false">(neu laden)</a></div>' +
     '<input type="text" id="rpRosterSuche" placeholder="Suche nach Name oder Kunde …" style="width:100%;margin-bottom:8px;padding:6px 10px;border:1px solid var(--rp-border,#ddd);border-radius:5px" oninput="rpApiFilterRoster(this.value)">' +
     '<div style="max-height:55vh;overflow:auto">' +
-    '<table style="width:100%;border-collapse:collapse;font-size:13px" id="rpRosterTabelle">' +
+    '<table style="width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap" id="rpRosterTabelle">' +
       '<thead><tr style="text-align:left;border-bottom:1px solid var(--rp-border,#ddd)">' +
-        '<th style="padding:4px 6px">Mitarbeiter</th><th style="padding:4px 6px">Kunde</th><th style="padding:4px 6px">Einsatz</th><th style="padding:4px 6px">Zeitraum</th><th style="padding:4px 6px">GAV</th>' +
+        '<th style="padding:4px 10px 4px 6px">Mitarbeiter</th><th style="padding:4px 10px">Kunde</th><th style="padding:4px 10px">Einsatz</th><th style="padding:4px 10px">Zeitraum</th><th style="padding:4px 6px">GAV</th>' +
       '</tr></thead><tbody>' + (rowsHtml || '<tr><td colspan="5" style="color:var(--rp-grey);padding:10px 6px">Keine Einsätze im Fenster gefunden.</td></tr>') + '</tbody>' +
     '</table></div>';
   showModal('Einsatzliste (letzte ' + (rpRoster.tage || ROSTER_TAGE) + ' Tage)', body);
+  var mbW = document.querySelector('#modal .modal');
+  if(mbW) mbW.style.maxWidth = '1200px';   // breiter als Standard — Tabellenzeilen sollen nicht umbrechen
 }
 function rpApiFilterRoster(q){
   var qq = String(q || '').toLowerCase().trim();
@@ -12737,14 +12742,19 @@ async function rpApiUebernehmen(){
      manuell erfassen zu müssen — spart den Bestätigungsdialog "Keine PLZ eingegeben". Nur setzen,
      wenn das PLZ-Feld noch leer ist (manuelle Eingabe hat Vorrang). */
   var plzFeld = $('rpPlz');
-  if(beste.workLocationId && plzFeld && !String(plzFeld.value || '').trim()){
+  var plzHinweis = '';
+  if(!beste.workLocationId){
+    plzHinweis = 'Kein Einsatzort (workLocationId) am Einsatz hinterlegt — PLZ manuell erfassen.';
+  } else if(plzFeld && !String(plzFeld.value || '').trim()){
     try {
       var wl = await AprikoApi.staffing.getWorkLocationAddress(beste.workLocationId);
       if(wl && wl.zipCode){
         plzFeld.value = wl.zipCode;
         toast && toast('Einsatzort übernommen: ' + wl.zipCode + (wl.city ? ' ' + wl.city : '') + (wl.canton && wl.canton !== 'None' ? ' (' + wl.canton + ')' : ''));
+      } else {
+        plzHinweis = 'Einsatzort geladen, aber keine PLZ enthalten — manuell erfassen.';
       }
-    } catch(wle){ /* kein Einsatzort hinterlegt oder nicht ladbar — PLZ bleibt leer, Dialog greift wie bisher */ }
+    } catch(wle){ plzHinweis = 'Einsatzort nicht ladbar (' + esc((wle && wle.message) || String(wle)).slice(0,120) + ') — PLZ manuell erfassen.'; }
   }
   var brancheSel = $('rpBranche');
   var gavMatch = null;
@@ -12754,6 +12764,28 @@ async function rpApiUebernehmen(){
       if(rpApiGavMatchesBranche(gavApi, key)){ gavMatch = key; break; }
     }
     if(gavMatch) brancheSel.value = gavMatch;
+  }
+  /* Echte tempdata-Recherche: liefert oft auch dann verwertbare Eckwerte, wenn der GAV in der
+     lokalen Branchen-Tabelle fehlt (z.B. regionale GAVs wie "Basler Ausbaugewerbe") — sourced
+     direkt aus Apriko, nicht geraten. */
+  var tempDataHtml = '';
+  if(beste.tempDataLabourStaffingAgreementVersionId){
+    try {
+      var ms = await AprikoApi.staffing.getTempDataMinimumSalary(beste.tempDataLabourStaffingAgreementVersionId, beste.tempDataLabourStaffingAgreementVersionValuesIds);
+      if(ms){
+        var teile = [];
+        if(typeof ms.monthSalary === 'number' && ms.monthSalary) teile.push('Monatslohn ' + ms.monthSalary.toFixed(2));
+        if(typeof ms.basicSalary === 'number' && ms.basicSalary) teile.push('Grundlohn ' + ms.basicSalary.toFixed(2));
+        if(ms.has13thMonthSalary && typeof ms.pct13thMonthSalary === 'number') teile.push('13. Monatslohn ' + ms.pct13thMonthSalary.toFixed(2) + '%');
+        if(typeof ms.pctVacationCompensation === 'number' && ms.pctVacationCompensation) teile.push('Ferienentschädigung ' + ms.pctVacationCompensation.toFixed(2) + '%');
+        if(typeof ms.pctHolidaysCompensation === 'number' && ms.pctHolidaysCompensation) teile.push('Feiertagsentschädigung ' + ms.pctHolidaysCompensation.toFixed(2) + '%');
+        if(typeof ms.vacationDays === 'number' && ms.vacationDays) teile.push(ms.vacationDays + ' Ferientage');
+        if(teile.length){
+          tempDataHtml = '<div style="margin-top:10px;padding:8px 12px;background:#ECFDF5;border-left:3px solid #059669;border-radius:3px;color:#065f46;font-size:12px">' +
+            '<b>✓ Eckwerte laut Apriko-tempdata</b> (live recherchiert, GAV: ' + esc(gavApi) + ')<br>' + teile.join(' · ') + '</div>';
+        }
+      }
+    } catch(tde){ /* tempdata nicht verfügbar für diese Version — Rückfall auf lokale Tabelle/Blockade */ }
   }
   var bc = beste.basicPlacementCompensation || {};
   var addl = beste.additionalPlacementCompensations || [];
@@ -12777,8 +12809,11 @@ async function rpApiUebernehmen(){
     (gavApi ? '<br>GAV: ' + esc(gavApi) + (gavMatch ? ' ✓ als Branche übernommen (massgeblich, nicht die Auswahl oben)' : '') : '') +
     (lohnTeile.length ? '<br>' + lohnTeile.join(' · ') : '') +
     '<br>Zulagen/Spesen: ' + (spesen.length ? spesen.join(', ') : 'keine zusätzlichen am Einsatz hinterlegt') +
-    '</div>';
-  if(gavApi && !gavMatch){
+    (plzHinweis ? '<br><span style="color:#92400E">⚠ ' + esc(plzHinweis) + '</span>' : '') +
+    '</div>' + tempDataHtml;
+  var s3K = $('rpS3Konditionen');
+  if(s3K) s3K.innerHTML = window.__rpEinsatzKonditionen;   // gleich sichtbar bei der Prüfung in Schritt 3, nicht nur oben bei Schritt 2
+  if(gavApi && !gavMatch && !tempDataHtml){
     toast && toast('GAV laut Einsatz „' + gavApi + '" ist in der lokalen GAV-Tabelle nicht hinterlegt — Eckwerte werden NICHT automatisch geladen (sonst würde die falsche Branche verwendet).', true);
     var srcEl = $('rpSrc'), factsEl = $('rpFacts');
     if(factsEl){ factsEl.hidden = true; factsEl.innerHTML = ''; }
@@ -12790,6 +12825,16 @@ async function rpApiUebernehmen(){
         window.__rpEinsatzKonditionen;
     }
     return;   // loadGav() bewusst NICHT aufgerufen — kein stilles Weiterlaufen mit falscher Branche
+  }
+  if(gavApi && !gavMatch && tempDataHtml){
+    // Lokale Branchen-Tabelle passt nicht, aber tempdata hat echte Eckwerte geliefert — damit
+    // weiterfahren statt zu blockieren; GAV-Eckwerte-Kachel bleibt leer, tempData-Block ersetzt sie.
+    var factsEl2 = $('rpFacts'), srcEl2 = $('rpSrc');
+    if(factsEl2){ factsEl2.hidden = true; factsEl2.innerHTML = ''; }
+    if(srcEl2){ srcEl2.hidden = false; srcEl2.innerHTML = window.__rpEinsatzKonditionen; }
+    unlock($('rpS3'));
+    $('rpS3').scrollIntoView({behavior:'smooth',block:'start'});
+    return;
   }
   if(typeof loadGav === 'function') loadGav();
 }

@@ -336,6 +336,18 @@
        er manuell erfasst werden muss. */
     getWorkLocationAddress: function (id) {
       return request("staffing", "/WorkLocationAddresses/" + encodeURIComponent(id));
+    },
+    /* Echte tempdata-Recherche (verifiziert 10.09.2026 gegen die staffing-Spec): liefert die
+       offiziellen Mindestlohn-/Eckwerte (Basislohn, 13. Monatslohn %, Ferien-/Feiertags-
+       entschädigung %, Ferientage) direkt aus Apriko's tempdata-Integration — keine geratenen
+       Werte. valueIds kommt vom Einsatz selbst (tempDataLabourStaffingAgreementVersionValuesIds),
+       falls vorhanden; sonst wird ohne valueIds versucht (liefert ggf. Standardwerte). */
+    getTempDataMinimumSalary: function (versionId, valueIds) {
+      return request("staffing", "/TempDataLabourStaffingAgreementVersions/" + encodeURIComponent(versionId) + "/MinimumSalary",
+        { query: valueIds != null ? { valueIds: valueIds } : undefined });
+    },
+    getTempDataSelectionCriterias: function (versionId) {
+      return request("staffing", "/TempDataLabourStaffingAgreementVersions/" + encodeURIComponent(versionId) + "/SelectionCriterias");
     }
   };
 
