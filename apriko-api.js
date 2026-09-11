@@ -420,6 +420,11 @@
         query: { pageIndex: pageIndex || 0, pageSize: pageSize || 100 }
       });
     },
+    listSalaryTypes: function (pageIndex, pageSize) {
+      return request("payrollaccounting", "/SalaryTypes", {
+        query: { pageIndex: pageIndex || 0, pageSize: pageSize || 100 }
+      });
+    },
     getEmploymentAssignment: function (id) {
       return request("payrollaccounting", "/EmploymentAssignments/" + encodeURIComponent(id));
     },

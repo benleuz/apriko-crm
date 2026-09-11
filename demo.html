@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.171.0"></script>
-<script src="apriko-api.js?v=1.171.0"></script>
-<script src="lohncheck.js?v=1.171.0"></script>
-<script src="personalbudget.js?v=1.171.0"></script>
-<script src="jahresbudget.js?v=1.171.0"></script>
-<script src="budgetpositionen.js?v=1.171.0"></script>
-<script src="lohnchecklistetemp.js?v=1.171.0"></script>
+<script src="apriko-filters.js?v=1.172.0"></script>
+<script src="apriko-api.js?v=1.172.0"></script>
+<script src="lohncheck.js?v=1.172.0"></script>
+<script src="personalbudget.js?v=1.172.0"></script>
+<script src="jahresbudget.js?v=1.172.0"></script>
+<script src="budgetpositionen.js?v=1.172.0"></script>
+<script src="lohnchecklistetemp.js?v=1.172.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.171.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.172.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -6192,10 +6192,10 @@ function kaHeat(v, min, max, higherBetter) {
    (wie der Anthropic-Key), nichts davon landet in SharePoint. */
 const AP_CFG_KEY = "apriko-api-cfg";
 let apState = {
-  tab: "people",             // people | companies | placements
-  rows: { people: [], companies: [], placements: [] },
-  page: { people: 0, companies: 0, placements: 0 },
-  done: { people: false, companies: false, placements: false },
+  tab: "people",             // people | companies | placements | salarytypes
+  rows: { people: [], companies: [], placements: [], salarytypes: [] },
+  page: { people: 0, companies: 0, placements: 0, salarytypes: 0 },
+  done: { people: false, companies: false, placements: false, salarytypes: false },
   loading: false,
   error: null,
   info: null,                // ServiceInfos-Antwort (Verbindungstest)
@@ -6322,6 +6322,8 @@ async function apLoadMore(tab) {
       ? await AprikoApi.people.listLegal(apState.page[tab], AP_PAGE_SIZE)
       : tab === "placements"
       ? await AprikoApi.staffing.listStaffLease(apState.page[tab], AP_PAGE_SIZE)
+      : tab === "salarytypes"
+      ? await AprikoApi.payrollaccounting.listSalaryTypes(apState.page[tab], AP_PAGE_SIZE)
       : await AprikoApi.people.listIndividual(apState.page[tab], AP_PAGE_SIZE);
     const arr = Array.isArray(data) ? data : [];
     apState.rows[tab] = apState.rows[tab].concat(arr);
@@ -6331,8 +6333,8 @@ async function apLoadMore(tab) {
   apState.loading = false; render();
 }
 function apReset() {
-  apState.rows = { people: [], companies: [], placements: [] }; apState.page = { people: 0, companies: 0, placements: 0 };
-  apState.done = { people: false, companies: false, placements: false }; apState.error = null; render();
+  apState.rows = { people: [], companies: [], placements: [], salarytypes: [] }; apState.page = { people: 0, companies: 0, placements: 0, salarytypes: 0 };
+  apState.done = { people: false, companies: false, placements: false, salarytypes: false }; apState.error = null; render();
 }
 function apSaveCfgFromForm() {
   const cfg = { baseUrl: apNormalizeBase(document.getElementById("ap-base").value), token: (document.getElementById("ap-token").value || "").trim().replace(/^Bearer\s+/i, "") };
@@ -6340,6 +6342,29 @@ function apSaveCfgFromForm() {
 }
 function apClearCfg() { localStorage.removeItem(AP_CFG_KEY); apState.info = null; apReset(); }
 function apTab(t) { apState.tab = t; apState.sort = { col: null, dir: 1 }; apState.filters = {}; render(); }
+/* Übernimmt die per API geladenen SalaryTypes direkt als zentrale Lohnartenliste im Ultimativ
+   Check (lohncheck.js) — spart den Umweg über manuellen CSV-Export/-Upload. number → Code,
+   name → Bezeichnung; compulsoryInsurances wird als Zusatzinfo mitgespeichert (aktuell vom
+   Lohnart-Vergleich noch nicht ausgewertet, aber bereits vorhanden für eine künftige SV-Prüfung). */
+async function apUebernehmeLohnartenliste() {
+  const rows = apState.rows.salarytypes;
+  if (!rows.length) { toast("Keine Lohnarten geladen.", true); return; }
+  const zeilen = rows.filter(r => typeof r.number === "number").map(r => ({
+    Code: r.number, Bezeichnung: r.name || r.displayName || "",
+    SV_Unterstellung: [].concat(r.compulsoryInsurances || []).filter(x => x && x !== "None").join(", ")
+  }));
+  if (!confirm(zeilen.length + " Lohnarten aus Apriko als zentrale Lohnartenliste im Ultimativ Check übernehmen? Eine evtl. bereits vorhandene Liste wird ersetzt.")) return;
+  await lcLoadLohnartenliste(false);
+  lcState.lohnartenliste = {
+    dateiname: "Apriko API (SalaryTypes, live übernommen " + new Date().toLocaleDateString("de-CH") + ")",
+    hochgeladenAm: new Date().toISOString(),
+    spalten: ["Code", "Bezeichnung", "SV_Unterstellung"],
+    spaltenMap: { code: "Code", bezeichnung: "Bezeichnung" },
+    zeilen
+  };
+  try { await lcSaveLohnartenliste(); toast(zeilen.length + " Lohnarten übernommen und gespeichert."); }
+  catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+}
 function apSort(col) { const s = apState.sort; if (s.col === col) s.dir = -s.dir; else { s.col = col; s.dir = 1; } render(); }
 function apFilter(col, inp) { apState.filters[col] = inp.value; apState._restoreFocus = { id: inp.id, pos: inp.selectionStart }; render(); }
 function apFmtDate(s) { if (!s) return ""; const d = new Date(s); return isNaN(d) ? String(s).slice(0, 10) : d.toLocaleDateString("de-CH"); }
@@ -6378,6 +6403,17 @@ const AP_COLS = {
     ["phone", "Telefon", r => r.primaryPhoneNumberValue],
     ["employees", "Mitarbeiter", r => r.numberOfEmployee],
     ["crm", "Im CRM?", r => (cache.companies || []).some(c => (c.Title || "").trim().toLowerCase() === String(r.businessName || r.displayName || "").trim().toLowerCase()) ? "✓" : "—"],
+    ["updated", "Geändert", r => apFmtDate(r.updatedTime)]
+  ],
+  salarytypes: [
+    ["number", "Code", r => r.number],
+    ["name", "Bezeichnung", r => r.name || r.displayName],
+    ["section", "Bereich", r => r.section === "None" ? "" : r.section],
+    ["insurances", "SV-Unterstellung", r => [].concat(r.compulsoryInsurances || []).filter(x => x && x !== "None").join(", ")],
+    ["gross", "Brutto?", r => r.isGross ? "✓" : ""],
+    ["deduction", "Abzug?", r => r.isDeduction ? "✓" : ""],
+    ["taxable", "Steuerpfl.?", r => r.isTaxable ? "✓" : ""],
+    ["active", "Aktiv?", r => r.isActive ? "✓" : ""],
     ["updated", "Geändert", r => apFmtDate(r.updatedTime)]
   ]
 };
@@ -6421,7 +6457,8 @@ function renderApiPoc(el) {
   const cols = AP_COLS[tab];
   document.getElementById("view-actions").innerHTML = `
     <button class="btn btn-sm" onclick="apTest()" ${apState.loading ? "disabled" : ""}>🔗 Verbindung testen</button>
-    <button class="btn btn-sm" onclick="apReset()">↻ Neu laden</button>`;
+    <button class="btn btn-sm" onclick="apReset()">↻ Neu laden</button>
+    ${tab === "salarytypes" && apState.rows.salarytypes.length ? `<button class="btn btn-sm" onclick="apUebernehmeLohnartenliste()">✓ ${apState.rows.salarytypes.length} Lohnarten in den Ultimativ Check übernehmen</button>` : ""}`;
   // Tabelle: Filter + Sortierung
   let rows = apState.rows[tab].map((r, i) => ({ r, i, v: Object.fromEntries(cols.map(c => [c[0], c[2](r)])) }));
   const fl = apState.filters;
@@ -6472,6 +6509,7 @@ function renderApiPoc(el) {
         <button class="btn btn-sm" onclick="apTab('people')" style="${tab === "people" ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">👤 Personen / Mitarbeiter</button>
         <button class="btn btn-sm" onclick="apTab('companies')" style="${tab === "companies" ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">🏢 Firmen</button>
         <button class="btn btn-sm" onclick="apTab('placements')" style="${tab === "placements" ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">👷 Einsätze</button>
+        <button class="btn btn-sm" onclick="apTab('salarytypes')" style="${tab === "salarytypes" ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">💰 Lohnarten</button>
         <span style="font-size:11px;color:var(--text-dim);margin-left:auto">${total} geladen${rows.length !== total ? " · " + rows.length + " nach Filter" : ""}${apState.done[tab] ? " · alle" : ""}</span>
         <button class="btn btn-sm" onclick="apLoadMore('${tab}')" ${apState.loading || apState.done[tab] || !cfg.token ? "disabled" : ""}>${apState.loading ? "Lädt …" : (total ? "+ " + AP_PAGE_SIZE + " weitere" : "▶ Laden")}</button>
       </div>
