@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.173.0"></script>
-<script src="apriko-api.js?v=1.173.0"></script>
-<script src="lohncheck.js?v=1.173.0"></script>
-<script src="personalbudget.js?v=1.173.0"></script>
-<script src="jahresbudget.js?v=1.173.0"></script>
-<script src="budgetpositionen.js?v=1.173.0"></script>
-<script src="lohnchecklistetemp.js?v=1.173.0"></script>
+<script src="apriko-filters.js?v=1.174.0"></script>
+<script src="apriko-api.js?v=1.174.0"></script>
+<script src="lohncheck.js?v=1.174.0"></script>
+<script src="personalbudget.js?v=1.174.0"></script>
+<script src="jahresbudget.js?v=1.174.0"></script>
+<script src="budgetpositionen.js?v=1.174.0"></script>
+<script src="lohnchecklistetemp.js?v=1.174.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.173.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.174.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -6453,6 +6453,13 @@ function apOpenDetail(tab, idx) {
 }
 function renderApiPoc(el) {
   const cfg = apCfg();
+  const rc = rpDbCfg();
+  // Punkt 10.09.2026: keine eigene Verbindungs-Eingabe mehr hier — die Rapport-Verbindung
+  // (Apriko-Datenbank für den Einsatz-Abgleich) ist die einzige Quelle; siehe rpApiUse(). Alte
+  // apCfg()-Konfiguration bleibt nur als stiller Rückfall im Code bestehen (rpApiUse-Fallback),
+  // wird aber nirgends mehr als eigenes Formular angezeigt, um die Einstellungen nicht doppelt
+  // zu pflegen.
+  const verbunden = !!(rc.gateway && (rc.token || (rc.user && rc.pass)));
   const tab = apState.tab;
   const cols = AP_COLS[tab];
   document.getElementById("view-actions").innerHTML = `
@@ -6473,28 +6480,9 @@ function renderApiPoc(el) {
   el.innerHTML = `
     <div class="card" style="padding:14px 16px;margin-bottom:14px">
       <div style="font-weight:600;margin-bottom:8px">Verbindung zur Apriko-Datenbank</div>
-      <div style="display:grid;grid-template-columns:2fr 3fr auto auto;gap:8px;align-items:end">
-        <div class="field"><label>Gateway-/Proxy-URL (mit https://)</label><input id="ap-base" value="${escape(cfg.baseUrl || "")}" placeholder="https://<worker>.workers.dev" onblur="this.value = apNormalizeBase(this.value)"></div>
-        <div class="field"><label>Bearer-Token</label><input id="ap-token" type="password" value="${escape(cfg.token || "")}" placeholder="Token aus der Apriko-Administration"></div>
-        <button class="btn btn-sm" onclick="apSaveCfgFromForm()">Speichern</button>
-        <button class="btn btn-sm" onclick="apClearCfg()" title="Zugangsdaten aus diesem Browser entfernen">Löschen</button>
+      <div style="font-size:12px;${verbunden ? "color:var(--accent)" : "color:var(--text-dim)"}">
+        ${verbunden ? `✓ Verbunden über die Rapport-Verbindung${rc.target ? " → " + escape(rc.target.replace(/^https?:\/\//, "")) : ""}` : `⚠ Keine Verbindung aktiv — im Rapport-Modul unter «🔌 Apriko-Datenbank für den Einsatz-Abgleich» einrichten, wird hier automatisch mitverwendet (keine doppelte Konfiguration nötig).`}
       </div>
-      <div style="font-size:10.5px;color:var(--text-faint);margin-top:6px">Zugangsdaten bleiben lokal in diesem Browser (localStorage) — nichts davon wird in SharePoint gespeichert. Der Zugriff läuft über den eigenen Reverse-Proxy (CORS); Client: apriko-api.js. Sichtbarkeit dieser Ansicht ist nur UX-Filter, keine Sicherheit — die Autorisierung macht die Apriko-API am Token.</div>
-      <details style="margin-top:10px" ${cfg.token ? "" : "open"}>
-        <summary style="cursor:pointer;font-size:12px;font-weight:600">🔑 Token mit Benutzer/Passwort holen${cfg.tokenExp ? (cfg.tokenExp > Date.now() ? ` — aktueller Token gültig bis ${new Date(cfg.tokenExp).toLocaleTimeString("de-CH", { hour: "2-digit", minute: "2-digit" })}` : " — Token abgelaufen") : ""}</summary>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px">
-          <div class="field"><label>Benutzer</label><input id="ap-user" value="${escape(cfg.user || "")}" autocomplete="username"></div>
-          <div class="field"><label>Passwort (wird nicht gespeichert)</label><input id="ap-pw" type="password" autocomplete="current-password"></div>
-          <div class="field"><label>Token-URL (leer = automatisch suchen)</label><input id="ap-tokenurl" value="${escape(cfg.tokenUrl || "")}" placeholder="/connect/token"></div>
-          <div class="field"><label>client_id (falls verlangt)</label><input id="ap-clientid" value="${escape(cfg.clientId || "")}"></div>
-          <div class="field"><label>client_secret (optional)</label><input id="ap-clientsecret" type="password"></div>
-          <div class="field"><label>scope (optional)</label><input id="ap-scope" value="${escape(cfg.scope || "")}" placeholder="z.B. api offline_access"></div>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
-          <button class="btn btn-sm" onclick="const c=apCfg();c.user=document.getElementById('ap-user').value.trim();apCfgSave(c);apLogin()">Token holen</button>
-          <span id="ap-login-status" style="font-size:11px;color:var(--text-dim)"></span>
-        </div>
-      </details>
       ${apState.selfTest ? `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11px">${[["Gateway (Proxy)", apState.selfTest.gateway], ["Apriko-Instanz", apState.selfTest.upstream], ["Token", apState.selfTest.token]].map(([lbl, z]) => `
         <div style="border:1px solid ${z.status === "ok" ? "var(--accent)" : z.status === "fail" ? "var(--danger)" : "var(--border)"};border-radius:4px;padding:6px 10px;min-width:150px">
           <div style="font-weight:600;color:${z.status === "ok" ? "var(--accent)" : z.status === "fail" ? "var(--danger)" : "var(--text-dim)"}">${z.status === "ok" ? "✓" : z.status === "fail" ? "✗" : "?"} ${lbl}</div>
@@ -6511,12 +6499,12 @@ function renderApiPoc(el) {
         <button class="btn btn-sm" onclick="apTab('placements')" style="${tab === "placements" ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">👷 Einsätze</button>
         <button class="btn btn-sm" onclick="apTab('salarytypes')" style="${tab === "salarytypes" ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">💰 Lohnarten</button>
         <span style="font-size:11px;color:var(--text-dim);margin-left:auto">${total} geladen${rows.length !== total ? " · " + rows.length + " nach Filter" : ""}${apState.done[tab] ? " · alle" : ""}</span>
-        <button class="btn btn-sm" onclick="apLoadMore('${tab}')" ${apState.loading || apState.done[tab] || !cfg.token ? "disabled" : ""}>${apState.loading ? "Lädt …" : (total ? "+ " + AP_PAGE_SIZE + " weitere" : "▶ Laden")}</button>
+        <button class="btn btn-sm" onclick="apLoadMore('${tab}')" ${apState.loading || apState.done[tab] || !(verbunden || cfg.token) ? "disabled" : ""}>${apState.loading ? "Lädt …" : (total ? "+ " + AP_PAGE_SIZE + " weitere" : "▶ Laden")}</button>
       </div>
       ${total ? `<div class="table-wrap"><table>
         <thead><tr>${cols.map(th).join("")}</tr><tr>${cols.map(fth).join("")}</tr></thead>
         <tbody>${rows.map(x => `<tr style="cursor:pointer" onclick="apOpenDetail('${tab}',${x.i})">${cols.map(c => `<td style="${typeof x.v[c[0]] === "number" ? "text-align:right;font-family:var(--font-mono)" : ""}">${escape(String(x.v[c[0]] ?? ""))}</td>`).join("")}</tr>`).join("")}</tbody>
-      </table></div>` : `<div class="empty">${cfg.token ? "Noch nichts geladen — «▶ Laden» klicken." : "Zuerst Basis-URL und Token hinterlegen, dann «Verbindung testen»."}</div>`}
+      </table></div>` : `<div class="empty">${verbunden || cfg.token ? "Noch nichts geladen — «▶ Laden» klicken." : "Zuerst im Rapport-Modul die Apriko-Verbindung einrichten, dann «Verbindung testen»."}</div>`}
     </div>`;
   if ((tab === "people" || tab === "placements") && total) apResolveRecruiters();
   const rf = apState._restoreFocus;
