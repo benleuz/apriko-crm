@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.180.0"></script>
-<script src="apriko-api.js?v=1.180.0"></script>
-<script src="lohncheck.js?v=1.180.0"></script>
-<script src="personalbudget.js?v=1.180.0"></script>
-<script src="jahresbudget.js?v=1.180.0"></script>
-<script src="budgetpositionen.js?v=1.180.0"></script>
-<script src="lohnchecklistetemp.js?v=1.180.0"></script>
+<script src="apriko-filters.js?v=1.183.0"></script>
+<script src="apriko-api.js?v=1.183.0"></script>
+<script src="lohncheck.js?v=1.183.0"></script>
+<script src="personalbudget.js?v=1.183.0"></script>
+<script src="jahresbudget.js?v=1.183.0"></script>
+<script src="budgetpositionen.js?v=1.183.0"></script>
+<script src="lohnchecklistetemp.js?v=1.183.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -167,7 +167,7 @@
     position: sticky; top: 0; background: var(--bg); z-index: 5;
   }
   .topbar h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
-  .topbar .actions { display: flex; gap: 8px; }
+  .topbar .actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .content { padding: 24px 28px; }
 
   /* Buttons */
@@ -973,7 +973,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.180.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.183.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -6380,6 +6380,10 @@ async function apLadeSalarytypesKomplett(force) {
     try { await apLadeBookingAccounts(); } catch (e) { /* Konten optional — Lohnarten trotzdem brauchbar */ }
     apState.salarytypesCacheDatum = new Date().toISOString();
     apSalarytypesCacheSchreiben();
+    // Automatisch als zentralen Lohnartenstamm speichern (SharePoint) — kein separater
+    // "übernehmen"-Klick mehr nötig, der lokale Cache und der geteilte Stamm laufen sonst
+    // auseinander (genau das gemeldete Problem: "wir cachen den ja, du solltest ihn finden").
+    try { await apSpeichereAlsLohnartenstamm(true); } catch (e) { /* Fehler wird in apSpeichereAlsLohnartenstamm selbst gemeldet */ }
   }
   render();
 }
@@ -6448,15 +6452,16 @@ function apSaveCfgFromForm() {
 }
 function apClearCfg() { localStorage.removeItem(AP_CFG_KEY); apState.info = null; apReset(); }
 
-/* Übernimmt die per API geladenen SalaryTypes direkt als zentrale Lohnartenliste im Ultimativ
-   Check (lohncheck.js) — spart den Umweg über manuellen CSV-Export/-Upload. number → Code,
-   name → Bezeichnung; compulsoryInsurances wird als Zusatzinfo mitgespeichert (aktuell vom
-   Lohnart-Vergleich noch nicht ausgewertet, aber bereits vorhanden für eine künftige SV-Prüfung). */
-async function apUebernehmeLohnartenliste() {
+/* Baut aus den geladenen SalaryTypes die zentrale Lohnartenliste (Lohnartenstamm) und speichert
+   sie nach SharePoint — gemeinsame Logik für den manuellen Button UND das automatische
+   Übernehmen nach jedem frischen "jetzt neu laden" (siehe apLadeSalarytypesKomplett), damit der
+   lokale Rohdaten-Cache (apState) und der geteilte Lohnartenstamm (lcState.lohnartenliste, siehe
+   lohncheck.js) nicht auseinanderlaufen — genau das gemeldete Problem vom 10.09.2026. */
+async function apSpeichereAlsLohnartenstamm(stumm) {
   const rows = apState.rows.salarytypes;
-  if (!rows.length) { toast("Keine Lohnarten geladen.", true); return; }
+  if (!rows.length) { if (!stumm) toast("Keine Lohnarten geladen.", true); return; }
   let konten = {};
-  try { konten = await apLadeBookingAccounts(); } catch (e) { toast("Konten (Soll/Haben) konnten nicht aufgelöst werden: " + e.message + " — wird ohne Kontonummern übernommen.", true); }
+  try { konten = await apLadeBookingAccounts(); } catch (e) { if (!stumm) toast("Konten (Soll/Haben) konnten nicht aufgelöst werden: " + e.message + " — wird ohne Kontonummern übernommen.", true); }
   const kontoAufloesen = id => id ? (konten[id] || id) : "";
   const zeilen = rows.filter(r => typeof r.number === "number").map(r => {
     const ins = new Set([].concat(r.compulsoryInsurances || []));
@@ -6466,7 +6471,7 @@ async function apUebernehmeLohnartenliste() {
     AP_SV_SPALTEN.forEach(([key, label]) => { z[label] = ins.has(key) ? "Ja" : ""; });
     return z;
   });
-  if (!confirm(zeilen.length + " Lohnarten aus Apriko als zentrale Lohnartenliste im Ultimativ Check übernehmen? Eine evtl. bereits vorhandene Liste wird ersetzt.")) return;
+  if (!stumm && !confirm(zeilen.length + " Lohnarten aus Apriko als zentrale Lohnartenliste im Ultimativ Check übernehmen? Eine evtl. bereits vorhandene Liste wird ersetzt.")) return;
   await lcLoadLohnartenliste(false);
   lcState.lohnartenliste = {
     dateiname: "Apriko API (SalaryTypes, live übernommen " + new Date().toLocaleDateString("de-CH") + ")",
@@ -6475,9 +6480,10 @@ async function apUebernehmeLohnartenliste() {
     spaltenMap: { code: "Code", bezeichnung: "Bezeichnung" },
     zeilen
   };
-  try { await lcSaveLohnartenliste(); toast(zeilen.length + " Lohnarten übernommen und gespeichert."); }
-  catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  try { await lcSaveLohnartenliste(); if (!stumm) toast(zeilen.length + " Lohnarten übernommen und gespeichert."); }
+  catch (e) { toast((stumm ? "Automatisches Übernehmen in den Lohnartenstamm fehlgeschlagen: " : "Speichern fehlgeschlagen: ") + e.message, true); }
 }
+async function apUebernehmeLohnartenliste() { await apSpeichereAlsLohnartenstamm(false); }
 /* Eigenständige, immer aktuelle Menüansicht (Workflows → Lohnartenstamm) — liest direkt aus
    derselben SharePoint-Datei, die der Ultimativ Check für den Lohnart-Vergleich nutzt
    (lcState.lohnartenliste, siehe lohncheck.js). Rein lesend; Aktualisierung läuft über
@@ -6558,10 +6564,10 @@ const AP_COLS = {
     ["number", "Code", r => r.number],
     ["name", "Bezeichnung", r => r.name || r.displayName],
     ["section", "Bereich", r => r.section === "None" ? "" : r.section, "max-width:40px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"],
-    ["gross", "Brutto?", r => r.isGross ? "✓" : ""],
-    ["deduction", "Abzug?", r => r.isDeduction ? "✓" : ""],
-    ["taxable", "Steuerpfl.?", r => r.isTaxable ? "✓" : ""],
-    ["active", "Aktiv?", r => r.isActive ? "✓" : ""],
+    ["gross", "Brutto", r => r.isGross ? "✓" : ""],
+    ["deduction", "Abzug", r => r.isDeduction ? "✓" : ""],
+    ["taxable", "Steuerpfl.", r => r.isTaxable ? "✓" : ""],
+    ["active", "Aktiv", r => r.isActive ? "✓" : ""],
     ["debit", "Soll-Konto", r => { const id = r.debitNumberId || r.overrideDebitNumberId || r.factoryDefaultDebitNumberId; return id ? ((apState.bookingAccounts || {})[id] || id) : ""; }],
     ["credit", "Haben-Konto", r => { const id = r.creditNumberId || r.overrideCreditNumberId || r.factoryDefaultCreditNumberId; return id ? ((apState.bookingAccounts || {})[id] || id) : ""; }]
   ].concat(AP_SV_SPALTEN.map(([key, label]) => [
