@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.167.0"></script>
-<script src="apriko-api.js?v=1.167.0"></script>
-<script src="lohncheck.js?v=1.167.0"></script>
-<script src="personalbudget.js?v=1.167.0"></script>
-<script src="jahresbudget.js?v=1.167.0"></script>
-<script src="budgetpositionen.js?v=1.167.0"></script>
-<script src="lohnchecklistetemp.js?v=1.167.0"></script>
+<script src="apriko-filters.js?v=1.168.0"></script>
+<script src="apriko-api.js?v=1.168.0"></script>
+<script src="lohncheck.js?v=1.168.0"></script>
+<script src="personalbudget.js?v=1.168.0"></script>
+<script src="jahresbudget.js?v=1.168.0"></script>
+<script src="budgetpositionen.js?v=1.168.0"></script>
+<script src="lohnchecklistetemp.js?v=1.168.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.167.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.168.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12423,11 +12423,15 @@ async function rpApiLoadRoster(force){
     // MUSS vor dem Aktiv-Filter-Versuch unten definiert sein, der sie bereits verwendet.
     var RP_RELEVANTE_STATES = ['Placed','Active','TerminatedPlaced','TerminatedActive','LockedPlaced','LockedActive'];
     /* ZUERST versuchen: gezielt nur aktuell offene/aktive Einsätze holen (Feld
-       isActivePendingVacantOrSinceRecentlyInactive, boolesch) statt alles zu paginieren — bei
-       einem Boolean ist die Trefferchance höher als beim gescheiterten employeeId-Text-Filter,
-       weil Booleans im Suchindex normalerweise nicht als analysiertes Textfeld behandelt werden.
-       Klappt das, ist die Liste i.d.R. winzig gegenüber der kompletten Historie. Klappt es nicht
-       (0 Treffer/Fehler), automatisch Rückfall auf die volle Paginierung weiter unten. */
+       isActivePendingVacantOrSinceRecentlyInactive) statt alles zu paginieren. Klappt das, ist
+       die Liste i.d.R. winzig gegenüber der kompletten Historie. Klappt es nicht (0 Treffer/
+       Fehler), automatisch Rückfall auf die volle Paginierung weiter unten.
+       EMPIRISCH GEPRÜFT (10.09.2026): dataType "boolean" für dieses Feld löst bei Apriko einen
+       HTTP 400 aus, trotz gegenteiliger Doku-Erwartung ("falscher dataType → 0 Treffer, kein
+       Fehler") — vermutlich wird "boolean" hier nicht als gültiger Enum-Wert akzeptiert. NICHT
+       erneut versuchen ohne vorherige Prüfung, welche Schreibweise Apriko tatsächlich erwartet.
+       dataType "text" (wie bisher) liefert zuverlässig 0 Treffer statt eines Fehlers — sicherer
+       Rückfall-Zustand, auch wenn dieser Fast-Path dadurch faktisch wirkungslos bleibt. */
     rpApiProgress('🔌 <b>Einsatzliste:</b> versuche gezielt nur aktive Einsätze zu holen …');
     var aktivDiagnose = '';
     /* WICHTIG: query darf hier nicht '' sein — eine leere Anfrage lieferte in einem früheren Test
@@ -12436,7 +12440,7 @@ async function rpApiLoadRoster(force){
     try {
       var aktivR = await AprikoApi.models.query({
         entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 500, resolveReferences: false,
-        filters: 'isActivePendingVacantOrSinceRecentlyInactive|=|true|boolean|false|false|["G1"]'
+        filters: 'isActivePendingVacantOrSinceRecentlyInactive|=|true|text|false|false|G1'
       });
       var aktivRows = ((aktivR && aktivR.results) || []).map(AprikoApi.models.hitData);
       // Auch hier den state-Filter anwenden — der Feldname sagt "...OrSinceRecentlyInactive",
