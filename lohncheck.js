@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.111.0";
+const LC_VERSION = "1.112.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -23,7 +23,12 @@ const lcState = {
   flag: "all",        // Belegfilter (siehe LC_FLAGS) — wirkt auf alle Tabs und Kennzahlen
   q: "",              // Suchtext (Mitarbeiter, AHV-Nr, Lohnart, Betrag, Meldung)
   koord: (() => { try { const v = parseFloat(localStorage.getItem("lc-koord")); return isNaN(v) ? 12.10 : v; } catch (e) { return 12.10; } })(), // BVG-Koordinationsabzug CHF pro Stunde (swissstaffing TEMP BASIC 2026: 12.10)
-  busy: false
+  busy: false,
+  // Ergänzung 10.09.2026: Kunde/Periode-Kontext für Kontrolllisten-Querchecks
+  kundeId: null,
+  periode: null,          // "YYYY-MM" (Lohnmonat)
+  kontrolllisten: null,   // { listen:[...], __kunde, __periode } — siehe lcLoadKontrolllisten
+  kontrolllistenLoading: null
 };
 
 /* ---------- Referenzwerte (Stand 2026, anpassbar) ---------- */
@@ -650,6 +655,309 @@ function lcEmployees() {
   return Object.values(m).sort((a, b) => a.name.localeCompare(b.name, "de"));
 }
 
+/* ============ ERWEITERUNG: Kontrolllisten pro Kunde+Periode (Ergänzung 10.09.2026) ============
+   Fundament für den erweiterten Ultimativ Check: zusätzliche Excel/CSV-Kontrolllisten
+   (Einsatzliste, BVG-/AHV-/KTG-SUVA-Liste, weitere) werden pro Kunde und Lohnperiode
+   hochgeladen, in SharePoint gespeichert und für Querchecks mit den Lohnabrechnungen bereit-
+   gehalten. Mitarbeiter-Abgleich über die Listen läuft primär über die AHV-Nummer, sonst über
+   Name+Vorname+Geburtsdatum. Struktur der Listen ist NICHT vorgegeben (jede Liste kann andere
+   Spalten haben) — Spalten werden heuristisch erkannt, aber immer sichtbar zur manuellen
+   Korrektur, nie stillschweigend geraten.
+   SPEICHERUNG: SharePoint-JSON CRM-Budgetdaten/lc_kontrolllisten_<companyId>_<periode>.json */
+const LC_KL_DIR = "CRM-Budgetdaten";
+const LC_LISTEN_TYPEN = ["Einsatzliste", "BVG", "AHV", "KTG_SUVA", "Sonstige"];
+const LC_LISTEN_TYP_LABEL = { Einsatzliste: "Einsatzliste", BVG: "BVG-Liste", AHV: "AHV-Liste", KTG_SUVA: "KTG/SUVA-Liste", Sonstige: "Sonstige Kontrollliste" };
+
+/* ---------- CSV/Excel lazy-laden (gleiches Muster wie kaLoadPdfJs für pdf.js) ---------- */
+let lcPapaPromise = null, lcXlsxPromise = null;
+function lcLoadPapa() {
+  if (!lcPapaPromise) {
+    lcPapaPromise = new Promise((res, rej) => {
+      if (window.Papa) return res();
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js";
+      s.onload = () => res();
+      s.onerror = () => { lcPapaPromise = null; rej(new Error("CSV-Bibliothek (PapaParse) konnte nicht geladen werden (Internetverbindung?)")); };
+      document.head.appendChild(s);
+    });
+  }
+  return lcPapaPromise;
+}
+function lcLoadXlsx() {
+  if (!lcXlsxPromise) {
+    lcXlsxPromise = new Promise((res, rej) => {
+      if (window.XLSX) return res();
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+      s.onload = () => res();
+      s.onerror = () => { lcXlsxPromise = null; rej(new Error("Excel-Bibliothek (SheetJS) konnte nicht geladen werden (Internetverbindung?)")); };
+      document.head.appendChild(s);
+    });
+  }
+  return lcXlsxPromise;
+}
+/* Datei (CSV oder XLSX) zu Array von Objekten (Kopfzeile = Keys) parsen. */
+async function lcParseListDatei(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".csv")) {
+    await lcLoadPapa();
+    const text = await file.text();
+    const res = window.Papa.parse(text, { header: true, skipEmptyLines: true, dynamicTyping: false });
+    return { zeilen: res.data, spalten: res.meta.fields || [] };
+  }
+  await lcLoadXlsx();
+  const ab = await file.arrayBuffer();
+  const wb = window.XLSX.read(ab, { type: "array", cellDates: true });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const zeilen = window.XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false });
+  const spalten = zeilen.length ? Object.keys(zeilen[0]) : [];
+  return { zeilen, spalten };
+}
+
+/* ---------- Spalten-Erkennung (heuristisch, immer zur manuellen Korrektur sichtbar) ---------- */
+const LC_SPALTEN_MUSTER = {
+  ahv: /^ahv[-\s]?(nr|nummer)?$|sozialversicherung/i,
+  name: /^(nach)?name$|familienname/i,
+  vorname: /vorname/i,
+  geburtsdatum: /geburt|geb\.?[-\s]?datum/i,
+  von: /^von$|beginn|start|eintritt|einsatzbeginn/i,
+  bis: /^bis$|ende|austritt|einsatzende/i
+};
+function lcErkenneSpalten(spalten) {
+  const out = {};
+  for (const key in LC_SPALTEN_MUSTER) {
+    out[key] = spalten.find(s => LC_SPALTEN_MUSTER[key].test(String(s).trim())) || null;
+  }
+  return out;
+}
+function lcErkenneListTyp(dateiname, spalten) {
+  const n = dateiname.toLowerCase();
+  if (/einsatz/i.test(n)) return "Einsatzliste";
+  if (/bvg|pension|vorsorge/i.test(n)) return "BVG";
+  if (/ahv|ausgleichskasse/i.test(n)) return "AHV";
+  if (/ktg|suva|unfall|krank/i.test(n)) return "KTG_SUVA";
+  const map = lcErkenneSpalten(spalten);
+  if (map.von && map.bis) return "Einsatzliste";   // Zeitraum-Spalten deuten stark auf Einsatzliste hin
+  return "Sonstige";
+}
+
+/* ---------- Mitarbeiter-Identität über Listen hinweg (Punkt 3) ----------
+   Primär AHV-Nummer (normalisiert, nur Ziffern). Fallback Name+Vorname+Geburtsdatum, tolerant
+   gegenüber Gross-/Kleinschreibung, Leerzeichen und vertauschter Reihenfolge. */
+function lcNormAhv(v) { return String(v || "").replace(/[^\d]/g, ""); }
+function lcNormText(v) { return String(v || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, ""); }
+function lcNormDatum(v) {
+  if (!v) return "";
+  if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0, 10);
+  const s = String(v).trim();
+  let m = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(s);           // 31.12.1990
+  if (m) return m[3] + "-" + m[2].padStart(2, "0") + "-" + m[1].padStart(2, "0");
+  m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);                   // 1990-12-31 (ISO, evtl. mit Zeit)
+  if (m) return m[1] + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0");
+  return lcNormText(s);   // unbekanntes Format — wenigstens normalisiert vergleichbar
+}
+/* Liefert einen Matching-Key für eine Zeile (Kontrollliste ODER Lohnabrechnungs-Slip).
+   spaltenMap: Ergebnis von lcErkenneSpalten (für Kontrollliste) — bei einem slip-Objekt direkt
+   ahv/name/geburtsdatum-Felder verwenden (siehe zweiter Parameter "istSlip"). */
+function lcMatchKeyAhv(zeile, spaltenMap) {
+  const ahv = spaltenMap ? zeile[spaltenMap.ahv] : zeile.ahv;
+  const n = lcNormAhv(ahv);
+  return n.length >= 10 ? n : null;   // AHV-Nr CH: 13 Ziffern (756...) — 10+ als Sicherheitsmarge bei Tippfehlern/Kurzformen
+}
+function lcMatchKeyName(zeile, spaltenMap) {
+  let name, vorname, geb;
+  if (spaltenMap) {
+    name = zeile[spaltenMap.name]; vorname = zeile[spaltenMap.vorname]; geb = zeile[spaltenMap.geburtsdatum];
+  } else {
+    // slip: "name" ist meist "Vorname Nachname" oder "Nachname Vorname" als ein String — beide
+    // Wortteile zusammen normalisiert vergleichen (Reihenfolge macht dann nichts aus)
+    const teile = String(zeile.name || "").trim().split(/\s+/);
+    name = teile.join(" "); vorname = ""; geb = null;
+  }
+  const kombiniert = lcNormText(String(name || "") + String(vorname || ""));
+  if (!kombiniert) return null;
+  const datum = lcNormDatum(geb);
+  return kombiniert + "|" + datum;
+}
+/* Sucht in einer Liste von Kontrollzeilen die zu einem Lohnabrechnungs-Slip passende Zeile.
+   1. Versuch: AHV-Nummer exakt. 2. Versuch: Name+Vorname (Wortmenge) + Geburtsdatum, falls
+   vorhanden — sonst Name+Vorname allein (schwächer, aber gemäss Vorgabe als Fallback zulässig). */
+function lcFindeZeileFuerSlip(zeilen, spaltenMap, slip) {
+  if (spaltenMap.ahv && slip.ahv) {
+    const slipAhv = lcNormAhv(slip.ahv);
+    const treffer = zeilen.find(z => lcNormAhv(z[spaltenMap.ahv]) === slipAhv && slipAhv.length >= 10);
+    if (treffer) return { zeile: treffer, ueber: "AHV" };
+  }
+  if (spaltenMap.name) {
+    const slipKombi = lcNormText(String(slip.name || ""));
+    if (slipKombi) {
+      const kandidaten = zeilen.filter(z => {
+        const zKombi = lcNormText(String(z[spaltenMap.name] || "") + String(spaltenMap.vorname ? z[spaltenMap.vorname] || "" : ""));
+        if (!zKombi) return false;
+        // Wortmenge vergleichen statt exakter String (Reihenfolge "Nachname Vorname" vs "Vorname Nachname" egal)
+        const slipWoerter = String(slip.name || "").toLowerCase().split(/\s+/).map(lcNormText).filter(Boolean);
+        const zWoerter = (String(z[spaltenMap.name] || "") + " " + String(spaltenMap.vorname ? z[spaltenMap.vorname] || "" : "")).toLowerCase().split(/\s+/).map(lcNormText).filter(Boolean);
+        return slipWoerter.length && slipWoerter.every(w => zWoerter.includes(w));
+      });
+      if (kandidaten.length === 1) return { zeile: kandidaten[0], ueber: "Name" };
+      if (kandidaten.length > 1 && spaltenMap.geburtsdatum) {
+        // mehrdeutig über den Namen allein — mit Geburtsdatum weiter eingrenzen, falls am Slip bekannt
+        // (Slips haben aktuell kein erkanntes Geburtsdatum — Platzhalter für künftige Erweiterung)
+        return { zeile: kandidaten[0], ueber: "Name (mehrdeutig, erste Übereinstimmung)" };
+      }
+    }
+  }
+  return null;
+}
+
+/* ---------- Speicherung (SharePoint JSON, pro Kunde + Periode) ---------- */
+function lcKunden() {
+  return (cache.companies || []).filter(c => c.IsCustomer).sort((a, b) => (a.Title || "").localeCompare(b.Title || "", "de-CH"));
+}
+function lcMonatHeute() { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); }
+function lcMonatLabel(ym) {
+  if (!ym) return "";
+  const [y, m] = ym.split("-").map(Number);
+  return LC_MONATE[(m || 1) - 1] + " " + y;
+}
+async function lcLoadKontrolllisten(companyId, periode, force) {
+  if (!force && lcState.kontrolllisten && lcState.kontrolllisten.__kunde === companyId && lcState.kontrolllisten.__periode === periode) return lcState.kontrolllisten;
+  if (lcState.kontrolllistenLoading) return lcState.kontrolllistenLoading;
+  lcState.kontrolllistenLoading = (async () => {
+    let data = null;
+    try {
+      data = await graph(`/sites/${siteId}/drive/root:/${LC_KL_DIR}/lc_kontrolllisten_${companyId}_${periode}.json:/content`);
+    } catch (e) { data = null; }
+    if (!data || typeof data !== "object") data = { listen: [] };
+    if (!Array.isArray(data.listen)) data.listen = [];
+    data.__kunde = companyId; data.__periode = periode;
+    lcState.kontrolllisten = data;
+    lcState.kontrolllistenLoading = null;
+    return data;
+  })();
+  return lcState.kontrolllistenLoading;
+}
+async function lcSaveKontrolllisten() {
+  const data = lcState.kontrolllisten;
+  const companyId = data.__kunde, periode = data.__periode;
+  const toSave = { listen: data.listen };
+  const path = `/sites/${siteId}/drive/root:/${LC_KL_DIR}/lc_kontrolllisten_${companyId}_${periode}.json:/content`;
+  const body = JSON.stringify(toSave);
+  try { await graph(path, { method: "PUT", body }); }
+  catch (e) {
+    if (!/404|itemNotFound|400/i.test(e.message)) throw e;
+    await graph(`/sites/${siteId}/drive/root/children`, {
+      method: "POST",
+      body: JSON.stringify({ name: LC_KL_DIR, folder: {}, "@microsoft.graph.conflictBehavior": "replace" })
+    });
+    await graph(path, { method: "PUT", body });
+  }
+}
+
+/* ---------- Upload-Handling ---------- */
+async function lcSetKunde(id) {
+  lcState.kundeId = parseInt(id, 10);
+  if (!lcState.periode) lcState.periode = lcMonatHeute();
+  await lcLoadKontrolllisten(lcState.kundeId, lcState.periode, false);
+  render();
+}
+async function lcSetPeriode(ym) {
+  lcState.periode = ym;
+  if (lcState.kundeId) await lcLoadKontrolllisten(lcState.kundeId, lcState.periode, false);
+  render();
+}
+async function lcUploadKontrollliste(input) {
+  const files = [...(input.files || [])];
+  input.value = "";
+  if (!files.length) return;
+  if (!lcState.kundeId) { toast("Bitte zuerst einen Kunden auswählen.", true); return; }
+  if (!lcState.periode) lcState.periode = lcMonatHeute();
+  await lcLoadKontrolllisten(lcState.kundeId, lcState.periode, false);
+  for (const file of files) {
+    try {
+      const { zeilen, spalten } = await lcParseListDatei(file);
+      const typ = lcErkenneListTyp(file.name, spalten);
+      const spaltenMap = lcErkenneSpalten(spalten);
+      lcState.kontrolllisten.listen.push({
+        id: "kl" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        typ, dateiname: file.name, hochgeladenAm: new Date().toISOString(),
+        spalten, spaltenMap, zeilen
+      });
+    } catch (e) {
+      toast('Fehler beim Einlesen von "' + file.name + '": ' + e.message, true);
+    }
+  }
+  try { await lcSaveKontrolllisten(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  render();
+}
+async function lcEntferneListe(id) {
+  lcState.kontrolllisten.listen = lcState.kontrolllisten.listen.filter(l => l.id !== id);
+  try { await lcSaveKontrolllisten(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  render();
+}
+function lcSetListTyp(id, typ) {
+  const l = lcState.kontrolllisten.listen.find(x => x.id === id);
+  if (l) { l.typ = typ; lcSaveKontrolllisten().catch(e => toast("Speichern fehlgeschlagen: " + e.message, true)); }
+}
+function lcSetSpalte(id, feld, spalte) {
+  const l = lcState.kontrolllisten.listen.find(x => x.id === id);
+  if (l) { l.spaltenMap[feld] = spalte || null; lcSaveKontrolllisten().catch(e => toast("Speichern fehlgeschlagen: " + e.message, true)); render(); }
+}
+
+/* ---------- UI-Baustein: Kunde/Periode-Auswahl + Kontrolllisten (wird in renderLohncheck eingebunden) ---------- */
+function lcRenderKontrolllistenPanel() {
+  const kunden = lcKunden();
+  const kl = lcState.kontrolllisten;
+  const hatListen = kl && kl.listen && kl.listen.length > 0;
+  return `
+    <div class="panel" style="margin-bottom:14px">
+      <div class="panel-h">Kunde &amp; Lohnperiode <span style="font-weight:400;color:var(--text-faint);font-size:11px">— steuert, welche Kontrolllisten für Querchecks verwendet werden</span></div>
+      <div style="padding:12px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <select onchange="lcSetKunde(this.value)" style="font-size:12px;padding:5px 8px;min-width:220px">
+          <option value="">— Kunde wählen —</option>
+          ${kunden.map(k => `<option value="${k.id}" ${k.id == lcState.kundeId ? "selected" : ""}>${escape(k.Title || "")}</option>`).join("")}
+        </select>
+        <input type="month" value="${escape(lcState.periode || lcMonatHeute())}" onchange="lcSetPeriode(this.value)" style="font-size:12px;padding:5px 8px">
+      </div>
+      ${!lcState.kundeId ? "" : `
+      <div style="padding:0 16px 14px 16px">
+        ${!hatListen ? `<div style="padding:10px 12px;background:#FEF2F2;border-left:4px solid #c62828;border-radius:4px;color:#7f1d1d;font-size:12px;margin-bottom:12px">
+          <b>ACHTUNG:</b> Keine Einsatzliste bzw. keine zusätzlichen Kontrolllisten für Querchecks vorhanden. Die Prüfung erfolgt ausschliesslich anhand der aktuell zur Verfügung gestellten Lohnabrechnungen. Zusätzliche Querchecks konnten nicht durchgeführt werden.
+        </div>` : ""}
+        ${hatListen ? kl.listen.map(l => lcRenderListRow(l)).join("") : ""}
+        <input type="file" id="lc-kl-file" accept=".csv,.xlsx,.xls" multiple style="display:none" onchange="lcUploadKontrollliste(this)">
+        <button class="btn btn-sm" onclick="document.getElementById('lc-kl-file').click()">⇪ Kontrollliste(n) hochladen (Excel/CSV) — Einsatzliste, BVG, AHV, KTG/SUVA, weitere</button>
+      </div>`}
+    </div>`;
+}
+function lcRenderListRow(l) {
+  const map = l.spaltenMap || {};
+  const feldLabel = { ahv: "AHV-Nr", name: "Name", vorname: "Vorname", geburtsdatum: "Geburtsdatum", von: "Von", bis: "Bis" };
+  return `
+    <div style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <select onchange="lcSetListTyp('${l.id}',this.value)" style="font-size:12px;padding:3px 6px">
+          ${LC_LISTEN_TYPEN.map(t => `<option value="${t}" ${t === l.typ ? "selected" : ""}>${LC_LISTEN_TYP_LABEL[t]}</option>`).join("")}
+        </select>
+        <span style="font-size:12px;color:var(--text-dim)">${escape(l.dateiname)}</span>
+        <span style="font-size:11px;color:var(--text-faint)">${l.zeilen.length} Zeile(n)</span>
+        <button class="btn btn-sm" style="margin-left:auto" onclick="lcEntferneListe('${l.id}')">✕</button>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;font-size:11px">
+        ${Object.keys(feldLabel).map(feld => `
+          <label style="display:flex;align-items:center;gap:4px;color:var(--text-faint)">${feldLabel[feld]}:
+            <select onchange="lcSetSpalte('${l.id}','${feld}',this.value)" style="font-size:11px;padding:2px 4px">
+              <option value="">—</option>
+              ${l.spalten.map(s => `<option value="${escape(s)}" ${s === map[feld] ? "selected" : ""}>${escape(s)}</option>`).join("")}
+            </select>
+          </label>`).join("")}
+      </div>
+      ${!map.ahv && !map.name ? `<div style="font-size:11px;color:var(--warn);margin-top:6px">⚠ Weder AHV-Nr- noch Name-Spalte erkannt/gesetzt — diese Liste kann aktuell nicht für den Mitarbeiter-Abgleich verwendet werden.</div>` : ""}
+    </div>`;
+}
+
+/* ============ ENDE ERWEITERUNG Kontrolllisten-Fundament ============ */
+
 /* ---------- Rendering ---------- */
 function lcSevBadge(sev) {
   const c = sev === "rot" ? "var(--danger)" : sev === "gelb" ? "var(--warn)" : "var(--text-faint)";
@@ -663,9 +971,10 @@ function renderLohncheck(el) {
     <button class="btn btn-sm" onclick="lcReset()" title="Alles zurücksetzen">↺</button>` : ""}`;
   if (lcState.busy) { el.innerHTML = `<div class="full-loading"><div class="loading"></div></div>`; return; }
   lcInstallGlobalDrop();
+  const klPanel = lcRenderKontrolllistenPanel();
   const DZ = `id="lc-dropzone" style="border-radius:10px;min-height:120px"`;
   if (!lcState.slips.length) {
-    el.innerHTML = `<div ${DZ}><div class="empty">Lohnabrechnungen als PDF hochladen oder <b>hierher ziehen</b> — beliebig viele Seiten und Dateien aufs Mal.<br>
+    el.innerHTML = klPanel + `<div ${DZ}><div class="empty">Lohnabrechnungen als PDF hochladen oder <b>hierher ziehen</b> — beliebig viele Seiten und Dateien aufs Mal.<br>
       <span style="font-size:11px;color:var(--text-faint)">Jede Abrechnung wird ab «Lohn und Zulagen» erkannt, die Lohnarten
       <input type="number" value="${lcState.von}" style="width:64px" onchange="lcRange(this.value,${lcState.bis})"> bis
       <input type="number" value="${lcState.bis}" style="width:64px" onchange="lcRange(${lcState.von},this.value)">
@@ -762,7 +1071,7 @@ function renderLohncheck(el) {
         <td style="text-align:right;padding:5px 8px;font-family:var(--font-mono)">${lcFmt(m.netto)}</td>
         <td style="text-align:right;padding:5px 8px;font-family:var(--font-mono)">${m.rot ? `<span style="color:var(--danger)">${m.rot} rot</span> ` : ""}${m.gelb ? `<span style="color:var(--warn)">${m.gelb} gelb</span>` : ""}${!m.rot && !m.gelb ? "✓" : ""}</td></tr>`).join("")}</table>`;
   }
-  el.innerHTML = `<div ${DZ}>
+  el.innerHTML = klPanel + `<div ${DZ}>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
       <div class="card stat-card"><div class="stat-label">Abrechnungen${lcState.flag !== "all" || lcState.q.trim() ? " <span style=\"color:var(--accent)\">(gefiltert)</span>" : ""}</div><div class="stat-value">${S.length}${lcState.flag !== "all" || lcState.q.trim() ? `<span style="font-size:12px;color:var(--text-faint)"> / ${lcState.slips.length}</span>` : ""}</div></div>
       <div class="card stat-card"><div class="stat-label">Mitarbeitende</div><div class="stat-value">${emps.length}</div></div>

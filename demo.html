@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.166.0"></script>
-<script src="apriko-api.js?v=1.166.0"></script>
-<script src="lohncheck.js?v=1.166.0"></script>
-<script src="personalbudget.js?v=1.166.0"></script>
-<script src="jahresbudget.js?v=1.166.0"></script>
-<script src="budgetpositionen.js?v=1.166.0"></script>
-<script src="lohnchecklistetemp.js?v=1.166.0"></script>
+<script src="apriko-filters.js?v=1.169.0"></script>
+<script src="apriko-api.js?v=1.169.0"></script>
+<script src="lohncheck.js?v=1.169.0"></script>
+<script src="personalbudget.js?v=1.169.0"></script>
+<script src="jahresbudget.js?v=1.169.0"></script>
+<script src="budgetpositionen.js?v=1.169.0"></script>
+<script src="lohnchecklistetemp.js?v=1.169.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.166.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.169.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12285,19 +12285,18 @@ function rpApiNameScore(kandidatName, ocrName){
    Treffer liefert (localStorage apriko-filter-format). Sobald am
    echten System geklärt: auf AprikoFilters.buildFilter fixieren. */
 async function rpApiPlacementsFor(personId){
-  /* Drei Formatvarianten; ein 400 (FormatViolation) einer Variante
-     bricht NICHT ab, sondern probiert die nächste. Empirie 02.09.2026
-     gegen die laufende Instanz: JSON.stringify-Wert ("id" mit
-     Anführungszeichen) → HTTP 400 FormatViolation ⇒ das Schema-
-     BEISPIEL (roher Wert) gilt, nicht die Schema-Beschreibung. */
-  /* Gruppe (Position 7): Pflicht UND JSON-Array — ["G1"] (empirisch). */
+  /* KORRIGIERTE ANALYSE (10.09.2026, nach echter Model-Service-Spezifikation des Kollegen):
+     Filter-Grammatik ist 7 Segmente: key|operator|value|dataType|isInclude|ignoreUnset|groups.
+     value MUSS JSON-kodiert sein (Text braucht Anführungszeichen), groups MUSS ein JSON-Array
+     sein (["G1"], nie ein blosser String). Die frühere Notiz "quotierter Wert → HTTP 400" bezog
+     sich auf die Guid-typisierten Varianten (guidJson/guidRaw) — für dataType Text war die
+     "json"-Variante unten (quotierter Wert, ["G1"]) bereits exakt spezifikationskonform und
+     scheiterte NICHT mit einem Fehler, sondern mit 0 Treffern. Das spricht für die
+     "keyword"-Hypothese unten (employeeId ist im Suchindex ein analysiertes Textfeld, kein
+     Exact-Match möglich) statt für ein Syntaxproblem. Für andere Felder (z.B. placementId,
+     isActivePendingVacantOrSinceRecentlyInactive) gilt die korrekte Syntax trotzdem — siehe
+     rpApiSucheAdditionalComp und den Aktiv-Filter oben in rpApiLoadRoster. */
   var VAR = {
-    // DOKU-BEISPIEL (models-Service, GET/POST /Query, Parameter "Filters"): das OpenAPI-Schema
-    // selbst gibt als Beispielwert "name|=|Doe|text|false|false|Group1" an — Wert UNQUOTIERT,
-    // Typ klein "text", Gruppe als BLOSSER String "Group1" (kein JSON-Array!). Das weicht von der
-    // bisherigen Annahme (Gruppe als ["G1"]) ab, unter der ALLE bisherigen Versuche fehlschlugen
-    // (json: 0 Treffer, raw/rawlower: HTTP 500, guidJson/guidRaw: HTTP 400, pascal: 0 Treffer) —
-    // dieser Fund kommt direkt aus der Apriko-eigenen Spec, nicht aus weiterem Raten.
     docText:       function(id){ return 'employeeId|=|' + String(id) + '|text|false|false|G1'; },
     docTextQuoted: function(id){ return 'employeeId|=|' + JSON.stringify(id) + '|text|false|false|G1'; },
     json:      function(id){ return 'employeeId|=|' + JSON.stringify(id) + '|Text|false|false|["G1"]'; },
@@ -12424,11 +12423,15 @@ async function rpApiLoadRoster(force){
     // MUSS vor dem Aktiv-Filter-Versuch unten definiert sein, der sie bereits verwendet.
     var RP_RELEVANTE_STATES = ['Placed','Active','TerminatedPlaced','TerminatedActive','LockedPlaced','LockedActive'];
     /* ZUERST versuchen: gezielt nur aktuell offene/aktive Einsätze holen (Feld
-       isActivePendingVacantOrSinceRecentlyInactive, boolesch) statt alles zu paginieren — bei
-       einem Boolean ist die Trefferchance höher als beim gescheiterten employeeId-Text-Filter,
-       weil Booleans im Suchindex normalerweise nicht als analysiertes Textfeld behandelt werden.
-       Klappt das, ist die Liste i.d.R. winzig gegenüber der kompletten Historie. Klappt es nicht
-       (0 Treffer/Fehler), automatisch Rückfall auf die volle Paginierung weiter unten. */
+       isActivePendingVacantOrSinceRecentlyInactive) statt alles zu paginieren. Klappt das, ist
+       die Liste i.d.R. winzig gegenüber der kompletten Historie. Klappt es nicht (0 Treffer/
+       Fehler), automatisch Rückfall auf die volle Paginierung weiter unten.
+       EMPIRISCH GEPRÜFT (10.09.2026): dataType "boolean" für dieses Feld löst bei Apriko einen
+       HTTP 400 aus, trotz gegenteiliger Doku-Erwartung ("falscher dataType → 0 Treffer, kein
+       Fehler") — vermutlich wird "boolean" hier nicht als gültiger Enum-Wert akzeptiert. NICHT
+       erneut versuchen ohne vorherige Prüfung, welche Schreibweise Apriko tatsächlich erwartet.
+       dataType "text" (wie bisher) liefert zuverlässig 0 Treffer statt eines Fehlers — sicherer
+       Rückfall-Zustand, auch wenn dieser Fast-Path dadurch faktisch wirkungslos bleibt. */
     rpApiProgress('🔌 <b>Einsatzliste:</b> versuche gezielt nur aktive Einsätze zu holen …');
     var aktivDiagnose = '';
     /* WICHTIG: query darf hier nicht '' sein — eine leere Anfrage lieferte in einem früheren Test
@@ -15317,7 +15320,7 @@ async function rpApiSucheAdditionalComp(placementId){
   try {
     var filterR = await AprikoApi.models.query({
       entityTypes: 'AdditionalPlacementCompensation', pageIndex: 0, pageSize: 50, resolveReferences: false,
-      filters: 'placementId|=|' + placementId + '|text|false|false|G1'
+      filters: 'placementId|=|' + JSON.stringify(placementId) + '|text|false|false|["G1"]'
     });
     var filterRows = ((filterR && filterR.results) || []).map(AprikoApi.models.hitData);
     if(filterRows.length){
