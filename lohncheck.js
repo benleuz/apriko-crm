@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.118.0";
+const LC_VERSION = "1.119.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -36,7 +36,46 @@ const lcState = {
 };
 
 /* ---------- Referenzwerte (Stand 2026, anpassbar) ---------- */
+/* SUVA-/UVG-Höchstlohn (Stand 2026, CHF 148'200/Jahr — jährlich neu prüfen, ändert sich).
+   swissdec empfiehlt für ALV-/UVG-Höchstlohn-Berechnungen die 30-Tage-Methode (jeder Monat = 30
+   Tage), siehe Richtlinien Lohnstandard-CH (ELM). Tageshöchstlohn = Jahresmaximum / 12 / 30. */
+const LC_SUVA_HOECHSTLOHN_JAHR = 148200;
+const LC_TAGESHOECHSTLOHN = LC_SUVA_HOECHSTLOHN_JAHR / 12 / 30;
+/* Prüft, ob eine NBU-Basis-Abweichung vom Brutto/der übrigen SV-Basis durch einen UVG-Höchstlohn-
+   Ausgleich über mehrere Monate erklärbar ist (z.B. im Juni gekappt, im Juli nachgeholt). Dazu
+   werden ALLE Abrechnungen derselben Person bis und mit der aktuellen Periode kumuliert: stimmt
+   die kumulierte NBU-Basis mit dem Minimum aus kumuliertem Bruttolohn und kumuliertem Höchstlohn-
+   Deckel überein, ist die Einzelmonat-Abweichung ein normaler, erwarteter Ausgleich — keine echte
+   Differenz. Tage bevorzugt aus der Einsatzliste (präziser), sonst 30 Tage/Monat (swissdec). */
+function lcHoechstlohnErklaerung(alleSlips, slip) {
+  const periodeAktuell = lcPeriodeEndeDatum(slip);
+  if (!periodeAktuell) return null;
+  const gleichePerson = alleSlips
+    .map(x => ({ x, pe: lcPeriodeEndeDatum(x) }))
+    .filter(o => o.pe !== null && o.x.key === slip.key && o.pe <= periodeAktuell)
+    .sort((a, b) => a.pe - b.pe)
+    .map(o => o.x);
+  if (gleichePerson.length < 2) return null;   // ohne Vorgeschichte kein Ausgleich prüfbar
+  let kumBrutto = 0, kumNbuBasis = 0, kumTage = 0;
+  let nbuFehlt = false;
+  gleichePerson.forEach(x => {
+    const nbuRow = x.rows.find(r => LC_REF.NBU.codes.includes(r.code) || LC_REF.NBU.key.test(r.label));
+    if (!nbuRow || nbuRow.basis === null) { nbuFehlt = true; return; }
+    kumNbuBasis += nbuRow.basis;
+    kumBrutto += (x.brutto || 0);
+    // Einsatzliste bevorzugen (präziser als die 30-Tage-Pauschale), sonst Fallback
+    const bvgInfo = lcBvgEinsatzInfo(x);   // liefert auch Einsatzliste-Wochen, unabhängig von BVG selbst nutzbar
+    kumTage += bvgInfo.verfuegbar && bvgInfo.wochen !== null ? Math.min(bvgInfo.wochen * 7, 31) : 30;
+  });
+  if (nbuFehlt) return null;
+  const kumDeckel = LC_TAGESHOECHSTLOHN * kumTage;
+  const erwarteteKumNbuBasis = Math.min(kumBrutto, kumDeckel);
+  const toleranz = Math.max(2, erwarteteKumNbuBasis * 0.01);
+  if (lcNear(kumNbuBasis, erwarteteKumNbuBasis, toleranz)) return { kumBrutto, kumDeckel, kumNbuBasis, monate: gleichePerson.length };
+  return null;
+}
 const LC_REF = {
+
   AHV: { codes: [5010], key: /\bAHV\b/i, satz: 5.3, pflicht: "rot" },
   ALV: { codes: [5020], key: /\bALV\b/i, satz: 1.1, pflicht: "rot" },
   NBU: { codes: [5050], key: /\bNBU\b/i, satz: null, pflicht: "gelb" },
@@ -575,8 +614,14 @@ function lcCheckAll(slips) {
           add(s, "rot", "Satz", nm + "-Satz " + lcFmtPct(row.ansatz) + " statt " + lcFmtPct(ref.satz) + ".");
         // Einzelbasis weicht von der gemeinsamen SV-Basis ab (AHV bei Rentner ausgenommen, BVG koordiniert)
         if (nm === "AHV" && rentner) continue;
-        if (nm !== "BVG" && row.basis !== null && commonBasis !== null && !lcNear(row.basis, commonBasis))
-          add(s, "gelb", "Basis", nm + "-Basis " + lcFmt(row.basis) + " ≠ Basis der übrigen SV-Abzüge " + lcFmt(commonBasis) + ".");
+        if (nm !== "BVG" && row.basis !== null && commonBasis !== null && !lcNear(row.basis, commonBasis)) {
+          const hoechstlohn = nm === "NBU" ? lcHoechstlohnErklaerung(slips, s) : null;
+          if (hoechstlohn) {
+            add(s, "gelb", "Höchstlohn-Ausgleich", "NBU-Basis " + lcFmt(row.basis) + " weicht von der übrigen SV-Basis " + lcFmt(commonBasis) + " ab — durch UVG-Höchstlohn-Ausgleich über " + hoechstlohn.monate + " Monate erklärbar (kumuliert NBU-Basis " + lcFmt(hoechstlohn.kumNbuBasis) + " ≈ Minimum aus Bruttolohn " + lcFmt(hoechstlohn.kumBrutto) + " und Höchstlohn-Deckel " + lcFmt(hoechstlohn.kumDeckel) + "). Zur Kontrolle markiert, vermutlich unproblematisch.");
+          } else {
+            add(s, "gelb", "Basis", nm + "-Basis " + lcFmt(row.basis) + " ≠ Basis der übrigen SV-Abzüge " + lcFmt(commonBasis) + ".");
+          }
+        }
       }
     }
     // Satz weicht vom häufigsten Satz ab (Abzüge 5000–5499; BVG altersabhängig, NBU branchenabhängig, QST individuell → ausgenommen)
