@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.112.0";
+const LC_VERSION = "1.113.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -456,7 +456,21 @@ function lcCheckAll(slips) {
           if (nm === "ALV" && rentner) { add(s, "grau", "Abzug fehlt", "Kein ALV-Abzug — bei Rentner/in korrekt."); continue; }
           if (nm === "BVG") {
             const zul = s.rows.filter(r => r.code < 4900 && !r.isTotal && /Kinderzulage|Familienzulage|Ausbildungszulage/i.test(r.label));
-            if (zul.length) { add(s, "rot", "Abzug fehlt", "Kein BVG-Abzug, obwohl Kinder-/Ausbildungszulagen abgerechnet sind (" + [...new Set(zul.map(r => r.code))].join(", ") + ")."); continue; }
+            const bvgInfo = lcBvgEinsatzInfo(s);
+            let gemeldet = false;
+            // Punkt 6: Kinderzulagen vorhanden aber kein BVG — unabhängig von der Einsatzdauer-Prüfung
+            if (zul.length) { add(s, "rot", "BVG prüfen", "BVG prüfen: Kinderzulagen vorhanden, jedoch kein BVG Abzug ersichtlich."); gemeldet = true; }
+            // Punkt 5: 13 Einsatzwochen gemäss Einsatzliste erreicht, aber kein BVG — nur wenn wir das
+            // aus echten Einsatzliste-Daten wissen, NIE aus einer blossen Kalender-Annahme
+            if (bvgInfo.verfuegbar && bvgInfo.wochen >= 13) {
+              add(s, "rot", "BVG prüfen", "BVG prüfen: Gemäss Einsatzliste wurden " + Math.floor(bvgInfo.wochen) + " Einsatzwochen erreicht. Auf der aktuellen Lohnabrechnung ist kein BVG Abzug vorhanden.");
+              gemeldet = true;
+            }
+            if (gemeldet) continue;
+            if (bvgInfo.verfuegbar && bvgInfo.wochen < 13) continue;   // Einsatzliste sagt: noch keine 13 Wochen — bewusst KEINE Meldung, das ist normal
+            // Keine Einsatzliste-Daten verfügbar — wie bisher nur ein tiefstufiger, unverbindlicher Hinweis
+            add(s, "grau", "Abzug fehlt", "Kein BVG-Abzug (5090) bei Bruttolohn " + lcFmt(s.brutto) + " — keine Einsatzliste hinterlegt, BVG-Pflicht konnte nicht anhand der Einsatzdauer geprüft werden.");
+            continue;
           }
           add(s, ref.pflicht, "Abzug fehlt", "Kein " + nm + "-Abzug (" + ref.codes.join("/") + ") bei Bruttolohn " + lcFmt(s.brutto) + "."); continue;
         }
@@ -810,7 +824,117 @@ function lcFindeZeileFuerSlip(zeilen, spaltenMap, slip) {
   return null;
 }
 
-/* ---------- Speicherung (SharePoint JSON, pro Kunde + Periode) ---------- */
+
+/* ============ ERWEITERUNG: BVG-Prüfung anhand Einsatzliste (Punkte 4, 5, 6) ============
+   Ersetzt die bisherige pauschale "Temporäre: erste 3 Monate ohne BVG möglich"-Annahme durch
+   eine echte Berechnung der kumulierten Einsatzwochen aus der hochgeladenen Einsatzliste, inkl.
+   korrekter Behandlung unterbrochener Einsätze (nicht Kalenderspanne erste bis letzte Woche,
+   sondern Summe der tatsächlich belegten, überlappungsbereinigten Zeiträume). */
+
+/* Datum aus Excel/CSV robust parsen — akzeptiert Date-Objekte (SheetJS cellDates) sowie
+   DD.MM.YYYY, YYYY-MM-DD und DD/MM/YYYY als String. Rechnet in UTC, damit Tagesdifferenzen nicht
+   durch Zeitzonen-Sommerzeit-Sprünge verfälscht werden. */
+function lcParseDatum(v) {
+  if (v instanceof Date && !isNaN(v)) return new Date(Date.UTC(v.getFullYear(), v.getMonth(), v.getDate()));
+  const s = String(v == null ? "" : v).trim();
+  let m = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(s);
+  if (m) return new Date(Date.UTC(+m[3], +m[2] - 1, +m[1]));
+  m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  if (m) return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+  if (m) return new Date(Date.UTC(+m[3], +m[1] - 1, +m[2]));
+  return null;
+}
+/* Letzter Tag der Lohnperiode eines Slips — Basis für "wie viele Einsatzwochen bis hierhin". */
+function lcPeriodeEndeDatum(slip) {
+  const m = new RegExp("(" + LC_MONATE.join("|") + ")\\s+(20\\d{2})", "i").exec(slip.periode || "");
+  if (m) {
+    const idx = LC_MONATE.findIndex(x => x.toLowerCase() === m[1].toLowerCase());
+    if (idx >= 0) return new Date(Date.UTC(+m[2], idx + 1, 0));   // Tag 0 des Folgemonats = letzter Tag des Monats
+  }
+  const m2 = /(\d{2}\.\d{2}\.\d{4})\s*[-–]\s*(\d{2}\.\d{2}\.\d{4})/.exec(slip.periode || "");
+  if (m2) return lcParseDatum(m2[2]);
+  return null;   // Periode nicht eindeutig erkennbar — Wochen können nicht verlässlich berechnet werden
+}
+/* Wie lcFindeZeileFuerSlip, aber liefert ALLE passenden Zeilen (ein Mitarbeitender kann mehrere
+   getrennte Einsätze in der Liste haben). */
+function lcFindeAlleZeilenFuerSlip(zeilen, spaltenMap, slip) {
+  const out = [];
+  if (spaltenMap.ahv && slip.ahv) {
+    const slipAhv = lcNormAhv(slip.ahv);
+    if (slipAhv.length >= 10) {
+      zeilen.forEach(z => { if (lcNormAhv(z[spaltenMap.ahv]) === slipAhv) out.push(z); });
+      if (out.length) return out;
+    }
+  }
+  if (spaltenMap.name) {
+    const slipWoerter = String(slip.name || "").toLowerCase().split(/\s+/).map(lcNormText).filter(Boolean);
+    if (slipWoerter.length) {
+      zeilen.forEach(z => {
+        const zWoerter = (String(z[spaltenMap.name] || "") + " " + String(spaltenMap.vorname ? z[spaltenMap.vorname] || "" : "")).toLowerCase().split(/\s+/).map(lcNormText).filter(Boolean);
+        if (slipWoerter.every(w => zWoerter.includes(w))) out.push(z);
+      });
+    }
+  }
+  return out;
+}
+/* Kernstück: aus einer Menge von Von/Bis-Zeiträumen die TATSÄCHLICH belegte Zeit in Wochen
+   berechnen — überlappende/angrenzende Zeiträume werden zusammengeführt (gemergt), NICHT einfach
+   von der frühesten bis zur spätesten Grenze gerechnet. Genau das deckt den in der Spezifikation
+   beschriebenen Fall ab: mehrere Monate Kalenderspanne mit Unterbrüchen ≠ mehrere Monate
+   tatsächlicher Einsatz. periodeEnde deckelt offene ("laufende") Einsätze und alles, was erst
+   nach der geprüften Lohnperiode beginnt. */
+function lcEinsatzwochenBerechnen(zeitraeume, periodeEnde) {
+  if (!periodeEnde) return null;
+  const bereiche = [];
+  zeitraeume.forEach(z => {
+    const von = z.von, bisRoh = z.bis;
+    if (!von) return;
+    let bis = bisRoh || periodeEnde;   // kein Enddatum = laufender Einsatz → bis Periodenende deckeln
+    if (bis > periodeEnde) bis = periodeEnde;
+    if (von > periodeEnde) return;      // Einsatz beginnt erst nach der geprüften Periode
+    if (von > bis) return;
+    bereiche.push([von, bis]);
+  });
+  if (!bereiche.length) return null;
+  bereiche.sort((a, b) => a[0] - b[0]);
+  const merged = [bereiche[0].slice()];
+  for (let i = 1; i < bereiche.length; i++) {
+    const last = merged[merged.length - 1];
+    const naechsterTagNachLast = new Date(last[1].getTime() + 86400000);
+    if (bereiche[i][0] <= naechsterTagNachLast) {   // überlappend oder direkt angrenzend → zusammenführen
+      if (bereiche[i][1] > last[1]) last[1] = bereiche[i][1];
+    } else {
+      merged.push(bereiche[i].slice());
+    }
+  }
+  const totalTage = merged.reduce((sum, b) => sum + Math.round((b[1] - b[0]) / 86400000) + 1, 0);
+  return totalTage / 7;
+}
+/* Verbindet Kontrolllisten-Suche + Wochenberechnung für einen konkreten Slip.
+   Rückgabe: { verfuegbar: bool, wochen: number|null } — verfuegbar=false heisst "wir wissen es
+   nicht" (keine Einsatzliste hochgeladen, Mitarbeiter nicht gefunden, oder Periode nicht
+   erkennbar) und darf NIE mit "unter 13 Wochen" verwechselt werden — nur bei verfuegbar=true darf
+   aus wochen<13 geschlossen werden, dass (noch) kein BVG-Abzug erwartet wird. */
+function lcBvgEinsatzInfo(slip) {
+  const kl = lcState.kontrolllisten;
+  if (!kl || !kl.listen) return { verfuegbar: false, wochen: null };
+  const einsatzlisten = kl.listen.filter(l => l.typ === "Einsatzliste" && l.spaltenMap && l.spaltenMap.von && l.spaltenMap.bis);
+  if (!einsatzlisten.length) return { verfuegbar: false, wochen: null };
+  const periodeEnde = lcPeriodeEndeDatum(slip);
+  if (!periodeEnde) return { verfuegbar: false, wochen: null };
+  const zeitraeume = [];
+  einsatzlisten.forEach(l => {
+    lcFindeAlleZeilenFuerSlip(l.zeilen, l.spaltenMap, slip).forEach(z => {
+      zeitraeume.push({ von: lcParseDatum(z[l.spaltenMap.von]), bis: lcParseDatum(z[l.spaltenMap.bis]) });
+    });
+  });
+  if (!zeitraeume.length) return { verfuegbar: false, wochen: null };
+  const wochen = lcEinsatzwochenBerechnen(zeitraeume, periodeEnde);
+  return { verfuegbar: wochen !== null, wochen };
+}
+/* ============ ENDE ERWEITERUNG BVG-Prüfung ============ */
+
 function lcKunden() {
   return (cache.companies || []).filter(c => c.IsCustomer).sort((a, b) => (a.Title || "").localeCompare(b.Title || "", "de-CH"));
 }
