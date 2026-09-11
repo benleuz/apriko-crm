@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.190.0"></script>
-<script src="apriko-api.js?v=1.190.0"></script>
-<script src="lohncheck.js?v=1.190.0"></script>
-<script src="personalbudget.js?v=1.190.0"></script>
-<script src="jahresbudget.js?v=1.190.0"></script>
-<script src="budgetpositionen.js?v=1.190.0"></script>
-<script src="lohnchecklistetemp.js?v=1.190.0"></script>
+<script src="apriko-filters.js?v=1.192.0"></script>
+<script src="apriko-api.js?v=1.192.0"></script>
+<script src="lohncheck.js?v=1.192.0"></script>
+<script src="personalbudget.js?v=1.192.0"></script>
+<script src="jahresbudget.js?v=1.192.0"></script>
+<script src="budgetpositionen.js?v=1.192.0"></script>
+<script src="lohnchecklistetemp.js?v=1.192.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -979,7 +979,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.190.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.192.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -6401,7 +6401,7 @@ const AP_SV_SPALTEN = [
   ["OccupationalAccident", "BU"], ["NonOccupationalAccident", "NBU"], ["AdditionalAccident", "Zusatzunfall"],
   ["RegularOccupationalBenefit", "BVG"], ["AdditionalOccupationalBenefit", "BVG überobl."],
   ["DailySickness", "KTG"], ["FamilyEqualisation", "FAK"],
-  ["JointCommission", "Vollzug (PK)"], ["EarlyRetirement", "Frühpensionierung"]
+  ["JointCommission", "Vollzug (PK)"], ["EarlyRetirement", "FAR"]
 ];
 /* Soll-/Haben-Konten (BookingAccounts) einmalig laden und als id→Kontonummer-Map bereithalten —
    für die Finanzbuchhaltung, löst creditNumberId/debitNumberId in lesbare Kontonummern auf. */
@@ -6429,7 +6429,7 @@ async function apExportSalaryTypesCsv() {
   try { konten = await apLadeBookingAccounts(); }
   catch (e) { toast("Konten (Soll/Haben) konnten nicht geladen werden: " + e.message + " — CSV wird ohne Kontonummern erstellt.", true); }
   const kontoAufloesen = id => id ? (konten[id] || id) : "";
-  const header = ["Code", "Bezeichnung", "Bereich", "Aktiv", "Brutto", "Abzug", "Steuerpflichtig"]
+  const header = ["Code", "Bezeichnung", "Bereich", "Aktiv", "Brutto", "Abzug", "QST-pflichtig", "Periodizität", "QST-Satzbestimmend"]
     .concat(AP_SV_SPALTEN.map(x => x[1]))
     .concat(["Soll-Konto", "Haben-Konto"]);
   const zeilen = rows.map(r => {
@@ -6437,7 +6437,9 @@ async function apExportSalaryTypesCsv() {
     const svSpalten = AP_SV_SPALTEN.map(([key]) => ins.has(key) ? "Ja" : "");
     return [
       r.number, r.name || r.displayName || "", r.section === "None" ? "" : r.section,
-      r.isActive ? "Ja" : "", r.isGross ? "Ja" : "", r.isDeduction ? "Ja" : "", r.isTaxable ? "Ja" : ""
+      r.isActive ? "Ja" : "", r.isGross ? "Ja" : "", r.isDeduction ? "Ja" : "", r.isTaxable ? "Ja" : "",
+      r.isPeriodical === true ? "Periodisch" : (r.isPeriodical === false ? "Aperiodisch" : ""),
+      r.isTaxRateDetermining ? "Ja" : ""
     ].concat(svSpalten).concat([
       kontoAufloesen(r.debitNumberId || r.overrideDebitNumberId || r.factoryDefaultDebitNumberId),
       kontoAufloesen(r.creditNumberId || r.overrideCreditNumberId || r.factoryDefaultCreditNumberId)
@@ -6475,6 +6477,9 @@ async function apSpeichereAlsLohnartenstamm(stumm) {
     const z = { Code: r.number, Bezeichnung: r.name || r.displayName || "", Bereich: r.section === "None" ? "" : r.section };
     z["Soll-Konto"] = kontoAufloesen(r.debitNumberId || r.overrideDebitNumberId || r.factoryDefaultDebitNumberId);
     z["Haben-Konto"] = kontoAufloesen(r.creditNumberId || r.overrideCreditNumberId || r.factoryDefaultCreditNumberId);
+    z["QST-pflichtig"] = r.isTaxable ? "Ja" : "";
+    z["Periodizität"] = r.isPeriodical === true ? "Periodisch" : (r.isPeriodical === false ? "Aperiodisch" : "");
+    z["QST-Satzbestimmend"] = r.isTaxRateDetermining ? "Ja" : "";
     AP_SV_SPALTEN.forEach(([key, label]) => { z[label] = ins.has(key) ? "Ja" : ""; });
     return z;
   });
@@ -6483,7 +6488,7 @@ async function apSpeichereAlsLohnartenstamm(stumm) {
   lcState.lohnartenliste = {
     dateiname: "Apriko API (SalaryTypes, live übernommen " + new Date().toLocaleDateString("de-CH") + ")",
     hochgeladenAm: new Date().toISOString(),
-    spalten: ["Code", "Bezeichnung", "Bereich", "Soll-Konto", "Haben-Konto"].concat(AP_SV_SPALTEN.map(x => x[1])),
+    spalten: ["Code", "Bezeichnung", "Bereich", "Soll-Konto", "Haben-Konto", "QST-pflichtig", "Periodizität", "QST-Satzbestimmend"].concat(AP_SV_SPALTEN.map(x => x[1])),
     spaltenMap: { code: "Code", bezeichnung: "Bezeichnung" },
     zeilen
   };
@@ -6536,7 +6541,7 @@ async function renderLohnartenstamm(el) {
   // Feste Breiten statt automatischer Verteilung — sonst nehmen sich Code/Bezeichnung zu viel
   // Platz, während andere Spalten abgeschnitten werden. Bei Kürzung zusätzlich title-Tooltip
   // (Mauszeiger drüber = voller Text), damit nichts komplett verloren geht.
-  const breite = s => schmal(s) ? 26 : (s === "Bereich" ? 46 : s === "Code" ? 55 : (s === "Bezeichnung" ? 200 : (s === "Soll-Konto" || s === "Haben-Konto") ? 150 : 90));
+  const breite = s => schmal(s) ? 26 : (s === "Bereich" ? 46 : s === "Code" ? 55 : (s === "Bezeichnung" ? 200 : (s === "Soll-Konto" || s === "Haben-Konto") ? 150 : s === "QST-pflichtig" || s === "QST" ? 45 : s === "Periodizität" ? 75 : s === "QST-Satzbestimmend" ? 60 : 90));
   const sortiert = la.zeilen.slice().sort((a, b) => {
     const av = parseFloat(String(a[codeSpalte]).replace(/\D/g, "")), bv = parseFloat(String(b[codeSpalte]).replace(/\D/g, ""));
     if (!isNaN(av) && !isNaN(bv)) return av - bv;
@@ -6611,7 +6616,9 @@ const AP_COLS = {
     ["section", "Bereich", r => r.section === "None" ? "" : r.section, "max-width:40px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"],
     ["gross", "Brutto", r => r.isGross ? "✓" : ""],
     ["deduction", "Abzug", r => r.isDeduction ? "✓" : ""],
-    ["taxable", "Steuerpfl.", r => r.isTaxable ? "✓" : ""],
+    ["taxable", "QST-pflichtig", r => r.isTaxable ? "✓" : ""],
+    ["periodical", "Periodizität", r => r.isPeriodical === true ? "Periodisch" : (r.isPeriodical === false ? "Aperiodisch" : "")],
+    ["taxratedet", "QST-Satzbest.", r => r.isTaxRateDetermining ? "✓" : ""],
     ["active", "Aktiv", r => r.isActive ? "✓" : ""],
     ["debit", "Soll-Konto", r => { const id = r.debitNumberId || r.overrideDebitNumberId || r.factoryDefaultDebitNumberId; return id ? ((apState.bookingAccounts || {})[id] || id) : ""; }],
     ["credit", "Haben-Konto", r => { const id = r.creditNumberId || r.overrideCreditNumberId || r.factoryDefaultCreditNumberId; return id ? ((apState.bookingAccounts || {})[id] || id) : ""; }]
