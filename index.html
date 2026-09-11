@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.185.0"></script>
-<script src="apriko-api.js?v=1.185.0"></script>
-<script src="lohncheck.js?v=1.185.0"></script>
-<script src="personalbudget.js?v=1.185.0"></script>
-<script src="jahresbudget.js?v=1.185.0"></script>
-<script src="budgetpositionen.js?v=1.185.0"></script>
-<script src="lohnchecklistetemp.js?v=1.185.0"></script>
+<script src="apriko-filters.js?v=1.186.0"></script>
+<script src="apriko-api.js?v=1.186.0"></script>
+<script src="lohncheck.js?v=1.186.0"></script>
+<script src="personalbudget.js?v=1.186.0"></script>
+<script src="jahresbudget.js?v=1.186.0"></script>
+<script src="budgetpositionen.js?v=1.186.0"></script>
+<script src="lohnchecklistetemp.js?v=1.186.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -973,7 +973,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.185.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.186.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -6486,7 +6486,12 @@ async function apSpeichereAlsLohnartenstamm(stumm) {
 }
 async function apUebernehmeLohnartenliste() { await apSpeichereAlsLohnartenstamm(false); }
 let lohnartenstammSuche = "";
-function lohnartenstammSucheSetzen(v) { lohnartenstammSuche = v || ""; render(); }
+let lohnartenstammRestoreFocus = null;
+function lohnartenstammSucheSetzen(inp) {
+  lohnartenstammSuche = inp.value || "";
+  lohnartenstammRestoreFocus = { id: inp.id, pos: inp.selectionStart };
+  render();
+}
 function lohnartenstammCsvExport() {
   const la = lcState.lohnartenliste;
   if (!la || !la.zeilen || !la.zeilen.length) { toast("Kein Lohnartenstamm vorhanden.", true); return; }
@@ -6532,7 +6537,7 @@ async function renderLohnartenstamm(el) {
   el.innerHTML = `
     <div class="card" style="padding:14px 16px;margin-bottom:14px">
       <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px"><b>${escape(la.dateiname || "Lohnartenstamm")}</b> — ${sortiert.length} Lohnart(en)${zeilen.length !== sortiert.length ? " · " + zeilen.length + " nach Suche" : ""}${la.hochgeladenAm ? " · zuletzt aktualisiert " + new Date(la.hochgeladenAm).toLocaleString("de-CH", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}</div>
-      <input type="text" value="${escape(lohnartenstammSuche)}" oninput="lohnartenstammSucheSetzen(this.value)" placeholder="Suche über alle Spalten … (Code, Bezeichnung, Konto, …)" style="width:100%;max-width:420px;font-size:13px;padding:6px 10px">
+      <input type="text" id="lohnartenstamm-suche" value="${escape(lohnartenstammSuche)}" oninput="lohnartenstammSucheSetzen(this)" placeholder="Suche über alle Spalten … (Code, Bezeichnung, Konto, …)" style="width:100%;max-width:420px;font-size:13px;padding:6px 10px">
     </div>
     <div class="card" style="padding:0">
       <div class="table-wrap"><table>
@@ -6544,6 +6549,8 @@ async function renderLohnartenstamm(el) {
         }).join("")}</tr>`).join("")}</tbody>
       </table></div>
     </div>`;
+  const rf = lohnartenstammRestoreFocus;
+  if (rf) { lohnartenstammRestoreFocus = null; const inp = document.getElementById(rf.id); if (inp) { inp.focus(); const p = Math.min(rf.pos || inp.value.length, inp.value.length); inp.setSelectionRange(p, p); } }
 }
 async function lohnartenstammNeuLaden() { await lcLoadLohnartenliste(true); render(); }
 function apSort(col) { const s = apState.sort; if (s.col === col) s.dir = -s.dir; else { s.col = col; s.dir = 1; } render(); }
