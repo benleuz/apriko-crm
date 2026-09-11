@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.174.0"></script>
-<script src="apriko-api.js?v=1.174.0"></script>
-<script src="lohncheck.js?v=1.174.0"></script>
-<script src="personalbudget.js?v=1.174.0"></script>
-<script src="jahresbudget.js?v=1.174.0"></script>
-<script src="budgetpositionen.js?v=1.174.0"></script>
-<script src="lohnchecklistetemp.js?v=1.174.0"></script>
+<script src="apriko-filters.js?v=1.175.0"></script>
+<script src="apriko-api.js?v=1.175.0"></script>
+<script src="lohncheck.js?v=1.175.0"></script>
+<script src="personalbudget.js?v=1.175.0"></script>
+<script src="jahresbudget.js?v=1.175.0"></script>
+<script src="budgetpositionen.js?v=1.175.0"></script>
+<script src="lohnchecklistetemp.js?v=1.175.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.174.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.175.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -13206,7 +13206,7 @@ function rpApiRender(){
     (st.viaText ? '<br><span style="color:var(--rp-grey);font-size:11px">Einsätze via Volltextsuche' + (st.textVerifiziert ? ', über die Personen-ID verifiziert' : ' — Personen-ID nicht bestätigt, bitte Beleg prüfen') + '; ID-Filter: ' + esc((st.protokoll || []).join(' · ')) + '.</span>' : '') +
     uebernahmeBtn;
 }
-if (typeof window !== 'undefined'){ window.rpApiSelectPerson = rpApiSelectPerson; window.rpApiSelectEinsatz = rpApiSelectEinsatz; window.rpDbTest = rpDbTest; window.rpDbInit = rpDbInit; }
+if (typeof window !== 'undefined'){ window.rpApiSelectPerson = rpApiSelectPerson; window.rpApiSelectEinsatz = rpApiSelectEinsatz; window.rpDbTest = rpDbTest; window.rpDbInit = rpDbInit; window.rpDbCfg = rpDbCfg; window.rpApiUse = rpApiUse; }
 if (typeof window !== 'undefined') window.rpApiMatch = rpApiMatch;   // für Tests/Debugging erreichbar
 
 function showGavSuggestion(gavKey, firma){
