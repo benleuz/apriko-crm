@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.178.0"></script>
-<script src="apriko-api.js?v=1.178.0"></script>
-<script src="lohncheck.js?v=1.178.0"></script>
-<script src="personalbudget.js?v=1.178.0"></script>
-<script src="jahresbudget.js?v=1.178.0"></script>
-<script src="budgetpositionen.js?v=1.178.0"></script>
-<script src="lohnchecklistetemp.js?v=1.178.0"></script>
+<script src="apriko-filters.js?v=1.180.0"></script>
+<script src="apriko-api.js?v=1.180.0"></script>
+<script src="lohncheck.js?v=1.180.0"></script>
+<script src="personalbudget.js?v=1.180.0"></script>
+<script src="jahresbudget.js?v=1.180.0"></script>
+<script src="budgetpositionen.js?v=1.180.0"></script>
+<script src="lohnchecklistetemp.js?v=1.180.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -218,7 +218,7 @@
   .deal-card .value { color: var(--accent); font-family: var(--font-mono); font-weight: 500; }
 
   /* Tables */
-  .table-wrap { border: 1px solid var(--border-soft); border-radius: var(--radius); overflow: hidden; }
+  .table-wrap { border: 1px solid var(--border-soft); border-radius: var(--radius); overflow-x: auto; overflow-y: hidden; }
   table { width: 100%; border-collapse: collapse; }
   thead th {
     background: var(--bg-elev); padding: 10px 14px;
@@ -947,6 +947,7 @@
           <button data-view="clintern"><span class="ic">☑</span> Lohn Checkliste intern</button>
           <button data-view="clfibu"><span class="ic">☑</span> FIBU Monatsabschluss</button>
           <button data-view="lct"><span class="ic">☑</span> Checkliste Lohn Temp 2.0</button>
+          <button data-view="lohnartenstamm"><span class="ic">📋</span> Lohnartenstamm</button>
           <button data-view="lohncheck"><span class="ic">🧾</span> Ultimativer Check</button>
         </div>
       </div>
@@ -972,7 +973,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.178.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.180.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -1415,6 +1416,7 @@ const VIEW_TITLES = {
   customers: "Kunden", companies: "Firmen", contacts: "Kontakte", tasks: "Aufgaben",
   revenue: "Umsätze", stats: "Statistik", budget: "Ertragsbudget", budgetvgl: "Budgetvergleich", personalbudget: "Budget Personalaufwand", jahresbudget: "Jahresbudget", budgetpos: "Budgetpositionen (Erfassung & Jahresübersicht)",
   bpocheck: "Lohn Checkliste Temp", clintern: "Lohn Checkliste intern", clfibu: "FIBU Monatsabschluss",
+  lohnartenstamm: "Lohnartenstamm",
   rapport: "Rapport", einsatzdash: "Kundendashboard", konzern: "Konzernanalyse",
   lohncheck: "Ultimativer Check", apipoc: "Apriko API (POC)",
   profiles: "Profile"
@@ -1880,6 +1882,7 @@ function render() {
   else if (currentView === "einsatzdash") renderEinsatzDash(content);
   else if (currentView === "konzern") renderKonzern(content);
   else if (currentView === "lohncheck") renderLohncheck(content);
+  else if (currentView === "lohnartenstamm") renderLohnartenstamm(content);
   else if (currentView === "personalbudget") renderPersonalBudget(content);
   else if (currentView === "jahresbudget") renderJahresbudget(content);
   else if (currentView === "budgetpos") renderBudgetpositionen(content);
@@ -6452,22 +6455,65 @@ function apClearCfg() { localStorage.removeItem(AP_CFG_KEY); apState.info = null
 async function apUebernehmeLohnartenliste() {
   const rows = apState.rows.salarytypes;
   if (!rows.length) { toast("Keine Lohnarten geladen.", true); return; }
-  const zeilen = rows.filter(r => typeof r.number === "number").map(r => ({
-    Code: r.number, Bezeichnung: r.name || r.displayName || "",
-    SV_Unterstellung: [].concat(r.compulsoryInsurances || []).filter(x => x && x !== "None").join(", ")
-  }));
+  let konten = {};
+  try { konten = await apLadeBookingAccounts(); } catch (e) { toast("Konten (Soll/Haben) konnten nicht aufgelöst werden: " + e.message + " — wird ohne Kontonummern übernommen.", true); }
+  const kontoAufloesen = id => id ? (konten[id] || id) : "";
+  const zeilen = rows.filter(r => typeof r.number === "number").map(r => {
+    const ins = new Set([].concat(r.compulsoryInsurances || []));
+    const z = { Code: r.number, Bezeichnung: r.name || r.displayName || "", Bereich: r.section === "None" ? "" : r.section };
+    z["Soll-Konto"] = kontoAufloesen(r.debitNumberId || r.overrideDebitNumberId || r.factoryDefaultDebitNumberId);
+    z["Haben-Konto"] = kontoAufloesen(r.creditNumberId || r.overrideCreditNumberId || r.factoryDefaultCreditNumberId);
+    AP_SV_SPALTEN.forEach(([key, label]) => { z[label] = ins.has(key) ? "Ja" : ""; });
+    return z;
+  });
   if (!confirm(zeilen.length + " Lohnarten aus Apriko als zentrale Lohnartenliste im Ultimativ Check übernehmen? Eine evtl. bereits vorhandene Liste wird ersetzt.")) return;
   await lcLoadLohnartenliste(false);
   lcState.lohnartenliste = {
     dateiname: "Apriko API (SalaryTypes, live übernommen " + new Date().toLocaleDateString("de-CH") + ")",
     hochgeladenAm: new Date().toISOString(),
-    spalten: ["Code", "Bezeichnung", "SV_Unterstellung"],
+    spalten: ["Code", "Bezeichnung", "Bereich", "Soll-Konto", "Haben-Konto"].concat(AP_SV_SPALTEN.map(x => x[1])),
     spaltenMap: { code: "Code", bezeichnung: "Bezeichnung" },
     zeilen
   };
   try { await lcSaveLohnartenliste(); toast(zeilen.length + " Lohnarten übernommen und gespeichert."); }
   catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
 }
+/* Eigenständige, immer aktuelle Menüansicht (Workflows → Lohnartenstamm) — liest direkt aus
+   derselben SharePoint-Datei, die der Ultimativ Check für den Lohnart-Vergleich nutzt
+   (lcState.lohnartenliste, siehe lohncheck.js). Rein lesend; Aktualisierung läuft über
+   Spielwiese → Apriko API (POC) → Lohnarten → "übernehmen", danach zeigt diese Ansicht sofort
+   den neuen Stand, sobald sie neu geöffnet oder "Neu laden" geklickt wird. */
+async function renderLohnartenstamm(el) {
+  await lcLoadLohnartenliste(false);
+  const la = lcState.lohnartenliste;
+  document.getElementById("view-actions").innerHTML = `<button class="btn btn-sm" onclick="lohnartenstammNeuLaden()">🔄 Neu laden</button>`;
+  if (!la || !la.zeilen || !la.zeilen.length) {
+    el.innerHTML = `<div class="empty">Noch kein Lohnartenstamm hinterlegt. Unter <b>Spielwiese → Apriko API (POC) → 💰 Lohnarten</b> laden und dort „✓ … in den Ultimativ Check übernehmen" klicken — erscheint danach automatisch hier.</div>`;
+    return;
+  }
+  const spalten = la.spalten && la.spalten.length ? la.spalten : Object.keys(la.zeilen[0]);
+  const codeSpalte = la.spaltenMap && la.spaltenMap.code ? la.spaltenMap.code : spalten[0];
+  const zeilen = la.zeilen.slice().sort((a, b) => {
+    const av = parseFloat(String(a[codeSpalte]).replace(/\D/g, "")), bv = parseFloat(String(b[codeSpalte]).replace(/\D/g, ""));
+    if (!isNaN(av) && !isNaN(bv)) return av - bv;
+    return String(a[codeSpalte] ?? "").localeCompare(String(b[codeSpalte] ?? ""), "de-CH", { numeric: true });
+  });
+  el.innerHTML = `
+    <div class="card" style="padding:14px 16px;margin-bottom:14px">
+      <div style="font-size:12px;color:var(--text-dim)"><b>${escape(la.dateiname || "Lohnartenstamm")}</b> — ${zeilen.length} Lohnart(en)${la.hochgeladenAm ? " · zuletzt aktualisiert " + new Date(la.hochgeladenAm).toLocaleString("de-CH", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}</div>
+    </div>
+    <div class="card" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr>${spalten.map(s => `<th style="white-space:nowrap${s === "Bereich" ? ";max-width:40px;overflow:hidden;text-overflow:ellipsis" : ""}">${escape(s)}</th>`).join("")}</tr></thead>
+        <tbody>${zeilen.map(z => `<tr>${spalten.map(s => {
+          const v = z[s];
+          const num = typeof v === "number";
+          return `<td style="${num ? "text-align:right;font-family:var(--font-mono)" : ""}${s === "Bereich" ? ";max-width:40px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" : ""}">${escape(String(v ?? ""))}</td>`;
+        }).join("")}</tr>`).join("")}</tbody>
+      </table></div>
+    </div>`;
+}
+async function lohnartenstammNeuLaden() { await lcLoadLohnartenliste(true); render(); }
 function apSort(col) { const s = apState.sort; if (s.col === col) s.dir = -s.dir; else { s.col = col; s.dir = 1; } render(); }
 function apFilter(col, inp) { apState.filters[col] = inp.value; apState._restoreFocus = { id: inp.id, pos: inp.selectionStart }; render(); }
 function apFmtDate(s) { if (!s) return ""; const d = new Date(s); return isNaN(d) ? String(s).slice(0, 10) : d.toLocaleDateString("de-CH"); }
@@ -6515,12 +6561,12 @@ const AP_COLS = {
     ["gross", "Brutto?", r => r.isGross ? "✓" : ""],
     ["deduction", "Abzug?", r => r.isDeduction ? "✓" : ""],
     ["taxable", "Steuerpfl.?", r => r.isTaxable ? "✓" : ""],
-    ["active", "Aktiv?", r => r.isActive ? "✓" : ""]
+    ["active", "Aktiv?", r => r.isActive ? "✓" : ""],
+    ["debit", "Soll-Konto", r => { const id = r.debitNumberId || r.overrideDebitNumberId || r.factoryDefaultDebitNumberId; return id ? ((apState.bookingAccounts || {})[id] || id) : ""; }],
+    ["credit", "Haben-Konto", r => { const id = r.creditNumberId || r.overrideCreditNumberId || r.factoryDefaultCreditNumberId; return id ? ((apState.bookingAccounts || {})[id] || id) : ""; }]
   ].concat(AP_SV_SPALTEN.map(([key, label]) => [
     "sv_" + key, label, r => [].concat(r.compulsoryInsurances || []).includes(key) ? "✓" : ""
   ])).concat([
-    ["debit", "Soll-Konto", r => { const id = r.debitNumberId || r.overrideDebitNumberId || r.factoryDefaultDebitNumberId; return id ? ((apState.bookingAccounts || {})[id] || id) : ""; }],
-    ["credit", "Haben-Konto", r => { const id = r.creditNumberId || r.overrideCreditNumberId || r.factoryDefaultCreditNumberId; return id ? ((apState.bookingAccounts || {})[id] || id) : ""; }],
     ["updated", "Geändert", r => apFmtDate(r.updatedTime)]
   ])
 };
