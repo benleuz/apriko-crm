@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.192.0"></script>
-<script src="apriko-api.js?v=1.192.0"></script>
-<script src="lohncheck.js?v=1.192.0"></script>
-<script src="personalbudget.js?v=1.192.0"></script>
-<script src="jahresbudget.js?v=1.192.0"></script>
-<script src="budgetpositionen.js?v=1.192.0"></script>
-<script src="lohnchecklistetemp.js?v=1.192.0"></script>
+<script src="apriko-filters.js?v=1.194.0"></script>
+<script src="apriko-api.js?v=1.194.0"></script>
+<script src="lohncheck.js?v=1.194.0"></script>
+<script src="personalbudget.js?v=1.194.0"></script>
+<script src="jahresbudget.js?v=1.194.0"></script>
+<script src="budgetpositionen.js?v=1.194.0"></script>
+<script src="lohnchecklistetemp.js?v=1.194.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -979,7 +979,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.192.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.194.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -6429,18 +6429,19 @@ async function apExportSalaryTypesCsv() {
   try { konten = await apLadeBookingAccounts(); }
   catch (e) { toast("Konten (Soll/Haben) konnten nicht geladen werden: " + e.message + " — CSV wird ohne Kontonummern erstellt.", true); }
   const kontoAufloesen = id => id ? (konten[id] || id) : "";
-  const header = ["Code", "Bezeichnung", "Bereich", "Aktiv", "Brutto", "Abzug", "QST-pflichtig", "Periodizität", "QST-Satzbestimmend"]
+  const header = ["Code", "Bezeichnung", "Bereich", "Aktiv", "Brutto", "Abzug"]
     .concat(AP_SV_SPALTEN.map(x => x[1]))
-    .concat(["Soll-Konto", "Haben-Konto"]);
+    .concat(["QST-pflichtig", "Periodizität", "QST-Satzbestimmend", "Soll-Konto", "Haben-Konto"]);
   const zeilen = rows.map(r => {
     const ins = new Set([].concat(r.compulsoryInsurances || []));
     const svSpalten = AP_SV_SPALTEN.map(([key]) => ins.has(key) ? "Ja" : "");
     return [
       r.number, r.name || r.displayName || "", r.section === "None" ? "" : r.section,
-      r.isActive ? "Ja" : "", r.isGross ? "Ja" : "", r.isDeduction ? "Ja" : "", r.isTaxable ? "Ja" : "",
-      r.isPeriodical === true ? "Periodisch" : (r.isPeriodical === false ? "Aperiodisch" : ""),
-      r.isTaxRateDetermining ? "Ja" : ""
+      r.isActive ? "Ja" : "", r.isGross ? "Ja" : "", r.isDeduction ? "Ja" : ""
     ].concat(svSpalten).concat([
+      r.isTaxable ? "Ja" : "",
+      r.isPeriodical === true ? "Periodisch" : (r.isPeriodical === false ? "Aperiodisch" : ""),
+      r.isTaxRateDetermining ? "Ja" : "",
       kontoAufloesen(r.debitNumberId || r.overrideDebitNumberId || r.factoryDefaultDebitNumberId),
       kontoAufloesen(r.creditNumberId || r.overrideCreditNumberId || r.factoryDefaultCreditNumberId)
     ]);
@@ -6488,7 +6489,7 @@ async function apSpeichereAlsLohnartenstamm(stumm) {
   lcState.lohnartenliste = {
     dateiname: "Apriko API (SalaryTypes, live übernommen " + new Date().toLocaleDateString("de-CH") + ")",
     hochgeladenAm: new Date().toISOString(),
-    spalten: ["Code", "Bezeichnung", "Bereich", "Soll-Konto", "Haben-Konto", "QST-pflichtig", "Periodizität", "QST-Satzbestimmend"].concat(AP_SV_SPALTEN.map(x => x[1])),
+    spalten: ["Code", "Bezeichnung", "Bereich", "Soll-Konto", "Haben-Konto"].concat(AP_SV_SPALTEN.map(x => x[1])).concat(["QST-pflichtig", "Periodizität", "QST-Satzbestimmend"]),
     spaltenMap: { code: "Code", bezeichnung: "Bezeichnung" },
     zeilen
   };
@@ -6541,7 +6542,7 @@ async function renderLohnartenstamm(el) {
   // Feste Breiten statt automatischer Verteilung — sonst nehmen sich Code/Bezeichnung zu viel
   // Platz, während andere Spalten abgeschnitten werden. Bei Kürzung zusätzlich title-Tooltip
   // (Mauszeiger drüber = voller Text), damit nichts komplett verloren geht.
-  const breite = s => schmal(s) ? 26 : (s === "Bereich" ? 46 : s === "Code" ? 55 : (s === "Bezeichnung" ? 200 : (s === "Soll-Konto" || s === "Haben-Konto") ? 150 : s === "QST-pflichtig" || s === "QST" ? 45 : s === "Periodizität" ? 75 : s === "QST-Satzbestimmend" ? 60 : 90));
+  const breite = s => schmal(s) ? 26 : (s === "Bereich" ? 46 : s === "Code" ? 55 : (s === "Bezeichnung" ? 200 : (s === "Soll-Konto" || s === "Haben-Konto") ? 150 : s === "QST-pflichtig" || s === "QST" ? 90 : s === "Periodizität" ? 95 : s === "QST-Satzbestimmend" ? 95 : 90));
   const sortiert = la.zeilen.slice().sort((a, b) => {
     const av = parseFloat(String(a[codeSpalte]).replace(/\D/g, "")), bv = parseFloat(String(b[codeSpalte]).replace(/\D/g, ""));
     if (!isNaN(av) && !isNaN(bv)) return av - bv;
@@ -6557,7 +6558,7 @@ async function renderLohnartenstamm(el) {
     <div class="card" style="padding:0">
       <div class="table-wrap"><table style="table-layout:fixed;width:100%">
         <colgroup>${spalten.map(s => `<col style="width:${breite(s)}px">`).join("")}</colgroup>
-        <thead><tr>${spalten.map(s => `<th title="${escape(s)}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis${schmal(s) ? ";writing-mode:vertical-rl;transform:rotate(180deg);text-align:left;padding:6px 3px" : ""}">${escape(s)}</th>`).join("")}</tr></thead>
+        <thead><tr>${spalten.map(s => `<th title="${escape(s)}" style="${schmal(s) ? "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;writing-mode:vertical-rl;transform:rotate(180deg);text-align:left;padding:6px 3px" : "white-space:normal;line-height:1.25"}">${escape(s)}</th>`).join("")}</tr></thead>
         <tbody>${zeilen.map(z => `<tr>${spalten.map(s => {
           const v = z[s];
           const num = typeof v === "number";
@@ -6616,15 +6617,15 @@ const AP_COLS = {
     ["section", "Bereich", r => r.section === "None" ? "" : r.section, "max-width:40px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"],
     ["gross", "Brutto", r => r.isGross ? "✓" : ""],
     ["deduction", "Abzug", r => r.isDeduction ? "✓" : ""],
-    ["taxable", "QST-pflichtig", r => r.isTaxable ? "✓" : ""],
-    ["periodical", "Periodizität", r => r.isPeriodical === true ? "Periodisch" : (r.isPeriodical === false ? "Aperiodisch" : "")],
-    ["taxratedet", "QST-Satzbest.", r => r.isTaxRateDetermining ? "✓" : ""],
     ["active", "Aktiv", r => r.isActive ? "✓" : ""],
     ["debit", "Soll-Konto", r => { const id = r.debitNumberId || r.overrideDebitNumberId || r.factoryDefaultDebitNumberId; return id ? ((apState.bookingAccounts || {})[id] || id) : ""; }],
     ["credit", "Haben-Konto", r => { const id = r.creditNumberId || r.overrideCreditNumberId || r.factoryDefaultCreditNumberId; return id ? ((apState.bookingAccounts || {})[id] || id) : ""; }]
   ].concat(AP_SV_SPALTEN.map(([key, label]) => [
     "sv_" + key, label, r => [].concat(r.compulsoryInsurances || []).includes(key) ? "✓" : ""
   ])).concat([
+    ["taxable", "QST-pflichtig", r => r.isTaxable ? "✓" : ""],
+    ["periodical", "Periodizität", r => r.isPeriodical === true ? "Periodisch" : (r.isPeriodical === false ? "Aperiodisch" : "")],
+    ["taxratedet", "QST-Satzbest.", r => r.isTaxRateDetermining ? "✓" : ""],
     ["updated", "Geändert", r => apFmtDate(r.updatedTime)]
   ])
 };
