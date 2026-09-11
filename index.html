@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.186.0"></script>
-<script src="apriko-api.js?v=1.186.0"></script>
-<script src="lohncheck.js?v=1.186.0"></script>
-<script src="personalbudget.js?v=1.186.0"></script>
-<script src="jahresbudget.js?v=1.186.0"></script>
-<script src="budgetpositionen.js?v=1.186.0"></script>
-<script src="lohnchecklistetemp.js?v=1.186.0"></script>
+<script src="apriko-filters.js?v=1.187.0"></script>
+<script src="apriko-api.js?v=1.187.0"></script>
+<script src="lohncheck.js?v=1.187.0"></script>
+<script src="personalbudget.js?v=1.187.0"></script>
+<script src="jahresbudget.js?v=1.187.0"></script>
+<script src="budgetpositionen.js?v=1.187.0"></script>
+<script src="lohnchecklistetemp.js?v=1.187.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -973,7 +973,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.186.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.187.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -6527,6 +6527,10 @@ async function renderLohnartenstamm(el) {
   // verschwinden. Code/Bezeichnung/Bereich/Soll-Konto/Haben-Konto bleiben normal breit lesbar.
   const svSpaltenNamen = new Set(AP_SV_SPALTEN.map(x => x[1]));
   const schmal = s => svSpaltenNamen.has(s);
+  // Feste Breiten statt automatischer Verteilung — sonst nehmen sich Code/Bezeichnung zu viel
+  // Platz, während andere Spalten abgeschnitten werden. Bei Kürzung zusätzlich title-Tooltip
+  // (Mauszeiger drüber = voller Text), damit nichts komplett verloren geht.
+  const breite = s => schmal(s) ? 26 : (s === "Bereich" ? 46 : s === "Code" ? 55 : (s === "Bezeichnung" ? 200 : (s === "Soll-Konto" || s === "Haben-Konto") ? 150 : 90));
   const sortiert = la.zeilen.slice().sort((a, b) => {
     const av = parseFloat(String(a[codeSpalte]).replace(/\D/g, "")), bv = parseFloat(String(b[codeSpalte]).replace(/\D/g, ""));
     if (!isNaN(av) && !isNaN(bv)) return av - bv;
@@ -6540,12 +6544,14 @@ async function renderLohnartenstamm(el) {
       <input type="text" id="lohnartenstamm-suche" value="${escape(lohnartenstammSuche)}" oninput="lohnartenstammSucheSetzen(this)" placeholder="Suche über alle Spalten … (Code, Bezeichnung, Konto, …)" style="width:100%;max-width:420px;font-size:13px;padding:6px 10px">
     </div>
     <div class="card" style="padding:0">
-      <div class="table-wrap"><table>
-        <thead><tr>${spalten.map(s => `<th style="white-space:nowrap${schmal(s) ? ";writing-mode:vertical-rl;transform:rotate(180deg);text-align:left;padding:6px 3px;max-width:22px" : (s === "Bereich" ? ";max-width:40px;overflow:hidden;text-overflow:ellipsis" : "")}">${escape(s)}</th>`).join("")}</tr></thead>
+      <div class="table-wrap"><table style="table-layout:fixed;width:100%">
+        <colgroup>${spalten.map(s => `<col style="width:${breite(s)}px">`).join("")}</colgroup>
+        <thead><tr>${spalten.map(s => `<th title="${escape(s)}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis${schmal(s) ? ";writing-mode:vertical-rl;transform:rotate(180deg);text-align:left;padding:6px 3px" : ""}">${escape(s)}</th>`).join("")}</tr></thead>
         <tbody>${zeilen.map(z => `<tr>${spalten.map(s => {
           const v = z[s];
           const num = typeof v === "number";
-          return `<td style="${num ? "text-align:right;font-family:var(--font-mono)" : ""}${schmal(s) ? ";text-align:center;max-width:22px;padding:4px 2px" : (s === "Bereich" ? ";max-width:40px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" : "")}">${escape(String(v ?? ""))}</td>`;
+          const txt = String(v ?? "");
+          return `<td title="${escape(txt)}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap${num ? ";text-align:right;font-family:var(--font-mono)" : ""}${schmal(s) ? ";text-align:center;padding:4px 2px" : ""}">${escape(txt)}</td>`;
         }).join("")}</tr>`).join("")}</tbody>
       </table></div>
     </div>`;
