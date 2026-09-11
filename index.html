@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.176.0"></script>
-<script src="apriko-api.js?v=1.176.0"></script>
-<script src="lohncheck.js?v=1.176.0"></script>
-<script src="personalbudget.js?v=1.176.0"></script>
-<script src="jahresbudget.js?v=1.176.0"></script>
-<script src="budgetpositionen.js?v=1.176.0"></script>
-<script src="lohnchecklistetemp.js?v=1.176.0"></script>
+<script src="apriko-filters.js?v=1.177.0"></script>
+<script src="apriko-api.js?v=1.177.0"></script>
+<script src="lohncheck.js?v=1.177.0"></script>
+<script src="personalbudget.js?v=1.177.0"></script>
+<script src="jahresbudget.js?v=1.177.0"></script>
+<script src="budgetpositionen.js?v=1.177.0"></script>
+<script src="lohnchecklistetemp.js?v=1.177.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.176.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.177.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -6337,7 +6337,18 @@ function apReset() {
   apState.rows = { people: [], companies: [], placements: [], salarytypes: [] }; apState.page = { people: 0, companies: 0, placements: 0, salarytypes: 0 };
   apState.done = { people: false, companies: false, placements: false, salarytypes: false }; apState.error = null; render();
 }
-function apTab(t) { apState.tab = t; apState.sort = { col: null, dir: 1 }; apState.filters = {}; render(); }
+function apTab(t) {
+  apState.tab = t; apState.filters = {};
+  apState.sort = t === "salarytypes" ? { col: "number", dir: 1 } : { col: null, dir: 1 };
+  if (t === "salarytypes" && !apState.rows.salarytypes.length && !apState.loading) apLoadAlle("salarytypes");
+  render();
+}
+/* Lädt für einen Tab alle Seiten am Stück, statt manuell "+ N weitere" klicken zu müssen —
+   für Lohnarten sinnvoll, da überschaubare Menge (im Gegensatz zu Personen/Einsätzen, die
+   bewusst weiterhin manuell nachgeladen werden, um nicht versehentlich zehntausende zu ziehen). */
+async function apLoadAlle(tab) {
+  while (!apState.done[tab] && !apState.error) { await apLoadMore(tab); }
+}
 /* Deutsche Spaltennamen je InsuranceType-Enum-Wert — eine Spalte pro Versicherung statt einer
    zusammengefassten Textliste, wie gewünscht ("z.B. ahv ja"). */
 const AP_SV_SPALTEN = [
@@ -6470,13 +6481,15 @@ const AP_COLS = {
     ["number", "Code", r => r.number],
     ["name", "Bezeichnung", r => r.name || r.displayName],
     ["section", "Bereich", r => r.section === "None" ? "" : r.section],
-    ["insurances", "SV-Unterstellung", r => [].concat(r.compulsoryInsurances || []).filter(x => x && x !== "None").join(", ")],
     ["gross", "Brutto?", r => r.isGross ? "✓" : ""],
     ["deduction", "Abzug?", r => r.isDeduction ? "✓" : ""],
     ["taxable", "Steuerpfl.?", r => r.isTaxable ? "✓" : ""],
-    ["active", "Aktiv?", r => r.isActive ? "✓" : ""],
+    ["active", "Aktiv?", r => r.isActive ? "✓" : ""]
+  ].concat(AP_SV_SPALTEN.map(([key, label]) => [
+    "sv_" + key, label, r => [].concat(r.compulsoryInsurances || []).includes(key) ? "✓" : ""
+  ])).concat([
     ["updated", "Geändert", r => apFmtDate(r.updatedTime)]
-  ]
+  ])
 };
 async function apResolveRecruiters() {
   const indIds = [...new Set(
