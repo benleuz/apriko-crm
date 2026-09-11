@@ -425,6 +425,11 @@
         query: { pageIndex: pageIndex || 0, pageSize: pageSize || 100 }
       });
     },
+    listBookingAccounts: function (pageIndex, pageSize) {
+      return request("payrollaccounting", "/BookingAccounts", {
+        query: { pageIndex: pageIndex || 0, pageSize: pageSize || 200 }
+      });
+    },
     getEmploymentAssignment: function (id) {
       return request("payrollaccounting", "/EmploymentAssignments/" + encodeURIComponent(id));
     },
