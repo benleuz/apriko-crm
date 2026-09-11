@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.183.0"></script>
-<script src="apriko-api.js?v=1.183.0"></script>
-<script src="lohncheck.js?v=1.183.0"></script>
-<script src="personalbudget.js?v=1.183.0"></script>
-<script src="jahresbudget.js?v=1.183.0"></script>
-<script src="budgetpositionen.js?v=1.183.0"></script>
-<script src="lohnchecklistetemp.js?v=1.183.0"></script>
+<script src="apriko-filters.js?v=1.185.0"></script>
+<script src="apriko-api.js?v=1.185.0"></script>
+<script src="lohncheck.js?v=1.185.0"></script>
+<script src="personalbudget.js?v=1.185.0"></script>
+<script src="jahresbudget.js?v=1.185.0"></script>
+<script src="budgetpositionen.js?v=1.185.0"></script>
+<script src="lohnchecklistetemp.js?v=1.185.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -973,7 +973,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.183.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.185.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -1407,7 +1407,7 @@ let currentView = DEMO_ANON ? "einsatzdash" : "dashboard";
    Berechtigungssystem
    =========================================================== */
 const SUPER_ADMIN_EMAIL = "benjamin@apriko.com";  // hat immer volle Rechte
-const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","rapport","einsatzdash","konzern","lohncheck","apipoc","profiles"];
+const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","rapport","einsatzdash","konzern","lohncheck","apipoc","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
@@ -1416,6 +1416,7 @@ const VIEW_TITLES = {
   customers: "Kunden", companies: "Firmen", contacts: "Kontakte", tasks: "Aufgaben",
   revenue: "Umsätze", stats: "Statistik", budget: "Ertragsbudget", budgetvgl: "Budgetvergleich", personalbudget: "Budget Personalaufwand", jahresbudget: "Jahresbudget", budgetpos: "Budgetpositionen (Erfassung & Jahresübersicht)",
   bpocheck: "Lohn Checkliste Temp", clintern: "Lohn Checkliste intern", clfibu: "FIBU Monatsabschluss",
+  lct: "Checkliste Lohn Temp 2.0",
   lohnartenstamm: "Lohnartenstamm",
   rapport: "Rapport", einsatzdash: "Kundendashboard", konzern: "Konzernanalyse",
   lohncheck: "Ultimativer Check", apipoc: "Apriko API (POC)",
@@ -6484,6 +6485,21 @@ async function apSpeichereAlsLohnartenstamm(stumm) {
   catch (e) { toast((stumm ? "Automatisches Übernehmen in den Lohnartenstamm fehlgeschlagen: " : "Speichern fehlgeschlagen: ") + e.message, true); }
 }
 async function apUebernehmeLohnartenliste() { await apSpeichereAlsLohnartenstamm(false); }
+let lohnartenstammSuche = "";
+function lohnartenstammSucheSetzen(v) { lohnartenstammSuche = v || ""; render(); }
+function lohnartenstammCsvExport() {
+  const la = lcState.lohnartenliste;
+  if (!la || !la.zeilen || !la.zeilen.length) { toast("Kein Lohnartenstamm vorhanden.", true); return; }
+  const spalten = la.spalten && la.spalten.length ? la.spalten : Object.keys(la.zeilen[0]);
+  const csvZeile = arr => arr.map(v => { const s = String(v == null ? "" : v); return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(";");
+  const csv = "\uFEFF" + [spalten].concat(la.zeilen.map(z => spalten.map(s => z[s]))).map(csvZeile).join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "Lohnartenstamm_" + new Date().toISOString().slice(0, 10) + ".csv";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
 /* Eigenständige, immer aktuelle Menüansicht (Workflows → Lohnartenstamm) — liest direkt aus
    derselben SharePoint-Datei, die der Ultimativ Check für den Lohnart-Vergleich nutzt
    (lcState.lohnartenliste, siehe lohncheck.js). Rein lesend; Aktualisierung läuft über
@@ -6492,29 +6508,39 @@ async function apUebernehmeLohnartenliste() { await apSpeichereAlsLohnartenstamm
 async function renderLohnartenstamm(el) {
   await lcLoadLohnartenliste(false);
   const la = lcState.lohnartenliste;
-  document.getElementById("view-actions").innerHTML = `<button class="btn btn-sm" onclick="lohnartenstammNeuLaden()">🔄 Neu laden</button>`;
+  document.getElementById("view-actions").innerHTML = `
+    <button class="btn btn-sm" onclick="lohnartenstammNeuLaden()">🔄 Neu laden</button>
+    ${la && la.zeilen && la.zeilen.length ? `<button class="btn btn-sm" onclick="lohnartenstammCsvExport()">⇩ Als CSV herunterladen</button>` : ""}`;
   if (!la || !la.zeilen || !la.zeilen.length) {
     el.innerHTML = `<div class="empty">Noch kein Lohnartenstamm hinterlegt. Unter <b>Spielwiese → Apriko API (POC) → 💰 Lohnarten</b> laden und dort „✓ … in den Ultimativ Check übernehmen" klicken — erscheint danach automatisch hier.</div>`;
     return;
   }
   const spalten = la.spalten && la.spalten.length ? la.spalten : Object.keys(la.zeilen[0]);
   const codeSpalte = la.spaltenMap && la.spaltenMap.code ? la.spaltenMap.code : spalten[0];
-  const zeilen = la.zeilen.slice().sort((a, b) => {
+  // Schmale, vertikal beschriftete Spalten für die 11 SV-Ja/Nein-Häkchen (AHV/ALV/BU/…) — spart
+  // horizontal viel Platz, damit Soll-/Haben-Konto beim Scrollen nicht sofort aus dem Blick
+  // verschwinden. Code/Bezeichnung/Bereich/Soll-Konto/Haben-Konto bleiben normal breit lesbar.
+  const svSpaltenNamen = new Set(AP_SV_SPALTEN.map(x => x[1]));
+  const schmal = s => svSpaltenNamen.has(s);
+  const sortiert = la.zeilen.slice().sort((a, b) => {
     const av = parseFloat(String(a[codeSpalte]).replace(/\D/g, "")), bv = parseFloat(String(b[codeSpalte]).replace(/\D/g, ""));
     if (!isNaN(av) && !isNaN(bv)) return av - bv;
     return String(a[codeSpalte] ?? "").localeCompare(String(b[codeSpalte] ?? ""), "de-CH", { numeric: true });
   });
+  const q = lohnartenstammSuche.trim().toLowerCase();
+  const zeilen = !q ? sortiert : sortiert.filter(z => spalten.some(s => String(z[s] ?? "").toLowerCase().includes(q)));
   el.innerHTML = `
     <div class="card" style="padding:14px 16px;margin-bottom:14px">
-      <div style="font-size:12px;color:var(--text-dim)"><b>${escape(la.dateiname || "Lohnartenstamm")}</b> — ${zeilen.length} Lohnart(en)${la.hochgeladenAm ? " · zuletzt aktualisiert " + new Date(la.hochgeladenAm).toLocaleString("de-CH", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}</div>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px"><b>${escape(la.dateiname || "Lohnartenstamm")}</b> — ${sortiert.length} Lohnart(en)${zeilen.length !== sortiert.length ? " · " + zeilen.length + " nach Suche" : ""}${la.hochgeladenAm ? " · zuletzt aktualisiert " + new Date(la.hochgeladenAm).toLocaleString("de-CH", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}</div>
+      <input type="text" value="${escape(lohnartenstammSuche)}" oninput="lohnartenstammSucheSetzen(this.value)" placeholder="Suche über alle Spalten … (Code, Bezeichnung, Konto, …)" style="width:100%;max-width:420px;font-size:13px;padding:6px 10px">
     </div>
     <div class="card" style="padding:0">
       <div class="table-wrap"><table>
-        <thead><tr>${spalten.map(s => `<th style="white-space:nowrap${s === "Bereich" ? ";max-width:40px;overflow:hidden;text-overflow:ellipsis" : ""}">${escape(s)}</th>`).join("")}</tr></thead>
+        <thead><tr>${spalten.map(s => `<th style="white-space:nowrap${schmal(s) ? ";writing-mode:vertical-rl;transform:rotate(180deg);text-align:left;padding:6px 3px;max-width:22px" : (s === "Bereich" ? ";max-width:40px;overflow:hidden;text-overflow:ellipsis" : "")}">${escape(s)}</th>`).join("")}</tr></thead>
         <tbody>${zeilen.map(z => `<tr>${spalten.map(s => {
           const v = z[s];
           const num = typeof v === "number";
-          return `<td style="${num ? "text-align:right;font-family:var(--font-mono)" : ""}${s === "Bereich" ? ";max-width:40px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" : ""}">${escape(String(v ?? ""))}</td>`;
+          return `<td style="${num ? "text-align:right;font-family:var(--font-mono)" : ""}${schmal(s) ? ";text-align:center;max-width:22px;padding:4px 2px" : (s === "Bereich" ? ";max-width:40px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" : "")}">${escape(String(v ?? ""))}</td>`;
         }).join("")}</tr>`).join("")}</tbody>
       </table></div>
     </div>`;
