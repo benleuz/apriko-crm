@@ -11,13 +11,14 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.113.0";
+const LC_VERSION = "1.114.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
   issues: [],
   files: [],
   tab: "konto",       // konto | diff | ma
+  rubrik: "differenz", // differenz | manuell | minuslohn — Unterrubrik im diff-Tab (Punkte 13-16)
   sev: "all",         // all | rot | gelb | grau
   open: {},           // aufgeklappte Mitarbeitende in der Differenzen-Ansicht (key → true)
   flag: "all",        // Belegfilter (siehe LC_FLAGS) — wirkt auf alle Tabs und Kennzahlen
@@ -28,7 +29,10 @@ const lcState = {
   kundeId: null,
   periode: null,          // "YYYY-MM" (Lohnmonat)
   kontrolllisten: null,   // { listen:[...], __kunde, __periode } — siehe lcLoadKontrolllisten
-  kontrolllistenLoading: null
+  kontrolllistenLoading: null,
+  kundenregeln: null,     // { hinweise:[...], __kunde } — siehe lcLoadKundenregeln (Punkt 8)
+  lohnartenliste: null,   // { dateiname, spalten, spaltenMap, zeilen } — zentral, siehe lcLoadLohnartenliste (Punkte 11/12)
+  auszahlungsliste: null  // { dateiname, spalten, spaltenMap, zeilen } — Punkte 17-19, nicht persistiert (Session-Check)
 };
 
 /* ---------- Referenzwerte (Stand 2026, anpassbar) ---------- */
@@ -348,7 +352,7 @@ function lcSubset(vals, target) {
 
 function lcCheckAll(slips) {
   const issues = [];
-  const add = (slip, sev, pruef, text) => { const i = { sev, pruef, text, slipId: slip.id, ma: slip.anzeige, key: slip.key, periode: slip.periode }; issues.push(i); slip.issues.push(i); };
+  const add = (slip, sev, pruef, text, kategorie) => { const i = { sev, pruef, text, slipId: slip.id, ma: slip.anzeige, key: slip.key, periode: slip.periode, kategorie: kategorie || "differenz" }; issues.push(i); slip.issues.push(i); };
   // Häufigster Ansatz je Abzugscode (über alle Abrechnungen) als Referenz
   const satzMode = {};
   const cnt = {};
@@ -414,8 +418,17 @@ function lcCheckAll(slips) {
     // Anzahl Vorschussgebühren (6390) vs. Anzahl Vorschüsse (8105)
     const vorschuesse = s.rows.filter(r => r.code === 8105 || (/^Vorschuss\b/i.test(r.label) && r.code >= 8000 && r.code < 8500));
     const gebuehr = s.rows.find(r => r.code === 6390 || /Vorschussgebühr/i.test(r.label));
-    if (vorschuesse.length && gebuehr && gebuehr.anzahl !== null && !lcNear(gebuehr.anzahl, vorschuesse.length))
-      add(s, "gelb", "Vorschuss", vorschuesse.length + " Vorschüsse, aber " + lcFmt(gebuehr.anzahl) + " Vorschussgebühren verrechnet.");
+    if (vorschuesse.length && gebuehr && gebuehr.anzahl !== null && !lcNear(gebuehr.anzahl, vorschuesse.length)) {
+      // Punkt 8: kundenspezifische Regeln berücksichtigen — bei hinterlegtem Hinweis nicht hart als
+      // Differenz werten (der Kunde kann z.B. nur für bestimmte Wochen Vorschussgebühren vereinbart
+      // haben), sondern informativ mit der hinterlegten Regel zusammen anzeigen.
+      const regeln = (lcState.kundenregeln && lcState.kundenregeln.hinweise) || [];
+      if (regeln.length) {
+        add(s, "grau", "Vorschuss (Kundenregel)", vorschuesse.length + " Vorschüsse, " + lcFmt(gebuehr.anzahl) + " Vorschussgebühren — weicht von der Standardregel ab, aber Kundenhinweis hinterlegt: „" + regeln.join(" / ") + "\" — bitte anhand der Regel prüfen.");
+      } else {
+        add(s, "gelb", "Vorschuss", vorschuesse.length + " Vorschüsse, aber " + lcFmt(gebuehr.anzahl) + " Vorschussgebühren verrechnet.");
+      }
+    }
     // Basis × Ansatz = Betrag
     for (const r of s.rows) {
       if (r.isTotal || r.basis === null || r.ansatz === null || LC_NICHT_PFLICHTIG(r.code, r.label)) continue;
@@ -423,6 +436,42 @@ function lcCheckAll(slips) {
       if (!lcNear(Math.abs(exp), Math.abs(r.betrag), Math.max(0.06, Math.abs(exp) * 0.002)))
         add(s, "gelb", "Rechnung", r.code + " " + r.label + ": Basis × Ansatz" + (r.anzahl ? " × Anzahl" : "") + " = " + lcFmt(exp) + ", Betrag " + lcFmt(r.betrag) + ".");
     }
+    // Punkt 12: Lohnart-Bezeichnung gegen die zentrale Lohnartenliste abgleichen (falls hinterlegt)
+    if (lcState.lohnartenliste && lcState.lohnartenliste.zeilen && lcState.lohnartenliste.zeilen.length) {
+      s.rows.forEach(r => {
+        if (r.isTotal) return;
+        const abw = lcLohnartVergleichen(r);
+        if (abw) add(s, "rot", "Lohnart falsch behandelt", "Lohnart " + r.code + " erfasst als „" + r.label + "\", gemäss zentraler Lohnartenliste jedoch definiert als „" + abw.refText + "\". Bitte prüfen.");
+      });
+    }
+    // Punkt 9: Ferienguthaben / Guthaben 13. Monatslohn — JEDER negative Wert wird gemeldet, keine
+    // Toleranz (ausdrücklich auch CHF -0.01). Diese Guthaben können an beliebiger Stelle auf der
+    // Abrechnung stehen (meist gegen Ende), darum über ALLE Zeilen (nicht nur den Lohnblock) suchen.
+    s.rows.forEach(r => {
+      if (/Ferienguthaben/i.test(r.label) && r.betrag < 0)
+        add(s, "rot", "Ferienguthaben negativ", "Ferienguthaben negativ: CHF " + lcFmt(r.betrag) + ". Bitte überprüfen.");
+      if (/13\.?\s*Monatslohn/i.test(r.label) && /Guthaben/i.test(r.label) && r.betrag < 0)
+        add(s, "rot", "13. ML-Guthaben negativ", "Guthaben 13. Monatslohn negativ: CHF " + lcFmt(r.betrag) + ". Bitte überprüfen.");
+    });
+    // Punkt 10: unrealistische Lohnfortzahlung/Tagegeldzahlung — Richtwert CHF 150–250, ab hier
+    // wird ein spürbarer Sicherheitsabstand (>350) als klar unrealistisch gewertet (z.B. versehentlich
+    // doppelt erfasster Tagegeldsatz). Ansatz (Tagessatz) bevorzugt prüfen, sonst Betrag als Ganzes.
+    s.rows.forEach(r => {
+      if (r.isTotal || !/Tagegeld|Taggeld|Lohnfortzahlung/i.test(r.label)) return;
+      const pruefWert = r.ansatz !== null && r.ansatz > 0 ? r.ansatz : r.betrag;
+      if (pruefWert !== null && pruefWert > 350)
+        add(s, "gelb", "Tagegeld unrealistisch", "Lohnfortzahlung / Tagegeldzahlung erscheint unrealistisch hoch (" + r.code + " " + r.label + ": CHF " + lcFmt(pruefWert) + "). Bitte überprüfen.");
+    });
+    // Punkt 13: manuell erfasste Lohnkomponenten (Nachzahlungen, Korrekturen, Gutschriften) separat
+    // sichtbar machen, NICHT automatisch als Differenz/Fehler werten — informativ, kategorie "manuell".
+    s.rows.forEach(r => {
+      if (r.isTotal) return;
+      if (/Nachzahlung|Korrektur|Gutschrift/i.test(r.label))
+        add(s, "grau", "Manuelle Position", r.code + " " + r.label + ": CHF " + lcFmt(r.betrag) + " — manuell erfasste Lohnkomponente, zur Kontrolle.", "manuell");
+    });
+    // Punkt 15: Minuslohnabrechnungen separat markieren (Auswertung/Darstellung siehe lcKategorisiere) —
+    // hier nur am Slip selbst vermerken, damit die Tabs das ohne erneute Berechnung nutzen können.
+    s.istMinuslohn = s.auszahlung !== null && s.auszahlung < 0;
     // Pflichtabzüge — Basis = Bruttolohn abzüglich nicht pflichtiger Lohnarten (36xx)
     if (s.brutto !== null && s.brutto > 0) {
       const nichtPflichtig = s.rows.filter(r => LC_NICHT_PFLICHTIG(r.code, r.label) && !r.isTotal && r.level === 0).reduce((a, r) => a + r.betrag, 0);
@@ -983,6 +1032,7 @@ async function lcSetKunde(id) {
   lcState.kundeId = parseInt(id, 10);
   if (!lcState.periode) lcState.periode = lcMonatHeute();
   await lcLoadKontrolllisten(lcState.kundeId, lcState.periode, false);
+  await lcLoadKundenregeln(lcState.kundeId, false);
   render();
 }
 async function lcSetPeriode(ym) {
@@ -1029,10 +1079,157 @@ function lcSetSpalte(id, feld, spalte) {
 }
 
 /* ---------- UI-Baustein: Kunde/Periode-Auswahl + Kontrolllisten (wird in renderLohncheck eingebunden) ---------- */
+
+/* ============ ERWEITERUNG: Kundenspezifische Regeln (Punkt 8) ============
+   Dauerhaft beim KUNDEN hinterlegt (nicht periodenbezogen) — z.B. abweichende
+   Vorschussgebühren-Vereinbarungen. Freitext, wird bei relevanten Checks berücksichtigt (siehe
+   Vorschussgebühren-Prüfung in lcCheckAll), indem eine Abweichung dann nicht hart als Fehler,
+   sondern informativ mit der hinterlegten Regel gemeldet wird. */
+const LC_KUNDENREGELN_DIR = "CRM-Budgetdaten";
+async function lcLoadKundenregeln(companyId, force) {
+  if (!force && lcState.kundenregeln && lcState.kundenregeln.__kunde === companyId) return lcState.kundenregeln;
+  let data = null;
+  try { data = await graph(`/sites/${siteId}/drive/root:/${LC_KUNDENREGELN_DIR}/lc_kundenregeln_${companyId}.json:/content`); }
+  catch (e) { data = null; }
+  if (!data || typeof data !== "object") data = { hinweise: [] };
+  if (!Array.isArray(data.hinweise)) data.hinweise = [];
+  data.__kunde = companyId;
+  lcState.kundenregeln = data;
+  return data;
+}
+async function lcSaveKundenregeln() {
+  const data = lcState.kundenregeln;
+  const companyId = data.__kunde;
+  const path = `/sites/${siteId}/drive/root:/${LC_KUNDENREGELN_DIR}/lc_kundenregeln_${companyId}.json:/content`;
+  const body = JSON.stringify({ hinweise: data.hinweise });
+  try { await graph(path, { method: "PUT", body }); }
+  catch (e) {
+    if (!/404|itemNotFound|400/i.test(e.message)) throw e;
+    await graph(`/sites/${siteId}/drive/root/children`, { method: "POST", body: JSON.stringify({ name: LC_KUNDENREGELN_DIR, folder: {}, "@microsoft.graph.conflictBehavior": "replace" }) });
+    await graph(path, { method: "PUT", body });
+  }
+}
+async function lcHinweisHinzufuegen(text) {
+  if (!text || !text.trim()) return;
+  lcState.kundenregeln.hinweise.push(text.trim());
+  try { await lcSaveKundenregeln(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  render();
+}
+async function lcHinweisEntfernen(idx) {
+  lcState.kundenregeln.hinweise.splice(idx, 1);
+  try { await lcSaveKundenregeln(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  render();
+}
+/* ============ ERWEITERUNG: Zentrale Lohnartenliste (Punkte 11, 12) ============
+   Im Gegensatz zu den Kontrolllisten NICHT pro Kunde/Periode, sondern EIN gemeinsamer Datensatz
+   für alle Mandanten. Definiert je Lohnart-Code die erwartete Bezeichnung (und optional
+   SV-Unterstellungen). Wird für den Abgleich "steht auf der Abrechnung dieselbe Bezeichnung wie
+   in der Lohnartenliste definiert?" verwendet (Beispiel aus der Spezifikation: Lohnart 3600 mit
+   Text "Kinderzulagen" statt der eigentlich definierten "Baustellenzulagen"). */
+const LC_LOHNARTEN_PFAD = "CRM-Budgetdaten/lc_lohnartenliste.json";
+async function lcLoadLohnartenliste(force) {
+  if (!force && lcState.lohnartenliste) return lcState.lohnartenliste;
+  let data = null;
+  try { data = await graph(`/sites/${siteId}/drive/root:/${LC_LOHNARTEN_PFAD}:/content`); }
+  catch (e) { data = null; }
+  if (!data || typeof data !== "object") data = { dateiname: null, spalten: [], spaltenMap: {}, zeilen: [] };
+  lcState.lohnartenliste = data;
+  return data;
+}
+async function lcSaveLohnartenliste() {
+  const body = JSON.stringify(lcState.lohnartenliste);
+  try { await graph(`/sites/${siteId}/drive/root:/${LC_LOHNARTEN_PFAD}:/content`, { method: "PUT", body }); }
+  catch (e) {
+    if (!/404|itemNotFound|400/i.test(e.message)) throw e;
+    await graph(`/sites/${siteId}/drive/root/children`, { method: "POST", body: JSON.stringify({ name: "CRM-Budgetdaten", folder: {}, "@microsoft.graph.conflictBehavior": "replace" }) });
+    await graph(`/sites/${siteId}/drive/root:/${LC_LOHNARTEN_PFAD}:/content`, { method: "PUT", body });
+  }
+}
+const LC_LOHNART_SPALTEN_MUSTER = {
+  code: /^lohnart(en)?[-\s]?(nr|nummer|code)?$/i,
+  bezeichnung: /bezeichnung|text|label|name/i
+};
+async function lcUploadLohnartenliste(input) {
+  const file = (input.files || [])[0];
+  input.value = "";
+  if (!file) return;
+  try {
+    const { zeilen, spalten } = await lcParseListDatei(file);
+    const spaltenMap = {};
+    for (const key in LC_LOHNART_SPALTEN_MUSTER) spaltenMap[key] = spalten.find(s => LC_LOHNART_SPALTEN_MUSTER[key].test(String(s).trim())) || null;
+    lcState.lohnartenliste = { dateiname: file.name, hochgeladenAm: new Date().toISOString(), spalten, spaltenMap, zeilen };
+    try { await lcSaveLohnartenliste(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  } catch (e) { toast('Fehler beim Einlesen von "' + file.name + '": ' + e.message, true); }
+  render();
+}
+function lcSetLohnartSpalte(feld, spalte) {
+  lcState.lohnartenliste.spaltenMap[feld] = spalte || null;
+  lcSaveLohnartenliste().catch(e => toast("Speichern fehlgeschlagen: " + e.message, true));
+  render();
+}
+/* Vergleicht eine Zeile der Lohnabrechnung mit der Referenzbezeichnung aus der Lohnartenliste.
+   BEWUSST KONSERVATIV: meldet nur, wenn die Bezeichnungen KEIN gemeinsames bedeutungstragendes
+   Wort haben (z.B. "Kinderzulagen" vs. "Baustellenzulagen" — komplett andere Begriffe). Kleinere
+   Schreibvarianten, angehängte Daten ("Kinderzulage 08.2026") oder Singular/Plural lösen bewusst
+   KEINE Meldung aus, um Fehlalarme bei blossen Formatierungsunterschieden zu vermeiden. */
+function lcLohnartVergleichen(row) {
+  const la = lcState.lohnartenliste;
+  if (!la || !la.zeilen || !la.spaltenMap || !la.spaltenMap.code || !la.spaltenMap.bezeichnung) return null;
+  const ref = la.zeilen.find(z => parseInt(String(z[la.spaltenMap.code]).replace(/\D/g, ""), 10) === row.code);
+  if (!ref) return null;
+  const refText = String(ref[la.spaltenMap.bezeichnung] || "").trim();
+  if (!refText) return null;
+  const stopwords = new Set(["und", "der", "die", "das", "für", "von", "zum", "zur", "bei", "im", "am"]);
+  const woerter = s => s.replace(/\d{1,2}\.\d{2,4}|\d{4}/g, "").toLowerCase().split(/[\s.,\/-]+/).map(w => w.replace(/[^a-zäöüéèà]/g, "")).filter(w => w.length > 3 && !stopwords.has(w));
+  const refW = woerter(refText), rowW = woerter(row.label || "");
+  if (!refW.length || !rowW.length) return null;
+  const ueberlappt = refW.some(w => rowW.some(x => x.includes(w) || w.includes(x)));
+  if (!ueberlappt) return { refText };
+  return null;
+}
+
+
+/* ============ ERWEITERUNG: Kontrolle Auszahlungsliste (Punkte 17, 18, 19) ============
+   Läuft NACH dem normalen Ultimativ Check, auf denselben bereits hochgeladenen/geparsten
+   Lohnabrechnungen (lcState.slips) — kein zweiter PDF-Upload nötig, nur die Auszahlungsliste
+   selbst (CSV) wird zusätzlich hochgeladen. Prüfregel: jeder Slip mit positivem Auszahlungs-
+   betrag MUSS auf der Auszahlungsliste erscheinen; Minuslohn-Slips (Auszahlung < 0) werden
+   bewusst NICHT erwartet und lösen keine Meldung bei Fehlen aus. */
+async function lcUploadAuszahlungsliste(input) {
+  const file = (input.files || [])[0];
+  input.value = "";
+  if (!file) return;
+  try {
+    const { zeilen, spalten } = await lcParseListDatei(file);
+    const spaltenMap = lcErkenneSpalten(spalten);
+    lcState.auszahlungsliste = { dateiname: file.name, spalten, spaltenMap, zeilen };
+  } catch (e) { toast('Fehler beim Einlesen von "' + file.name + '": ' + e.message, true); }
+  render();
+}
+function lcSetAuszahlungSpalte(feld, spalte) {
+  lcState.auszahlungsliste.spaltenMap[feld] = spalte || null;
+  render();
+}
+/* Für jeden Slip mit positiver Auszahlung: Treffer auf der Auszahlungsliste suchen (AHV primär,
+   Name als Fallback — dieselbe Logik wie beim Kontrolllisten-Abgleich). */
+function lcAuszahlungslisteAbgleich() {
+  const al = lcState.auszahlungsliste;
+  if (!al) return null;
+  const ergebnisse = [];
+  lcState.slips.forEach(s => {
+    if (s.auszahlung === null || s.auszahlung <= 0) return;   // Minuslohn/0/unbekannt — nicht erwartet, siehe Punkt 19
+    const treffer = lcFindeZeileFuerSlip(al.zeilen, al.spaltenMap, s);
+    ergebnisse.push({ slip: s, gefunden: !!treffer });
+  });
+  return ergebnisse;
+}
+
 function lcRenderKontrolllistenPanel() {
   const kunden = lcKunden();
   const kl = lcState.kontrolllisten;
   const hatListen = kl && kl.listen && kl.listen.length > 0;
+  const la = lcState.lohnartenliste;
+  const kr = lcState.kundenregeln;
   return `
     <div class="panel" style="margin-bottom:14px">
       <div class="panel-h">Kunde &amp; Lohnperiode <span style="font-weight:400;color:var(--text-faint);font-size:11px">— steuert, welche Kontrolllisten für Querchecks verwendet werden</span></div>
@@ -1051,7 +1248,45 @@ function lcRenderKontrolllistenPanel() {
         ${hatListen ? kl.listen.map(l => lcRenderListRow(l)).join("") : ""}
         <input type="file" id="lc-kl-file" accept=".csv,.xlsx,.xls" multiple style="display:none" onchange="lcUploadKontrollliste(this)">
         <button class="btn btn-sm" onclick="document.getElementById('lc-kl-file').click()">⇪ Kontrollliste(n) hochladen (Excel/CSV) — Einsatzliste, BVG, AHV, KTG/SUVA, weitere</button>
+
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+          <div style="font-size:12px;font-weight:600;margin-bottom:6px">Kundenspezifische Hinweise / Prüfregeln</div>
+          ${kr && kr.hinweise.length ? kr.hinweise.map((h, i) => `
+            <div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px">
+              <span style="flex:1">„${escape(h)}"</span>
+              <button class="btn btn-sm" onclick="lcHinweisEntfernen(${i})">✕</button>
+            </div>`).join("") : `<div style="font-size:11px;color:var(--text-faint);margin-bottom:6px">Keine besonderen Regeln hinterlegt.</div>`}
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <input type="text" id="lc-hinweis-neu" placeholder="z.B. Vorschussgebühren nur für 2. und 4. Woche" style="flex:1;font-size:12px;padding:4px 8px">
+            <button class="btn btn-sm" onclick="lcHinweisHinzufuegen(document.getElementById('lc-hinweis-neu').value); document.getElementById('lc-hinweis-neu').value=''">＋</button>
+          </div>
+        </div>
       </div>`}
+    </div>
+    <div class="panel" style="margin-bottom:14px">
+      <div class="panel-h">Zentrale Lohnartenliste <span style="font-weight:400;color:var(--text-faint);font-size:11px">— gilt für alle Kunden, einmalig hochladen</span></div>
+      <div style="padding:12px 16px">
+        ${la && la.dateiname ? `
+          <div style="font-size:12px;margin-bottom:6px">${escape(la.dateiname)} — ${la.zeilen.length} Lohnart(en) erkannt</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11px">
+            <label style="display:flex;align-items:center;gap:4px;color:var(--text-faint)">Lohnart-Code:
+              <select onchange="lcSetLohnartSpalte('code',this.value)" style="font-size:11px;padding:2px 4px">
+                <option value="">—</option>
+                ${la.spalten.map(s => `<option value="${escape(s)}" ${s === la.spaltenMap.code ? "selected" : ""}>${escape(s)}</option>`).join("")}
+              </select>
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;color:var(--text-faint)">Bezeichnung:
+              <select onchange="lcSetLohnartSpalte('bezeichnung',this.value)" style="font-size:11px;padding:2px 4px">
+                <option value="">—</option>
+                ${la.spalten.map(s => `<option value="${escape(s)}" ${s === la.spaltenMap.bezeichnung ? "selected" : ""}>${escape(s)}</option>`).join("")}
+              </select>
+            </label>
+          </div>
+          ${!la.spaltenMap.code || !la.spaltenMap.bezeichnung ? `<div style="font-size:11px;color:var(--warn);margin-top:6px">⚠ Code- oder Bezeichnungs-Spalte nicht gesetzt — Lohnart-Abgleich (Punkt 12) inaktiv.</div>` : ""}
+        ` : `<div style="font-size:12px;color:var(--text-faint);margin-bottom:8px">Noch keine zentrale Lohnartenliste hochgeladen — Lohnart-Abgleich (Punkt 12) ist inaktiv.</div>`}
+        <input type="file" id="lc-la-file" accept=".csv,.xlsx,.xls" style="display:none" onchange="lcUploadLohnartenliste(this)">
+        <button class="btn btn-sm" style="margin-top:8px" onclick="document.getElementById('lc-la-file').click()">⇪ Lohnartenliste ${la && la.dateiname ? "ersetzen" : "hochladen"}</button>
+      </div>
     </div>`;
 }
 function lcRenderListRow(l) {
@@ -1087,7 +1322,8 @@ function lcSevBadge(sev) {
   const c = sev === "rot" ? "var(--danger)" : sev === "gelb" ? "var(--warn)" : "var(--text-faint)";
   return `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${c};margin-right:6px;vertical-align:middle"></span>`;
 }
-function renderLohncheck(el) {
+async function renderLohncheck(el) {
+  await lcLoadLohnartenliste(false);
   document.getElementById("view-actions").innerHTML = `
     <label class="btn btn-sm" style="cursor:pointer">⇪ Lohnabrechnungen (PDF)
       <input type="file" accept=".pdf" multiple style="display:none" onchange="lcUpload(this)"></label>
@@ -1156,17 +1392,31 @@ function renderLohncheck(el) {
       <div style="font-size:10px;color:var(--text-faint);margin-top:8px">↳ = Bestandteil einer übergeordneten Lohnart (z.B. Grundlohn/Ferien/Feiertag/13. ML in Stundenlohn enthalten) — nicht zusätzlich zum Bruttolohn zählen. Fett = Totalzeilen. Berechnet = Basis Σ × Ansatz für Sozialabzüge 5000–5499 mit einheitlichem Ansatz über alle Belege; Kontrolle vergleicht mit Betrag Σ.</div>`;
   } else if (lcState.tab === "diff") {
     const q = lcState.q.trim();
-    const list = I.filter(i => (lcState.sev === "all" || i.sev === lcState.sev) && (!q || lcHit(i.ma) || lcHit(i.text) || lcHit(i.pruef) || lcHit(i.periode) || (lcState.slips.find(s => s.id === i.slipId) || { rows: [] }).rows.some(lcRowHit)));
-    const f = (id, label) => `<button class="btn btn-sm" style="${lcState.sev === id ? "background:var(--accent);color:#fff" : ""}" onclick="lcState.sev='${id}';render()">${label}</button>`;
-    // Gruppierung: eine Zeile pro Mitarbeiter, Klick klappt die einzelnen Hinweise auf
-    const groups = [];
-    const byKey = {};
-    list.forEach(i => { let g = byKey[i.key]; if (!g) { g = byKey[i.key] = { key: i.key, ma: i.ma, items: [], rot: 0, gelb: 0, grau: 0 }; groups.push(g); } g.items.push(i); g[i.sev]++; });
-    groups.sort((a, b) => b.rot - a.rot || b.gelb - a.gelb || a.ma.localeCompare(b.ma, "de"));
-    const allOpen = groups.length && groups.every(g => lcState.open[g.key]);
-    // Zähler = Anzahl betroffene Mitarbeitende, nicht Anzahl Hinweise
-    const maCount = sev => new Set(I.filter(i => sev === "all" || i.sev === sev).map(i => i.key)).size;
-    body = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center">${f("all", "Alle " + maCount("all"))}${f("rot", "Rot " + maCount("rot"))}${f("gelb", "Gelb " + maCount("gelb"))}${f("grau", "Grau " + maCount("grau"))}<span style="font-size:11px;color:var(--text-faint);margin-left:4px">Mitarbeitende</span>
+    const rubrik = lcState.rubrik || "differenz";
+    const rub = (id, label) => `<button class="btn btn-sm" style="${rubrik === id ? "background:var(--accent);color:#fff" : ""}" onclick="lcState.rubrik='${id}';render()">${label}</button>`;
+    const minuslohnSlips = S.filter(s => s.istMinuslohn);
+    if (rubrik === "minuslohn") {
+      // Punkt 15: eigene, einfache Liste betroffener Abrechnungen — keine Issue-Gruppierung nötig
+      body = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">${rub("differenz", "Differenzen " + I.filter(i => i.kategorie !== "manuell").length)}${rub("manuell", "Manuell erfasste Lohnkomponenten " + I.filter(i => i.kategorie === "manuell").length)}${rub("minuslohn", "Minuslohnabrechnungen " + minuslohnSlips.length)}</div>
+        ${minuslohnSlips.length ? `<table style="width:100%;font-size:12px;border-collapse:collapse">
+        <tr style="color:var(--text-dim)"><th style="text-align:left">Mitarbeiter</th><th style="text-align:left">Periode</th><th style="text-align:right">Auszahlung</th></tr>
+        ${minuslohnSlips.map(s => `<tr style="cursor:pointer;border-top:1px solid var(--border)" onclick="lcDetail(${s.id})">
+          <td style="padding:5px 8px 5px 0">${escape(s.anzeige)}</td>
+          <td style="padding:5px 8px;color:var(--text-dim)">${escape(s.periode)}</td>
+          <td style="padding:5px 8px;text-align:right;font-family:var(--font-mono);color:var(--danger)">${lcFmt(s.auszahlung)}</td></tr>`).join("")}
+        </table>` : `<div class="empty">Keine Minuslohnabrechnungen ✓</div>`}`;
+    } else {
+      const list = I.filter(i => (rubrik === "manuell" ? i.kategorie === "manuell" : i.kategorie !== "manuell") && (lcState.sev === "all" || i.sev === lcState.sev) && (!q || lcHit(i.ma) || lcHit(i.text) || lcHit(i.pruef) || lcHit(i.periode) || (lcState.slips.find(s => s.id === i.slipId) || { rows: [] }).rows.some(lcRowHit)));
+      const f = (id, label) => `<button class="btn btn-sm" style="${lcState.sev === id ? "background:var(--accent);color:#fff" : ""}" onclick="lcState.sev='${id}';render()">${label}</button>`;
+      const groups = [];
+      const byKey = {};
+      list.forEach(i => { let g = byKey[i.key]; if (!g) { g = byKey[i.key] = { key: i.key, ma: i.ma, items: [], rot: 0, gelb: 0, grau: 0 }; groups.push(g); } g.items.push(i); g[i.sev]++; });
+      groups.sort((a, b) => b.rot - a.rot || b.gelb - a.gelb || a.ma.localeCompare(b.ma, "de"));
+      const allOpen = groups.length && groups.every(g => lcState.open[g.key]);
+      const rubIssues = I.filter(i => rubrik === "manuell" ? i.kategorie === "manuell" : i.kategorie !== "manuell");
+      const maCount = sev => new Set(rubIssues.filter(i => sev === "all" || i.sev === sev).map(i => i.key)).size;
+      body = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">${rub("differenz", "Differenzen " + I.filter(i => i.kategorie !== "manuell").length)}${rub("manuell", "Manuell erfasste Lohnkomponenten " + I.filter(i => i.kategorie === "manuell").length)}${rub("minuslohn", "Minuslohnabrechnungen " + minuslohnSlips.length)}</div>
+      <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center">${f("all", "Alle " + maCount("all"))}${f("rot", "Rot " + maCount("rot"))}${f("gelb", "Gelb " + maCount("gelb"))}${f("grau", "Grau " + maCount("grau"))}<span style="font-size:11px;color:var(--text-faint);margin-left:4px">Mitarbeitende</span>
       <span style="flex:1"></span><button class="btn btn-sm" onclick="lcToggleAll(${allOpen ? "false" : "true"})">${allOpen ? "Alle zuklappen" : "Alle aufklappen"}</button></div>
       ${groups.length ? `<table style="width:100%;font-size:12px;border-collapse:collapse">
       <tr style="color:var(--text-dim)"><th style="text-align:left">Mitarbeiter</th><th style="text-align:left">Hinweise</th><th style="text-align:left">Perioden</th></tr>
@@ -1183,6 +1433,48 @@ function renderLohncheck(el) {
           <td style="padding:3px 8px;white-space:nowrap">${escape(i.pruef)}</td>
           <td style="padding:3px 8px">${escape(i.text)}</td></tr>`).join("");
       }).join("")}</table>` : `<div class="empty">Keine Hinweise in dieser Kategorie ✓</div>`}`;
+    }
+  } else if (lcState.tab === "auszahlung") {
+    const al = lcState.auszahlungsliste;
+    const feldLabel2 = { ahv: "AHV-Nr", name: "Name", vorname: "Vorname", geburtsdatum: "Geburtsdatum" };
+    body = `<div class="panel" style="margin-bottom:14px">
+      <div class="panel-h">Auszahlungsliste <span style="font-weight:400;color:var(--text-faint);font-size:11px">— prüft, ob jeder Mitarbeitende mit positivem Auszahlungsbetrag auf der Liste vorhanden ist (Minuslohn-Abrechnungen sind davon ausgenommen)</span></div>
+      <div style="padding:12px 16px">
+        ${al ? `
+          <div style="font-size:12px;margin-bottom:6px">${escape(al.dateiname)} — ${al.zeilen.length} Zeile(n)</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11px;margin-bottom:8px">
+            ${Object.keys(feldLabel2).map(feld => `
+              <label style="display:flex;align-items:center;gap:4px;color:var(--text-faint)">${feldLabel2[feld]}:
+                <select onchange="lcSetAuszahlungSpalte('${feld}',this.value)" style="font-size:11px;padding:2px 4px">
+                  <option value="">—</option>
+                  ${al.spalten.map(s => `<option value="${escape(s)}" ${s === al.spaltenMap[feld] ? "selected" : ""}>${escape(s)}</option>`).join("")}
+                </select>
+              </label>`).join("")}
+          </div>
+          ${!al.spaltenMap.ahv && !al.spaltenMap.name ? `<div style="font-size:11px;color:var(--warn);margin-bottom:8px">⚠ Weder AHV-Nr- noch Name-Spalte erkannt/gesetzt — Abgleich nicht möglich.</div>` : ""}
+        ` : `<div style="font-size:12px;color:var(--text-faint);margin-bottom:8px">Noch keine Auszahlungsliste hochgeladen.</div>`}
+        <input type="file" id="lc-al-file" accept=".csv,.xlsx,.xls" style="display:none" onchange="lcUploadAuszahlungsliste(this)">
+        <button class="btn btn-sm" onclick="document.getElementById('lc-al-file').click()">⇪ Auszahlungsliste ${al ? "ersetzen" : "hochladen"} (CSV)</button>
+      </div>
+    </div>`;
+    if (al && (al.spaltenMap.ahv || al.spaltenMap.name)) {
+      const ergebnisse = lcAuszahlungslisteAbgleich();
+      const fehlend = ergebnisse.filter(e => !e.gefunden);
+      body += `<div class="panel">
+        <div class="panel-h">Ergebnis — ${ergebnisse.length} Abrechnung(en) mit positiver Auszahlung geprüft, ${fehlend.length} fehlen auf der Liste</div>
+        <div style="padding:12px 16px">
+          ${fehlend.length ? `<table style="width:100%;font-size:12px;border-collapse:collapse">
+            <tr style="color:var(--text-dim)"><th style="text-align:left">Mitarbeiter</th><th style="text-align:left">Periode</th><th style="text-align:right">Auszahlung</th></tr>
+            ${fehlend.map(e => `<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="lcDetail(${e.slip.id})">
+              <td style="padding:5px 8px 5px 0">${escape(e.slip.anzeige)}</td>
+              <td style="padding:5px 8px;color:var(--text-dim)">${escape(e.slip.periode)}</td>
+              <td style="padding:5px 8px;text-align:right;font-family:var(--font-mono)">${lcFmt(e.slip.auszahlung)}</td></tr>`).join("")}
+            </table>
+            <div style="font-size:11px;color:var(--text-faint);margin-top:8px">Mitarbeiter auf Lohnabrechnung mit positivem Auszahlungsguthaben vorhanden, jedoch nicht auf Auszahlungsliste gefunden. Bitte überprüfen.</div>`
+            : `<div class="empty">Alle Mitarbeitenden mit positiver Auszahlung sind auf der Liste vorhanden ✓</div>`}
+        </div>
+      </div>`;
+    }
   } else {
     body = `<table style="width:100%;font-size:12px;border-collapse:collapse">
       <tr style="color:var(--text-dim)"><th style="text-align:left">Mitarbeiter</th><th style="text-align:left">AHV-Nr</th>
@@ -1206,7 +1498,7 @@ function renderLohncheck(el) {
     </div>
     <div class="card" style="padding:14px 16px;overflow-x:auto">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${tab("konto", "Lohnkontoblatt")}${tab("diff", "Differenzen " + new Set(I.filter(i => i.sev !== "grau").map(i => i.key)).size)}${tab("ma", "Mitarbeitende")}<span style="margin-left:8px;font-size:11px;color:var(--text-dim)">Filter:</span>${flagSel}
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${tab("konto", "Lohnkontoblatt")}${tab("diff", "Differenzen " + new Set(I.filter(i => i.sev !== "grau").map(i => i.key)).size)}${tab("ma", "Mitarbeitende")}${tab("auszahlung", "Kontrolle Auszahlungsliste")}<span style="margin-left:8px;font-size:11px;color:var(--text-dim)">Filter:</span>${flagSel}
           <input id="lc-search" type="search" placeholder="Suche: Name, AHV-Nr, Lohnart, Betrag, Meldung …" value="${escape(lcState.q)}" style="margin-left:8px;font-size:12px;padding:3px 8px;width:260px" oninput="lcSearch(this.value)">
           ${koordHint ? `<span style="margin-left:8px">${koordHint}</span>` : ""}</div>
         <div style="font-size:10px;color:var(--text-faint)">${escape(lcState.files.join(" + "))} · Lohnarten ${lcState.von}–${lcState.bis} · Check v${LC_VERSION}</div>
