@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.117.0";
+const LC_VERSION = "1.118.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -1410,6 +1410,7 @@ function lcSevBadge(sev) {
 async function renderLohncheck(el) {
   await lcLoadLohnartenliste(false);
   document.getElementById("view-actions").innerHTML = `
+    <span style="font-size:11px;color:var(--text-faint);align-self:center;margin-right:4px">Check v${LC_VERSION}</span>
     <label class="btn btn-sm" style="cursor:pointer">⇪ Lohnabrechnungen (PDF)
       <input type="file" accept=".pdf" multiple style="display:none" onchange="lcUpload(this)"></label>
     ${lcState.slips.length ? `<button class="btn btn-sm" onclick="lcExport()">⇩ CSV</button>
