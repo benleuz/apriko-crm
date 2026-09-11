@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.172.0"></script>
-<script src="apriko-api.js?v=1.172.0"></script>
-<script src="lohncheck.js?v=1.172.0"></script>
-<script src="personalbudget.js?v=1.172.0"></script>
-<script src="jahresbudget.js?v=1.172.0"></script>
-<script src="budgetpositionen.js?v=1.172.0"></script>
-<script src="lohnchecklistetemp.js?v=1.172.0"></script>
+<script src="apriko-filters.js?v=1.173.0"></script>
+<script src="apriko-api.js?v=1.173.0"></script>
+<script src="lohncheck.js?v=1.173.0"></script>
+<script src="personalbudget.js?v=1.173.0"></script>
+<script src="jahresbudget.js?v=1.173.0"></script>
+<script src="budgetpositionen.js?v=1.173.0"></script>
+<script src="lohnchecklistetemp.js?v=1.173.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -972,7 +972,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.172.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.173.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -6305,7 +6305,7 @@ async function apLogin() {
 }
 async function apTest() {
   apState.error = null; apState.info = null; apState.selfTest = null; apState.loading = true; render();
-  apConfigure();
+  rpApiUse();   // eigene Rapport-Verbindung geht vor, falls konfiguriert (siehe rpApiUse-Kommentar)
   const st = await AprikoApi.selfTest("people");   // wirft nicht — liefert 3 Zustände
   apState.selfTest = st;
   apState.info = st.info;
@@ -6317,7 +6317,7 @@ async function apLoadMore(tab) {
   if (apState.loading || apState.done[tab]) return;
   apState.loading = true; apState.error = null; render();
   try {
-    apConfigure();
+    rpApiUse();   // eigene Rapport-Verbindung geht vor, falls konfiguriert (siehe rpApiUse-Kommentar)
     const data = tab === "companies"
       ? await AprikoApi.people.listLegal(apState.page[tab], AP_PAGE_SIZE)
       : tab === "placements"
