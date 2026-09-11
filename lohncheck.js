@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.114.0";
+const LC_VERSION = "1.117.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -81,6 +81,25 @@ function lcFmt(v, dec) {
 }
 function lcFmtPct(v) { return v === null || v === undefined ? "—" : (Math.round(v * 10000) / 10000).toString().replace(".", ".") + "%"; }
 function lcNear(a, b, tol) { return Math.abs(a - b) <= (tol == null ? 0.051 : tol); }
+/* Durchsucht den rohen Zeilentext ALLER Seiten eines Belegs (nicht nur die erkannten,
+   4-stellig-codierten Lohnart-Zeilen) nach einem Muster wie "Guthaben Ferien" und liefert den
+   ERSTEN danach stehenden Betrag — genau der direkt neben dem Label, nicht spätere Zahlen aus
+   einer Herleitung in Klammern. null, wenn nichts gefunden (nicht 0 — Unterschied zwischen
+   "kein Treffer" und "Treffer mit Wert 0" ist für den Aufrufer relevant). */
+function lcGuthabenSuche(slip, muster) {
+  for (const pg of (slip.pages || [])) {
+    for (const l of (pg.lines || [])) {
+      const text = l.text || "";
+      const idx = text.search(muster);
+      if (idx < 0) continue;
+      const rest = text.slice(idx);
+      let m = /CHF\s*(-?[\d'.,]+)/.exec(rest);
+      if (!m) m = /(-?[\d'.,]+\.\d{2})/.exec(rest);   // Fallback ohne "CHF"-Präfix: erste Zahl im CHF-Format
+      if (m) { const n = lcNum(m[1]); if (n !== null) return n.v; }
+    }
+  }
+  return null;
+}
 
 /* ---------- PDF → Zeilen mit Positionen ---------- */
 async function lcReadPdf(ab) {
@@ -408,7 +427,7 @@ function lcCheckAll(slips) {
     }
     if (s.abgerechnet !== null && s.auszahlung !== null && !lcNear(s.abgerechnet + rueckTot, s.auszahlung))
       add(s, "rot", "Auszahlung", "Abgerechnet " + lcFmt(s.abgerechnet) + " + Rückbehalte/Zahlungen " + lcFmt(rueckTot) + " = " + lcFmt(s.abgerechnet + rueckTot) + " ≠ Auszahlung " + lcFmt(s.auszahlung) + ".");
-    if (s.auszahlung !== null && s.auszahlung < 0) add(s, "grau", "Auszahlung", "Negative Auszahlung " + lcFmt(s.auszahlung) + " — Vorschüsse/Rückbehalte übersteigen den Abrechnungsbetrag, Übertrag/Rückforderung.");
+    if (s.auszahlung !== null && s.auszahlung < 0) add(s, "grau", "Auszahlung", "Negative Auszahlung " + lcFmt(s.auszahlung) + " — Vorschüsse/Rückbehalte übersteigen den Abrechnungsbetrag, Übertrag/Rückforderung. Siehe Rubrik «Minuslohnabrechnungen».", "manuell");
     if (s.abgerechnet !== null && s.auszahlung === null) add(s, "grau", "Auszahlung", "Keine Auszahlungszeile (8900) erkannt.");
     // Ferienrückbehalt (8020) sollte der Ferienvergütung (1160) entsprechen
     const ferien = s.rows.find(r => r.code === 1160 || (/Ferienvergütung/i.test(r.label) && r.code < 4900));
@@ -436,23 +455,34 @@ function lcCheckAll(slips) {
       if (!lcNear(Math.abs(exp), Math.abs(r.betrag), Math.max(0.06, Math.abs(exp) * 0.002)))
         add(s, "gelb", "Rechnung", r.code + " " + r.label + ": Basis × Ansatz" + (r.anzahl ? " × Anzahl" : "") + " = " + lcFmt(exp) + ", Betrag " + lcFmt(r.betrag) + ".");
     }
-    // Punkt 12: Lohnart-Bezeichnung gegen die zentrale Lohnartenliste abgleichen (falls hinterlegt)
-    if (lcState.lohnartenliste && lcState.lohnartenliste.zeilen && lcState.lohnartenliste.zeilen.length) {
-      s.rows.forEach(r => {
-        if (r.isTotal) return;
-        const abw = lcLohnartVergleichen(r);
-        if (abw) add(s, "rot", "Lohnart falsch behandelt", "Lohnart " + r.code + " erfasst als „" + r.label + "\", gemäss zentraler Lohnartenliste jedoch definiert als „" + abw.refText + "\". Bitte prüfen.");
-      });
-    }
-    // Punkt 9: Ferienguthaben / Guthaben 13. Monatslohn — JEDER negative Wert wird gemeldet, keine
-    // Toleranz (ausdrücklich auch CHF -0.01). Diese Guthaben können an beliebiger Stelle auf der
-    // Abrechnung stehen (meist gegen Ende), darum über ALLE Zeilen (nicht nur den Lohnblock) suchen.
-    s.rows.forEach(r => {
-      if (/Ferienguthaben/i.test(r.label) && r.betrag < 0)
-        add(s, "rot", "Ferienguthaben negativ", "Ferienguthaben negativ: CHF " + lcFmt(r.betrag) + ". Bitte überprüfen.");
-      if (/13\.?\s*Monatslohn/i.test(r.label) && /Guthaben/i.test(r.label) && r.betrag < 0)
-        add(s, "rot", "13. ML-Guthaben negativ", "Guthaben 13. Monatslohn negativ: CHF " + lcFmt(r.betrag) + ". Bitte überprüfen.");
+    // Punkt 12 — DEAKTIVIERT 11.09.2026: Der reine Text-Vergleich gegen die zentrale
+    // Lohnartenliste hat sich als zu unzuverlässig erwiesen. Laut Rückmeldung dürfen Fälle wie
+    // "Baustellenzulage" vs. "Übrige pauschale Zulagen" oder "Samstagszulage" vs. "Sonntagszulage"
+    // (keine gemeinsamen Wörter, aber plausible kundenspezifische Umbenennungen) NIE eine Differenz
+    // auslösen — genau solche Fälle hätte der bisherige Wortüberlappungs-Check aber geflaggt.
+    // Massgeblich ist laut Vorgabe die Lohnartnummer und ihre fachliche Behandlung (SV-Unterstellung
+    // etc.), nicht der Anzeigetext — ein zuverlässiger Text-Plausibilitätscheck ("fachlich unmöglich"
+    // vs. "nur anders benannt") ist mit einfachen Mitteln nicht robust genug baubar, darum bewusst
+    // ganz entfernt statt weiter nachjustiert. lcLohnartVergleichen()/lcState.lohnartenliste bleiben
+    // im Code bestehen (z.B. für Soll/Haben, SV-Spalten im Lohnartenstamm), erzeugen aber keine
+    // Meldung mehr.
+
+
+    // Punkt 9 (+ Korrektur 10.09.2026): "Guthaben Ferien" / "Guthaben 13. Monatslohn" — JEDER
+    // negative Wert wird gemeldet, keine Toleranz (ausdrücklich auch CHF -0.01). WICHTIG: diese
+    // Zeilen haben KEINEN 4-stelligen Lohnart-Code (reine Saldo-Zeile), erscheinen darum NICHT in
+    // s.rows — deshalb wird der komplette Rohtext aller Seiten durchsucht, nicht nur die erkannten
+    // Lohnart-Zeilen. Bezeichnung bewusst "Guthaben Ferien" (nicht "Ferienguthaben" — Reihenfolge
+    // im echten Beleg ist umgekehrt zur ersten Annahme). Nur der Betrag UNMITTELBAR nach dem Label
+    // zählt, NICHT die Werte der Herleitung in Klammern dahinter (z.B. "+ CHF 378.67 aus aktueller
+    // Periode"). Eine reine Auszahlung/ein Bezug ("Ferienkonto Bezug" o.ä.) enthält das Wort
+    // "Guthaben" nicht direkt vor "Ferien" und wird durch das Suchmuster automatisch ausgeschlossen.
+    [["Guthaben Ferien negativ", /Guthaben\s+Ferien\b/i, "Ferienguthaben"], ["13. ML-Guthaben negativ", /Guthaben\s+13\.?\s*Monatslohn\b/i, "Guthaben 13. Monatslohn"]].forEach(([pruef, muster, bezeichnung]) => {
+      const treffer = lcGuthabenSuche(s, muster);
+      if (treffer !== null && treffer < 0)
+        add(s, "rot", pruef, bezeichnung + " negativ: CHF " + lcFmt(treffer) + ". Bitte überprüfen.");
     });
+
     // Punkt 10: unrealistische Lohnfortzahlung/Tagegeldzahlung — Richtwert CHF 150–250, ab hier
     // wird ein spürbarer Sicherheitsabstand (>350) als klar unrealistisch gewertet (z.B. versehentlich
     // doppelt erfasster Tagegeldsatz). Ansatz (Tagessatz) bevorzugt prüfen, sonst Betrag als Ganzes.
@@ -509,16 +539,32 @@ function lcCheckAll(slips) {
             let gemeldet = false;
             // Punkt 6: Kinderzulagen vorhanden aber kein BVG — unabhängig von der Einsatzdauer-Prüfung
             if (zul.length) { add(s, "rot", "BVG prüfen", "BVG prüfen: Kinderzulagen vorhanden, jedoch kein BVG Abzug ersichtlich."); gemeldet = true; }
-            // Punkt 5: 13 Einsatzwochen gemäss Einsatzliste erreicht, aber kein BVG — nur wenn wir das
-            // aus echten Einsatzliste-Daten wissen, NIE aus einer blossen Kalender-Annahme
-            if (bvgInfo.verfuegbar && bvgInfo.wochen >= 13) {
-              add(s, "rot", "BVG prüfen", "BVG prüfen: Gemäss Einsatzliste wurden " + Math.floor(bvgInfo.wochen) + " Einsatzwochen erreicht. Auf der aktuellen Lohnabrechnung ist kein BVG Abzug vorhanden.");
-              gemeldet = true;
+            // Punkte 5, 7, 8, 9: nicht nur PRÜFEN, ob der Stichtag (13 Einsatzwochen, ggf. über
+            // mehrere Einsätze zusammengeführt) erreicht ist, sondern zusätzlich mit der auf DIESER
+            // Abrechnung effektiv abgerechneten Einsatzperiode ("Einsatz Nr. X (von - bis)")
+            // abgleichen. Erst wenn diese Periode BIS ZUM ODER NACH dem Stichtag reicht, wird ein
+            // BVG-Abzug erwartet — reines "13 Wochen seit Beginn erreicht" genügt nicht, wenn die
+            // aktuell abgerechnete Abrechnung selbst noch vor dem Stichtag liegt.
+            if (!gemeldet && bvgInfo.verfuegbar && bvgInfo.stichtag) {
+              const abgerechnet = lcAbgerechneteEinsaetze(s);
+              if (abgerechnet.length) {
+                const nachStichtag = abgerechnet.some(e => e.bis >= bvgInfo.stichtag);
+                if (nachStichtag) {
+                  add(s, "rot", "BVG prüfen", "BVG prüfen: Individueller BVG-Stichtag (" + bvgInfo.stichtag.toLocaleDateString("de-CH") + ") erreicht, die aktuelle Abrechnung enthält Stunden ab diesem Datum. Auf der aktuellen Lohnabrechnung ist kein BVG Abzug vorhanden.");
+                  gemeldet = true;
+                }
+                // sonst: alle auf DIESER Abrechnung abgerechneten Perioden liegen vor dem Stichtag
+                // → bewusst KEINE Meldung (Punkt 7, Beispiel 1) — "eindeutig korrekt"
+              } else {
+                // Punkt 9: Stichtag zwar bekannt, aber welche Periode DIESE Abrechnung genau
+                // abdeckt, ist auf dem Beleg nicht erkennbar — Hinweis statt harter Differenz
+                add(s, "grau", "BVG Hinweis", "BVG konnte nicht eindeutig geprüft werden (abgerechnete Einsatzperiode auf dem Beleg nicht erkannt, Stichtag wäre " + bvgInfo.stichtag.toLocaleDateString("de-CH") + "). Kein BVG Abzug vorhanden. Bitte manuell überprüfen.", "manuell");
+              }
             }
             if (gemeldet) continue;
-            if (bvgInfo.verfuegbar && bvgInfo.wochen < 13) continue;   // Einsatzliste sagt: noch keine 13 Wochen — bewusst KEINE Meldung, das ist normal
+            if (bvgInfo.verfuegbar) continue;   // Einsatzliste vorhanden: entweder Stichtag noch nicht erreicht, oder Hinweis bereits oben ausgegeben — so oder so keine weitere Meldung nötig
             // Keine Einsatzliste-Daten verfügbar — wie bisher nur ein tiefstufiger, unverbindlicher Hinweis
-            add(s, "grau", "Abzug fehlt", "Kein BVG-Abzug (5090) bei Bruttolohn " + lcFmt(s.brutto) + " — keine Einsatzliste hinterlegt, BVG-Pflicht konnte nicht anhand der Einsatzdauer geprüft werden.");
+            add(s, "grau", "Abzug fehlt", "Kein BVG-Abzug (5090) bei Bruttolohn " + lcFmt(s.brutto) + " — keine Einsatzliste hinterlegt, BVG-Pflicht konnte nicht anhand der Einsatzdauer geprüft werden.", "manuell");
             continue;
           }
           add(s, ref.pflicht, "Abzug fehlt", "Kein " + nm + "-Abzug (" + ref.codes.join("/") + ") bei Bruttolohn " + lcFmt(s.brutto) + "."); continue;
@@ -960,27 +1006,75 @@ function lcEinsatzwochenBerechnen(zeitraeume, periodeEnde) {
   const totalTage = merged.reduce((sum, b) => sum + Math.round((b[1] - b[0]) / 86400000) + 1, 0);
   return totalTage / 7;
 }
+/* Punkt 6-8: individueller BVG-STICHTAG statt nur Wochenzahl — das exakte Datum, ab dem die 13
+   Wochen erreicht sind (über alle zusammengeführten Einsätze hinweg, auch laufende/offene). NICHT
+   auf die geprüfte Periode gedeckelt (anders als lcEinsatzwochenBerechnen) — der Stichtag selbst
+   kann auch in der Zukunft liegen. Rückgabe: Date oder null (Ziel noch nie erreicht). */
+function lcBvgStichtagBerechnen(zeitraeume) {
+  const bereiche = [];
+  zeitraeume.forEach(z => {
+    if (!z.von) return;
+    const bis = z.bis || new Date(8640000000000000);   // offener Einsatz = "unendlich" für die Stichtag-Suche
+    if (z.von > bis) return;
+    bereiche.push([z.von, bis]);
+  });
+  if (!bereiche.length) return null;
+  bereiche.sort((a, b) => a[0] - b[0]);
+  const merged = [bereiche[0].slice()];
+  for (let i = 1; i < bereiche.length; i++) {
+    const last = merged[merged.length - 1];
+    const naechsterTag = new Date(last[1].getTime() + 86400000);
+    if (bereiche[i][0] <= naechsterTag) { if (bereiche[i][1] > last[1]) last[1] = bereiche[i][1]; }
+    else merged.push(bereiche[i].slice());
+  }
+  const zielTage = 13 * 7;
+  let kumuliert = 0;
+  for (const [von, bis] of merged) {
+    const rangeTage = Math.round((bis - von) / 86400000) + 1;
+    if (kumuliert + rangeTage >= zielTage) return new Date(von.getTime() + (zielTage - kumuliert - 1) * 86400000);
+    kumuliert += rangeTage;
+  }
+  return null;
+}
+/* Punkt 5, 7, 8: welche Einsatzperiode(n) sind auf DIESER Abrechnung effektiv abgerechnet? Steht
+   im Beleg z.B. als "Einsatz Nr. 2461 (10.08.2026 - 26.08.2026)" bei den Lohnpositionen. Mehrere
+   Treffer möglich (mehrere Einsätze in derselben Abrechnung). */
+function lcAbgerechneteEinsaetze(slip) {
+  const treffer = [];
+  const muster = /Einsatz\s*Nr\.?\s*(\d+)\s*\(([\d.]+)\s*[-–]\s*([\d.]+)\)/gi;
+  for (const pg of (slip.pages || [])) {
+    for (const l of (pg.lines || [])) {
+      let m; muster.lastIndex = 0;
+      while ((m = muster.exec(l.text || "")) !== null) {
+        const von = lcParseDatum(m[2]), bis = lcParseDatum(m[3]);
+        if (von && bis) treffer.push({ nr: m[1], von, bis });
+      }
+    }
+  }
+  return treffer;
+}
 /* Verbindet Kontrolllisten-Suche + Wochenberechnung für einen konkreten Slip.
-   Rückgabe: { verfuegbar: bool, wochen: number|null } — verfuegbar=false heisst "wir wissen es
-   nicht" (keine Einsatzliste hochgeladen, Mitarbeiter nicht gefunden, oder Periode nicht
-   erkennbar) und darf NIE mit "unter 13 Wochen" verwechselt werden — nur bei verfuegbar=true darf
-   aus wochen<13 geschlossen werden, dass (noch) kein BVG-Abzug erwartet wird. */
+   Rückgabe: { verfuegbar: bool, wochen: number|null, stichtag: Date|null } — verfuegbar=false
+   heisst "wir wissen es nicht" (keine Einsatzliste hochgeladen, Mitarbeiter nicht gefunden, oder
+   Periode nicht erkennbar) und darf NIE mit "unter 13 Wochen" verwechselt werden — nur bei
+   verfuegbar=true darf aus wochen<13 geschlossen werden, dass (noch) kein BVG-Abzug erwartet wird. */
 function lcBvgEinsatzInfo(slip) {
   const kl = lcState.kontrolllisten;
-  if (!kl || !kl.listen) return { verfuegbar: false, wochen: null };
+  if (!kl || !kl.listen) return { verfuegbar: false, wochen: null, stichtag: null };
   const einsatzlisten = kl.listen.filter(l => l.typ === "Einsatzliste" && l.spaltenMap && l.spaltenMap.von && l.spaltenMap.bis);
-  if (!einsatzlisten.length) return { verfuegbar: false, wochen: null };
+  if (!einsatzlisten.length) return { verfuegbar: false, wochen: null, stichtag: null };
   const periodeEnde = lcPeriodeEndeDatum(slip);
-  if (!periodeEnde) return { verfuegbar: false, wochen: null };
+  if (!periodeEnde) return { verfuegbar: false, wochen: null, stichtag: null };
   const zeitraeume = [];
   einsatzlisten.forEach(l => {
     lcFindeAlleZeilenFuerSlip(l.zeilen, l.spaltenMap, slip).forEach(z => {
       zeitraeume.push({ von: lcParseDatum(z[l.spaltenMap.von]), bis: lcParseDatum(z[l.spaltenMap.bis]) });
     });
   });
-  if (!zeitraeume.length) return { verfuegbar: false, wochen: null };
+  if (!zeitraeume.length) return { verfuegbar: false, wochen: null, stichtag: null };
   const wochen = lcEinsatzwochenBerechnen(zeitraeume, periodeEnde);
-  return { verfuegbar: wochen !== null, wochen };
+  const stichtag = lcBvgStichtagBerechnen(zeitraeume);
+  return { verfuegbar: wochen !== null, wochen, stichtag };
 }
 /* ============ ENDE ERWEITERUNG BVG-Prüfung ============ */
 
@@ -1264,28 +1358,19 @@ function lcRenderKontrolllistenPanel() {
       </div>`}
     </div>
     <div class="panel" style="margin-bottom:14px">
-      <div class="panel-h">Zentrale Lohnartenliste <span style="font-weight:400;color:var(--text-faint);font-size:11px">— gilt für alle Kunden, einmalig hochladen</span></div>
+      <div class="panel-h">Zentrale Lohnartenliste <span style="font-weight:400;color:var(--text-faint);font-size:11px">— gilt für alle Kunden, gemeinsam mit «Workflows → Lohnartenstamm»</span></div>
       <div style="padding:12px 16px">
         ${la && la.dateiname ? `
-          <div style="font-size:12px;margin-bottom:6px">${escape(la.dateiname)} — ${la.zeilen.length} Lohnart(en) erkannt</div>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11px">
-            <label style="display:flex;align-items:center;gap:4px;color:var(--text-faint)">Lohnart-Code:
-              <select onchange="lcSetLohnartSpalte('code',this.value)" style="font-size:11px;padding:2px 4px">
-                <option value="">—</option>
-                ${la.spalten.map(s => `<option value="${escape(s)}" ${s === la.spaltenMap.code ? "selected" : ""}>${escape(s)}</option>`).join("")}
-              </select>
-            </label>
-            <label style="display:flex;align-items:center;gap:4px;color:var(--text-faint)">Bezeichnung:
-              <select onchange="lcSetLohnartSpalte('bezeichnung',this.value)" style="font-size:11px;padding:2px 4px">
-                <option value="">—</option>
-                ${la.spalten.map(s => `<option value="${escape(s)}" ${s === la.spaltenMap.bezeichnung ? "selected" : ""}>${escape(s)}</option>`).join("")}
-              </select>
-            </label>
-          </div>
-          ${!la.spaltenMap.code || !la.spaltenMap.bezeichnung ? `<div style="font-size:11px;color:var(--warn);margin-top:6px">⚠ Code- oder Bezeichnungs-Spalte nicht gesetzt — Lohnart-Abgleich (Punkt 12) inaktiv.</div>` : ""}
-        ` : `<div style="font-size:12px;color:var(--text-faint);margin-bottom:8px">Noch keine zentrale Lohnartenliste hochgeladen — Lohnart-Abgleich (Punkt 12) ist inaktiv.</div>`}
-        <input type="file" id="lc-la-file" accept=".csv,.xlsx,.xls" style="display:none" onchange="lcUploadLohnartenliste(this)">
-        <button class="btn btn-sm" style="margin-top:8px" onclick="document.getElementById('lc-la-file').click()">⇪ Lohnartenliste ${la && la.dateiname ? "ersetzen" : "hochladen"}</button>
+          <div style="font-size:12px;color:var(--ok, #3a3)">✓ ${la.zeilen.length} Lohnart(en) geladen — ${escape(la.dateiname)}${la.hochgeladenAm ? ", " + new Date(la.hochgeladenAm).toLocaleDateString("de-CH") : ""}</div>
+          ${!la.spaltenMap.code || !la.spaltenMap.bezeichnung ? `<div style="font-size:11px;color:var(--warn);margin-top:6px">⚠ Code- oder Bezeichnungs-Spalte nicht erkannt — Lohnart-Abgleich (Punkt 12) inaktiv.</div>` : ""}
+        ` : `<div style="font-size:12px;color:var(--text-faint)">Noch kein Lohnartenstamm hinterlegt — Lohnart-Abgleich (Punkt 12) ist inaktiv.</div>`}
+        <div style="font-size:11px;color:var(--text-faint);margin-top:8px">Aktualisierung läuft über <b>Workflows → Lohnartenstamm</b> (direkt aus Apriko) — hier nur zur Kontrolle, kein separater Upload mehr nötig.
+          <a href="#" onclick="currentView='lohnartenstamm';document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.view==='lohnartenstamm'));render();return false;" style="color:var(--accent)">→ Lohnartenstamm öffnen</a>
+        </div>
+        <details style="margin-top:10px"><summary style="cursor:pointer;font-size:11px;color:var(--text-faint)">Alternativ: Datei manuell hochladen (falls kein Apriko-Zugriff vorhanden)</summary>
+          <input type="file" id="lc-la-file" accept=".csv,.xlsx,.xls" style="display:none" onchange="lcUploadLohnartenliste(this)">
+          <button class="btn btn-sm" style="margin-top:8px" onclick="document.getElementById('lc-la-file').click()">⇪ Lohnartenliste ${la && la.dateiname ? "ersetzen" : "hochladen"}</button>
+        </details>
       </div>
     </div>`;
 }
@@ -1395,9 +1480,15 @@ async function renderLohncheck(el) {
     const rubrik = lcState.rubrik || "differenz";
     const rub = (id, label) => `<button class="btn btn-sm" style="${rubrik === id ? "background:var(--accent);color:#fff" : ""}" onclick="lcState.rubrik='${id}';render()">${label}</button>`;
     const minuslohnSlips = S.filter(s => s.istMinuslohn);
+    // Punkt 12: "Differenzen" darf nicht zur allgemeinen Auffälligkeitsliste werden — graue,
+    // rein informative Hinweise (z.B. "nicht eindeutig prüfbar", erklärte Sonderfälle) zählen dort
+    // standardmässig NICHT mit, nur echte rot/gelb-Abweichungen. Grau bleibt über den expliziten
+    // Schweregrad-Filter weiterhin einsehbar, drängt sich aber nicht in die Standardansicht.
+    const istDifferenz = i => i.kategorie !== "manuell";
+    const zaehltAlsDifferenz = i => istDifferenz(i) && i.sev !== "grau";
     if (rubrik === "minuslohn") {
       // Punkt 15: eigene, einfache Liste betroffener Abrechnungen — keine Issue-Gruppierung nötig
-      body = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">${rub("differenz", "Differenzen " + I.filter(i => i.kategorie !== "manuell").length)}${rub("manuell", "Manuell erfasste Lohnkomponenten " + I.filter(i => i.kategorie === "manuell").length)}${rub("minuslohn", "Minuslohnabrechnungen " + minuslohnSlips.length)}</div>
+      body = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">${rub("differenz", "Differenzen " + I.filter(zaehltAlsDifferenz).length)}${rub("manuell", "Manuell erfasste Lohnkomponenten " + I.filter(i => i.kategorie === "manuell").length)}${rub("minuslohn", "Minuslohnabrechnungen " + minuslohnSlips.length)}</div>
         ${minuslohnSlips.length ? `<table style="width:100%;font-size:12px;border-collapse:collapse">
         <tr style="color:var(--text-dim)"><th style="text-align:left">Mitarbeiter</th><th style="text-align:left">Periode</th><th style="text-align:right">Auszahlung</th></tr>
         ${minuslohnSlips.map(s => `<tr style="cursor:pointer;border-top:1px solid var(--border)" onclick="lcDetail(${s.id})">
@@ -1406,16 +1497,20 @@ async function renderLohncheck(el) {
           <td style="padding:5px 8px;text-align:right;font-family:var(--font-mono);color:var(--danger)">${lcFmt(s.auszahlung)}</td></tr>`).join("")}
         </table>` : `<div class="empty">Keine Minuslohnabrechnungen ✓</div>`}`;
     } else {
-      const list = I.filter(i => (rubrik === "manuell" ? i.kategorie === "manuell" : i.kategorie !== "manuell") && (lcState.sev === "all" || i.sev === lcState.sev) && (!q || lcHit(i.ma) || lcHit(i.text) || lcHit(i.pruef) || lcHit(i.periode) || (lcState.slips.find(s => s.id === i.slipId) || { rows: [] }).rows.some(lcRowHit)));
+      const list = I.filter(i => {
+        if (rubrik === "manuell") { if (i.kategorie !== "manuell") return false; }
+        else if (!istDifferenz(i) || (i.sev === "grau" && lcState.sev !== "grau")) return false;
+        return (lcState.sev === "all" || i.sev === lcState.sev) && (!q || lcHit(i.ma) || lcHit(i.text) || lcHit(i.pruef) || lcHit(i.periode) || (lcState.slips.find(s => s.id === i.slipId) || { rows: [] }).rows.some(lcRowHit));
+      });
       const f = (id, label) => `<button class="btn btn-sm" style="${lcState.sev === id ? "background:var(--accent);color:#fff" : ""}" onclick="lcState.sev='${id}';render()">${label}</button>`;
       const groups = [];
       const byKey = {};
       list.forEach(i => { let g = byKey[i.key]; if (!g) { g = byKey[i.key] = { key: i.key, ma: i.ma, items: [], rot: 0, gelb: 0, grau: 0 }; groups.push(g); } g.items.push(i); g[i.sev]++; });
       groups.sort((a, b) => b.rot - a.rot || b.gelb - a.gelb || a.ma.localeCompare(b.ma, "de"));
       const allOpen = groups.length && groups.every(g => lcState.open[g.key]);
-      const rubIssues = I.filter(i => rubrik === "manuell" ? i.kategorie === "manuell" : i.kategorie !== "manuell");
+      const rubIssues = rubrik === "manuell" ? I.filter(i => i.kategorie === "manuell") : I.filter(zaehltAlsDifferenz);
       const maCount = sev => new Set(rubIssues.filter(i => sev === "all" || i.sev === sev).map(i => i.key)).size;
-      body = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">${rub("differenz", "Differenzen " + I.filter(i => i.kategorie !== "manuell").length)}${rub("manuell", "Manuell erfasste Lohnkomponenten " + I.filter(i => i.kategorie === "manuell").length)}${rub("minuslohn", "Minuslohnabrechnungen " + minuslohnSlips.length)}</div>
+      body = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">${rub("differenz", "Differenzen " + I.filter(zaehltAlsDifferenz).length)}${rub("manuell", "Manuell erfasste Lohnkomponenten " + I.filter(i => i.kategorie === "manuell").length)}${rub("minuslohn", "Minuslohnabrechnungen " + minuslohnSlips.length)}</div>
       <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center">${f("all", "Alle " + maCount("all"))}${f("rot", "Rot " + maCount("rot"))}${f("gelb", "Gelb " + maCount("gelb"))}${f("grau", "Grau " + maCount("grau"))}<span style="font-size:11px;color:var(--text-faint);margin-left:4px">Mitarbeitende</span>
       <span style="flex:1"></span><button class="btn btn-sm" onclick="lcToggleAll(${allOpen ? "false" : "true"})">${allOpen ? "Alle zuklappen" : "Alle aufklappen"}</button></div>
       ${groups.length ? `<table style="width:100%;font-size:12px;border-collapse:collapse">
