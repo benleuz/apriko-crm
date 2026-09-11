@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.187.0"></script>
-<script src="apriko-api.js?v=1.187.0"></script>
-<script src="lohncheck.js?v=1.187.0"></script>
-<script src="personalbudget.js?v=1.187.0"></script>
-<script src="jahresbudget.js?v=1.187.0"></script>
-<script src="budgetpositionen.js?v=1.187.0"></script>
-<script src="lohnchecklistetemp.js?v=1.187.0"></script>
+<script src="apriko-filters.js?v=1.188.0"></script>
+<script src="apriko-api.js?v=1.188.0"></script>
+<script src="lohncheck.js?v=1.188.0"></script>
+<script src="personalbudget.js?v=1.188.0"></script>
+<script src="jahresbudget.js?v=1.188.0"></script>
+<script src="budgetpositionen.js?v=1.188.0"></script>
+<script src="lohnchecklistetemp.js?v=1.188.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -51,21 +51,27 @@
     --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
 
-  /* Light-Modus: Werte werden über [data-theme="light"] auf <html> gesetzt */
+  /* Light-Modus: Werte werden über [data-theme="light"] auf <html> gesetzt.
+     Überarbeitet 11.09.2026 — vorher waren bg/bg-elev/bg-card praktisch alle weiss/fast-weiss,
+     dadurch keine erkennbare Tiefe zwischen Seite/Oberfläche/Karte, und die Akzentfarben waren zu
+     blass für echten Kontrast. Jetzt: sanft salbeigrüner Seitenhintergrund (nicht reines Weiss),
+     echtes Weiss nur für die Karten selbst (dadurch heben sie sich tatsächlich ab), sichtbarere
+     Ränder, und kräftigere Varianten derselben Lime/Mint/Teal-Familie wie im Dunkelmodus — bleibt
+     erkennbar dasselbe Farbthema, wirkt aber nicht mehr flach. */
   html[data-theme="light"] {
-    --bg: #f7f9f8;
-    --bg-elev: #ffffff;
+    --bg: #eef2ef;
+    --bg-elev: #f6f9f7;
     --bg-card: #ffffff;
-    --border: #e5e9e7;
-    --border-soft: #eff2f0;
-    --text: #1a2624;
-    --text-dim: #5a716c;
-    --text-faint: #8aa19c;
-    --accent: #7cc040;       /* dunkleres Lime für Kontrast auf Hell */
-    --accent-2: #3ba884;
-    --accent-3: #2d95a5;
-    --danger: #dc2626;
-    --warn: #d97706;
+    --border: #d3ddd7;
+    --border-soft: #e3e9e5;
+    --text: #16211e;
+    --text-dim: #4f6b64;
+    --text-faint: #7c948d;
+    --accent: #5ea62c;       /* kräftigeres Lime — mehr Kontrast auf Hell als zuvor */
+    --accent-2: #23916f;
+    --accent-3: #1c7e8f;
+    --danger: #c22323;
+    --warn: #b45f04;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
@@ -973,7 +979,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.187.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.188.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
