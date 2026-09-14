@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.206.0"></script>
-<script src="apriko-api.js?v=1.206.0"></script>
-<script src="lohncheck.js?v=1.206.0"></script>
-<script src="personalbudget.js?v=1.206.0"></script>
-<script src="jahresbudget.js?v=1.206.0"></script>
-<script src="budgetpositionen.js?v=1.206.0"></script>
-<script src="lohnchecklistetemp.js?v=1.206.0"></script>
+<script src="apriko-filters.js?v=1.209.0"></script>
+<script src="apriko-api.js?v=1.209.0"></script>
+<script src="lohncheck.js?v=1.209.0"></script>
+<script src="personalbudget.js?v=1.209.0"></script>
+<script src="jahresbudget.js?v=1.209.0"></script>
+<script src="budgetpositionen.js?v=1.209.0"></script>
+<script src="lohnchecklistetemp.js?v=1.209.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -980,7 +980,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.206.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.209.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -1027,6 +1027,11 @@
           <button type="button" class="rp-btn-sm" onclick="rpApiTestEinzeln()">🔍 Isolierter Test: eine einzelne listStaffLease-Anfrage (wie in Apriko API POC)</button>
           <div id="rpApiTestEinzelnErgebnis" style="margin-top:6px;font-size:11.5px"></div>
         </div>
+        <div style="margin-top:8px;display:flex;gap:6px;align-items:center">
+          <input type="text" id="rpApiEinsatzNrLookup" placeholder="Einsatz-Nr eingeben (z.B. 3428)" style="font-size:12px;padding:4px 8px;width:200px">
+          <button type="button" class="rp-btn-sm" onclick="rpApiLookupEinsatzNr()">🔍 Diesen Einsatz direkt abrufen (Rohdaten)</button>
+        </div>
+        <div id="rpApiLookupErgebnis" style="margin-top:6px;font-size:11.5px"></div>
       </div>
 
       <!-- 1 Upload -->
@@ -12808,6 +12813,36 @@ async function rpApiTestEinzeln(){
     el.innerHTML = '<span style="color:#c62828">✗ Fehler nach ' + ms2 + 'ms: ' + esc((e && e.message) || String(e)) + '</span>';
   }
 }
+/* Sucht gezielt EINEN Einsatz per Einsatznummer (nicht die interne ID) und zeigt die kompletten
+   Rohdaten — zum direkten Vergleich, wie ein echter, aktueller Einsatz tatsächlich aussieht
+   (state, updatedTime, entryDate etc.), ohne durch tausende Seiten blättern zu müssen. */
+async function rpApiLookupEinsatzNr(){
+  var inp = document.getElementById('rpApiEinsatzNrLookup');
+  var el = document.getElementById('rpApiLookupErgebnis');
+  if(!inp || !el) return;
+  var nr = (inp.value || '').trim();
+  if(!nr){ el.innerHTML = '<span style="color:#c62828">Bitte eine Einsatz-Nr eingeben.</span>'; return; }
+  el.innerHTML = '<span style="color:var(--rp-grey)">Läuft …</span>';
+  var start = Date.now();
+  try {
+    rpApiUse();
+    var res = await AprikoApi.models.query({
+      entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 10, resolveReferences: false,
+      filters: 'number|=|' + JSON.stringify(parseInt(nr, 10)) + '|numeric|false|false|["G1"]'
+    });
+    var rows = ((res && res.results) || []).map(AprikoApi.models.hitData);
+    var ms = Date.now() - start;
+    if(!rows.length){
+      el.innerHTML = '<span style="color:#c62828">✗ Kein Treffer nach ' + ms + 'ms für Einsatz-Nr ' + esc(nr) + ' (über number-Filter).</span>';
+      return;
+    }
+    el.innerHTML = '<span style="color:#2e7d32">✓ Gefunden in ' + ms + 'ms:</span>' +
+      '<pre style="white-space:pre-wrap;word-break:break-all;background:var(--rp-bg-alt,#f5f5f5);border:1px solid var(--rp-border,#ddd);border-radius:3px;padding:8px;margin-top:4px;font-size:11px">' + esc(JSON.stringify(rows[0], null, 1)) + '</pre>';
+  } catch(e){
+    var ms2 = Date.now() - start;
+    el.innerHTML = '<span style="color:#c62828">✗ Fehler nach ' + ms2 + 'ms: ' + esc((e && e.message) || String(e)) + '</span>';
+  }
+}
 async function rpApiLoadRoster(force){
   /* WICHTIG: rpApiUse() konfiguriert AprikoApi (Gateway/Target/Token-Callback) frisch. Wird diese
      Funktion über "Jetzt laden"/"neu laden" direkt angeklickt (ohne vorherigen rpApiMatch-Aufruf,
@@ -12849,28 +12884,38 @@ async function rpApiLoadRoster(force){
        erneut versuchen ohne vorherige Prüfung, welche Schreibweise Apriko tatsächlich erwartet.
        dataType "text" (wie bisher) liefert zuverlässig 0 Treffer statt eines Fehlers — sicherer
        Rückfall-Zustand, auch wenn dieser Fast-Path dadurch faktisch wirkungslos bleibt. */
-    rpApiProgress('🔌 <b>Einsatzliste:</b> versuche gezielt nur aktive Einsätze zu holen …');
+    /* NEUER ANSATZ 11.09.2026: Das abgeleitete Boolean-Feld isActivePendingVacantOrSinceRecentlyInactive
+       lieferte trotz korrektem Format (JSON-kodierter Wert, ["G1"]-Array) zuverlässig 0 Treffer — auch
+       nach über 1450 durchsuchten Datensätzen in der vollen Paginierung fand sich kein einziger
+       relevanter Status, was auf sehr viel Historie VOR den aktuellen Einsätzen hindeutet (Liste
+       scheint alt→neu sortiert, kein Sortier-Parameter am Endpunkt verfügbar). Deshalb jetzt direkt
+       auf das state-Feld selbst filtern, mit dem ANY-Operator für mehrere erlaubte Werte auf einmal
+       (dokumentiertes Beispiel: id|ANY|["Wert1","Wert2"]|Text|false|false|[]). */
+    rpApiProgress('🔌 <b>Einsatzliste:</b> versuche gezielt nur kürzlich aktualisierte Einsätze zu holen …');
     var aktivDiagnose = '';
-    /* WICHTIG: query darf hier nicht '' sein — eine leere Anfrage lieferte in einem früheren Test
-       bereits 0 Treffer, unabhängig von etwaigen Filtern (offenbar wird ohne Suchtext die ganze
-       Match-Stufe übersprungen). Deshalb query-Feld hier ganz weglassen (undefined), nicht ''. */
+    /* NOCH NEUERER ANSATZ 11.09.2026: state-Filter (auch mit ANY) fand ebenfalls 0 Treffer, selbst
+       nach 1450+ durchsuchten Datensätzen in der vollen Paginierung — bei >1000 Einsätzen insgesamt
+       über viele Jahre (bestätigt) ist reines Durchblättern unrealistisch. Neuer Versuch: nach
+       kürzlich AKTUALISIERTEN Einsätzen filtern (updatedTime) statt nach Status — ein laufender,
+       langjähriger Einsatz hat ein alte entryDate, aber vermutlich ein kürzliches updatedTime
+       (Lohnlauf, Statusprüfung etc.), während wirklich abgeschlossene/archivierte Einsätze seit
+       Jahren nicht mehr angefasst wurden. */
+    var cutoffDatum = new Date(Date.now() - 200 * 86400000).toISOString();   // ~200 Tage zurück
     try {
       var aktivR = await AprikoApi.models.query({
         entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 100, resolveReferences: false,
-        filters: 'isActivePendingVacantOrSinceRecentlyInactive|=|"true"|text|false|false|["G1"]'
+        filters: 'updatedTime|>=|' + JSON.stringify(cutoffDatum) + '|date|false|false|["G1"]'
       });
       var aktivRows = ((aktivR && aktivR.results) || []).map(AprikoApi.models.hitData);
-      // Auch hier den state-Filter anwenden — der Feldname sagt "...OrSinceRecentlyInactive",
-      // könnte also auch kürzlich inaktive Einsätze mitliefern, die uns laut Vorgabe nicht interessieren.
       aktivRows = aktivRows.filter(function(p){ return RP_RELEVANTE_STATES.indexOf(p.state) >= 0; });
       if(aktivRows.length){
         placements = aktivRows;
         ladeMethode = 'aktiv-filter';
-        aktivDiagnose = aktivRows.length + ' Treffer über Aktiv-Filter (nach state-Filter)';
+        aktivDiagnose = aktivRows.length + ' Treffer über updatedTime-Filter (nach state-Bestätigung)';
       } else {
-        aktivDiagnose = '0 Treffer über Aktiv-Filter — Rückfall auf komplette Liste';
+        aktivDiagnose = '0 Treffer über updatedTime-Filter — Rückfall auf komplette Liste';
       }
-    } catch(afe){ aktivDiagnose = 'Aktiv-Filter fehlgeschlagen (' + esc((afe && afe.message) || String(afe)).slice(0,150) + ') — Rückfall auf komplette Liste'; }
+    } catch(afe){ aktivDiagnose = 'updatedTime-Filter fehlgeschlagen (' + esc((afe && afe.message) || String(afe)).slice(0,150) + ') — Rückfall auf komplette Liste'; }
     rpApiProgress('🔌 <b>Einsatzliste:</b> ' + esc(aktivDiagnose) + (ladeMethode === 'liste' ? ' — lade nun komplette Liste …' : ''));
     // Bulk-Abruf über den echten Listen-Endpunkt (GET /StaffLeasePlacements, staffing-Service) —
     // NICHT über /models/Query: eine leere Volltextsuche ("") liefert dort 0 Treffer statt "alles",
@@ -13613,7 +13658,7 @@ function rpApiRender(){
     (st.viaText ? '<br><span style="color:var(--rp-grey);font-size:11px">Einsätze via Volltextsuche' + (st.textVerifiziert ? ', über die Personen-ID verifiziert' : ' — Personen-ID nicht bestätigt, bitte Beleg prüfen') + '; ID-Filter: ' + esc((st.protokoll || []).join(' · ')) + '.</span>' : '') +
     uebernahmeBtn;
 }
-if (typeof window !== 'undefined'){ window.rpApiSelectPerson = rpApiSelectPerson; window.rpApiSelectEinsatz = rpApiSelectEinsatz; window.rpDbTest = rpDbTest; window.rpDbInit = rpDbInit; window.rpDbCfg = rpDbCfg; window.rpApiUse = rpApiUse; window.rpApiTestEinzeln = rpApiTestEinzeln; }
+if (typeof window !== 'undefined'){ window.rpApiSelectPerson = rpApiSelectPerson; window.rpApiSelectEinsatz = rpApiSelectEinsatz; window.rpDbTest = rpDbTest; window.rpDbInit = rpDbInit; window.rpDbCfg = rpDbCfg; window.rpApiUse = rpApiUse; window.rpApiTestEinzeln = rpApiTestEinzeln; window.rpApiLookupEinsatzNr = rpApiLookupEinsatzNr; }
 if (typeof window !== 'undefined') window.rpApiMatch = rpApiMatch;   // für Tests/Debugging erreichbar
 
 function showGavSuggestion(gavKey, firma){
