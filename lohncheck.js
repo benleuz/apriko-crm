@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.120.0";
+const LC_VERSION = "1.122.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -523,20 +523,27 @@ function lcCheckAll(slips) {
     });
 
 
-    // Punkt 10 (korrigiert 14.09.2026): unrealistische Lohnfortzahlung/Tagegeldzahlung — geprüft
-    // wird AUSSCHLIESSLICH der Taggeldsatz PRO TAG, nie der Gesamtbetrag als Ersatz dafür (das war
-    // der Bug: 40 Tage × CHF 200 = CHF 8'000 hätte fälschlich anhand des Totals flaggen können,
-    // während 9 Tage × CHF 1'154 wegen fehlendem/falschem ansatz-Wert eben NICHT flaggte — genau
-    // umgekehrt zum gewünschten Verhalten). Satz bevorzugt aus der Ansatz-Spalte, sonst aus
-    // Betrag ÷ Anzahl rekonstruiert. Üblicher Bereich CHF 150–250/Tag, > 350 klar unrealistisch
-    // (bewusster Sicherheitsabstand zum Graubereich). Lässt sich weder Ansatz noch Anzahl sauber
-    // bestimmen, aber die Position sieht auffällig aus, gibt es trotzdem einen Hinweis statt
-    // stillschweigend zu passieren — bleibt aber gelb (Differenzen-Rubrik), nicht grau/manuell.
+    // Punkt 10 (korrigiert 14.09.2026, zweiter Fix): unrealistische Lohnfortzahlung/Tagegeldzahlung
+    // — geprüft wird AUSSCHLIESSLICH der Taggeldsatz PRO TAG, nie der Gesamtbetrag als Ersatz dafür.
+    // ZWEITER FUND (echtes Beispiel): bei prozentualen Lohnfortzahlungen (z.B. 100% Krankentaggeld)
+    // steht in der Ansatz-Spalte die PROZENTZAHL (z.B. "100"), nicht der CHF-Tagessatz — der sitzt
+    // stattdessen in der Basis-Spalte (z.B. Basis 1'190.60 × Ansatz 100% = Tagessatz 1'190.60). Ohne
+    // Gegenprobe hätte man fälschlich den Ansatz-Wert (100, unauffällig) statt des echten Tagessatzes
+    // geprüft. Deshalb: wenn Basis+Ansatz+Anzahl+Betrag vorhanden sind, zuerst versuchen, ob
+    // Basis × (Ansatz/100) × Anzahl den gedruckten Betrag korrekt ergibt (Gegenprobe) — nur dann gilt
+    // Ansatz als Prozentsatz und Basis als eigentlicher Tagessatz. Sonst Ansatz direkt als CHF-Satz
+    // werten, sonst aus Betrag ÷ Anzahl rekonstruieren. Üblicher Bereich CHF 150–250/Tag, > 350 klar
+    // unrealistisch. Lässt sich nichts davon sauber bestimmen, aber die Position sieht auffällig aus,
+    // gibt es trotzdem einen Hinweis statt stillschweigend zu passieren — bleibt gelb, nicht grau.
     s.rows.forEach(r => {
       if (r.isTotal || !/Tagegeld|Taggeld|Lohnfortzahlung/i.test(r.label)) return;
       let taggeldsatz = null;
-      if (r.ansatz !== null && r.ansatz > 0) taggeldsatz = r.ansatz;
-      else if (r.anzahl !== null && r.anzahl > 0 && r.betrag !== null) taggeldsatz = Math.abs(r.betrag) / r.anzahl;
+      if (r.basis !== null && r.basis > 0 && r.ansatz !== null && r.ansatz > 0 && r.anzahl !== null && r.anzahl > 0 && r.betrag !== null) {
+        const rekonstruiert = r.basis * (r.ansatz / 100) * r.anzahl;
+        if (lcNear(rekonstruiert, Math.abs(r.betrag), Math.max(1, Math.abs(r.betrag) * 0.02))) taggeldsatz = r.basis * (r.ansatz / 100);
+      }
+      if (taggeldsatz === null && r.ansatz !== null && r.ansatz > 0) taggeldsatz = r.ansatz;
+      else if (taggeldsatz === null && r.anzahl !== null && r.anzahl > 0 && r.betrag !== null) taggeldsatz = Math.abs(r.betrag) / r.anzahl;
       if (taggeldsatz !== null) {
         if (taggeldsatz > 350)
           add(s, "rot", "Tagegeld unrealistisch", "Unrealistisch hoher Taggeldsatz erkannt: " + (r.anzahl !== null ? r.anzahl + " Tage × " : "") + "CHF " + lcFmt(taggeldsatz) + " (" + r.code + " " + r.label + "). Bitte Taggeldsatz / Lohnfortzahlung überprüfen.");
@@ -1448,16 +1455,19 @@ function lcRenderListRow(l) {
         <span style="font-size:11px;color:var(--text-faint)">${l.zeilen.length} Zeile(n)</span>
         <button class="btn btn-sm" style="margin-left:auto" onclick="lcEntferneListe('${l.id}')">✕</button>
       </div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;font-size:11px">
-        ${Object.keys(feldLabel).map(feld => `
-          <label style="display:flex;align-items:center;gap:4px;color:var(--text-faint)">${feldLabel[feld]}:
-            <select onchange="lcSetSpalte('${l.id}','${feld}',this.value)" style="font-size:11px;padding:2px 4px">
-              <option value="">—</option>
-              ${l.spalten.map(s => `<option value="${escape(s)}" ${s === map[feld] ? "selected" : ""}>${escape(s)}</option>`).join("")}
-            </select>
-          </label>`).join("")}
-      </div>
-      ${!map.ahv && !map.name ? `<div style="font-size:11px;color:var(--warn);margin-top:6px">⚠ Weder AHV-Nr- noch Name-Spalte erkannt/gesetzt — diese Liste kann aktuell nicht für den Mitarbeiter-Abgleich verwendet werden.</div>` : ""}
+      <details style="margin-top:6px">
+        <summary style="cursor:pointer;font-size:11px;color:var(--text-faint)">Spalten zuordnen</summary>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;font-size:11px">
+          ${Object.keys(feldLabel).map(feld => `
+            <label style="display:flex;align-items:center;gap:4px;color:var(--text-faint)">${feldLabel[feld]}:
+              <select onchange="lcSetSpalte('${l.id}','${feld}',this.value)" style="font-size:11px;padding:2px 4px">
+                <option value="">—</option>
+                ${l.spalten.map(s => `<option value="${escape(s)}" ${s === map[feld] ? "selected" : ""}>${escape(s)}</option>`).join("")}
+              </select>
+            </label>`).join("")}
+        </div>
+      </details>
+      ${!map.ahv && !map.name ? `<div style="font-size:11px;color:var(--warn);margin-top:6px">⚠ Weder AHV-Nr- noch Name-Spalte erkannt/gesetzt — diese Liste kann aktuell nicht für den Mitarbeiter-Abgleich verwendet werden. Oben „Spalten zuordnen" öffnen und korrigieren.</div>` : ""}
     </div>`;
 }
 
