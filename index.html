@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.209.0"></script>
-<script src="apriko-api.js?v=1.209.0"></script>
-<script src="lohncheck.js?v=1.209.0"></script>
-<script src="personalbudget.js?v=1.209.0"></script>
-<script src="jahresbudget.js?v=1.209.0"></script>
-<script src="budgetpositionen.js?v=1.209.0"></script>
-<script src="lohnchecklistetemp.js?v=1.209.0"></script>
+<script src="apriko-filters.js?v=1.210.0"></script>
+<script src="apriko-api.js?v=1.210.0"></script>
+<script src="lohncheck.js?v=1.210.0"></script>
+<script src="personalbudget.js?v=1.210.0"></script>
+<script src="jahresbudget.js?v=1.210.0"></script>
+<script src="budgetpositionen.js?v=1.210.0"></script>
+<script src="lohnchecklistetemp.js?v=1.210.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -980,7 +980,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.209.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.210.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12828,7 +12828,7 @@ async function rpApiLookupEinsatzNr(){
     rpApiUse();
     var res = await AprikoApi.models.query({
       entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 10, resolveReferences: false,
-      filters: 'number|=|' + JSON.stringify(parseInt(nr, 10)) + '|numeric|false|false|["G1"]'
+      filters: 'placementNumber|=|' + JSON.stringify(parseInt(nr, 10)) + '|numeric|false|false|["G1"]'
     });
     var rows = ((res && res.results) || []).map(AprikoApi.models.hitData);
     var ms = Date.now() - start;
