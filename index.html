@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.202.0"></script>
-<script src="apriko-api.js?v=1.202.0"></script>
-<script src="lohncheck.js?v=1.202.0"></script>
-<script src="personalbudget.js?v=1.202.0"></script>
-<script src="jahresbudget.js?v=1.202.0"></script>
-<script src="budgetpositionen.js?v=1.202.0"></script>
-<script src="lohnchecklistetemp.js?v=1.202.0"></script>
+<script src="apriko-filters.js?v=1.204.0"></script>
+<script src="apriko-api.js?v=1.204.0"></script>
+<script src="lohncheck.js?v=1.204.0"></script>
+<script src="personalbudget.js?v=1.204.0"></script>
+<script src="jahresbudget.js?v=1.204.0"></script>
+<script src="budgetpositionen.js?v=1.204.0"></script>
+<script src="lohnchecklistetemp.js?v=1.204.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -980,7 +980,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.202.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.204.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -1023,6 +1023,10 @@
           <div id="rpDbTestResult" style="margin-top:8px"></div>
           <div style="font-size:10.5px;color:var(--rp-grey);margin-top:6px">Mit Benutzername/Passwort holt sich das Tool den Zugangsschlüssel (Token) selbst und erneuert ihn bei Ablauf automatisch. Alles leer lassen = Verbindung aus dem Menü «Apriko API (POC)». Eine andere Instanz muss beim Proxy auf der Ziel-Allowlist stehen (APRIKO_BASES). Zugangsdaten bleiben lokal in diesem Browser.</div>
         </details>
+        <div style="margin-top:8px">
+          <button type="button" class="rp-btn-sm" onclick="rpApiTestEinzeln()">🔍 Isolierter Test: eine einzelne listStaffLease-Anfrage (wie in Apriko API POC)</button>
+          <div id="rpApiTestEinzelnErgebnis" style="margin-top:6px;font-size:11.5px"></div>
+        </div>
       </div>
 
       <!-- 1 Upload -->
@@ -6564,14 +6568,16 @@ async function apSpeichereAlsTarifartenstamm(stumm) {
   const zeilen = rows.filter(r => typeof r.number === "number").map(r => ({
     Code: r.number, Bezeichnung: r.name || r.displayName || "",
     "Marge-Stufe": r.grossMarginLevel === "None" ? "" : r.grossMarginLevel,
-    Aktiv: r.isActive ? "Ja" : "", Synonyme: r.synonyms || ""
+    Aktiv: r.isActive ? "Ja" : "", Gesperrt: r.isLocked ? "Ja" : "",
+    "Gültig ab": apFmtDate(r.validFrom), "Gültig bis": apFmtDate(r.validUntil),
+    Synonyme: r.synonyms || ""
   }));
   if (!stumm && !confirm(zeilen.length + " Tarifarten aus Apriko als Tarifartenstamm speichern? Eine evtl. bereits vorhandene Liste wird ersetzt.")) return;
   await tarifartenLaden(false);
   tarifartenStamm = {
     dateiname: "Apriko API (RateTypes, live übernommen " + new Date().toLocaleDateString("de-CH") + ")",
     hochgeladenAm: new Date().toISOString(),
-    spalten: ["Code", "Bezeichnung", "Marge-Stufe", "Aktiv", "Synonyme"],
+    spalten: ["Code", "Bezeichnung", "Marge-Stufe", "Aktiv", "Gesperrt", "Gültig ab", "Gültig bis", "Synonyme"],
     zeilen
   };
   try { await tarifartenSpeichern(); if (!stumm) toast(zeilen.length + " Tarifarten übernommen und gespeichert."); }
@@ -6620,7 +6626,7 @@ async function renderTarifarten(el) {
     </div>
     <div class="card" style="padding:0">
       <div class="table-wrap"><table style="table-layout:fixed;width:100%">
-        <colgroup>${spalten.map(s => `<col style="width:${s === "Bezeichnung" || s === "Synonyme" ? 220 : s === "Code" ? 60 : 110}px">`).join("")}</colgroup>
+        <colgroup>${spalten.map(s => `<col style="width:${s === "Bezeichnung" || s === "Synonyme" ? 220 : s === "Code" ? 60 : (s === "Gültig ab" || s === "Gültig bis") ? 90 : s === "Gesperrt" ? 70 : 110}px">`).join("")}</colgroup>
         <thead><tr>${spalten.map(s => `<th title="${escape(s)}" style="white-space:normal;line-height:1.25">${escape(s)}</th>`).join("")}</tr></thead>
         <tbody>${zeilen.map(z => `<tr>${spalten.map(s => `<td title="${escape(String(z[s] ?? ""))}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap${typeof z[s] === "number" ? ";text-align:right;font-family:var(--font-mono)" : ""}">${escape(String(z[s] ?? ""))}</td>`).join("")}</tr>`).join("")}</tbody>
       </table></div>
@@ -6766,6 +6772,9 @@ const AP_COLS = {
     ["name", "Bezeichnung", r => r.name || r.displayName],
     ["margin", "Marge-Stufe", r => r.grossMarginLevel === "None" ? "" : r.grossMarginLevel],
     ["active", "Aktiv", r => r.isActive ? "✓" : ""],
+    ["locked", "Gesperrt", r => r.isLocked ? "✓" : ""],
+    ["validFrom", "Gültig ab", r => apFmtDate(r.validFrom)],
+    ["validUntil", "Gültig bis", r => apFmtDate(r.validUntil)],
     ["synonyms", "Synonyme", r => r.synonyms || ""],
     ["updated", "Geändert", r => apFmtDate(r.updatedTime)]
   ]
@@ -12777,6 +12786,28 @@ function rpApiProgress(html){
     if(mb) mb.innerHTML = '<div style="padding:20px 0">' + html + '</div>';
   }
 }
+
+/* Isolierter Vergleichs-Test (11.09.2026): EXAKT derselbe Aufruf, der in der Apriko-API-POC-Ansicht
+   nachweislich funktioniert (listStaffLease sequenziell, pageSize 100) — aber HIER, im
+   Rapport-Kontext, komplett ohne die ganze Roster-Maschinerie drumherum (kein Aktiv-Filter, keine
+   Batches, kein State-Filter). Soll zeigen, ob der Unterschied wirklich am Kontext liegt oder ob
+   noch irgendwo eine unsichtbare Race Condition/Blockade steckt. */
+async function rpApiTestEinzeln(){
+  var el = document.getElementById('rpApiTestEinzelnErgebnis');
+  if(!el) return;
+  el.innerHTML = '<span style="color:var(--rp-grey)">Läuft …</span>';
+  var start = Date.now();
+  try {
+    rpApiUse();
+    var rows = await AprikoApi.staffing.listStaffLease(0, 100);
+    var ms = Date.now() - start;
+    el.innerHTML = '<span style="color:#2e7d32">✓ Erfolgreich in ' + ms + 'ms — ' + (rows ? rows.length : 0) + ' Einsätze erhalten (roh, vor Status-Filter).</span>' +
+      (rows && rows.length ? '<div style="color:var(--rp-grey);margin-top:4px">Erster Datensatz: ' + esc(JSON.stringify({id: rows[0].id, state: rows[0].state, entryDate: rows[0].entryDate}).slice(0,200)) + '</div>' : '');
+  } catch(e){
+    var ms2 = Date.now() - start;
+    el.innerHTML = '<span style="color:#c62828">✗ Fehler nach ' + ms2 + 'ms: ' + esc((e && e.message) || String(e)) + '</span>';
+  }
+}
 async function rpApiLoadRoster(force){
   /* WICHTIG: rpApiUse() konfiguriert AprikoApi (Gateway/Target/Token-Callback) frisch. Wird diese
      Funktion über "Jetzt laden"/"neu laden" direkt angeklickt (ohne vorherigen rpApiMatch-Aufruf,
@@ -12848,7 +12879,7 @@ async function rpApiLoadRoster(force){
     // direkt als Array (keine Suchtreffer-Hülle wie bei /models/Query). Über mehrere Seiten, bis
     // eine Seite leer ist oder der Sicherheitsdeckel greift. Sortierreihenfolge ist nicht
     // dokumentiert, deshalb wird über alle gelieferten Seiten client-seitig nach Datum gefiltert.
-    var ROSTER_PAGE_SIZE = 100;   // Apriko meldet explizit "PageSize must be between 1 and 120" (gefunden 11.09.2026 über die Aktiv-Filter-Fehlermeldung, /models/Query) — vermutlich gilt dieselbe Grenze auch hier; bisher 150/500 verwendet, das war der eigentliche Fehler die ganze Zeit, nicht das Filter-Format.
+    var ROSTER_PAGE_SIZE = 50;   // 11.09.2026: exakt derselbe Wert wie AP_PAGE_SIZE in der API-POC-Ansicht, wo derselbe Endpunkt (listStaffLease) nachweislich funktioniert hat (50 geladen, sauber). Selbst 100 hing trotz sequenziellem Laden bis zum Zeitlimit fest — der genaue Grund unklar, aber 50 ist der einzige bewiesenermassen funktionierende Wert.
     var ROSTER_MAX_SEKUNDEN = 45;   // harte Zeitbremse — lieber unvollständig als endlos warten
     // Gefunden 11.09.2026: die Liste scheint chronologisch alt→neu sortiert zu sein (kein
     // Sortier-Parameter am Endpunkt verfügbar, siehe OpenAPI-Spec) — Seite 1 kann daher 0 aktuell
