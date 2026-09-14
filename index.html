@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.205.0"></script>
-<script src="apriko-api.js?v=1.205.0"></script>
-<script src="lohncheck.js?v=1.205.0"></script>
-<script src="personalbudget.js?v=1.205.0"></script>
-<script src="jahresbudget.js?v=1.205.0"></script>
-<script src="budgetpositionen.js?v=1.205.0"></script>
-<script src="lohnchecklistetemp.js?v=1.205.0"></script>
+<script src="apriko-filters.js?v=1.206.0"></script>
+<script src="apriko-api.js?v=1.206.0"></script>
+<script src="lohncheck.js?v=1.206.0"></script>
+<script src="personalbudget.js?v=1.206.0"></script>
+<script src="jahresbudget.js?v=1.206.0"></script>
+<script src="budgetpositionen.js?v=1.206.0"></script>
+<script src="lohnchecklistetemp.js?v=1.206.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -980,7 +980,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.205.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.206.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12880,7 +12880,7 @@ async function rpApiLoadRoster(force){
     // eine Seite leer ist oder der Sicherheitsdeckel greift. Sortierreihenfolge ist nicht
     // dokumentiert, deshalb wird über alle gelieferten Seiten client-seitig nach Datum gefiltert.
     var ROSTER_PAGE_SIZE = 50;   // 11.09.2026: exakt derselbe Wert wie AP_PAGE_SIZE in der API-POC-Ansicht, wo derselbe Endpunkt (listStaffLease) nachweislich funktioniert hat (50 geladen, sauber). Selbst 100 hing trotz sequenziellem Laden bis zum Zeitlimit fest — der genaue Grund unklar, aber 50 ist der einzige bewiesenermassen funktionierende Wert.
-    var ROSTER_MAX_SEKUNDEN = 45;   // harte Zeitbremse — lieber unvollständig als endlos warten
+    var ROSTER_MAX_SEKUNDEN = 180;   // harte Zeitbremse — 11.09.2026 gemessen: eine einzelne Seite (100 Einsätze) brauchte 11.6s (Tunnel-Latenz), und die Liste ist alt→neu sortiert — bei 45s kamen wir nur 3-4 Seiten weit, die aktuellen Einsätze liegen vermutlich viel weiter hinten. 180s erlaubt ~15 Seiten.
     // Gefunden 11.09.2026: die Liste scheint chronologisch alt→neu sortiert zu sein (kein
     // Sortier-Parameter am Endpunkt verfügbar, siehe OpenAPI-Spec) — Seite 1 kann daher 0 aktuell
     // relevante Einsätze enthalten, obwohl weiter hinten viele stecken. UND: jede einzelne Anfrage
