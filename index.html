@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.194.0"></script>
-<script src="apriko-api.js?v=1.194.0"></script>
-<script src="lohncheck.js?v=1.194.0"></script>
-<script src="personalbudget.js?v=1.194.0"></script>
-<script src="jahresbudget.js?v=1.194.0"></script>
-<script src="budgetpositionen.js?v=1.194.0"></script>
-<script src="lohnchecklistetemp.js?v=1.194.0"></script>
+<script src="apriko-filters.js?v=1.196.0"></script>
+<script src="apriko-api.js?v=1.196.0"></script>
+<script src="lohncheck.js?v=1.196.0"></script>
+<script src="personalbudget.js?v=1.196.0"></script>
+<script src="jahresbudget.js?v=1.196.0"></script>
+<script src="budgetpositionen.js?v=1.196.0"></script>
+<script src="lohnchecklistetemp.js?v=1.196.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -954,6 +954,7 @@
           <button data-view="clfibu"><span class="ic">☑</span> FIBU Monatsabschluss</button>
           <button data-view="lct"><span class="ic">☑</span> Checkliste Lohn Temp 2.0</button>
           <button data-view="lohnartenstamm"><span class="ic">📋</span> Lohnartenstamm</button>
+          <button data-view="tarifarten"><span class="ic">🏷️</span> Tarifarten</button>
           <button data-view="lohncheck"><span class="ic">🧾</span> Ultimativer Check</button>
         </div>
       </div>
@@ -979,7 +980,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.194.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.196.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -1413,7 +1414,7 @@ let currentView = DEMO_ANON ? "einsatzdash" : "dashboard";
    Berechtigungssystem
    =========================================================== */
 const SUPER_ADMIN_EMAIL = "benjamin@apriko.com";  // hat immer volle Rechte
-const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","rapport","einsatzdash","konzern","lohncheck","apipoc","profiles"];
+const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","lohncheck","apipoc","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
@@ -1424,6 +1425,7 @@ const VIEW_TITLES = {
   bpocheck: "Lohn Checkliste Temp", clintern: "Lohn Checkliste intern", clfibu: "FIBU Monatsabschluss",
   lct: "Checkliste Lohn Temp 2.0",
   lohnartenstamm: "Lohnartenstamm",
+  tarifarten: "Tarifarten",
   rapport: "Rapport", einsatzdash: "Kundendashboard", konzern: "Konzernanalyse",
   lohncheck: "Ultimativer Check", apipoc: "Apriko API (POC)",
   profiles: "Profile"
@@ -1890,6 +1892,7 @@ function render() {
   else if (currentView === "konzern") renderKonzern(content);
   else if (currentView === "lohncheck") renderLohncheck(content);
   else if (currentView === "lohnartenstamm") renderLohnartenstamm(content);
+  else if (currentView === "tarifarten") renderTarifarten(content);
   else if (currentView === "personalbudget") renderPersonalBudget(content);
   else if (currentView === "jahresbudget") renderJahresbudget(content);
   else if (currentView === "budgetpos") renderBudgetpositionen(content);
@@ -6203,9 +6206,9 @@ function kaHeat(v, min, max, higherBetter) {
 const AP_CFG_KEY = "apriko-api-cfg";
 let apState = {
   tab: "people",             // people | companies | placements | salarytypes
-  rows: { people: [], companies: [], placements: [], salarytypes: [] },
-  page: { people: 0, companies: 0, placements: 0, salarytypes: 0 },
-  done: { people: false, companies: false, placements: false, salarytypes: false },
+  rows: { people: [], companies: [], placements: [], salarytypes: [], tarifarten: [] },
+  page: { people: 0, companies: 0, placements: 0, salarytypes: 0, tarifarten: 0 },
+  done: { people: false, companies: false, placements: false, salarytypes: false, tarifarten: false },
   loading: false,
   error: null,
   info: null,                // ServiceInfos-Antwort (Verbindungstest)
@@ -6336,6 +6339,8 @@ async function apLoadMore(tab) {
       ? await AprikoApi.staffing.listStaffLease(apState.page[tab], AP_PAGE_SIZE)
       : tab === "salarytypes"
       ? await AprikoApi.payrollaccounting.listSalaryTypes(apState.page[tab], AP_PAGE_SIZE)
+      : tab === "tarifarten"
+      ? await AprikoApi.receivableaccounting.listRateTypes(apState.page[tab], AP_PAGE_SIZE)
       : await AprikoApi.people.listIndividual(apState.page[tab], AP_PAGE_SIZE);
     const arr = Array.isArray(data) ? data : [];
     apState.rows[tab] = apState.rows[tab].concat(arr);
@@ -6345,18 +6350,19 @@ async function apLoadMore(tab) {
   apState.loading = false; render();
 }
 function apReset() {
-  apState.rows = { people: [], companies: [], placements: [], salarytypes: [] }; apState.page = { people: 0, companies: 0, placements: 0, salarytypes: 0 };
-  apState.done = { people: false, companies: false, placements: false, salarytypes: false }; apState.error = null; render();
+  apState.rows = { people: [], companies: [], placements: [], salarytypes: [], tarifarten: [] }; apState.page = { people: 0, companies: 0, placements: 0, salarytypes: 0, tarifarten: 0 };
+  apState.done = { people: false, companies: false, placements: false, salarytypes: false, tarifarten: false }; apState.error = null; render();
 }
 function apTab(t) {
   apState.tab = t; apState.filters = {};
-  apState.sort = t === "salarytypes" ? { col: "number", dir: 1 } : { col: null, dir: 1 };
+  apState.sort = (t === "salarytypes" || t === "tarifarten") ? { col: "number", dir: 1 } : { col: null, dir: 1 };
   if (t === "salarytypes" && !apState.rows.salarytypes.length && !apState.loading) apLadeSalarytypesKomplett(false);
+  if (t === "tarifarten" && !apState.rows.tarifarten.length && !apState.loading) apLadeTarifartenKomplett(false);
   render();
 }
 /* Lädt für einen Tab alle Seiten am Stück, statt manuell "+ N weitere" klicken zu müssen —
-   für Lohnarten sinnvoll, da überschaubare Menge (im Gegensatz zu Personen/Einsätzen, die
-   bewusst weiterhin manuell nachgeladen werden, um nicht versehentlich zehntausende zu ziehen). */
+   für Lohnarten/Tarifarten sinnvoll, da überschaubare Menge (im Gegensatz zu Personen/Einsätzen,
+   die bewusst weiterhin manuell nachgeladen werden, um nicht versehentlich zehntausende zu ziehen). */
 async function apLoadAlle(tab) {
   while (!apState.done[tab] && !apState.error) { await apLoadMore(tab); }
 }
@@ -6391,6 +6397,35 @@ async function apLadeSalarytypesKomplett(force) {
     // "übernehmen"-Klick mehr nötig, der lokale Cache und der geteilte Stamm laufen sonst
     // auseinander (genau das gemeldete Problem: "wir cachen den ja, du solltest ihn finden").
     try { await apSpeichereAlsLohnartenstamm(true); } catch (e) { /* Fehler wird in apSpeichereAlsLohnartenstamm selbst gemeldet */ }
+  }
+  render();
+}
+/* Tarifarten (receivableaccounting/RateTypes) — gleiches Cache-Muster wie Lohnarten. KEIN
+   Gegenkonto-Feld verfügbar (im Schema gründlich gesucht, siehe Chat vom 11.09.2026) — daher auch
+   kein BookingAccounts-Abgleich wie bei den Lohnarten nötig. */
+const AP_TARIFARTEN_CACHE_KEY = "apriko-tarifarten-cache";
+function apTarifartenCacheLesen() { try { return JSON.parse(localStorage.getItem(AP_TARIFARTEN_CACHE_KEY) || "null"); } catch (e) { return null; } }
+function apTarifartenCacheSchreiben() {
+  try { localStorage.setItem(AP_TARIFARTEN_CACHE_KEY, JSON.stringify({ rows: apState.rows.tarifarten, savedAt: new Date().toISOString() })); }
+  catch (e) { /* z.B. Speicher voll — Cache ist nur eine Optimierung, kein Problem wenn's scheitert */ }
+}
+async function apLadeTarifartenKomplett(force) {
+  if (!force) {
+    const cached = apTarifartenCacheLesen();
+    if (cached && cached.rows && cached.rows.length) {
+      apState.rows.tarifarten = cached.rows;
+      apState.done.tarifarten = true;
+      apState.tarifartenCacheDatum = cached.savedAt;
+      render();
+      return;
+    }
+  }
+  apState.rows.tarifarten = []; apState.page.tarifarten = 0; apState.done.tarifarten = false;
+  await apLoadAlle("tarifarten");
+  if (!apState.error) {
+    apState.tarifartenCacheDatum = new Date().toISOString();
+    apTarifartenCacheSchreiben();
+    try { await apSpeichereAlsTarifartenstamm(true); } catch (e) { /* Fehler wird dort selbst gemeldet */ }
   }
   render();
 }
@@ -6497,6 +6532,104 @@ async function apSpeichereAlsLohnartenstamm(stumm) {
   catch (e) { toast((stumm ? "Automatisches Übernehmen in den Lohnartenstamm fehlgeschlagen: " : "Speichern fehlgeschlagen: ") + e.message, true); }
 }
 async function apUebernehmeLohnartenliste() { await apSpeichereAlsLohnartenstamm(false); }
+
+/* ============ Tarifartenstamm (Workflows → Tarifarten) ============
+   Eigenständig hier in index.html gehalten (nicht über lohncheck.js), da Tarifarten nicht in den
+   Ultimativ Check einfliessen — reine Nachschlage-Ansicht. Gleiches SharePoint-Speichermuster wie
+   der Lohnartenstamm. KEIN Gegenkonto verfügbar (RateType/BasicRateType/AdditionalRateType im
+   receivableaccounting-Schema gründlich durchsucht, 11.09.2026 — nicht vorhanden). */
+const TARIFARTEN_PFAD = "CRM-Budgetdaten/lc_tarifartenliste.json";
+let tarifartenStamm = null;
+async function tarifartenLaden(force) {
+  if (!force && tarifartenStamm) return tarifartenStamm;
+  let data = null;
+  try { data = await graph(`/sites/${siteId}/drive/root:/${TARIFARTEN_PFAD}:/content`); }
+  catch (e) { data = null; }
+  if (!data || typeof data !== "object") data = { dateiname: null, spalten: [], zeilen: [] };
+  tarifartenStamm = data;
+  return data;
+}
+async function tarifartenSpeichern() {
+  const body = JSON.stringify(tarifartenStamm);
+  try { await graph(`/sites/${siteId}/drive/root:/${TARIFARTEN_PFAD}:/content`, { method: "PUT", body }); }
+  catch (e) {
+    if (!/404|itemNotFound|400/i.test(e.message)) throw e;
+    await graph(`/sites/${siteId}/drive/root/children`, { method: "POST", body: JSON.stringify({ name: "CRM-Budgetdaten", folder: {}, "@microsoft.graph.conflictBehavior": "replace" }) });
+    await graph(`/sites/${siteId}/drive/root:/${TARIFARTEN_PFAD}:/content`, { method: "PUT", body });
+  }
+}
+async function apSpeichereAlsTarifartenstamm(stumm) {
+  const rows = apState.rows.tarifarten;
+  if (!rows.length) { if (!stumm) toast("Keine Tarifarten geladen.", true); return; }
+  const zeilen = rows.filter(r => typeof r.number === "number").map(r => ({
+    Code: r.number, Bezeichnung: r.name || r.displayName || "",
+    "Marge-Stufe": r.grossMarginLevel === "None" ? "" : r.grossMarginLevel,
+    Aktiv: r.isActive ? "Ja" : "", Synonyme: r.synonyms || ""
+  }));
+  if (!stumm && !confirm(zeilen.length + " Tarifarten aus Apriko als Tarifartenstamm speichern? Eine evtl. bereits vorhandene Liste wird ersetzt.")) return;
+  await tarifartenLaden(false);
+  tarifartenStamm = {
+    dateiname: "Apriko API (RateTypes, live übernommen " + new Date().toLocaleDateString("de-CH") + ")",
+    hochgeladenAm: new Date().toISOString(),
+    spalten: ["Code", "Bezeichnung", "Marge-Stufe", "Aktiv", "Synonyme"],
+    zeilen
+  };
+  try { await tarifartenSpeichern(); if (!stumm) toast(zeilen.length + " Tarifarten übernommen und gespeichert."); }
+  catch (e) { toast((stumm ? "Automatisches Übernehmen in den Tarifartenstamm fehlgeschlagen: " : "Speichern fehlgeschlagen: ") + e.message, true); }
+}
+async function apUebernehmeTarifartenliste() { await apSpeichereAlsTarifartenstamm(false); }
+let tarifartenSuche = "";
+let tarifartenRestoreFocus = null;
+function tarifartenSucheSetzen(inp) { tarifartenSuche = inp.value || ""; tarifartenRestoreFocus = { id: inp.id, pos: inp.selectionStart }; render(); }
+function tarifartenCsvExport() {
+  const ta = tarifartenStamm;
+  if (!ta || !ta.zeilen || !ta.zeilen.length) { toast("Kein Tarifartenstamm vorhanden.", true); return; }
+  const spalten = ta.spalten && ta.spalten.length ? ta.spalten : Object.keys(ta.zeilen[0]);
+  const csvZeile = arr => arr.map(v => { const s = String(v == null ? "" : v); return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(";");
+  const csv = "\uFEFF" + [spalten].concat(ta.zeilen.map(z => spalten.map(s => z[s]))).map(csvZeile).join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "Tarifartenstamm_" + new Date().toISOString().slice(0, 10) + ".csv";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+async function renderTarifarten(el) {
+  await tarifartenLaden(false);
+  const ta = tarifartenStamm;
+  document.getElementById("view-actions").innerHTML = `
+    <button class="btn btn-sm" onclick="tarifartenNeuLaden()">🔄 Neu laden</button>
+    ${ta && ta.zeilen && ta.zeilen.length ? `<button class="btn btn-sm" onclick="tarifartenCsvExport()">⇩ Als CSV herunterladen</button>` : ""}`;
+  if (!ta || !ta.zeilen || !ta.zeilen.length) {
+    el.innerHTML = `<div class="empty">Noch kein Tarifartenstamm hinterlegt. Unter <b>Spielwiese → Apriko API (POC) → 🏷️ Tarifarten</b> laden — wird automatisch übernommen und erscheint danach hier.</div>`;
+    return;
+  }
+  const spalten = ta.spalten && ta.spalten.length ? ta.spalten : Object.keys(ta.zeilen[0]);
+  const sortiert = ta.zeilen.slice().sort((a, b) => {
+    const av = parseFloat(String(a.Code).replace(/\D/g, "")), bv = parseFloat(String(b.Code).replace(/\D/g, ""));
+    if (!isNaN(av) && !isNaN(bv)) return av - bv;
+    return String(a.Code ?? "").localeCompare(String(b.Code ?? ""), "de-CH", { numeric: true });
+  });
+  const q = tarifartenSuche.trim().toLowerCase();
+  const zeilen = !q ? sortiert : sortiert.filter(z => spalten.some(s => String(z[s] ?? "").toLowerCase().includes(q)));
+  el.innerHTML = `
+    <div class="card" style="padding:14px 16px;margin-bottom:14px">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px"><b>${escape(ta.dateiname || "Tarifartenstamm")}</b> — ${sortiert.length} Tarifart(en)${zeilen.length !== sortiert.length ? " · " + zeilen.length + " nach Suche" : ""}${ta.hochgeladenAm ? " · zuletzt aktualisiert " + new Date(ta.hochgeladenAm).toLocaleString("de-CH", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}</div>
+      <div style="font-size:11px;color:var(--warn);margin-bottom:8px">⚠ Kein Gegenkonto-Feld in der Apriko-API für Tarifarten vorhanden (gründlich gesucht) — darum hier nicht anzeigbar.</div>
+      <input type="text" id="tarifarten-suche" value="${escape(tarifartenSuche)}" oninput="tarifartenSucheSetzen(this)" placeholder="Suche über alle Spalten …" style="width:100%;max-width:420px;font-size:13px;padding:6px 10px">
+    </div>
+    <div class="card" style="padding:0">
+      <div class="table-wrap"><table style="table-layout:fixed;width:100%">
+        <colgroup>${spalten.map(s => `<col style="width:${s === "Bezeichnung" || s === "Synonyme" ? 220 : s === "Code" ? 60 : 110}px">`).join("")}</colgroup>
+        <thead><tr>${spalten.map(s => `<th title="${escape(s)}" style="white-space:normal;line-height:1.25">${escape(s)}</th>`).join("")}</tr></thead>
+        <tbody>${zeilen.map(z => `<tr>${spalten.map(s => `<td title="${escape(String(z[s] ?? ""))}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap${typeof z[s] === "number" ? ";text-align:right;font-family:var(--font-mono)" : ""}">${escape(String(z[s] ?? ""))}</td>`).join("")}</tr>`).join("")}</tbody>
+      </table></div>
+    </div>`;
+  const rf = tarifartenRestoreFocus;
+  if (rf) { tarifartenRestoreFocus = null; const inp = document.getElementById(rf.id); if (inp) { inp.focus(); const p = Math.min(rf.pos || inp.value.length, inp.value.length); inp.setSelectionRange(p, p); } }
+}
+async function tarifartenNeuLaden() { await tarifartenLaden(true); render(); }
+
 let lohnartenstammSuche = "";
 let lohnartenstammRestoreFocus = null;
 function lohnartenstammSucheSetzen(inp) {
@@ -6627,7 +6760,15 @@ const AP_COLS = {
     ["periodical", "Periodizität", r => r.isPeriodical === true ? "Periodisch" : (r.isPeriodical === false ? "Aperiodisch" : "")],
     ["taxratedet", "QST-Satzbest.", r => r.isTaxRateDetermining ? "✓" : ""],
     ["updated", "Geändert", r => apFmtDate(r.updatedTime)]
-  ])
+  ]),
+  tarifarten: [
+    ["number", "Code", r => r.number],
+    ["name", "Bezeichnung", r => r.name || r.displayName],
+    ["margin", "Marge-Stufe", r => r.grossMarginLevel === "None" ? "" : r.grossMarginLevel],
+    ["active", "Aktiv", r => r.isActive ? "✓" : ""],
+    ["synonyms", "Synonyme", r => r.synonyms || ""],
+    ["updated", "Geändert", r => apFmtDate(r.updatedTime)]
+  ]
 };
 async function apResolveRecruiters() {
   const indIds = [...new Set(
@@ -6678,9 +6819,12 @@ function renderApiPoc(el) {
     <button class="btn btn-sm" onclick="apTest()" ${apState.loading ? "disabled" : ""}>🔗 Verbindung testen</button>
     ${tab === "salarytypes"
       ? `<button class="btn btn-sm" onclick="apLadeSalarytypesKomplett(true)" ${apState.loading ? "disabled" : ""}>🔄 Lohnarten jetzt neu laden</button>`
+      : tab === "tarifarten"
+      ? `<button class="btn btn-sm" onclick="apLadeTarifartenKomplett(true)" ${apState.loading ? "disabled" : ""}>🔄 Tarifarten jetzt neu laden</button>`
       : `<button class="btn btn-sm" onclick="apReset()">↻ Neu laden</button>`}
     ${tab === "salarytypes" && apState.rows.salarytypes.length ? `<button class="btn btn-sm" onclick="apUebernehmeLohnartenliste()">✓ ${apState.rows.salarytypes.length} Lohnarten in den Ultimativ Check übernehmen</button>
-    <button class="btn btn-sm" onclick="apExportSalaryTypesCsv()">⇩ Als CSV herunterladen (mit Soll/Haben, SV-Spalten)</button>` : ""}`;
+    <button class="btn btn-sm" onclick="apExportSalaryTypesCsv()">⇩ Als CSV herunterladen (mit Soll/Haben, SV-Spalten)</button>` : ""}
+    ${tab === "tarifarten" && apState.rows.tarifarten.length ? `<button class="btn btn-sm" onclick="apUebernehmeTarifartenliste()">✓ ${apState.rows.tarifarten.length} Tarifarten in den Tarifartenstamm übernehmen</button>` : ""}`;
   // Tabelle: Filter + Sortierung
   let rows = apState.rows[tab].map((r, i) => ({ r, i, v: Object.fromEntries(cols.map(c => [c[0], c[2](r)])) }));
   const fl = apState.filters;
@@ -6713,6 +6857,7 @@ function renderApiPoc(el) {
         <button class="btn btn-sm" onclick="apTab('companies')" style="${tab === "companies" ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">🏢 Firmen</button>
         <button class="btn btn-sm" onclick="apTab('placements')" style="${tab === "placements" ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">👷 Einsätze</button>
         <button class="btn btn-sm" onclick="apTab('salarytypes')" style="${tab === "salarytypes" ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">💰 Lohnarten</button>
+        <button class="btn btn-sm" onclick="apTab('tarifarten')" style="${tab === "tarifarten" ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">🏷️ Tarifarten</button>
         <span style="font-size:11px;color:var(--text-dim);margin-left:auto">${total} geladen${rows.length !== total ? " · " + rows.length + " nach Filter" : ""}${apState.done[tab] ? " · alle" : ""}${tab === "salarytypes" && apState.salarytypesCacheDatum ? ` · aus Cache vom ${new Date(apState.salarytypesCacheDatum).toLocaleString("de-CH", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : ""}</span>
         <button class="btn btn-sm" onclick="apLoadMore('${tab}')" ${apState.loading || apState.done[tab] || !(verbunden || cfg.token) ? "disabled" : ""}>${apState.loading ? "Lädt …" : (total ? "+ " + AP_PAGE_SIZE + " weitere" : "▶ Laden")}</button>
       </div>
@@ -12681,7 +12826,7 @@ async function rpApiLoadRoster(force){
     try {
       var aktivR = await AprikoApi.models.query({
         entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 500, resolveReferences: false,
-        filters: 'isActivePendingVacantOrSinceRecentlyInactive|=|true|text|false|false|G1'
+        filters: 'isActivePendingVacantOrSinceRecentlyInactive|=|true|text|false|false|["G1"]'
       });
       var aktivRows = ((aktivR && aktivR.results) || []).map(AprikoApi.models.hitData);
       // Auch hier den state-Filter anwenden — der Feldname sagt "...OrSinceRecentlyInactive",
@@ -12778,7 +12923,7 @@ async function rpApiLoadRoster(force){
     rpApiProgress('🔌 <b>Einsatzliste fertig geladen</b> — ' + Object.keys(mitarbeiter).length + ' Mitarbeitende, ' + Object.keys(kunden).length + ' Kunden.<br>' +
       '<span style="color:var(--rp-grey);font-size:11px">Zeit: ' + ladeSekundenGesamt + 's Liste laden (' + placements.length + ' Einsätze, Methode: ' + (ladeMethode === 'aktiv-filter' ? 'gezielter Aktiv-Filter' : 'komplette Liste paginiert') + ') + ' + aufloeseSekunden + 's Namen auflösen.</span>' +
       (zeitlimitErreicht ? '<br><span style="color:#c62828;font-size:11px">⚠ 30s-Zeitlimit erreicht — Liste ist möglicherweise unvollständig (nur die ersten ' + placements.length + ' geladenen Einsätze berücksichtigt).</span>' : ''));
-    rpRoster = { loadedAt: Date.now(), tage: ROSTER_TAGE, seiten: Math.min(ROSTER_MAX_SEITEN, placements.length ? Math.ceil(placements.length / ROSTER_PAGE_SIZE) : 0), mitarbeiter: mitarbeiter, kunden: kunden, ladeFehler: ladeFehler, zeitlimitErreicht: zeitlimitErreicht };
+    rpRoster = { loadedAt: Date.now(), tage: ROSTER_TAGE, seiten: Math.min(ROSTER_MAX_SEITEN, placements.length ? Math.ceil(placements.length / ROSTER_PAGE_SIZE) : 0), mitarbeiter: mitarbeiter, kunden: kunden, ladeFehler: ladeFehler, zeitlimitErreicht: zeitlimitErreicht, aktivDiagnose: aktivDiagnose, ladeMethode: ladeMethode, placementsRoh: placements.length, placementsImFenster: imFenster.length };
     if(!ladeFehler) rpRosterToStorage(rpRoster);   // Fehlversuche nicht dauerhaft cachen — nur echte Erfolge
     rpRosterLoading = null;
     return rpRoster;
@@ -13059,6 +13204,11 @@ function rpApiShowRoster(){
   body = fehlerBanner + '<div style="margin-bottom:8px;font-size:12.5px;color:var(--rp-grey)">' +
       Object.keys(rpRoster.mitarbeiter).length + ' Mitarbeitende · ' + gesamtEinsaetze + ' Einsätze · letzte ' + (rpRoster.tage || ROSTER_TAGE) + ' Tage · geladen vor ' + altMin + ' Min.' +
       ' <a href="#" onclick="rpApiLoadRoster(true).then(rpApiShowRoster);return false">(neu laden)</a></div>' +
+    '<div style="margin-bottom:8px;font-size:11px;color:var(--rp-grey)">Diagnose: Methode „' + esc(rpRoster.ladeMethode || '?') + '"' +
+      (rpRoster.aktivDiagnose ? ' · ' + esc(rpRoster.aktivDiagnose) : '') +
+      ' · ' + (rpRoster.placementsRoh != null ? rpRoster.placementsRoh : '?') + ' Einsätze insgesamt geladen, ' + (rpRoster.placementsImFenster != null ? rpRoster.placementsImFenster : '?') + ' im ' + (rpRoster.tage || ROSTER_TAGE) + '-Tage-Fenster' +
+      (rpRoster.zeitlimitErreicht ? ' · ⚠ Zeitlimit erreicht, evtl. unvollständig' : '') +
+    '</div>' +
     '<input type="text" id="rpRosterSuche" placeholder="Suche nach Name oder Kunde …" style="width:100%;margin-bottom:8px;padding:6px 10px;border:1px solid var(--rp-border,#ddd);border-radius:5px" oninput="rpApiFilterRoster(this.value)">' +
     '<div style="max-height:55vh;overflow:auto">' +
     '<table style="width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap" id="rpRosterTabelle">' +
