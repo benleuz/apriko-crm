@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.216.0"></script>
-<script src="apriko-api.js?v=1.216.0"></script>
-<script src="lohncheck.js?v=1.216.0"></script>
-<script src="personalbudget.js?v=1.216.0"></script>
-<script src="jahresbudget.js?v=1.216.0"></script>
-<script src="budgetpositionen.js?v=1.216.0"></script>
-<script src="lohnchecklistetemp.js?v=1.216.0"></script>
+<script src="apriko-filters.js?v=1.218.0"></script>
+<script src="apriko-api.js?v=1.218.0"></script>
+<script src="lohncheck.js?v=1.218.0"></script>
+<script src="personalbudget.js?v=1.218.0"></script>
+<script src="jahresbudget.js?v=1.218.0"></script>
+<script src="budgetpositionen.js?v=1.218.0"></script>
+<script src="lohnchecklistetemp.js?v=1.218.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -980,7 +980,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.216.0</span> · <span id="app-build-date">14.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.218.0</span> · <span id="app-build-date">14.09.2026</span>
     </div>
   </aside>
 
@@ -1497,6 +1497,11 @@ function resolveCurrentUser(email) {
   } else if (typeof profile.AllowedViews === "string" && profile.AllowedViews.trim()) {
     allowedViews = profile.AllowedViews.split(/[,;]/).map(s => s.trim()).filter(Boolean);
   }
+
+  // Profil existiert, gewährt aber effektiv nichts (AllowedViews leer, weder Admin noch
+  // Super-Admin) → wie "kein Profil" behandeln, damit die komplette Zugriff-verweigert-Seite
+  // greift statt einer Seitenleiste mit nur dem öffentlichen Kundendashboard sichtbar zu lassen.
+  if (!allowedViews.length && profile.Role !== "Admin") return null;
 
   return {
     email: email,
@@ -11558,7 +11563,10 @@ async function crmCopyCustomerEmails(kind) {
     if (kind === "alle" || kind === "entscheid") emails.push(...crmParseEmails(s.entscheid));
     if (kind === "alle" || kind === "user") emails.push(...crmParseEmails(s.user));
   });
-  emails = [...new Set(emails)].sort();
+  emails = [...new Set(emails)].sort((a, b) => {
+    const da = a.split("@")[1] || "", db = b.split("@")[1] || "";
+    return da.localeCompare(db) || a.localeCompare(b);
+  });
   if (!emails.length) {
     const scopeLbl = scope === "saas" ? " (Filter: nur SaaS-Kunden)" : scope === "bpo" ? " (Filter: nur BPO-Kunden)" : "";
     toast("Keine E-Mail-Adressen hinterlegt" + scopeLbl + " — bei den Firmen unter «Entscheidungsträger» / «User» eintragen.", true);

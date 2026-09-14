@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.122.0";
+const LC_VERSION = "1.123.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -1407,7 +1407,7 @@ function lcRenderKontrolllistenPanel() {
         ${!hatListen ? `<div style="padding:10px 12px;background:#FEF2F2;border-left:4px solid #c62828;border-radius:4px;color:#7f1d1d;font-size:12px;margin-bottom:12px">
           <b>ACHTUNG:</b> Keine Einsatzliste bzw. keine zusätzlichen Kontrolllisten für Querchecks vorhanden. Die Prüfung erfolgt ausschliesslich anhand der aktuell zur Verfügung gestellten Lohnabrechnungen. Zusätzliche Querchecks konnten nicht durchgeführt werden.
         </div>` : ""}
-        ${hatListen ? kl.listen.map(l => lcRenderListRow(l)).join("") : ""}
+        ${hatListen ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">${kl.listen.map(l => lcRenderListRow(l)).join("")}</div>` : ""}
         <input type="file" id="lc-kl-file" accept=".csv,.xlsx,.xls" multiple style="display:none" onchange="lcUploadKontrollliste(this)">
         <button class="btn btn-sm" onclick="document.getElementById('lc-kl-file').click()">⇪ Kontrollliste(n) hochladen (Excel/CSV) — Einsatzliste, BVG, AHV, KTG/SUVA, weitere</button>
 
@@ -1447,14 +1447,14 @@ function lcRenderListRow(l) {
   const feldLabel = { ahv: "AHV-Nr", name: "Name", vorname: "Vorname", geburtsdatum: "Geburtsdatum", von: "Von", bis: "Bis" };
   return `
     <div style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:8px">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <select onchange="lcSetListTyp('${l.id}',this.value)" style="font-size:12px;padding:3px 6px">
+      <div style="display:flex;align-items:center;gap:6px">
+        <select onchange="lcSetListTyp('${l.id}',this.value)" style="font-size:11px;padding:3px 4px;flex-shrink:0">
           ${LC_LISTEN_TYPEN.map(t => `<option value="${t}" ${t === l.typ ? "selected" : ""}>${LC_LISTEN_TYP_LABEL[t]}</option>`).join("")}
         </select>
-        <span style="font-size:12px;color:var(--text-dim)">${escape(l.dateiname)}</span>
-        <span style="font-size:11px;color:var(--text-faint)">${l.zeilen.length} Zeile(n)</span>
-        <button class="btn btn-sm" style="margin-left:auto" onclick="lcEntferneListe('${l.id}')">✕</button>
+        <button class="btn btn-sm" style="margin-left:auto;flex-shrink:0" onclick="lcEntferneListe('${l.id}')">✕</button>
       </div>
+      <div title="${escape(l.dateiname)}" style="font-size:11.5px;color:var(--text-dim);margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escape(l.dateiname)}</div>
+      <div style="font-size:11px;color:var(--text-faint)">${l.zeilen.length} Zeile(n)</div>
       <details style="margin-top:6px">
         <summary style="cursor:pointer;font-size:11px;color:var(--text-faint)">Spalten zuordnen</summary>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;font-size:11px">
