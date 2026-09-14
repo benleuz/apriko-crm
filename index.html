@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.210.0"></script>
-<script src="apriko-api.js?v=1.210.0"></script>
-<script src="lohncheck.js?v=1.210.0"></script>
-<script src="personalbudget.js?v=1.210.0"></script>
-<script src="jahresbudget.js?v=1.210.0"></script>
-<script src="budgetpositionen.js?v=1.210.0"></script>
-<script src="lohnchecklistetemp.js?v=1.210.0"></script>
+<script src="apriko-filters.js?v=1.211.0"></script>
+<script src="apriko-api.js?v=1.211.0"></script>
+<script src="lohncheck.js?v=1.211.0"></script>
+<script src="personalbudget.js?v=1.211.0"></script>
+<script src="jahresbudget.js?v=1.211.0"></script>
+<script src="budgetpositionen.js?v=1.211.0"></script>
+<script src="lohnchecklistetemp.js?v=1.211.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -980,7 +980,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.210.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.211.0</span> · <span id="app-build-date">14.09.2026</span>
     </div>
   </aside>
 
@@ -12891,31 +12891,28 @@ async function rpApiLoadRoster(force){
        scheint alt→neu sortiert, kein Sortier-Parameter am Endpunkt verfügbar). Deshalb jetzt direkt
        auf das state-Feld selbst filtern, mit dem ANY-Operator für mehrere erlaubte Werte auf einmal
        (dokumentiertes Beispiel: id|ANY|["Wert1","Wert2"]|Text|false|false|[]). */
-    rpApiProgress('🔌 <b>Einsatzliste:</b> versuche gezielt nur kürzlich aktualisierte Einsätze zu holen …');
+    rpApiProgress('🔌 <b>Einsatzliste:</b> versuche gezielt nur aktive Einsätze zu holen …');
     var aktivDiagnose = '';
-    /* NOCH NEUERER ANSATZ 11.09.2026: state-Filter (auch mit ANY) fand ebenfalls 0 Treffer, selbst
-       nach 1450+ durchsuchten Datensätzen in der vollen Paginierung — bei >1000 Einsätzen insgesamt
-       über viele Jahre (bestätigt) ist reines Durchblättern unrealistisch. Neuer Versuch: nach
-       kürzlich AKTUALISIERTEN Einsätzen filtern (updatedTime) statt nach Status — ein laufender,
-       langjähriger Einsatz hat ein alte entryDate, aber vermutlich ein kürzliches updatedTime
-       (Lohnlauf, Statusprüfung etc.), während wirklich abgeschlossene/archivierte Einsätze seit
-       Jahren nicht mehr angefasst wurden. */
-    var cutoffDatum = new Date(Date.now() - 200 * 86400000).toISOString();   // ~200 Tage zurück
+    /* DURCHBRUCH 11.09.2026: Direkter Einzel-Lookup (Einsatz-Nr 3484) fand einen ECHTEN Datensatz
+       mit state:"Active" — aktive Einsätze existieren also zweifelsfrei. Der bisherige state|ANY|[...]
+       -Filter fand trotzdem 0 Treffer — der ANY-Operator mit Array-Wert ist vermutlich das Problem,
+       nicht fehlende Daten. Die erfolgreiche placementNumber-Abfrage nutzte einen einfachen
+       =-Operator mit einem einzelnen quotierten Wert — das jetzt für state exakt gleich probiert. */
     try {
       var aktivR = await AprikoApi.models.query({
         entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 100, resolveReferences: false,
-        filters: 'updatedTime|>=|' + JSON.stringify(cutoffDatum) + '|date|false|false|["G1"]'
+        filters: 'state|=|"Active"|text|false|false|["G1"]'
       });
       var aktivRows = ((aktivR && aktivR.results) || []).map(AprikoApi.models.hitData);
       aktivRows = aktivRows.filter(function(p){ return RP_RELEVANTE_STATES.indexOf(p.state) >= 0; });
       if(aktivRows.length){
         placements = aktivRows;
         ladeMethode = 'aktiv-filter';
-        aktivDiagnose = aktivRows.length + ' Treffer über updatedTime-Filter (nach state-Bestätigung)';
+        aktivDiagnose = aktivRows.length + ' Treffer über state="Active"-Filter (einfacher =-Operator)';
       } else {
-        aktivDiagnose = '0 Treffer über updatedTime-Filter — Rückfall auf komplette Liste';
+        aktivDiagnose = '0 Treffer über state="Active"-Filter — Rückfall auf komplette Liste';
       }
-    } catch(afe){ aktivDiagnose = 'updatedTime-Filter fehlgeschlagen (' + esc((afe && afe.message) || String(afe)).slice(0,150) + ') — Rückfall auf komplette Liste'; }
+    } catch(afe){ aktivDiagnose = 'state="Active"-Filter fehlgeschlagen (' + esc((afe && afe.message) || String(afe)).slice(0,150) + ') — Rückfall auf komplette Liste'; }
     rpApiProgress('🔌 <b>Einsatzliste:</b> ' + esc(aktivDiagnose) + (ladeMethode === 'liste' ? ' — lade nun komplette Liste …' : ''));
     // Bulk-Abruf über den echten Listen-Endpunkt (GET /StaffLeasePlacements, staffing-Service) —
     // NICHT über /models/Query: eine leere Volltextsuche ("") liefert dort 0 Treffer statt "alles",
