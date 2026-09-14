@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.200.0"></script>
-<script src="apriko-api.js?v=1.200.0"></script>
-<script src="lohncheck.js?v=1.200.0"></script>
-<script src="personalbudget.js?v=1.200.0"></script>
-<script src="jahresbudget.js?v=1.200.0"></script>
-<script src="budgetpositionen.js?v=1.200.0"></script>
-<script src="lohnchecklistetemp.js?v=1.200.0"></script>
+<script src="apriko-filters.js?v=1.201.0"></script>
+<script src="apriko-api.js?v=1.201.0"></script>
+<script src="lohncheck.js?v=1.201.0"></script>
+<script src="personalbudget.js?v=1.201.0"></script>
+<script src="jahresbudget.js?v=1.201.0"></script>
+<script src="budgetpositionen.js?v=1.201.0"></script>
+<script src="lohnchecklistetemp.js?v=1.201.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -980,7 +980,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.200.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.201.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12856,7 +12856,7 @@ async function rpApiLoadRoster(force){
     // brauchte einzeln ~9s (Tunnel-/Proxy-Latenz), nicht Serverlast — sequentielles Warten war der
     // Flaschenhals. Deshalb jetzt mehrere Seiten GLEICHZEITIG anfragen (wie schon bei der
     // Mitarbeiter/Kunden-Auflösung unten), das deckt in derselben Zeit deutlich mehr Historie ab.
-    var ROSTER_PARALLEL = 8;
+    var ROSTER_PARALLEL = 2;   // von 8 auf 2 reduziert (11.09.2026): 8 gleichzeitige Anfragen liefen in ein Zeitlimit ohne jedes Ergebnis — Verdacht, dass der Codespace-Tunnel/Proxy so viel Gleichzeitigkeit nicht verträgt. "Letzte Woche" lief es sequenziell (1 nach dem anderen) nachweislich — 2 ist ein vorsichtiger Mittelweg, kein Rückfall auf komplett sequenziell, aber deutlich weniger Last auf einmal.
     for(var batchStart = 0; ladeMethode === 'liste' && batchStart < ROSTER_MAX_SEITEN && (Date.now() - ladeStart) < ROSTER_MAX_SEKUNDEN * 1000; batchStart += ROSTER_PARALLEL){
       var batchIndices = [];
       for(var bi = 0; bi < ROSTER_PARALLEL && (batchStart + bi) < ROSTER_MAX_SEITEN; bi++) batchIndices.push(batchStart + bi);
