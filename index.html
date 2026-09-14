@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.196.0"></script>
-<script src="apriko-api.js?v=1.196.0"></script>
-<script src="lohncheck.js?v=1.196.0"></script>
-<script src="personalbudget.js?v=1.196.0"></script>
-<script src="jahresbudget.js?v=1.196.0"></script>
-<script src="budgetpositionen.js?v=1.196.0"></script>
-<script src="lohnchecklistetemp.js?v=1.196.0"></script>
+<script src="apriko-filters.js?v=1.198.0"></script>
+<script src="apriko-api.js?v=1.198.0"></script>
+<script src="lohncheck.js?v=1.198.0"></script>
+<script src="personalbudget.js?v=1.198.0"></script>
+<script src="jahresbudget.js?v=1.198.0"></script>
+<script src="budgetpositionen.js?v=1.198.0"></script>
+<script src="lohnchecklistetemp.js?v=1.198.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -980,7 +980,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.196.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.198.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12826,7 +12826,7 @@ async function rpApiLoadRoster(force){
     try {
       var aktivR = await AprikoApi.models.query({
         entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 500, resolveReferences: false,
-        filters: 'isActivePendingVacantOrSinceRecentlyInactive|=|true|text|false|false|["G1"]'
+        filters: 'isActivePendingVacantOrSinceRecentlyInactive|=|"true"|text|false|false|["G1"]'
       });
       var aktivRows = ((aktivR && aktivR.results) || []).map(AprikoApi.models.hitData);
       // Auch hier den state-Filter anwenden — der Feldname sagt "...OrSinceRecentlyInactive",
@@ -12848,8 +12848,8 @@ async function rpApiLoadRoster(force){
     // direkt als Array (keine Suchtreffer-Hülle wie bei /models/Query). Über mehrere Seiten, bis
     // eine Seite leer ist oder der Sicherheitsdeckel greift. Sortierreihenfolge ist nicht
     // dokumentiert, deshalb wird über alle gelieferten Seiten client-seitig nach Datum gefiltert.
-    var ROSTER_PAGE_SIZE = 500;   // grössere Seiten = weniger Anfragen hintereinander durch den Tunnel
-    var ROSTER_MAX_SEKUNDEN = 30;   // harte Zeitbremse — lieber unvollständig als endlos warten
+    var ROSTER_PAGE_SIZE = 150;   // kleinere Seiten = jede einzelne Anfrage kommt eher rechtzeitig durch (11.09.2026: 500er-Seiten liefen ins Zeitlimit, evtl. weil mittlerweile deutlich mehr Einsätze im System sind als früher)
+    var ROSTER_MAX_SEKUNDEN = 45;   // harte Zeitbremse — lieber unvollständig als endlos warten (von 30 auf 45s erhöht, da kleinere Seiten mehr Anfragen brauchen)
     for(var pi = 0; ladeMethode === 'liste' && pi < ROSTER_MAX_SEITEN && (Date.now() - ladeStart) < ROSTER_MAX_SEKUNDEN * 1000; pi++){
       var sekunden = Math.round((Date.now() - ladeStart) / 1000);
       var seitenMsg = '🔌 <b>Einsatzliste wird geladen</b> — Seite ' + (pi + 1) + ' (' + placements.length + ' Einsätze bisher, ' + sekunden + 's) — einmalig, danach ' + ROSTER_TTL_MIN + ' Min. aus dem Cache …';
