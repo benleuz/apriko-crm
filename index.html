@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.199.0"></script>
-<script src="apriko-api.js?v=1.199.0"></script>
-<script src="lohncheck.js?v=1.199.0"></script>
-<script src="personalbudget.js?v=1.199.0"></script>
-<script src="jahresbudget.js?v=1.199.0"></script>
-<script src="budgetpositionen.js?v=1.199.0"></script>
-<script src="lohnchecklistetemp.js?v=1.199.0"></script>
+<script src="apriko-filters.js?v=1.200.0"></script>
+<script src="apriko-api.js?v=1.200.0"></script>
+<script src="lohncheck.js?v=1.200.0"></script>
+<script src="personalbudget.js?v=1.200.0"></script>
+<script src="jahresbudget.js?v=1.200.0"></script>
+<script src="budgetpositionen.js?v=1.200.0"></script>
+<script src="lohnchecklistetemp.js?v=1.200.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -980,7 +980,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.199.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.200.0</span> · <span id="app-build-date">10.09.2026</span>
     </div>
   </aside>
 
@@ -12825,7 +12825,7 @@ async function rpApiLoadRoster(force){
        Match-Stufe übersprungen). Deshalb query-Feld hier ganz weglassen (undefined), nicht ''. */
     try {
       var aktivR = await AprikoApi.models.query({
-        entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 500, resolveReferences: false,
+        entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 100, resolveReferences: false,
         filters: 'isActivePendingVacantOrSinceRecentlyInactive|=|"true"|text|false|false|["G1"]'
       });
       var aktivRows = ((aktivR && aktivR.results) || []).map(AprikoApi.models.hitData);
@@ -12848,7 +12848,7 @@ async function rpApiLoadRoster(force){
     // direkt als Array (keine Suchtreffer-Hülle wie bei /models/Query). Über mehrere Seiten, bis
     // eine Seite leer ist oder der Sicherheitsdeckel greift. Sortierreihenfolge ist nicht
     // dokumentiert, deshalb wird über alle gelieferten Seiten client-seitig nach Datum gefiltert.
-    var ROSTER_PAGE_SIZE = 150;   // kleinere Seiten = jede einzelne Anfrage kommt eher rechtzeitig durch (11.09.2026: 500er-Seiten liefen ins Zeitlimit, evtl. weil mittlerweile deutlich mehr Einsätze im System sind als früher)
+    var ROSTER_PAGE_SIZE = 100;   // Apriko meldet explizit "PageSize must be between 1 and 120" (gefunden 11.09.2026 über die Aktiv-Filter-Fehlermeldung, /models/Query) — vermutlich gilt dieselbe Grenze auch hier; bisher 150/500 verwendet, das war der eigentliche Fehler die ganze Zeit, nicht das Filter-Format.
     var ROSTER_MAX_SEKUNDEN = 45;   // harte Zeitbremse — lieber unvollständig als endlos warten
     // Gefunden 11.09.2026: die Liste scheint chronologisch alt→neu sortiert zu sein (kein
     // Sortier-Parameter am Endpunkt verfügbar, siehe OpenAPI-Spec) — Seite 1 kann daher 0 aktuell
