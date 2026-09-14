@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.194.0"></script>
-<script src="apriko-api.js?v=1.194.0"></script>
-<script src="lohncheck.js?v=1.194.0"></script>
-<script src="personalbudget.js?v=1.194.0"></script>
-<script src="jahresbudget.js?v=1.194.0"></script>
-<script src="budgetpositionen.js?v=1.194.0"></script>
-<script src="lohnchecklistetemp.js?v=1.194.0"></script>
+<script src="apriko-filters.js?v=1.218.0"></script>
+<script src="apriko-api.js?v=1.218.0"></script>
+<script src="lohncheck.js?v=1.218.0"></script>
+<script src="personalbudget.js?v=1.218.0"></script>
+<script src="jahresbudget.js?v=1.218.0"></script>
+<script src="budgetpositionen.js?v=1.218.0"></script>
+<script src="lohnchecklistetemp.js?v=1.218.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -980,7 +980,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.194.0</span> · <span id="app-build-date">10.09.2026</span>
+      Apriko CRM <span style="background:var(--warn);color:#000;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700">DEMO</span> · <span id="app-version">v1.218.0</span> · <span id="app-build-date">14.09.2026</span>
     </div>
   </aside>
 
@@ -1023,6 +1023,15 @@
           <div id="rpDbTestResult" style="margin-top:8px"></div>
           <div style="font-size:10.5px;color:var(--rp-grey);margin-top:6px">Mit Benutzername/Passwort holt sich das Tool den Zugangsschlüssel (Token) selbst und erneuert ihn bei Ablauf automatisch. Alles leer lassen = Verbindung aus dem Menü «Apriko API (POC)». Eine andere Instanz muss beim Proxy auf der Ziel-Allowlist stehen (APRIKO_BASES). Zugangsdaten bleiben lokal in diesem Browser.</div>
         </details>
+        <div style="margin-top:8px">
+          <button type="button" class="rp-btn-sm" onclick="rpApiTestEinzeln()">🔍 Isolierter Test: eine einzelne listStaffLease-Anfrage (wie in Apriko API POC)</button>
+          <div id="rpApiTestEinzelnErgebnis" style="margin-top:6px;font-size:11.5px"></div>
+        </div>
+        <div style="margin-top:8px;display:flex;gap:6px;align-items:center">
+          <input type="text" id="rpApiEinsatzNrLookup" placeholder="Einsatz-Nr eingeben (z.B. 3428)" style="font-size:12px;padding:4px 8px;width:200px">
+          <button type="button" class="rp-btn-sm" onclick="rpApiLookupEinsatzNr()">🔍 Diesen Einsatz direkt abrufen (Rohdaten)</button>
+        </div>
+        <div id="rpApiLookupErgebnis" style="margin-top:6px;font-size:11.5px"></div>
       </div>
 
       <!-- 1 Upload -->
@@ -1488,6 +1497,11 @@ function resolveCurrentUser(email) {
   } else if (typeof profile.AllowedViews === "string" && profile.AllowedViews.trim()) {
     allowedViews = profile.AllowedViews.split(/[,;]/).map(s => s.trim()).filter(Boolean);
   }
+
+  // Profil existiert, gewährt aber effektiv nichts (AllowedViews leer, weder Admin noch
+  // Super-Admin) → wie "kein Profil" behandeln, damit die komplette Zugriff-verweigert-Seite
+  // greift statt einer Seitenleiste mit nur dem öffentlichen Kundendashboard sichtbar zu lassen.
+  if (!allowedViews.length && profile.Role !== "Admin") return null;
 
   return {
     email: email,
@@ -3463,7 +3477,6 @@ function renderBudgetVergleich(el) {
     if (bj) return ih1 + (bj - bh1);
     return ih1 * 2;
   });
-
   if (filters.fbView === "monate") { renderFbMonate(el, { year, bud, ist, G, vals, rowsOut, fkt }); return; }
   if (filters.fbView === "mgmt") { renderFbMgmt(el, { year, ist, vals, fkt }); return; }
   if (filters.fbView === "vorjahr") { renderFbVorjahr(el, { year, ist, vals, fkt }); return; }
@@ -6576,14 +6589,16 @@ async function apSpeichereAlsTarifartenstamm(stumm) {
   const zeilen = rows.filter(r => typeof r.number === "number").map(r => ({
     Code: r.number, Bezeichnung: r.name || r.displayName || "",
     "Marge-Stufe": r.grossMarginLevel === "None" ? "" : r.grossMarginLevel,
-    Aktiv: r.isActive ? "Ja" : "", Synonyme: r.synonyms || ""
+    Aktiv: r.isActive ? "Ja" : "", Gesperrt: r.isLocked ? "Ja" : "",
+    "Gültig ab": apFmtDate(r.validFrom), "Gültig bis": apFmtDate(r.validUntil),
+    Synonyme: r.synonyms || ""
   }));
   if (!stumm && !confirm(zeilen.length + " Tarifarten aus Apriko als Tarifartenstamm speichern? Eine evtl. bereits vorhandene Liste wird ersetzt.")) return;
   await tarifartenLaden(false);
   tarifartenStamm = {
     dateiname: "Apriko API (RateTypes, live übernommen " + new Date().toLocaleDateString("de-CH") + ")",
     hochgeladenAm: new Date().toISOString(),
-    spalten: ["Code", "Bezeichnung", "Marge-Stufe", "Aktiv", "Synonyme"],
+    spalten: ["Code", "Bezeichnung", "Marge-Stufe", "Aktiv", "Gesperrt", "Gültig ab", "Gültig bis", "Synonyme"],
     zeilen
   };
   try { await tarifartenSpeichern(); if (!stumm) toast(zeilen.length + " Tarifarten übernommen und gespeichert."); }
@@ -6632,7 +6647,7 @@ async function renderTarifarten(el) {
     </div>
     <div class="card" style="padding:0">
       <div class="table-wrap"><table style="table-layout:fixed;width:100%">
-        <colgroup>${spalten.map(s => `<col style="width:${s === "Bezeichnung" || s === "Synonyme" ? 220 : s === "Code" ? 60 : 110}px">`).join("")}</colgroup>
+        <colgroup>${spalten.map(s => `<col style="width:${s === "Bezeichnung" || s === "Synonyme" ? 220 : s === "Code" ? 60 : (s === "Gültig ab" || s === "Gültig bis") ? 90 : s === "Gesperrt" ? 70 : 110}px">`).join("")}</colgroup>
         <thead><tr>${spalten.map(s => `<th title="${escape(s)}" style="white-space:normal;line-height:1.25">${escape(s)}</th>`).join("")}</tr></thead>
         <tbody>${zeilen.map(z => `<tr>${spalten.map(s => `<td title="${escape(String(z[s] ?? ""))}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap${typeof z[s] === "number" ? ";text-align:right;font-family:var(--font-mono)" : ""}">${escape(String(z[s] ?? ""))}</td>`).join("")}</tr>`).join("")}</tbody>
       </table></div>
@@ -6778,6 +6793,9 @@ const AP_COLS = {
     ["name", "Bezeichnung", r => r.name || r.displayName],
     ["margin", "Marge-Stufe", r => r.grossMarginLevel === "None" ? "" : r.grossMarginLevel],
     ["active", "Aktiv", r => r.isActive ? "✓" : ""],
+    ["locked", "Gesperrt", r => r.isLocked ? "✓" : ""],
+    ["validFrom", "Gültig ab", r => apFmtDate(r.validFrom)],
+    ["validUntil", "Gültig bis", r => apFmtDate(r.validUntil)],
     ["synonyms", "Synonyme", r => r.synonyms || ""],
     ["updated", "Geändert", r => apFmtDate(r.updatedTime)]
   ]
@@ -10899,6 +10917,7 @@ function renderCompanies(el) {
       <option value="__none" ${filters.companyAnsprech === "__none" ? "selected" : ""}>— ohne Ansprechperson —</option>
     </select>
     <input class="search-input" placeholder="Suchen..." oninput="filterTable(this.value, 'comp-row')">
+    ${f === "customer" ? `<button class="seg-filter-btn ${filters.customerActiveOnly?"active":""}" onclick="toggleActiveOnly();render()" title="Gekündigte/Pausierte Kundenverträge ausblenden">${filters.customerActiveOnly ? "● Nur Aktive" : "○ Alle Status"}</button>` : ""}
     <button class="btn btn-primary" onclick="newCompany()">+ Neue Firma</button>
   `;
   if (!cache.companies.length) {
@@ -10910,6 +10929,15 @@ function renderCompanies(el) {
   let filtered = cache.companies;
   if (f === "customer") filtered = filtered.filter(c => c.IsCustomer);
   else if (f === "lead") filtered = filtered.filter(c => !c.IsCustomer);
+  // Bei "nur Kunden" zusätzlich den verlinkten Kundenvertrag (separate Kunden-Liste, siehe
+  // "customers"-Ansicht) nach Status prüfen — eine Firma bleibt IsCustomer=true auch nach
+  // Kündigung, taucht sonst also fälschlich weiterhin als "aktueller Kunde" auf.
+  if (f === "customer" && filters.customerActiveOnly) {
+    filtered = filtered.filter(c => {
+      const vertrag = cache.customers.find(cu => cu.CompanyId == c.id);
+      return !vertrag || (vertrag.Status || "Aktiv") === "Aktiv";
+    });
+  }
   if (filters.companyAnsprech === "__none") filtered = filtered.filter(c => !ansprechEmail(c.id));
   else if (filters.companyAnsprech) filtered = filtered.filter(c => ansprechEmail(c.id) === filters.companyAnsprech);
 
@@ -10930,7 +10958,7 @@ function renderCompanies(el) {
   });
 
   // Info-Zeile
-  const filterLabel = f === "customer" ? "nur Kunden" : f === "lead" ? "nur Leads" : null;
+  const filterLabel = f === "customer" ? "nur Kunden" + (filters.customerActiveOnly ? " (nur aktive Verträge)" : "") : f === "lead" ? "nur Leads" : null;
   const filterInfo = filterLabel
     ? `<div style="margin-bottom:12px;color:var(--text-dim);font-size:12px">
          Zeige ${filtered.length} von ${cache.companies.length} Firmen · ${filterLabel}
@@ -11546,7 +11574,10 @@ async function crmCopyCustomerEmails(kind) {
     if (kind === "alle" || kind === "entscheid") emails.push(...crmParseEmails(s.entscheid));
     if (kind === "alle" || kind === "user") emails.push(...crmParseEmails(s.user));
   });
-  emails = [...new Set(emails)].sort();
+  emails = [...new Set(emails)].sort((a, b) => {
+    const da = a.split("@")[1] || "", db = b.split("@")[1] || "";
+    return da.localeCompare(db) || a.localeCompare(b);
+  });
   if (!emails.length) {
     const scopeLbl = scope === "saas" ? " (Filter: nur SaaS-Kunden)" : scope === "bpo" ? " (Filter: nur BPO-Kunden)" : "";
     toast("Keine E-Mail-Adressen hinterlegt" + scopeLbl + " — bei den Firmen unter «Entscheidungsträger» / «User» eintragen.", true);
@@ -12789,6 +12820,58 @@ function rpApiProgress(html){
     if(mb) mb.innerHTML = '<div style="padding:20px 0">' + html + '</div>';
   }
 }
+
+/* Isolierter Vergleichs-Test (11.09.2026): EXAKT derselbe Aufruf, der in der Apriko-API-POC-Ansicht
+   nachweislich funktioniert (listStaffLease sequenziell, pageSize 100) — aber HIER, im
+   Rapport-Kontext, komplett ohne die ganze Roster-Maschinerie drumherum (kein Aktiv-Filter, keine
+   Batches, kein State-Filter). Soll zeigen, ob der Unterschied wirklich am Kontext liegt oder ob
+   noch irgendwo eine unsichtbare Race Condition/Blockade steckt. */
+async function rpApiTestEinzeln(){
+  var el = document.getElementById('rpApiTestEinzelnErgebnis');
+  if(!el) return;
+  el.innerHTML = '<span style="color:var(--rp-grey)">Läuft …</span>';
+  var start = Date.now();
+  try {
+    rpApiUse();
+    var rows = await AprikoApi.staffing.listStaffLease(0, 100);
+    var ms = Date.now() - start;
+    el.innerHTML = '<span style="color:#2e7d32">✓ Erfolgreich in ' + ms + 'ms — ' + (rows ? rows.length : 0) + ' Einsätze erhalten (roh, vor Status-Filter).</span>' +
+      (rows && rows.length ? '<div style="color:var(--rp-grey);margin-top:4px">Erster Datensatz: ' + esc(JSON.stringify({id: rows[0].id, state: rows[0].state, entryDate: rows[0].entryDate}).slice(0,200)) + '</div>' : '');
+  } catch(e){
+    var ms2 = Date.now() - start;
+    el.innerHTML = '<span style="color:#c62828">✗ Fehler nach ' + ms2 + 'ms: ' + esc((e && e.message) || String(e)) + '</span>';
+  }
+}
+/* Sucht gezielt EINEN Einsatz per Einsatznummer (nicht die interne ID) und zeigt die kompletten
+   Rohdaten — zum direkten Vergleich, wie ein echter, aktueller Einsatz tatsächlich aussieht
+   (state, updatedTime, entryDate etc.), ohne durch tausende Seiten blättern zu müssen. */
+async function rpApiLookupEinsatzNr(){
+  var inp = document.getElementById('rpApiEinsatzNrLookup');
+  var el = document.getElementById('rpApiLookupErgebnis');
+  if(!inp || !el) return;
+  var nr = (inp.value || '').trim();
+  if(!nr){ el.innerHTML = '<span style="color:#c62828">Bitte eine Einsatz-Nr eingeben.</span>'; return; }
+  el.innerHTML = '<span style="color:var(--rp-grey)">Läuft …</span>';
+  var start = Date.now();
+  try {
+    rpApiUse();
+    var res = await AprikoApi.models.query({
+      entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 10, resolveReferences: false,
+      filters: 'placementNumber|=|' + JSON.stringify(parseInt(nr, 10)) + '|numeric|false|false|["G1"]'
+    });
+    var rows = ((res && res.results) || []).map(AprikoApi.models.hitData);
+    var ms = Date.now() - start;
+    if(!rows.length){
+      el.innerHTML = '<span style="color:#c62828">✗ Kein Treffer nach ' + ms + 'ms für Einsatz-Nr ' + esc(nr) + ' (über number-Filter).</span>';
+      return;
+    }
+    el.innerHTML = '<span style="color:#2e7d32">✓ Gefunden in ' + ms + 'ms:</span>' +
+      '<pre style="white-space:pre-wrap;word-break:break-all;background:var(--rp-bg-alt,#f5f5f5);border:1px solid var(--rp-border,#ddd);border-radius:3px;padding:8px;margin-top:4px;font-size:11px">' + esc(JSON.stringify(rows[0], null, 1)) + '</pre>';
+  } catch(e){
+    var ms2 = Date.now() - start;
+    el.innerHTML = '<span style="color:#c62828">✗ Fehler nach ' + ms2 + 'ms: ' + esc((e && e.message) || String(e)) + '</span>';
+  }
+}
 async function rpApiLoadRoster(force){
   /* WICHTIG: rpApiUse() konfiguriert AprikoApi (Gateway/Target/Token-Callback) frisch. Wird diese
      Funktion über "Jetzt laden"/"neu laden" direkt angeklickt (ohne vorherigen rpApiMatch-Aufruf,
@@ -12824,30 +12907,38 @@ async function rpApiLoadRoster(force){
        isActivePendingVacantOrSinceRecentlyInactive) statt alles zu paginieren. Klappt das, ist
        die Liste i.d.R. winzig gegenüber der kompletten Historie. Klappt es nicht (0 Treffer/
        Fehler), automatisch Rückfall auf die volle Paginierung weiter unten.
-       EMPIRISCH GEPRÜFT (10.09.2026): dataType "boolean" für dieses Feld löst bei Apriko einen
-       HTTP 400 aus, trotz gegenteiliger Doku-Erwartung ("falscher dataType → 0 Treffer, kein
-       Fehler") — vermutlich wird "boolean" hier nicht als gültiger Enum-Wert akzeptiert. NICHT
-       erneut versuchen ohne vorherige Prüfung, welche Schreibweise Apriko tatsächlich erwartet.
-       dataType "text" (wie bisher) liefert zuverlässig 0 Treffer statt eines Fehlers — sicherer
-       Rückfall-Zustand, auch wenn dieser Fast-Path dadurch faktisch wirkungslos bleibt. */
+       DURCHBRUCH 11.09.2026 (nach vielen erfolglosen Versuchen mit Boolean-Feldern, ANY-Operator
+       und Array-Werten): Ein direkter Einzel-Lookup per Einsatznummer bewies, dass aktive Einsätze
+       existieren (state:"Active"). Der Schlüssel war: dataType "boolean" löst einen HTTP 400 aus;
+       der ANY-Operator mit Array-Wert liefert 0 Treffer trotz vorhandener Daten. Was zuverlässig
+       funktioniert: ein einfacher =-Operator mit GENAU EINEM JSON-quotierten Wert (genau das Muster,
+       das schon bei der placementNumber-Suche geklappt hat). Da es keinen funktionierenden
+       Mehrfachwert-Operator gibt, wird für jeden der 6 relevanten Zustände EINZELN abgefragt und
+       serverseitig zusammengeführt — pro Abfrage nur ein paar hundert ms, insgesamt immer noch
+       um Grössenordnungen schneller als die volle Paginierung durch >1000 historische Einsätze. */
     rpApiProgress('🔌 <b>Einsatzliste:</b> versuche gezielt nur aktive Einsätze zu holen …');
     var aktivDiagnose = '';
-    /* WICHTIG: query darf hier nicht '' sein — eine leere Anfrage lieferte in einem früheren Test
-       bereits 0 Treffer, unabhängig von etwaigen Filtern (offenbar wird ohne Suchtext die ganze
-       Match-Stufe übersprungen). Deshalb query-Feld hier ganz weglassen (undefined), nicht ''. */
     try {
-      var aktivR = await AprikoApi.models.query({
-        entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 500, resolveReferences: false,
-        filters: 'isActivePendingVacantOrSinceRecentlyInactive|=|true|text|false|false|G1'
+      var aktivNachStatus = await Promise.all(RP_RELEVANTE_STATES.map(function(st){
+        return AprikoApi.models.query({
+          entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 100, resolveReferences: false,
+          filters: 'state|=|' + JSON.stringify(st) + '|text|false|false|["G1"]'
+        }).then(function(r){ return ((r && r.results) || []).map(AprikoApi.models.hitData); })
+          .catch(function(){ return []; });   // ein einzelner Zustand darf scheitern, ohne die anderen zu blockieren
+      }));
+      var aktivRows = [].concat.apply([], aktivNachStatus);
+      // Sicherheitsnetz + Deduplizierung (falls sich zwei Zustands-Abfragen überschneiden sollten)
+      var gesehen = {};
+      aktivRows = aktivRows.filter(function(p){
+        if(RP_RELEVANTE_STATES.indexOf(p.state) < 0) return false;
+        if(gesehen[p.id]) return false;
+        gesehen[p.id] = true;
+        return true;
       });
-      var aktivRows = ((aktivR && aktivR.results) || []).map(AprikoApi.models.hitData);
-      // Auch hier den state-Filter anwenden — der Feldname sagt "...OrSinceRecentlyInactive",
-      // könnte also auch kürzlich inaktive Einsätze mitliefern, die uns laut Vorgabe nicht interessieren.
-      aktivRows = aktivRows.filter(function(p){ return RP_RELEVANTE_STATES.indexOf(p.state) >= 0; });
       if(aktivRows.length){
         placements = aktivRows;
         ladeMethode = 'aktiv-filter';
-        aktivDiagnose = aktivRows.length + ' Treffer über Aktiv-Filter (nach state-Filter)';
+        aktivDiagnose = aktivRows.length + ' Treffer über Aktiv-Filter (6 Einzelabfragen je Zustand, zusammengeführt)';
       } else {
         aktivDiagnose = '0 Treffer über Aktiv-Filter — Rückfall auf komplette Liste';
       }
@@ -12860,28 +12951,39 @@ async function rpApiLoadRoster(force){
     // direkt als Array (keine Suchtreffer-Hülle wie bei /models/Query). Über mehrere Seiten, bis
     // eine Seite leer ist oder der Sicherheitsdeckel greift. Sortierreihenfolge ist nicht
     // dokumentiert, deshalb wird über alle gelieferten Seiten client-seitig nach Datum gefiltert.
-    var ROSTER_PAGE_SIZE = 500;   // grössere Seiten = weniger Anfragen hintereinander durch den Tunnel
-    var ROSTER_MAX_SEKUNDEN = 30;   // harte Zeitbremse — lieber unvollständig als endlos warten
-    for(var pi = 0; ladeMethode === 'liste' && pi < ROSTER_MAX_SEITEN && (Date.now() - ladeStart) < ROSTER_MAX_SEKUNDEN * 1000; pi++){
+    var ROSTER_PAGE_SIZE = 50;   // 11.09.2026: exakt derselbe Wert wie AP_PAGE_SIZE in der API-POC-Ansicht, wo derselbe Endpunkt (listStaffLease) nachweislich funktioniert hat (50 geladen, sauber). Selbst 100 hing trotz sequenziellem Laden bis zum Zeitlimit fest — der genaue Grund unklar, aber 50 ist der einzige bewiesenermassen funktionierende Wert.
+    var ROSTER_MAX_SEKUNDEN = 180;   // harte Zeitbremse — 11.09.2026 gemessen: eine einzelne Seite (100 Einsätze) brauchte 11.6s (Tunnel-Latenz), und die Liste ist alt→neu sortiert — bei 45s kamen wir nur 3-4 Seiten weit, die aktuellen Einsätze liegen vermutlich viel weiter hinten. 180s erlaubt ~15 Seiten.
+    // Gefunden 11.09.2026: die Liste scheint chronologisch alt→neu sortiert zu sein (kein
+    // Sortier-Parameter am Endpunkt verfügbar, siehe OpenAPI-Spec) — Seite 1 kann daher 0 aktuell
+    // relevante Einsätze enthalten, obwohl weiter hinten viele stecken. UND: jede einzelne Anfrage
+    // brauchte einzeln ~9s (Tunnel-/Proxy-Latenz), nicht Serverlast — sequentielles Warten war der
+    // Flaschenhals. Deshalb jetzt mehrere Seiten GLEICHZEITIG anfragen (wie schon bei der
+    // Mitarbeiter/Kunden-Auflösung unten), das deckt in derselben Zeit deutlich mehr Historie ab.
+    var ROSTER_PARALLEL = 1;   // 11.09.2026: bestätigt per direktem Vergleich — dieselbe Funktion (listStaffLease) lief in der API-POC-Ansicht sequenziell einwandfrei (50 geladen), aber selbst 2 gleichzeitige Anfragen in der Einsatzliste hingen fest bis zum Zeitlimit. Der Codespace-Tunnel verträgt offenbar wirklich nur eine Anfrage auf einmal — zurück auf komplett sequenziell (Wert 1 = keine echte Parallelität, aber dieselbe Schleifenstruktur bleibt für später falls sich das mal ändert).
+    for(var batchStart = 0; ladeMethode === 'liste' && batchStart < ROSTER_MAX_SEITEN && (Date.now() - ladeStart) < ROSTER_MAX_SEKUNDEN * 1000; batchStart += ROSTER_PARALLEL){
+      var batchIndices = [];
+      for(var bi = 0; bi < ROSTER_PARALLEL && (batchStart + bi) < ROSTER_MAX_SEITEN; bi++) batchIndices.push(batchStart + bi);
       var sekunden = Math.round((Date.now() - ladeStart) / 1000);
-      var seitenMsg = '🔌 <b>Einsatzliste wird geladen</b> — Seite ' + (pi + 1) + ' (' + placements.length + ' Einsätze bisher, ' + sekunden + 's) — einmalig, danach ' + ROSTER_TTL_MIN + ' Min. aus dem Cache …';
-      rpApiProgress(seitenMsg);
-      var rows;
-      var seitenStart = Date.now();
-      try { rows = await AprikoApi.staffing.listStaffLease(pi, ROSTER_PAGE_SIZE); }
-      catch(e){ ladeFehler = (e && e.message) || String(e); break; }
-      if(!rows || !rows.length) break;
-      // Nur relevante Status behalten (state-Feld, siehe RP_RELEVANTE_STATES) — der Rest (Entwurf,
-      // Storniert, Archiviert, Inaktiv-Varianten usw.) interessiert nicht und wird sofort verworfen,
-      // statt unnötig Mitarbeitende/Kunden dafür aufzulösen. Direkt nach dem Abruf gefiltert, nicht
-      // erst am Ende — reduziert Speicher und die Auflösungsmenge auf das Wesentliche.
-      rows = rows.filter(function(p){ return RP_RELEVANTE_STATES.indexOf(p.state) >= 0; });
-      placements = placements.concat(rows);
-      // Warnung, falls eine einzelne Seite selbst schon sehr lange braucht (z.B. Tunnel-Latenz) —
-      // hilft zu unterscheiden zwischen "viele Seiten nötig" und "jede Seite einzeln ist langsam".
-      if((Date.now() - seitenStart) > 4000){
-        rpApiProgress(seitenMsg + '<br><span style="color:var(--rp-grey);font-size:11px">Seite ' + (pi + 1) + ' brauchte ' + Math.round((Date.now() - seitenStart) / 1000) + 's — der Proxy/Tunnel ist hier der Flaschenhals, nicht die Anzahl Seiten.</span>');
+      rpApiProgress('🔌 <b>Einsatzliste wird geladen</b> — Seiten ' + (batchStart + 1) + '–' + (batchStart + batchIndices.length) + ' parallel (' + placements.length + ' relevante Einsätze bisher, ' + sekunden + 's) — einmalig, danach ' + ROSTER_TTL_MIN + ' Min. aus dem Cache …');
+      var batchStartZeit = Date.now();
+      var batchResults;
+      try {
+        batchResults = await Promise.all(batchIndices.map(function(pi){ return AprikoApi.staffing.listStaffLease(pi, ROSTER_PAGE_SIZE); }));
+      } catch(e){ ladeFehler = (e && e.message) || String(e); break; }
+      var erreichtesEnde = false;
+      for(var bj = 0; bj < batchResults.length; bj++){
+        var rohRows = batchResults[bj] || [];
+        if(rohRows.length < ROSTER_PAGE_SIZE) erreichtesEnde = true;   // an der ROHEN Länge erkannt, nicht der state-gefilterten — sonst würde eine Seite ganz ohne relevante Einsätze fälschlich als "Ende" gewertet
+        // Nur relevante Status behalten (state-Feld, siehe RP_RELEVANTE_STATES) — der Rest (Entwurf,
+        // Storniert, Archiviert, Inaktiv-Varianten usw.) interessiert nicht.
+        var gefiltert = rohRows.filter(function(p){ return RP_RELEVANTE_STATES.indexOf(p.state) >= 0; });
+        placements = placements.concat(gefiltert);
       }
+      if((Date.now() - batchStartZeit) > 8000){
+        rpApiProgress('🔌 <b>Einsatzliste wird geladen</b> — Seiten ' + (batchStart + 1) + '–' + (batchStart + batchIndices.length) + ' parallel (' + placements.length + ' relevante Einsätze bisher, ' + Math.round((Date.now() - ladeStart) / 1000) + 's)' +
+          '<br><span style="color:var(--rp-grey);font-size:11px">Dieser Block brauchte ' + Math.round((Date.now() - batchStartZeit) / 1000) + 's — der Proxy/Tunnel ist hier der Flaschenhals, nicht die Anzahl Seiten.</span>');
+      }
+      if(erreichtesEnde) break;
     }
     var ladeSekundenGesamt = Math.round((Date.now() - ladeStart) / 1000);
     var zeitlimitErreicht = (ladeMethode === 'liste' && !ladeFehler && ladeSekundenGesamt >= ROSTER_MAX_SEKUNDEN);
@@ -12935,7 +13037,7 @@ async function rpApiLoadRoster(force){
     rpApiProgress('🔌 <b>Einsatzliste fertig geladen</b> — ' + Object.keys(mitarbeiter).length + ' Mitarbeitende, ' + Object.keys(kunden).length + ' Kunden.<br>' +
       '<span style="color:var(--rp-grey);font-size:11px">Zeit: ' + ladeSekundenGesamt + 's Liste laden (' + placements.length + ' Einsätze, Methode: ' + (ladeMethode === 'aktiv-filter' ? 'gezielter Aktiv-Filter' : 'komplette Liste paginiert') + ') + ' + aufloeseSekunden + 's Namen auflösen.</span>' +
       (zeitlimitErreicht ? '<br><span style="color:#c62828;font-size:11px">⚠ 30s-Zeitlimit erreicht — Liste ist möglicherweise unvollständig (nur die ersten ' + placements.length + ' geladenen Einsätze berücksichtigt).</span>' : ''));
-    rpRoster = { loadedAt: Date.now(), tage: ROSTER_TAGE, seiten: Math.min(ROSTER_MAX_SEITEN, placements.length ? Math.ceil(placements.length / ROSTER_PAGE_SIZE) : 0), mitarbeiter: mitarbeiter, kunden: kunden, ladeFehler: ladeFehler, zeitlimitErreicht: zeitlimitErreicht };
+    rpRoster = { loadedAt: Date.now(), tage: ROSTER_TAGE, seiten: Math.min(ROSTER_MAX_SEITEN, placements.length ? Math.ceil(placements.length / ROSTER_PAGE_SIZE) : 0), mitarbeiter: mitarbeiter, kunden: kunden, ladeFehler: ladeFehler, zeitlimitErreicht: zeitlimitErreicht, aktivDiagnose: aktivDiagnose, ladeMethode: ladeMethode, placementsRoh: placements.length, placementsImFenster: imFenster.length };
     if(!ladeFehler) rpRosterToStorage(rpRoster);   // Fehlversuche nicht dauerhaft cachen — nur echte Erfolge
     rpRosterLoading = null;
     return rpRoster;
@@ -13216,6 +13318,11 @@ function rpApiShowRoster(){
   body = fehlerBanner + '<div style="margin-bottom:8px;font-size:12.5px;color:var(--rp-grey)">' +
       Object.keys(rpRoster.mitarbeiter).length + ' Mitarbeitende · ' + gesamtEinsaetze + ' Einsätze · letzte ' + (rpRoster.tage || ROSTER_TAGE) + ' Tage · geladen vor ' + altMin + ' Min.' +
       ' <a href="#" onclick="rpApiLoadRoster(true).then(rpApiShowRoster);return false">(neu laden)</a></div>' +
+    '<div style="margin-bottom:8px;font-size:11px;color:var(--rp-grey)">Diagnose: Methode „' + esc(rpRoster.ladeMethode || '?') + '"' +
+      (rpRoster.aktivDiagnose ? ' · ' + esc(rpRoster.aktivDiagnose) : '') +
+      ' · ' + (rpRoster.placementsRoh != null ? rpRoster.placementsRoh : '?') + ' Einsätze insgesamt geladen, ' + (rpRoster.placementsImFenster != null ? rpRoster.placementsImFenster : '?') + ' im ' + (rpRoster.tage || ROSTER_TAGE) + '-Tage-Fenster' +
+      (rpRoster.zeitlimitErreicht ? ' · ⚠ Zeitlimit erreicht, evtl. unvollständig' : '') +
+    '</div>' +
     '<input type="text" id="rpRosterSuche" placeholder="Suche nach Name oder Kunde …" style="width:100%;margin-bottom:8px;padding:6px 10px;border:1px solid var(--rp-border,#ddd);border-radius:5px" oninput="rpApiFilterRoster(this.value)">' +
     '<div style="max-height:55vh;overflow:auto">' +
     '<table style="width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap" id="rpRosterTabelle">' +
@@ -13578,7 +13685,7 @@ function rpApiRender(){
     (st.viaText ? '<br><span style="color:var(--rp-grey);font-size:11px">Einsätze via Volltextsuche' + (st.textVerifiziert ? ', über die Personen-ID verifiziert' : ' — Personen-ID nicht bestätigt, bitte Beleg prüfen') + '; ID-Filter: ' + esc((st.protokoll || []).join(' · ')) + '.</span>' : '') +
     uebernahmeBtn;
 }
-if (typeof window !== 'undefined'){ window.rpApiSelectPerson = rpApiSelectPerson; window.rpApiSelectEinsatz = rpApiSelectEinsatz; window.rpDbTest = rpDbTest; window.rpDbInit = rpDbInit; window.rpDbCfg = rpDbCfg; window.rpApiUse = rpApiUse; }
+if (typeof window !== 'undefined'){ window.rpApiSelectPerson = rpApiSelectPerson; window.rpApiSelectEinsatz = rpApiSelectEinsatz; window.rpDbTest = rpDbTest; window.rpDbInit = rpDbInit; window.rpDbCfg = rpDbCfg; window.rpApiUse = rpApiUse; window.rpApiTestEinzeln = rpApiTestEinzeln; window.rpApiLookupEinsatzNr = rpApiLookupEinsatzNr; }
 if (typeof window !== 'undefined') window.rpApiMatch = rpApiMatch;   // für Tests/Debugging erreichbar
 
 function showGavSuggestion(gavKey, firma){
