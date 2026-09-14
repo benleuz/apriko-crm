@@ -440,6 +440,14 @@
     }
   };
 
+  var receivableaccounting = {
+    listRateTypes: function (pageIndex, pageSize) {
+      return request("receivableaccounting", "/RateTypes", {
+        query: { pageIndex: pageIndex || 0, pageSize: pageSize || 200 }
+      });
+    }
+  };
+
   var api = {
     configure: configure,
     isConfigured: isConfigured,
@@ -450,6 +458,7 @@
     people: people,
     staffing: staffing,
     payrollaccounting: payrollaccounting,
+    receivableaccounting: receivableaccounting,
     models: models,
     extractMessages: extractMessages
   };
