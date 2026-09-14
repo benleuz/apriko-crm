@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.119.0";
+const LC_VERSION = "1.120.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -522,15 +522,31 @@ function lcCheckAll(slips) {
         add(s, "rot", pruef, bezeichnung + " negativ: CHF " + lcFmt(treffer) + ". Bitte überprüfen.");
     });
 
-    // Punkt 10: unrealistische Lohnfortzahlung/Tagegeldzahlung — Richtwert CHF 150–250, ab hier
-    // wird ein spürbarer Sicherheitsabstand (>350) als klar unrealistisch gewertet (z.B. versehentlich
-    // doppelt erfasster Tagegeldsatz). Ansatz (Tagessatz) bevorzugt prüfen, sonst Betrag als Ganzes.
+
+    // Punkt 10 (korrigiert 14.09.2026): unrealistische Lohnfortzahlung/Tagegeldzahlung — geprüft
+    // wird AUSSCHLIESSLICH der Taggeldsatz PRO TAG, nie der Gesamtbetrag als Ersatz dafür (das war
+    // der Bug: 40 Tage × CHF 200 = CHF 8'000 hätte fälschlich anhand des Totals flaggen können,
+    // während 9 Tage × CHF 1'154 wegen fehlendem/falschem ansatz-Wert eben NICHT flaggte — genau
+    // umgekehrt zum gewünschten Verhalten). Satz bevorzugt aus der Ansatz-Spalte, sonst aus
+    // Betrag ÷ Anzahl rekonstruiert. Üblicher Bereich CHF 150–250/Tag, > 350 klar unrealistisch
+    // (bewusster Sicherheitsabstand zum Graubereich). Lässt sich weder Ansatz noch Anzahl sauber
+    // bestimmen, aber die Position sieht auffällig aus, gibt es trotzdem einen Hinweis statt
+    // stillschweigend zu passieren — bleibt aber gelb (Differenzen-Rubrik), nicht grau/manuell.
     s.rows.forEach(r => {
       if (r.isTotal || !/Tagegeld|Taggeld|Lohnfortzahlung/i.test(r.label)) return;
-      const pruefWert = r.ansatz !== null && r.ansatz > 0 ? r.ansatz : r.betrag;
-      if (pruefWert !== null && pruefWert > 350)
-        add(s, "gelb", "Tagegeld unrealistisch", "Lohnfortzahlung / Tagegeldzahlung erscheint unrealistisch hoch (" + r.code + " " + r.label + ": CHF " + lcFmt(pruefWert) + "). Bitte überprüfen.");
+      let taggeldsatz = null;
+      if (r.ansatz !== null && r.ansatz > 0) taggeldsatz = r.ansatz;
+      else if (r.anzahl !== null && r.anzahl > 0 && r.betrag !== null) taggeldsatz = Math.abs(r.betrag) / r.anzahl;
+      if (taggeldsatz !== null) {
+        if (taggeldsatz > 350)
+          add(s, "rot", "Tagegeld unrealistisch", "Unrealistisch hoher Taggeldsatz erkannt: " + (r.anzahl !== null ? r.anzahl + " Tage × " : "") + "CHF " + lcFmt(taggeldsatz) + " (" + r.code + " " + r.label + "). Bitte Taggeldsatz / Lohnfortzahlung überprüfen.");
+        // sonst: Satz plausibel — auch bei hohem Gesamtbetrag (viele Tage) bewusst KEINE Meldung
+      } else if (r.betrag !== null && Math.abs(r.betrag) > 350) {
+        // Tage/Satz nicht sauber trennbar, Position aber auffällig hoch — nicht stillschweigend durchlassen
+        add(s, "gelb", "Tagegeld Hinweis", "Taggeld-/Lohnfortzahlungsposition (" + r.code + " " + r.label + ": CHF " + lcFmt(r.betrag) + ") konnte nicht eindeutig auf den Taggeldsatz pro Tag geprüft werden — Anzahl Tage oder Ansatz fehlen. Bitte manuell kontrollieren.");
+      }
     });
+
     // Punkt 13: manuell erfasste Lohnkomponenten (Nachzahlungen, Korrekturen, Gutschriften) separat
     // sichtbar machen, NICHT automatisch als Differenz/Fehler werten — informativ, kategorie "manuell".
     s.rows.forEach(r => {

@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.211.0"></script>
-<script src="apriko-api.js?v=1.211.0"></script>
-<script src="lohncheck.js?v=1.211.0"></script>
-<script src="personalbudget.js?v=1.211.0"></script>
-<script src="jahresbudget.js?v=1.211.0"></script>
-<script src="budgetpositionen.js?v=1.211.0"></script>
-<script src="lohnchecklistetemp.js?v=1.211.0"></script>
+<script src="apriko-filters.js?v=1.214.0"></script>
+<script src="apriko-api.js?v=1.214.0"></script>
+<script src="lohncheck.js?v=1.214.0"></script>
+<script src="personalbudget.js?v=1.214.0"></script>
+<script src="jahresbudget.js?v=1.214.0"></script>
+<script src="budgetpositionen.js?v=1.214.0"></script>
+<script src="lohnchecklistetemp.js?v=1.214.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -980,7 +980,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.211.0</span> · <span id="app-build-date">14.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.214.0</span> · <span id="app-build-date">14.09.2026</span>
     </div>
   </aside>
 
@@ -10901,6 +10901,7 @@ function renderCompanies(el) {
       <option value="__none" ${filters.companyAnsprech === "__none" ? "selected" : ""}>— ohne Ansprechperson —</option>
     </select>
     <input class="search-input" placeholder="Suchen..." oninput="filterTable(this.value, 'comp-row')">
+    ${f === "customer" ? `<button class="seg-filter-btn ${filters.customerActiveOnly?"active":""}" onclick="toggleActiveOnly();render()" title="Gekündigte/Pausierte Kundenverträge ausblenden">${filters.customerActiveOnly ? "● Nur Aktive" : "○ Alle Status"}</button>` : ""}
     <button class="btn btn-primary" onclick="newCompany()">+ Neue Firma</button>
   `;
   if (!cache.companies.length) {
@@ -10912,6 +10913,15 @@ function renderCompanies(el) {
   let filtered = cache.companies;
   if (f === "customer") filtered = filtered.filter(c => c.IsCustomer);
   else if (f === "lead") filtered = filtered.filter(c => !c.IsCustomer);
+  // Bei "nur Kunden" zusätzlich den verlinkten Kundenvertrag (separate Kunden-Liste, siehe
+  // "customers"-Ansicht) nach Status prüfen — eine Firma bleibt IsCustomer=true auch nach
+  // Kündigung, taucht sonst also fälschlich weiterhin als "aktueller Kunde" auf.
+  if (f === "customer" && filters.customerActiveOnly) {
+    filtered = filtered.filter(c => {
+      const vertrag = cache.customers.find(cu => cu.CompanyId == c.id);
+      return !vertrag || (vertrag.Status || "Aktiv") === "Aktiv";
+    });
+  }
   if (filters.companyAnsprech === "__none") filtered = filtered.filter(c => !ansprechEmail(c.id));
   else if (filters.companyAnsprech) filtered = filtered.filter(c => ansprechEmail(c.id) === filters.companyAnsprech);
 
@@ -10932,7 +10942,7 @@ function renderCompanies(el) {
   });
 
   // Info-Zeile
-  const filterLabel = f === "customer" ? "nur Kunden" : f === "lead" ? "nur Leads" : null;
+  const filterLabel = f === "customer" ? "nur Kunden" + (filters.customerActiveOnly ? " (nur aktive Verträge)" : "") : f === "lead" ? "nur Leads" : null;
   const filterInfo = filterLabel
     ? `<div style="margin-bottom:12px;color:var(--text-dim);font-size:12px">
          Zeige ${filtered.length} von ${cache.companies.length} Firmen · ${filterLabel}
@@ -12878,41 +12888,42 @@ async function rpApiLoadRoster(force){
        isActivePendingVacantOrSinceRecentlyInactive) statt alles zu paginieren. Klappt das, ist
        die Liste i.d.R. winzig gegenüber der kompletten Historie. Klappt es nicht (0 Treffer/
        Fehler), automatisch Rückfall auf die volle Paginierung weiter unten.
-       EMPIRISCH GEPRÜFT (10.09.2026): dataType "boolean" für dieses Feld löst bei Apriko einen
-       HTTP 400 aus, trotz gegenteiliger Doku-Erwartung ("falscher dataType → 0 Treffer, kein
-       Fehler") — vermutlich wird "boolean" hier nicht als gültiger Enum-Wert akzeptiert. NICHT
-       erneut versuchen ohne vorherige Prüfung, welche Schreibweise Apriko tatsächlich erwartet.
-       dataType "text" (wie bisher) liefert zuverlässig 0 Treffer statt eines Fehlers — sicherer
-       Rückfall-Zustand, auch wenn dieser Fast-Path dadurch faktisch wirkungslos bleibt. */
-    /* NEUER ANSATZ 11.09.2026: Das abgeleitete Boolean-Feld isActivePendingVacantOrSinceRecentlyInactive
-       lieferte trotz korrektem Format (JSON-kodierter Wert, ["G1"]-Array) zuverlässig 0 Treffer — auch
-       nach über 1450 durchsuchten Datensätzen in der vollen Paginierung fand sich kein einziger
-       relevanter Status, was auf sehr viel Historie VOR den aktuellen Einsätzen hindeutet (Liste
-       scheint alt→neu sortiert, kein Sortier-Parameter am Endpunkt verfügbar). Deshalb jetzt direkt
-       auf das state-Feld selbst filtern, mit dem ANY-Operator für mehrere erlaubte Werte auf einmal
-       (dokumentiertes Beispiel: id|ANY|["Wert1","Wert2"]|Text|false|false|[]). */
+       DURCHBRUCH 11.09.2026 (nach vielen erfolglosen Versuchen mit Boolean-Feldern, ANY-Operator
+       und Array-Werten): Ein direkter Einzel-Lookup per Einsatznummer bewies, dass aktive Einsätze
+       existieren (state:"Active"). Der Schlüssel war: dataType "boolean" löst einen HTTP 400 aus;
+       der ANY-Operator mit Array-Wert liefert 0 Treffer trotz vorhandener Daten. Was zuverlässig
+       funktioniert: ein einfacher =-Operator mit GENAU EINEM JSON-quotierten Wert (genau das Muster,
+       das schon bei der placementNumber-Suche geklappt hat). Da es keinen funktionierenden
+       Mehrfachwert-Operator gibt, wird für jeden der 6 relevanten Zustände EINZELN abgefragt und
+       serverseitig zusammengeführt — pro Abfrage nur ein paar hundert ms, insgesamt immer noch
+       um Grössenordnungen schneller als die volle Paginierung durch >1000 historische Einsätze. */
     rpApiProgress('🔌 <b>Einsatzliste:</b> versuche gezielt nur aktive Einsätze zu holen …');
     var aktivDiagnose = '';
-    /* DURCHBRUCH 11.09.2026: Direkter Einzel-Lookup (Einsatz-Nr 3484) fand einen ECHTEN Datensatz
-       mit state:"Active" — aktive Einsätze existieren also zweifelsfrei. Der bisherige state|ANY|[...]
-       -Filter fand trotzdem 0 Treffer — der ANY-Operator mit Array-Wert ist vermutlich das Problem,
-       nicht fehlende Daten. Die erfolgreiche placementNumber-Abfrage nutzte einen einfachen
-       =-Operator mit einem einzelnen quotierten Wert — das jetzt für state exakt gleich probiert. */
     try {
-      var aktivR = await AprikoApi.models.query({
-        entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 100, resolveReferences: false,
-        filters: 'state|=|"Active"|text|false|false|["G1"]'
+      var aktivNachStatus = await Promise.all(RP_RELEVANTE_STATES.map(function(st){
+        return AprikoApi.models.query({
+          entityTypes: 'StaffLeasePlacement', pageIndex: 0, pageSize: 100, resolveReferences: false,
+          filters: 'state|=|' + JSON.stringify(st) + '|text|false|false|["G1"]'
+        }).then(function(r){ return ((r && r.results) || []).map(AprikoApi.models.hitData); })
+          .catch(function(){ return []; });   // ein einzelner Zustand darf scheitern, ohne die anderen zu blockieren
+      }));
+      var aktivRows = [].concat.apply([], aktivNachStatus);
+      // Sicherheitsnetz + Deduplizierung (falls sich zwei Zustands-Abfragen überschneiden sollten)
+      var gesehen = {};
+      aktivRows = aktivRows.filter(function(p){
+        if(RP_RELEVANTE_STATES.indexOf(p.state) < 0) return false;
+        if(gesehen[p.id]) return false;
+        gesehen[p.id] = true;
+        return true;
       });
-      var aktivRows = ((aktivR && aktivR.results) || []).map(AprikoApi.models.hitData);
-      aktivRows = aktivRows.filter(function(p){ return RP_RELEVANTE_STATES.indexOf(p.state) >= 0; });
       if(aktivRows.length){
         placements = aktivRows;
         ladeMethode = 'aktiv-filter';
-        aktivDiagnose = aktivRows.length + ' Treffer über state="Active"-Filter (einfacher =-Operator)';
+        aktivDiagnose = aktivRows.length + ' Treffer über Aktiv-Filter (6 Einzelabfragen je Zustand, zusammengeführt)';
       } else {
-        aktivDiagnose = '0 Treffer über state="Active"-Filter — Rückfall auf komplette Liste';
+        aktivDiagnose = '0 Treffer über Aktiv-Filter — Rückfall auf komplette Liste';
       }
-    } catch(afe){ aktivDiagnose = 'state="Active"-Filter fehlgeschlagen (' + esc((afe && afe.message) || String(afe)).slice(0,150) + ') — Rückfall auf komplette Liste'; }
+    } catch(afe){ aktivDiagnose = 'Aktiv-Filter fehlgeschlagen (' + esc((afe && afe.message) || String(afe)).slice(0,150) + ') — Rückfall auf komplette Liste'; }
     rpApiProgress('🔌 <b>Einsatzliste:</b> ' + esc(aktivDiagnose) + (ladeMethode === 'liste' ? ' — lade nun komplette Liste …' : ''));
     // Bulk-Abruf über den echten Listen-Endpunkt (GET /StaffLeasePlacements, staffing-Service) —
     // NICHT über /models/Query: eine leere Volltextsuche ("") liefert dort 0 Treffer statt "alles",
