@@ -3422,10 +3422,21 @@ function renderBudgetVergleich(el) {
   fbMigrateZuordnung(ist);
   fbGesellschaften = [...new Set(ist.map(d => d.g))].sort();
   const G = fbGesellschaften;
-  const budH1 = k => (FB_SRC[k] || [k]).reduce((sum, kk) => sum + (bud[kk] || []).slice(0, 6).reduce((s,v) => s + v, 0), 0);
-  const budJahr = k => (FB_SRC[k] || [k]).reduce((sum, kk) => sum + (bud[kk] || []).reduce((s,v) => s + v, 0), 0);
+  /* DEMO-Modus: Zahlen pro Aufruf neu erfunden, aber strukturell positiv (Ertrag > Aufwand) statt
+     nur "zufällig grösser negativ". Eine reine lineare Skalierung der bereits aggregierten Werte
+     behält das Vorzeichen bei — bei strukturell defizitären Basisdaten bliebe das Ergebnis immer
+     negativ. Stattdessen wird HIER, auf Zeilenebene (vor der Summierung durch fbCompute), Ertrag
+     verstärkt und Aufwand deutlich geschrumpft — dadurch wird die Bodenzeile (EBITDA/Gewinn)
+     durch Konstruktion positiv, UND alle Zwischensummen bleiben exakt konsistent, weil sie
+     weiterhin ganz normal aus den (jetzt anderen) Einzelwerten aufsummiert werden. */
+  const demoAktiv = typeof DEMO_ANON !== "undefined" && DEMO_ANON;
+  const demoFErtrag = demoAktiv ? 1.35 + Math.random() * 0.35 : 1;    // Ertrag: ×1.35–1.70
+  const demoFAufwand = demoAktiv ? 0.32 + Math.random() * 0.15 : 1;   // Aufwand: ×0.32–0.47 (deutlich geschrumpft)
+  const demoFaktor = k => FB_AUFWAND.has(k) ? demoFAufwand : demoFErtrag;
+  const budH1 = k => (FB_SRC[k] || [k]).reduce((sum, kk) => sum + (bud[kk] || []).slice(0, 6).reduce((s,v) => s + v, 0), 0) * demoFaktor(k);
+  const budJahr = k => (FB_SRC[k] || [k]).reduce((sum, kk) => sum + (bud[kk] || []).reduce((s,v) => s + v, 0), 0) * demoFaktor(k);
   const fkt = k => FB_AUFWAND.has(k) ? -1 : 1;
-  const istVal = (k, g) => ist.filter(d => d.z === k && d.g === g).reduce((s,d) => s + (parseFloat(d.v) || 0), 0) * fkt(k);
+  const istVal = (k, g) => ist.filter(d => d.z === k && d.g === g).reduce((s,d) => s + (parseFloat(d.v) || 0), 0) * fkt(k) * demoFaktor(k);
 
   if (!filters.fbView) filters.fbView = "h1";
   // Zeilen-Metadaten + Struktur-Berechnung (Budget + je Gesellschaft + Konzern)
@@ -3452,22 +3463,6 @@ function renderBudgetVergleich(el) {
     if (bj) return ih1 + (bj - bh1);
     return ih1 * 2;
   });
-  /* DEMO-Modus: Zahlen zufällig, aber tendenziell positiv (Ist über Budget) — echte Kundendaten
-     dürfen in einer öffentlichen Demo nicht sichtbar sein. Bewusst als EINHEITLICHER linearer
-     Skalierungsfaktor je Werte-Ebene (Budget/Ist/Forecast) statt pro Zeile einzeln randomisiert:
-     so bleiben alle Zwischensummen und Abweichungs-Prozente weiterhin rechnerisch korrekt
-     zueinander, nur die absoluten Beträge sind bei jedem Aufruf neu und frei erfunden. Details
-     (Kontozeilen/Buchungen in den Drill-downs) bleiben unangetastet — nicht relevant fürs Demo-Ziel. */
-  if (typeof DEMO_ANON !== "undefined" && DEMO_ANON) {
-    const skaliere = (obj, faktor) => { Object.keys(obj).forEach(k => { if (typeof obj[k] === "number") obj[k] *= faktor; }); };
-    const fIst = 1.08 + Math.random() * 0.22;      // Ist/Total/Forecast überdurchschnittlich (positiv)
-    const fBudget = 0.92 + Math.random() * 0.10;    // Budget leicht darunter -> Ist schlägt Budget
-    skaliere(vals.b, fBudget);
-    skaliere(vals.bj, fBudget);
-    skaliere(vals.tot, fIst);
-    skaliere(vals.fc, fIst);
-    vals.g.forEach(gVals => skaliere(gVals, fIst));
-  }
 
   if (filters.fbView === "monate") { renderFbMonate(el, { year, bud, ist, G, vals, rowsOut, fkt }); return; }
   if (filters.fbView === "mgmt") { renderFbMgmt(el, { year, ist, vals, fkt }); return; }
