@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.230.0"></script>
-<script src="apriko-api.js?v=1.230.0"></script>
-<script src="lohncheck.js?v=1.230.0"></script>
-<script src="personalbudget.js?v=1.230.0"></script>
-<script src="jahresbudget.js?v=1.230.0"></script>
-<script src="budgetpositionen.js?v=1.230.0"></script>
-<script src="lohnchecklistetemp.js?v=1.230.0"></script>
+<script src="apriko-filters.js?v=1.231.0"></script>
+<script src="apriko-api.js?v=1.231.0"></script>
+<script src="lohncheck.js?v=1.231.0"></script>
+<script src="personalbudget.js?v=1.231.0"></script>
+<script src="jahresbudget.js?v=1.231.0"></script>
+<script src="budgetpositionen.js?v=1.231.0"></script>
+<script src="lohnchecklistetemp.js?v=1.231.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -980,7 +980,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.230.0</span> · <span id="app-build-date">15.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.231.0</span> · <span id="app-build-date">15.09.2026</span>
     </div>
   </aside>
 
@@ -1355,6 +1355,13 @@ function calcRevenue(rec, customer, year, month) {
       prevBilled: prevYtdHonorar,    // YTD-Stand des Vormonats
       thisMonth: diff                // Differenz = Rechnungsbetrag dieses Monats
     };
+  }
+
+  // Mindesthonorare (CHF/Monat) auf prozentuale Komponenten — nur bei erfasstem Aussenumsatz
+  const hasExt = (parseFloat(rec?.ExternalRevenue) || 0) > 0;
+  if (hasExt && customer?.id != null) {
+    if (saasIsPercent(customer)) saasComponent = applyMin(saasComponent, kundenMin(customer.id, "minSaas"));
+    if (segmentNeedsBPO(seg) && (customer?.BPOModel || "Prozentual") === "Prozentual") bpoGross = applyMin(bpoGross, kundenMin(customer.id, "minBpo"));
   }
 
   let saas = 0, bpo = 0, total = 0;
@@ -4391,7 +4398,7 @@ function renderRevenue(el) {
     crmLoadVertragLinks().then(() => { if (currentView === "customers") render(); });
   }
   if (crmKundenFlags === null && typeof siteId !== "undefined" && siteId) {
-    crmLoadKundenFlags().then(() => { if (currentView === "customers") render(); });
+    crmLoadKundenFlags().then(() => { if (currentView === "customers" || currentView === "revenue") render(); });
   }
   if (!cache.customers.length) {
     el.innerHTML = `<div class="empty">Noch keine Kunden erfasst.<br><br>Geh zuerst zum Kunden-Tab und lege mindestens einen Kunden an.</div>`;
@@ -5163,7 +5170,10 @@ async function faktNachFakturierung(custId, year, month) {
 /* Zu verrechnen: Netto der Rechnungen nach «Fakturiert bis» bis zum letzten Import-Stichtag × Satz. */
 /* SaaS-Honorar auf einem Netto-Betrag (nur bei prozentualem SaaS-Modell, sonst 0). */
 function faktSaasHonorar(cust, netto) {
-  return saasIsPercent(cust) ? netto * (parseFloat(cust.SaaSRate) || 0) / 100 : 0;
+  return saasIsPercent(cust) ? applyMin(netto * (parseFloat(cust.SaaSRate) || 0) / 100, kundenMin(cust.id, "minSaas")) : 0;
+}
+function faktBpoHonorar(cust, netto) {
+  return applyMin(netto * (parseFloat(cust.BPORate) || 0) / 100, kundenMin(cust.id, "minBpo"));
 }
 function faktOffen(cust, year) {
   const e = faktStand && faktStand[cust.id + "_" + year];
@@ -5181,7 +5191,7 @@ function faktOffen(cust, year) {
     const wert = Math.round((stand - b.betrag) * 100) / 100;
     return { ytd: true, monat, stand, vormonate: b.betrag, fakturiert, netto: wert, saasHonorar: fakturiert ? 0 : faktSaasHonorar(cust, wert),
              ytdBis: b.bis, ytdBasis: b.betrag, ytdQuelle: b.quelle,
-             honorar: fakturiert ? 0 : wert * rate / 100, faktBis, bis, von: "", anzahlTage: wert ? 1 : 0, rate };
+             honorar: fakturiert ? 0 : faktBpoHonorar(cust, wert), faktBis, bis, von: "", anzahlTage: wert ? 1 : 0, rate };
   }
   let netto = 0, anzahlTage = 0, von = "";
   if (e && bis) {
@@ -5189,7 +5199,7 @@ function faktOffen(cust, year) {
       if (d > faktBis && d <= bis) { netto += e.tage[d]; anzahlTage++; if (!von) von = d; }
     });
   }
-  return { netto: Math.round(netto * 100) / 100, honorar: netto * rate / 100, saasHonorar: faktSaasHonorar(cust, netto), faktBis, bis, von, anzahlTage, rate };
+  return { netto: Math.round(netto * 100) / 100, honorar: faktBpoHonorar(cust, netto), saasHonorar: faktSaasHonorar(cust, netto), faktBis, bis, von, anzahlTage, rate };
 }
 /* «Zu verrechnen»-Kasten für den Pro-Kunde-Modus. */
 function faktRenderKasten(cust, year) {
@@ -5238,6 +5248,8 @@ function faktRenderKasten(cust, year) {
       <div style="flex:1;min-width:280px">
         <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em">Zu verrechnen (${segmentNeedsBPO(cust.Segment) ? "BPO" + (segmentChargesSaaS(cust.Segment) ? "" : ", inkl. SaaS-Anteil") : "SaaS"})</div>
         <div style="font-family:var(--font-mono);font-size:22px;font-weight:600;color:${(segmentNeedsBPO(cust.Segment) ? o.honorar : o.saasHonorar) > 0 ? "var(--accent-2)" : "var(--text-dim)"}">CHF ${faktFmt(segmentNeedsBPO(cust.Segment) ? o.honorar : o.saasHonorar)}${nurLizenz && segmentNeedsBPO(cust.Segment) ? ` <span style="color:var(--warn);font-size:11px;font-weight:400">BPO-Satz fehlt beim Kunden</span>` : ""}</div>
+        ${o.netto > 0 && o.honorar > 0 && o.honorar === kundenMin(cust.id, "minBpo") && o.netto * o.rate / 100 < o.honorar ? `<div style="font-size:11px;color:var(--warn)">Mindesthonorar BPO greift (${o.rate.toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})} % wären CHF ${faktFmt(o.netto * o.rate / 100)})</div>` : ""}
+        ${o.netto > 0 && saasIsPercent(cust) && o.saasHonorar === kundenMin(cust.id, "minSaas") && o.netto * (parseFloat(cust.SaaSRate) || 0) / 100 < o.saasHonorar ? `<div style="font-size:11px;color:var(--warn)">Mindesthonorar SaaS greift</div>` : ""}
         ${saasIsPercent(cust) && segmentNeedsBPO(cust.Segment) ? `<div style="font-family:var(--font-mono);font-size:13px;color:var(--accent);margin-top:2px">+ SaaS ${parseFloat(cust.SaaSRate || 0).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})} %: CHF ${faktFmt(o.saasHonorar)}</div>` : ""}
         <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${detail}</div>${abweichung}
         <div style="font-size:11px;color:var(--text-faint);margin-top:6px">${importInfo}</div>
@@ -11082,8 +11094,8 @@ function openCustomer(id) {
         } catch(e){}
         return "";
       })()}</dd>
-      <dt>SaaS-Modell</dt><dd>${saasIsPercent(c) ? `Prozentual · ${parseFloat(c.SaaSRate || 0).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}% auf Aussenumsatz` : "Pro Lizenz"}</dd>
-      <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}${c.BPOYtd ? ` · <span style="color:var(--accent-3)">YTD-kumulativ</span>` : ""}</dd>
+      <dt>SaaS-Modell</dt><dd>${saasIsPercent(c) ? `Prozentual · ${parseFloat(c.SaaSRate || 0).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}% auf Aussenumsatz${kundenMin(c.id, "minSaas") ? ` · min. CHF ${kundenMin(c.id, "minSaas").toLocaleString("de-CH")}/Monat` : ""}` : "Pro Lizenz"}</dd>
+      <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Prozentual" && kundenMin(c.id, "minBpo") ? ` · min. CHF ${kundenMin(c.id, "minBpo").toLocaleString("de-CH")}/Monat` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}${c.BPOYtd ? ` · <span style="color:var(--accent-3)">YTD-kumulativ</span>` : ""}</dd>
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Link</dt><dd>${appLinkText(c.id, c.Link) ? `<a href="${escape(appLinkText(c.id, c.Link))}" target="_blank" rel="noopener" style="color:var(--accent-2)">${escape(appLinkText(c.id, c.Link))} ↗</a>` : "—"}</dd>
       ${VERTRAG_ARTEN.map(([art, label]) => `<dt>${label}</dt><dd>${vertragLink(c.id, art) ? `<a href="${escape(vertragLink(c.id, art))}" target="_blank" rel="noopener" style="color:var(--accent-2)">📄 Öffnen ↗</a>` : "—"}</dd>`).join("")}
@@ -11135,6 +11147,8 @@ function editCustomer(id) {
     <div id="saas-percent-row" class="field" style="display:${c.SaaSModel==='Prozentual'?'block':'none'}">
       <label>SaaS-Satz (% auf Aussenumsatz)</label>
       <input id="f-saasrate" type="number" step="0.01" min="0" max="100" value="${c.SaaSRate||""}" placeholder="z.B. 0.35">
+      <label style="margin-top:8px">Mindesthonorar SaaS (CHF/Monat)</label>
+      <input id="f-minsaas" type="number" step="1" min="0" value="${kundenMin(c.id, "minSaas") || ""}" placeholder="z.B. 500 — leer = keines">
     </div>
     <div id="saas-license-block" style="display:${c.SaaSModel==='Prozentual'?'none':'block'}">
     <div class="field"><label>Preis pro Lizenz (CHF/Monat)</label><input id="f-pricelic" type="number" step="0.01" min="0" value="${c.PricePerLicense||""}" placeholder="z.B. 340"></div>
@@ -11163,6 +11177,8 @@ function editCustomer(id) {
     <div id="bpo-percent-row" class="field" style="display:${c.BPOModel==='Prozentual'?'block':'none'}">
       <label>BPO-Satz (% auf Aussenumsatz)</label>
       <input id="f-bporate" type="number" step="0.01" min="0" max="100" value="${c.BPORate||""}" placeholder="z.B. 1.2">
+      <label style="margin-top:8px">Mindesthonorar BPO (CHF/Monat)</label>
+      <input id="f-minbpo" type="number" step="1" min="0" value="${kundenMin(c.id, "minBpo") || ""}" placeholder="z.B. 1'500 — leer = keines">
     </div>
     <div id="bpo-hourly-row" class="field" style="display:${c.BPOModel==='Stundensatz'?'block':'none'}">
       <label>Stundensatz (CHF/h)</label>
@@ -11336,9 +11352,16 @@ async function saveCustomer(id) {
       const neuFibu = document.getElementById("f-wf-fibu")?.checked || false;
       const neuMinfee = val("f-minfee");
       const neuApplink = normalizeUrl(val("f-link")) || "";
+      const neuMinSaas = parseFloat(val("f-minsaas")) || 0;
+      const neuMinBpo = parseFloat(val("f-minbpo")) || 0;
       const alt = crmKundenFlags[key] || {};
-      if (neuIntern !== !!alt.intern || neuFibu !== !!alt.fibu || neuMinfee !== (alt.minfee || "") || neuApplink !== (alt.applink || "")) {
-        if (neuIntern || neuFibu || neuMinfee || neuApplink) crmKundenFlags[key] = { intern: neuIntern, fibu: neuFibu, minfee: neuMinfee, applink: neuApplink };
+      if (neuIntern !== !!alt.intern || neuFibu !== !!alt.fibu || neuMinfee !== (alt.minfee || "") || neuApplink !== (alt.applink || "")
+          || neuMinSaas !== (parseFloat(alt.minSaas) || 0) || neuMinBpo !== (parseFloat(alt.minBpo) || 0)) {
+        if (neuIntern || neuFibu || neuMinfee || neuApplink || neuMinSaas || neuMinBpo) {
+          crmKundenFlags[key] = { intern: neuIntern, fibu: neuFibu, minfee: neuMinfee, applink: neuApplink };
+          if (neuMinSaas) crmKundenFlags[key].minSaas = neuMinSaas;
+          if (neuMinBpo) crmKundenFlags[key].minBpo = neuMinBpo;
+        }
         else delete crmKundenFlags[key];
         await crmSaveKundenFlags();
       }
@@ -12621,6 +12644,9 @@ async function crmSaveKundenFlags() {
   }
 }
 function kundenFlag(custId, flag) { return !!((crmKundenFlags || {})[String(custId)] || {})[flag]; }
+/* Numerische Mindesthonorare (CHF/Monat) aus den Kundenflags: minSaas / minBpo. */
+function kundenMin(custId, which) { return parseFloat(((crmKundenFlags || {})[String(custId)] || {})[which]) || 0; }
+function applyMin(betrag, min) { return min > 0 && betrag > 0 && betrag < min ? min : betrag; }
 function minFeeText(custId, spFallback) {
   const t = ((crmKundenFlags || {})[String(custId)] || {}).minfee;
   return t !== undefined && t !== null ? t : (spFallback || "");
