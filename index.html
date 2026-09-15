@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.224.0"></script>
-<script src="apriko-api.js?v=1.224.0"></script>
-<script src="lohncheck.js?v=1.224.0"></script>
-<script src="personalbudget.js?v=1.224.0"></script>
-<script src="jahresbudget.js?v=1.224.0"></script>
-<script src="budgetpositionen.js?v=1.224.0"></script>
-<script src="lohnchecklistetemp.js?v=1.224.0"></script>
+<script src="apriko-filters.js?v=1.225.0"></script>
+<script src="apriko-api.js?v=1.225.0"></script>
+<script src="lohncheck.js?v=1.225.0"></script>
+<script src="personalbudget.js?v=1.225.0"></script>
+<script src="jahresbudget.js?v=1.225.0"></script>
+<script src="budgetpositionen.js?v=1.225.0"></script>
+<script src="lohnchecklistetemp.js?v=1.225.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -980,7 +980,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.224.0</span> · <span id="app-build-date">15.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.225.0</span> · <span id="app-build-date">15.09.2026</span>
     </div>
   </aside>
 
@@ -1301,10 +1301,7 @@ function calcRevenue(rec, customer, year, month) {
   let bpoGross = grossBPOofMonth(rec, customer);
   let ytdInfo = null;
 
-  /* v1.223: Monatszeilen sind auch bei YTD-Kunden MONATSWERTE. Der Jahresstand
-     wird nur beim CSV-Import verarbeitet (Stand − verrechneter Stand, s. faktImportCsv).
-     Die kumulative Zeilen-Interpretation ist abgeschaltet (Bedingung false). */
-  if (false && customer?.BPOYtd && segmentNeedsBPO(seg) && year && month) {
+  if (customer?.BPOYtd && segmentNeedsBPO(seg) && year && month) {
     // YTD-Logik: Der eingegebene Aussenumsatz/Stunden ist BEREITS der kumulierte
     // Jahresstand (nicht der Monatswert). Das YTD-Honorar dieses Monats ist
     // direkt Aussenumsatz × Satz. Die Zeile zeigt aber die DIFFERENZ zum letzten
@@ -2254,7 +2251,7 @@ function budgetSuggest(refType, refId, btype) {
       // aktuelle Run-Rate verwässern (recs sind absteigend sortiert)
       const latestYear = withExt[0].Year;
       withExt = withExt.filter(r => r.Year == latestYear);
-      if (false && c.BPOYtd) { // v1.223: Zeilen sind Monatswerte
+      if (c.BPOYtd) {
         // YTD: letzter Stand ist bereits der kumulierte Jahresstand
         // → ÷ Monatsnummer × 12 (z.B. 2 Mio per Juni → 4 Mio Jahr)
         const latest = withExt[0];
@@ -4313,6 +4310,19 @@ function renderPipeline(el) {
 /* ---------- Revenue (Monatsumsätze) ---------- */
 const MONTH_NAMES = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 
+/* Aussenumsatz-Eingabefelder: Anzeige mit Tausender-Apostroph (de-CH), Speichern als reine Zahl. */
+function fmtExtRevInput(v) {
+  const n = parseFloat(v);
+  if (!n && n !== 0) return "";
+  if (n === 0) return "";
+  return n.toLocaleString("de-CH", { maximumFractionDigits: 2 });
+}
+function parseExtRevInput(v) {
+  const t = String(v == null ? "" : v).replace(/['’\u2019\s]/g, "").replace(",", ".");
+  if (t === "") return "";
+  const n = parseFloat(t);
+  return isNaN(n) ? "" : String(n);
+}
 function findRev(customerId, year, month) {
   return cache.monthlyrevenue.find(r =>
     r.CustomerId == customerId && r.Year == year && r.Month == month);
@@ -4460,7 +4470,7 @@ function renderRevenueByMonth(el) {
           // BPO-Input-Cell: entweder Aussenumsatz, Stunden oder gar nichts
           let bpoInputCell;
           if (useExt) {
-            bpoInputCell = `<input class="rev-input" type="number" step="100" min="0" value="${r.ExternalRevenue||""}" onblur="saveRev(${c.id}, ${year}, ${month}, 'ExternalRevenue', this.value, this)" data-orig="${r.ExternalRevenue||""}" title="Aussenumsatz in CHF">
+            bpoInputCell = `<input class="rev-input" type="text" inputmode="decimal" value="${fmtExtRevInput(r.ExternalRevenue)}" onfocus="this.select()" onblur="saveRev(${c.id}, ${year}, ${month}, 'ExternalRevenue', parseExtRevInput(this.value), this)" data-orig="${parseExtRevInput(r.ExternalRevenue)}" title="Aussenumsatz in CHF">
               <span class="saved-flash">✓</span>`;
           } else if (useHrs) {
             bpoInputCell = `<input class="rev-input" type="number" step="0.25" min="0" value="${r.Hours||""}" onblur="saveRev(${c.id}, ${year}, ${month}, 'Hours', this.value, this)" data-orig="${r.Hours||""}" title="Stunden">
@@ -4548,7 +4558,7 @@ function renderRevenueByCustomer(el) {
 
   // Jahressummen
   let yearSaaS = 0, yearBPO = 0, yearTotal = 0;
-  if (false && cust.BPOYtd && segmentNeedsBPO(cust.Segment)) { // v1.223: Zeilen sind Monatswerte
+  if (cust.BPOYtd && segmentNeedsBPO(cust.Segment)) {
     // YTD-Kunde: BPO-Jahressumme = YTD-Honorar des letzten Monats mit Daten
     // (NICHT aufsummieren, sonst Doppelzählung der kumulativen Werte)
     let lastBPOGross = 0;
@@ -4647,7 +4657,7 @@ function renderRevenueByCustomer(el) {
 
           let bpoInputCell;
           if (useExt) {
-            bpoInputCell = `<input class="rev-input" type="number" step="100" min="0" value="${r.ExternalRevenue||""}" onblur="saveRev(${custId}, ${year}, ${m}, 'ExternalRevenue', this.value, this)" data-orig="${r.ExternalRevenue||""}">
+            bpoInputCell = `<input class="rev-input" type="text" inputmode="decimal" value="${fmtExtRevInput(r.ExternalRevenue)}" onfocus="this.select()" onblur="saveRev(${custId}, ${year}, ${m}, 'ExternalRevenue', parseExtRevInput(this.value), this)" data-orig="${parseExtRevInput(r.ExternalRevenue)}">
               <span class="saved-flash">✓</span>`;
           } else if (useHrs) {
             bpoInputCell = `<input class="rev-input" type="number" step="0.25" min="0" value="${r.Hours||""}" onblur="saveRev(${custId}, ${year}, ${m}, 'Hours', this.value, this)" data-orig="${r.Hours||""}">
@@ -4755,6 +4765,7 @@ async function saveRev(customerId, year, month, field, value, inputEl) {
       inputEl.classList.remove("saving");
       inputEl.classList.add("saved");
       inputEl.dataset.orig = newVal;
+      if (field === "ExternalRevenue") inputEl.value = fmtExtRevInput(newVal);
       const cell = inputEl.closest(".rev-cell");
       if (cell) {
         cell.classList.add("flash");
@@ -4817,12 +4828,12 @@ async function toggleInvoiced(customerId, year, month, type) {
    ihr Netto landet KOMPLETT im gewählten Abrechnungsmonat (nicht nach
    Kalendermonat verteilt — die Periode kann Monatsgrenzen überschreiten).
    YTD-Kunden: Stichtag ist IMMER der Monatsletzte des Abrechnungsmonats;
-   der Jahresstand (Netto aller Rechnungen des Jahres bis Monatsende) minus
-   der zuletzt VERRECHNETE Jahresstand (pro Kunde gespeichert: «Verrechnet
-   bis <Datum> auf CHF <Betrag>», editierbar, wird beim Setzen von Fakt.
-   BPO = Ja auf den neuen Stand gesetzt) ergibt den Monatswert, der in die
-   Zeile geschrieben wird (Monatszeilen sind seit v1.223 bei ALLEN Kunden
-   Monatswerte, nicht mehr kumuliert). Zu verrechnen = Monatswert × Satz.
+   in die Zeile des Abrechnungsmonats wird der JAHRESSTAND geschrieben
+   (kumuliert, wie die Vormonate — die App-Logik zeigt in der Tabelle
+   automatisch die Differenz zum Vormonat). Zu verrechnen = Jahresstand
+   minus zuletzt VERRECHNETER Jahresstand (pro Kunde gespeichert:
+   «Verrechnet bis <Datum> auf CHF <Betrag>», aus der letzten Rechnung,
+   editierbar, wird beim Setzen von Fakt. BPO = Ja nachgeführt) × Satz.
    Monats-Kunden: Netto der Periode × BPO-Satz. Wird Fakt. BPO des
    Abrechnungsmonats auf «Ja» gesetzt, springt «Fakturiert bis» automatisch
    auf den Import-Stichtag. Tagessummen und Vorher-Werte (Rückgängig) liegen
@@ -4859,6 +4870,9 @@ function faktKunde(custId) {
   if (!faktStand) faktStand = {};
   if (!faktStand["c" + custId]) faktStand["c" + custId] = {};
   return faktStand["c" + custId];
+}
+function faktFmt(v) {
+  return (parseFloat(v) || 0).toLocaleString("de-CH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 function faktFmtDatum(iso) {
   if (!iso) return "";
@@ -4995,9 +5009,10 @@ async function faktImportCsv(custId, year, file, bisIso, monat) {
     vormonate = basisJahr === year ? (parseFloat(k.ytdBasis) || 0) : 0;   // anderes Jahr → Jahresanfang, Basis 0
     if (k.ytdBis && k.ytdBis >= bisIso) { toast(`Bereits verrechnet bis ${faktFmtDatum(k.ytdBis)} — Abrechnungsmonat muss danach liegen.`, true); return; }
     ziel = Math.round((stand - vormonate) * 100) / 100;
-    if (ziel < 0) { toast(`Jahresstand per ${faktFmtDatum(bisIso)} (CHF ${fmtCHFShort(stand)}) ist kleiner als der verrechnete Stand (CHF ${fmtCHFShort(vormonate)}) — Basis prüfen.`, true); return; }
+    if (ziel < 0) { toast(`Jahresstand per ${faktFmtDatum(bisIso)} (CHF ${faktFmt(stand)}) ist kleiner als der verrechnete Stand (CHF ${faktFmt(vormonate)}) — Basis prüfen.`, true); return; }
   }
-  const nachher = { [monat]: ziel };
+  // YTD: die Zeile trägt den kumulierten Jahresstand (wie die Vormonate); Monats-Kunde: Periodenwert
+  const nachher = { [monat]: cust.BPOYtd ? stand : ziel };
   toast(cust.BPOYtd ? `Importiere YTD-Stand per ${faktFmtDatum(bisIso)} in ${MONTH_NAMES[monat - 1]} …`
                     : `Importiere Periode ${faktFmtDatum(von || bisIso)} – ${faktFmtDatum(bisIso)} in ${MONTH_NAMES[monat - 1]} …`);
   let geschrieben = 0;
@@ -5015,7 +5030,7 @@ async function faktImportCsv(custId, year, file, bisIso, monat) {
       netto: Math.round(a.netto * 100) / 100, vorher, nachher
     };
     await faktSpeichern();
-    toast(`${cust.BPOYtd ? "Jahresstand per " + faktFmtDatum(bisIso) + " CHF " + fmtCHFShort(stand) + " − verrechnet CHF " + fmtCHFShort(vormonate) : "Periode " + faktFmtDatum(von || bisIso) + " – " + faktFmtDatum(bisIso)}: CHF ${fmtCHFShort(ziel)} netto → ${MONTH_NAMES[monat - 1]} ${year}${geschrieben ? "" : " (unverändert)"}. Ausgeschlossen: ${a.storno} Storno, ${a.fest} Festvermittlung, ${a.nachStichtag} nach Stichtag.`);
+    toast(`${cust.BPOYtd ? "Jahresstand per " + faktFmtDatum(bisIso) + " CHF " + faktFmt(stand) + " → " + MONTH_NAMES[monat - 1] + " " + year + "; zu verrechnen (− CHF " + faktFmt(vormonate) + "): CHF " + faktFmt(ziel) : "Periode " + faktFmtDatum(von || bisIso) + " – " + faktFmtDatum(bisIso) + ": CHF " + faktFmt(ziel) + " netto → " + MONTH_NAMES[monat - 1] + " " + year}${geschrieben ? "" : " (unverändert)"}. Ausgeschlossen: ${a.storno} Storno, ${a.fest} Festvermittlung, ${a.nachStichtag} nach Stichtag.`);
   } catch (err) {
     await reload("MonthlyRevenue");
     toast("Import unvollständig: " + err.message, true);
@@ -5055,7 +5070,7 @@ async function faktYtdBasisSetzen(custId, bisIso, betrag) {
   const k = faktKunde(custId);
   if (bisIso !== undefined) { if (bisIso) k.ytdBis = bisIso; else delete k.ytdBis; }
   if (betrag !== undefined) { const n = faktNum(betrag); if (n) k.ytdBasis = Math.round(n * 100) / 100; else delete k.ytdBasis; }
-  try { await faktSpeichern(); toast(`Verrechnet bis ${faktFmtDatum(k.ytdBis || "")} auf CHF ${fmtCHFShort(k.ytdBasis || 0)} gespeichert.`); }
+  try { await faktSpeichern(); toast(`Verrechnet bis ${faktFmtDatum(k.ytdBis || "")} auf CHF ${faktFmt(k.ytdBasis || 0)} gespeichert.`); }
   catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
   render();
 }
@@ -5072,7 +5087,7 @@ async function faktNachFakturierung(custId, year, month) {
       if (k.ytdBis === e.letzterImport.bis && k.ytdBasis === e.letzterImport.stand) return;
       k.ytdBis = e.letzterImport.bis; k.ytdBasis = e.letzterImport.stand;
       await faktSpeichern();
-      toast(`Verrechnet bis ${faktFmtDatum(k.ytdBis)} auf CHF ${fmtCHFShort(k.ytdBasis)} gesetzt.`);
+      toast(`Verrechnet bis ${faktFmtDatum(k.ytdBis)} auf CHF ${faktFmt(k.ytdBasis)} gesetzt.`);
       return;
     }
     if (k.faktBis === e.letzterImport.bis) return;
@@ -5092,10 +5107,12 @@ function faktOffen(cust, year) {
     const li = e && e.letzterImport;
     const monat = li ? li.monat : 0;
     const r = monat ? findRev(cust.id, year, monat) : null;
-    const wert = r ? (parseFloat(r.ExternalRevenue) || 0) : 0;
+    const stand = r ? (parseFloat(r.ExternalRevenue) || 0) : 0;   // Zeile = Jahresstand
     const fakturiert = !!(r && r.InvoicedBPO);
     const k = (faktStand && faktStand["c" + cust.id]) || {};
-    return { ytd: true, monat, stand: li ? li.stand : 0, vormonate: li ? li.vormonate : 0, fakturiert, netto: wert,
+    const basis = k.ytdBis && parseInt(k.ytdBis.slice(0, 4)) === year ? (parseFloat(k.ytdBasis) || 0) : 0;
+    const wert = Math.round((stand - basis) * 100) / 100;
+    return { ytd: true, monat, stand, vormonate: basis, fakturiert, netto: wert,
              ytdBis: k.ytdBis || "", ytdBasis: k.ytdBasis || 0,
              honorar: fakturiert ? 0 : wert * rate / 100, faktBis, bis, von: "", anzahlTage: wert ? 1 : 0, rate };
   }
@@ -5131,22 +5148,22 @@ function faktRenderKasten(cust, year) {
   let detail;
   if (cust.BPOYtd && li) {
     const pct = o.rate.toLocaleString("de-CH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    detail = `Jahresstand per ${faktFmtDatum(li.bis)} CHF ${fmtCHFShort(o.stand)} − verrechnet CHF ${fmtCHFShort(o.vormonate)} = ${MONTH_NAMES[li.monat - 1]} CHF ${fmtCHFShort(o.netto)} × ${pct} %` +
+    detail = `Jahresstand per ${faktFmtDatum(li.bis)} CHF ${faktFmt(o.stand)} − verrechnet${o.ytdBis ? " bis " + faktFmtDatum(o.ytdBis) : ""} CHF ${faktFmt(o.vormonate)} = CHF ${faktFmt(o.netto)} × ${pct} % = CHF ${faktFmt(o.netto * o.rate / 100)}` +
       (o.fakturiert ? ` · ${MONTH_NAMES[li.monat - 1]} ist fakturiert.` : ` → ${MONTH_NAMES[li.monat - 1]} offen. Fakt. BPO in ${MONTH_NAMES[li.monat - 1]} auf «Ja» setzen, wenn verrechnet.`);
   }
   else if (!li) detail = cust.BPOYtd ? `Noch kein Import für ${year}. YTD-Kunde: Stichtag ist immer der Monatsletzte des Abrechnungsmonats; abgezogen wird der rechts eingetragene, zuletzt verrechnete Jahresstand${o.ytdBasis ? "" : " (noch leer → 0)"}.` : `Noch kein Import für ${year}.`;
   else if (!o.anzahlTage) detail = o.faktBis && o.faktBis >= o.bis
     ? `Bis ${faktFmtDatum(o.bis)} importiert und bis ${faktFmtDatum(o.faktBis)} fakturiert — nichts offen.`
     : `Keine Rechnungen zwischen ${o.faktBis ? faktFmtDatum(o.faktBis) : "Jahresbeginn"} und ${faktFmtDatum(o.bis)}.`;
-  else detail = `Periode ${faktFmtDatum(o.von)} – ${faktFmtDatum(o.bis)}: CHF ${fmtCHFShort(o.netto)} netto × ${o.rate.toLocaleString("de-CH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} % → Abrechnungsmonat ${li && li.monat ? MONTH_NAMES[li.monat - 1] : "?"}${o.faktBis ? ` · fakturiert bis ${faktFmtDatum(o.faktBis)}` : " · noch nichts fakturiert"}. Fakt. BPO im Abrechnungsmonat auf «Ja» setzen → «Fakturiert bis» springt auf ${faktFmtDatum(o.bis)}.`;
+  else detail = `Periode ${faktFmtDatum(o.von)} – ${faktFmtDatum(o.bis)}: CHF ${faktFmt(o.netto)} netto × ${o.rate.toLocaleString("de-CH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} % = CHF ${faktFmt(o.honorar)} → Abrechnungsmonat ${li && li.monat ? MONTH_NAMES[li.monat - 1] : "?"}${o.faktBis ? ` · fakturiert bis ${faktFmtDatum(o.faktBis)}` : " · noch nichts fakturiert"}. Fakt. BPO im Abrechnungsmonat auf «Ja» setzen → «Fakturiert bis» springt auf ${faktFmtDatum(o.bis)}.`;
   const importInfo = li
-    ? `Letzter Import: ${escape(li.dateiname || "")} · ${new Date(li.am).toLocaleString("de-CH", { dateStyle: "short", timeStyle: "short" })} · ${cust.BPOYtd ? "Jahresstand CHF " + fmtCHFShort(li.stand) + " − verrechnet CHF " + fmtCHFShort(li.vormonate) + " =" : "Periode"} CHF ${fmtCHFShort(li.ziel != null ? li.ziel : li.periode)} netto → ${MONTH_NAMES[(li.monat || 1) - 1]} · Datei: ${li.anzahl} Rechnungen bis ${faktFmtDatum(li.bis)}, CHF ${fmtCHFShort(li.netto)} netto (ausgeschlossen: ${li.storno} Storno, ${li.fest} Festvermittlung, ${li.nachStichtag} nach Stichtag${li.fremdesJahr ? `, ${li.fremdesJahr} anderes Jahr` : ""}) <a href="#" onclick="faktImportRueckgaengig(${cust.id},${year});return false;" style="color:var(--accent-3)">Rückgängig</a>`
-    : `Rechnungs-Export des Kunden hochladen — Festvermittlung, Storno und Rechnungen nach dem Stichtag werden ausgeschlossen; das Netto der Periode nach «Fakturiert bis» landet komplett im Abrechnungsmonat${cust.BPOYtd ? " (YTD: Jahresstand minus verrechneter Stand)" : ""}.`;
+    ? `Letzter Import: ${escape(li.dateiname || "")} · ${new Date(li.am).toLocaleString("de-CH", { dateStyle: "short", timeStyle: "short" })} · ${cust.BPOYtd ? "Jahresstand CHF " + faktFmt(li.stand) : "Periode CHF " + faktFmt(li.ziel != null ? li.ziel : li.periode) + " netto"} → ${MONTH_NAMES[(li.monat || 1) - 1]} · Datei: ${li.anzahl} Rechnungen bis ${faktFmtDatum(li.bis)}, CHF ${faktFmt(li.netto)} netto (ausgeschlossen: ${li.storno} Storno, ${li.fest} Festvermittlung, ${li.nachStichtag} nach Stichtag${li.fremdesJahr ? `, ${li.fremdesJahr} anderes Jahr` : ""}) <a href="#" onclick="faktImportRueckgaengig(${cust.id},${year});return false;" style="color:var(--accent-3)">Rückgängig</a>`
+    : `Rechnungs-Export des Kunden hochladen — Festvermittlung, Storno und Rechnungen nach dem Stichtag werden ausgeschlossen; das Netto der Periode nach «Fakturiert bis» landet komplett im Abrechnungsmonat${cust.BPOYtd ? " (YTD: Zeile = Jahresstand; zu verrechnen = Jahresstand − verrechneter Stand)" : ""}.`;
   return `
     <div style="border:1px solid var(--border);border-left:3px solid var(--accent-2);border-radius:6px;padding:10px 14px;margin-bottom:14px;display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;background:var(--bg-card)">
       <div style="flex:1;min-width:280px">
         <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em">Zu verrechnen (BPO${segmentChargesSaaS(cust.Segment) ? "" : ", inkl. SaaS-Anteil"})</div>
-        <div style="font-family:var(--font-mono);font-size:22px;font-weight:600;color:${o.honorar > 0 ? "var(--accent-2)" : "var(--text-dim)"}">CHF ${o.honorar ? fmtCHFShort(o.honorar) : "0"}${nurLizenz ? ` <span style="color:var(--warn);font-size:11px;font-weight:400">BPO-Satz fehlt beim Kunden</span>` : ""}</div>
+        <div style="font-family:var(--font-mono);font-size:22px;font-weight:600;color:${o.honorar > 0 ? "var(--accent-2)" : "var(--text-dim)"}">CHF ${o.honorar ? faktFmt(o.honorar) : "0.00"}${nurLizenz ? ` <span style="color:var(--warn);font-size:11px;font-weight:400">BPO-Satz fehlt beim Kunden</span>` : ""}</div>
         <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${detail}</div>
         <div style="font-size:11px;color:var(--text-faint);margin-top:6px">${importInfo}</div>
       </div>
@@ -5212,7 +5229,7 @@ function computeCustomerStats(cust, range) {
   const monthly = [];
   let sumSaaS = 0, sumBPO = 0;
 
-  if (false && cust.BPOYtd && segmentNeedsBPO(cust.Segment)) { // v1.223: Zeilen sind Monatswerte
+  if (cust.BPOYtd && segmentNeedsBPO(cust.Segment)) {
     iter((y, m) => {
       const r = findRev(cust.id, y, m);
       const calc = calcRevenue(r, cust, y, m);
@@ -5829,7 +5846,7 @@ function renderStats(el) {
     </table></div>
 
     <div style="margin-top:12px;color:var(--text-faint);font-size:11px">
-      Hinweis: Auch bei YTD-Kunden sind die Monatszeilen Monatswerte (der Jahresstand wird beim CSV-Import um den verrechneten Stand bereinigt).
+      Hinweis: Bei YTD-Kunden zeigen die Monatsspalten den effektiv in dem Monat fakturierten Differenzbetrag. Die BPO-Jahressumme entspricht dem letzten YTD-Stand des Zeitraums (kein Doppelzählen).
     </div>
   `;
 }
@@ -11063,7 +11080,7 @@ function editCustomer(id) {
       <label>Stundensatz (CHF/h)</label>
       <input id="f-hourlyrate" type="number" step="0.01" min="0" value="${c.HourlyRate||""}" placeholder="z.B. 180">
     </div>
-    <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-bpoytd" ${c.BPOYtd?"checked":""} style="width:auto;margin:0"> BPO-Abrechnung YTD (Kunde wird auf Jahresstand abgerechnet; beim CSV-Import wird der zuletzt verrechnete Stand abgezogen, Monatszeilen bleiben Monatswerte)</label></div>
+    <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-bpoytd" ${c.BPOYtd?"checked":""} style="width:auto;margin:0"> BPO-Abrechnung YTD-kumulativ (Jahresbasis, Vormonate werden automatisch abgezogen)</label></div>
     <div class="field"><label>Ziel-ARR SaaS (CHF)</label><input id="f-targetarr" type="number" step="1000" min="0" value="${c.TargetARR||""}"></div>
     <div class="field"><label>Link</label><input id="f-link" type="text" value="${escape(appLinkText(c.id || "", c.Link))}" placeholder="z.B. helva.apriko.app"></div>
     ${VERTRAG_ARTEN.map(([art, label]) => `<div class="field"><label>${label} (SharePoint-URL)</label><input id="f-vertrag-${art}" type="text" value="${escape(vertragLink(c.id || "", art))}" placeholder="In SharePoint: Dokument → Link kopieren → hier einfügen"></div>`).join("")}
