@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.218.0"></script>
-<script src="apriko-api.js?v=1.218.0"></script>
-<script src="lohncheck.js?v=1.218.0"></script>
-<script src="personalbudget.js?v=1.218.0"></script>
-<script src="jahresbudget.js?v=1.218.0"></script>
-<script src="budgetpositionen.js?v=1.218.0"></script>
-<script src="lohnchecklistetemp.js?v=1.218.0"></script>
+<script src="apriko-filters.js?v=1.219.0"></script>
+<script src="apriko-api.js?v=1.219.0"></script>
+<script src="lohncheck.js?v=1.219.0"></script>
+<script src="personalbudget.js?v=1.219.0"></script>
+<script src="jahresbudget.js?v=1.219.0"></script>
+<script src="budgetpositionen.js?v=1.219.0"></script>
+<script src="lohnchecklistetemp.js?v=1.219.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -980,7 +980,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.218.0</span> · <span id="app-build-date">14.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.219.0</span> · <span id="app-build-date">15.09.2026</span>
     </div>
   </aside>
 
@@ -4622,6 +4622,8 @@ function renderRevenueByCustomer(el) {
       ${incomplete ? `<span style="color:var(--warn);margin-left:8px">⚠ Preismodell unvollständig — bitte beim Kunden ergänzen</span>` : ""}
     </div>
 
+    ${faktRenderKasten(cust, year)}
+
     <div class="table-wrap"><table>
       <thead><tr>
         <th>Monat</th>
@@ -4797,9 +4799,267 @@ async function toggleInvoiced(customerId, year, month, type) {
       });
     }
     await reload("MonthlyRevenue");
+    if (type === "BPO") await faktBasisMerken(customerId, year, month, newValue);
     render();
     toast(newValue ? `${type} als fakturiert markiert` : `${type}-Faktura zurückgesetzt`);
   } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- Fakturierung: Aussenumsatz-CSV-Import (Pro Kunde) ----------
+   Liest den Rechnungs-Export des Kunden (Semikolon-CSV: Filiale;Fakturajahr;
+   Fakturamonat;…;Netto;…;Status;Fakturaart), streicht Festvermittlung und
+   Storno, summiert Netto pro Fakturamonat und schreibt die Werte direkt als
+   Aussenumsatz in die Monatszeilen (YTD-Kunden: kumuliert). Vorher-Werte
+   werden pro Kunde+Jahr in CRM-Budgetdaten/fakt_import.json gesichert
+   (Rückgängig). Dieselbe Datei merkt sich pro fakturiertem Monat den
+   Aussenumsatz zum Zeitpunkt der Fakturierung («Basis») — weicht der
+   Import später davon ab, wird die Differenz als Nachtrag ausgewiesen. */
+const FAKT_PFAD = "CRM-Budgetdaten/fakt_import.json";
+let faktStand = null;          // { "<custId>_<year>": {...} }
+let faktStandLaedt = false;
+async function faktLaden(force) {
+  if (!force && faktStand) return faktStand;
+  let data = null;
+  try { data = await graph(`/sites/${siteId}/drive/root:/${FAKT_PFAD}:/content`); }
+  catch (e) { data = null; }
+  if (!data || typeof data !== "object" || Array.isArray(data)) data = {};
+  faktStand = data;
+  return data;
+}
+async function faktSpeichern() {
+  const body = JSON.stringify(faktStand || {});
+  try { await graph(`/sites/${siteId}/drive/root:/${FAKT_PFAD}:/content`, { method: "PUT", body }); }
+  catch (e) {
+    if (!/404|itemNotFound|400/i.test(e.message)) throw e;
+    await graph(`/sites/${siteId}/drive/root/children`, { method: "POST", body: JSON.stringify({ name: "CRM-Budgetdaten", folder: {}, "@microsoft.graph.conflictBehavior": "replace" }) });
+    await graph(`/sites/${siteId}/drive/root:/${FAKT_PFAD}:/content`, { method: "PUT", body });
+  }
+}
+function faktKey(custId, year) { return custId + "_" + year; }
+function faktEintrag(custId, year) {
+  if (!faktStand) return null;
+  return faktStand[faktKey(custId, year)] || null;
+}
+function faktEintragSicher(custId, year) {
+  if (!faktStand) faktStand = {};
+  const k = faktKey(custId, year);
+  if (!faktStand[k]) faktStand[k] = { basis: {} };
+  if (!faktStand[k].basis) faktStand[k].basis = {};
+  return faktStand[k];
+}
+
+/* Semikolon-CSV mit Anführungszeichen, BOM und CRLF robust parsen. */
+function faktParseCsv(text) {
+  text = String(text || "").replace(/^\uFEFF/, "");
+  const rows = []; let row = [], cell = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+      else cell += c;
+    } else if (c === '"') q = true;
+    else if (c === ";") { row.push(cell); cell = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(cell); cell = "";
+      if (row.some(v => v !== "")) rows.push(row);
+      row = [];
+    } else cell += c;
+  }
+  row.push(cell); if (row.some(v => v !== "")) rows.push(row);
+  if (!rows.length) return [];
+  const head = rows[0].map(h => h.trim());
+  return rows.slice(1).map(r => { const o = {}; head.forEach((h, i) => o[h] = (r[i] || "").trim()); return o; });
+}
+function faktNum(v) {
+  const n = parseFloat(String(v == null ? "" : v).replace(/'/g, "").replace(/\s/g, "").replace(",", "."));
+  return isNaN(n) ? 0 : n;
+}
+/* CSV auswerten → { monate:{m:netto}, anzahl, storno, fest, fremdesJahr, letzterMonat } */
+function faktAuswerten(zeilen, year) {
+  const out = { monate: {}, anzahl: 0, storno: 0, fest: 0, fremdesJahr: 0, letzterMonat: 0, netto: 0 };
+  for (const z of zeilen) {
+    const art = (z["Fakturaart"] || "").toLowerCase();
+    const status = (z["Status"] || "").toLowerCase();
+    if (/festverm|feststell/.test(art)) { out.fest++; continue; }
+    if (/storn/.test(status) || z["Storniert am"]) { out.storno++; continue; }
+    let jahr = parseInt(z["Fakturajahr"]) || 0, monat = parseInt(z["Fakturamonat"]) || 0;
+    if (!jahr || !monat) {                       // Fallback: Rechnungsdatum dd.mm.yyyy
+      const m = /(\d{1,2})\.(\d{1,2})\.(\d{4})/.exec(z["Rechnungsdatum"] || "");
+      if (m) { monat = parseInt(m[2]); jahr = parseInt(m[3]); }
+    }
+    if (jahr !== year) { out.fremdesJahr++; continue; }
+    if (monat < 1 || monat > 12) continue;
+    const netto = faktNum(z["Netto"]);
+    out.monate[monat] = (out.monate[monat] || 0) + netto;
+    out.netto += netto; out.anzahl++;
+    if (monat > out.letzterMonat) out.letzterMonat = monat;
+  }
+  Object.keys(out.monate).forEach(m => out.monate[m] = Math.round(out.monate[m] * 100) / 100);
+  return out;
+}
+/* Ein Monatswert schreiben (ohne Reload — der Aufrufer lädt einmal am Schluss). */
+async function faktSchreibeExtRev(cust, year, month, value) {
+  const existing = findRev(cust.id, year, month);
+  const projected = { ...(existing || {}), ExternalRevenue: value };
+  const calc = calcRevenue(projected, cust, year, month);
+  if (existing) {
+    if ((parseFloat(existing.ExternalRevenue) || 0) === value) return false;
+    await updateItem("MonthlyRevenue", existing.id, { ExternalRevenue: value, SaaSRevenue: calc.saas, BPORevenue: calc.bpo });
+  } else {
+    if (!value) return false;
+    await createItem("MonthlyRevenue", {
+      Title: `${cust.Title || "Customer"} - ${year}-${String(month).padStart(2, "0")}`,
+      CustomerId: cust.id, Year: year, Month: month,
+      Licenses: 0, ExternalRevenue: value, Hours: 0,
+      SaaSRevenue: calc.saas, BPORevenue: calc.bpo,
+      InvoicedSaaS: false, InvoicedBPO: false
+    });
+  }
+  return true;
+}
+function faktUploadStarten(custId, year) {
+  const inp = document.createElement("input");
+  inp.type = "file"; inp.accept = ".csv,text/csv";
+  inp.onchange = () => { if (inp.files && inp.files[0]) faktImportCsv(custId, year, inp.files[0]); };
+  inp.click();
+}
+async function faktImportCsv(custId, year, file) {
+  const cust = cache.customers.find(c => c.id == custId);
+  if (!cust) return;
+  if (!needsExternal(cust)) { toast("Dieser Kunde rechnet nicht über den Aussenumsatz ab.", true); return; }
+  let text;
+  try { text = await file.text(); } catch (e) { toast("Datei nicht lesbar: " + e.message, true); return; }
+  const zeilen = faktParseCsv(text);
+  if (!zeilen.length || !("Netto" in zeilen[0])) { toast("Keine Spalte «Netto» gefunden — ist das der Rechnungs-Export?", true); return; }
+  const a = faktAuswerten(zeilen, year);
+  if (!a.anzahl) { toast(`Keine verwertbaren Rechnungen für ${year} in der Datei (${a.storno} Storno, ${a.fest} Festvermittlung, ${a.fremdesJahr} anderes Jahr).`, true); return; }
+
+  await faktLaden(false);
+  const e = faktEintragSicher(custId, year);
+  const vorher = {};
+  for (let m = 1; m <= 12; m++) { const r = findRev(custId, year, m); vorher[m] = r ? (parseFloat(r.ExternalRevenue) || 0) : 0; }
+  // Fakturierte Monate ohne Basis: der bisherige Wert galt bei der Fakturierung
+  for (let m = 1; m <= 12; m++) {
+    const r = findRev(custId, year, m);
+    if (r && r.InvoicedBPO && e.basis[m] === undefined) e.basis[m] = vorher[m];
+  }
+  // Zielwerte: monatlich = Monatssumme; YTD = kumuliert bis zum letzten CSV-Monat
+  const nachher = {}; let kum = 0;
+  for (let m = 1; m <= a.letzterMonat; m++) {
+    kum += a.monate[m] || 0;
+    nachher[m] = cust.BPOYtd ? Math.round(kum * 100) / 100 : (a.monate[m] || 0);
+  }
+  toast(`Importiere ${a.anzahl} Rechnungen …`);
+  let geschrieben = 0;
+  try {
+    for (const m of Object.keys(nachher)) {
+      if (await faktSchreibeExtRev(cust, year, parseInt(m), nachher[m])) geschrieben++;
+    }
+    await reload("MonthlyRevenue");
+    e.letzterImport = {
+      dateiname: file.name, am: new Date().toISOString(),
+      anzahl: a.anzahl, storno: a.storno, fest: a.fest, fremdesJahr: a.fremdesJahr,
+      netto: Math.round(a.netto * 100) / 100, letzterMonat: a.letzterMonat,
+      vorher, nachher
+    };
+    await faktSpeichern();
+    toast(`${a.anzahl} Rechnungen importiert (${a.storno} Storno, ${a.fest} Festvermittlung ausgeschlossen) — ${geschrieben} Monat${geschrieben === 1 ? "" : "e"} aktualisiert.`);
+  } catch (err) {
+    await reload("MonthlyRevenue");
+    toast("Import unvollständig: " + err.message, true);
+  }
+  render();
+}
+async function faktImportRueckgaengig(custId, year) {
+  const cust = cache.customers.find(c => c.id == custId);
+  await faktLaden(false);
+  const e = faktEintrag(custId, year);
+  if (!cust || !e || !e.letzterImport) { toast("Kein Import zum Rückgängigmachen.", true); return; }
+  if (!confirm(`Import vom ${new Date(e.letzterImport.am).toLocaleString("de-CH")} rückgängig machen? Die Aussenumsätze werden auf den Stand davor zurückgesetzt.`)) return;
+  try {
+    for (const m of Object.keys(e.letzterImport.vorher)) {
+      await faktSchreibeExtRev(cust, year, parseInt(m), e.letzterImport.vorher[m] || 0);
+    }
+    await reload("MonthlyRevenue");
+    delete e.letzterImport;
+    await faktSpeichern();
+    toast("Import rückgängig gemacht.");
+  } catch (err) { await reload("MonthlyRevenue"); toast("Rückgängig unvollständig: " + err.message, true); }
+  render();
+}
+/* Basis bei Fakturierung merken (aus toggleInvoiced) — best effort. */
+async function faktBasisMerken(custId, year, month, fakturiert) {
+  try {
+    await faktLaden(false);
+    const e = faktEintragSicher(custId, year);
+    if (fakturiert) {
+      const r = findRev(custId, year, month);
+      e.basis[month] = r ? (parseFloat(r.ExternalRevenue) || 0) : 0;
+    } else delete e.basis[month];
+    await faktSpeichern();
+  } catch (err) { console.warn("Fakt-Basis nicht gespeichert:", err.message); }
+}
+/* Rechnungsbetrag eines Aussenumsatzes: bei separater SaaS-Faktura nur der
+   BPO-Anteil, sonst (Nur BPO / BPO inkl. SaaS) der ganze Betrag. */
+function faktHonorar(cust, ext) {
+  const rate = parseFloat(cust.BPORate) || 0;
+  return ext * rate / 100;
+}
+function faktRechnungsBetrag(cust, calc) {
+  return segmentChargesSaaS(cust.Segment) ? calc.bpo : calc.total;
+}
+/* «Zu verrechnen»-Kasten für den Pro-Kunde-Modus. */
+function faktRenderKasten(cust, year) {
+  if (!needsExternal(cust)) return "";
+  if (!faktStand && !faktStandLaedt) {
+    faktStandLaedt = true;
+    faktLaden(false).then(() => { faktStandLaedt = false; if (currentView === "revenue") render(); });
+  }
+  const e = faktEintrag(cust.id, year) || { basis: {} };
+  const basis = e.basis || {};
+  const posten = [];
+  let total = 0;
+  if (cust.BPOYtd) {
+    let lastM = 0, lastFaktM = 0;
+    for (let m = 1; m <= 12; m++) {
+      const r = findRev(cust.id, year, m);
+      if (r && (parseFloat(r.ExternalRevenue) || 0) > 0) { lastM = m; if (r.InvoicedBPO) lastFaktM = m; }
+    }
+    if (lastM) {
+      const stand = faktHonorar(cust, parseFloat(findRev(cust.id, year, lastM).ExternalRevenue) || 0);
+      const fakt = lastFaktM ? faktHonorar(cust, parseFloat(findRev(cust.id, year, lastFaktM).ExternalRevenue) || 0) : 0;
+      total = stand - fakt;
+      posten.push(`YTD-Stand ${MONTH_NAMES[lastM - 1]}: CHF ${fmtCHFShort(stand)}`);
+      posten.push(lastFaktM ? `bereits fakturiert bis ${MONTH_NAMES[lastFaktM - 1]}: CHF ${fmtCHFShort(fakt)}` : "noch nichts fakturiert");
+    }
+  } else {
+    for (let m = 1; m <= 12; m++) {
+      const r = findRev(cust.id, year, m);
+      if (!r) continue;
+      const ext = parseFloat(r.ExternalRevenue) || 0;
+      if (!r.InvoicedBPO) {
+        if (ext > 0) { const b = faktRechnungsBetrag(cust, calcRevenue(r, cust, year, m)); total += b; posten.push(`${MONTH_NAMES[m - 1]} offen: CHF ${fmtCHFShort(b)}`); }
+      } else if (basis[m] !== undefined && Math.abs(ext - basis[m]) >= 0.5) {
+        const d = faktHonorar(cust, ext - basis[m]); total += d;
+        posten.push(`${MONTH_NAMES[m - 1]} Nachtrag: CHF ${(d < 0 ? "−" : "") + fmtCHFShort(Math.abs(d))} <span style="color:var(--text-faint)">(Aussenumsatz ${fmtCHFShort(basis[m])} → ${fmtCHFShort(ext)})</span>`);
+      }
+    }
+  }
+  const li = e.letzterImport;
+  const importInfo = li
+    ? `Letzter Import: ${escape(li.dateiname || "")} · ${new Date(li.am).toLocaleString("de-CH", { dateStyle: "short", timeStyle: "short" })} · ${li.anzahl} Rechnungen, CHF ${fmtCHFShort(li.netto)} netto (ausgeschlossen: ${li.storno} Storno, ${li.fest} Festvermittlung${li.fremdesJahr ? `, ${li.fremdesJahr} anderes Jahr` : ""}) <a href="#" onclick="faktImportRueckgaengig(${cust.id},${year});return false;" style="color:var(--accent-3)">Rückgängig</a>`
+    : `Noch kein CSV-Import für ${year}. Rechnungs-Export des Kunden hochladen — Festvermittlung und Storno werden automatisch ausgeschlossen, Netto pro Fakturamonat als Aussenumsatz eingetragen${cust.BPOYtd ? " (YTD: kumuliert)" : ""}.`;
+  return `
+    <div style="border:1px solid var(--border);border-left:3px solid var(--accent-2);border-radius:6px;padding:10px 14px;margin-bottom:14px;display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;background:var(--bg-card)">
+      <div style="flex:1;min-width:260px">
+        <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em">Zu verrechnen (BPO${segmentChargesSaaS(cust.Segment) ? "" : ", inkl. SaaS-Anteil"})</div>
+        <div style="font-family:var(--font-mono);font-size:22px;font-weight:600;color:${total > 0 ? "var(--accent-2)" : "var(--text-dim)"}">CHF ${total ? (total < 0 ? "−" : "") + fmtCHFShort(Math.abs(total)) : "0"}</div>
+        ${posten.length ? `<div style="font-size:11px;color:var(--text-dim);margin-top:4px">${posten.join(" · ")}</div>` : `<div style="font-size:11px;color:var(--text-faint);margin-top:4px">Nichts offen.</div>`}
+        <div style="font-size:11px;color:var(--text-faint);margin-top:6px">${importInfo}</div>
+      </div>
+      <div><button class="btn btn-sm" onclick="faktUploadStarten(${cust.id},${year})">⇧ Aussenumsatz-CSV importieren</button></div>
+    </div>`;
 }
 
 /* ---------- Statistiken (Umsatzliste über Zeitraum) ---------- */
