@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.229.0"></script>
-<script src="apriko-api.js?v=1.229.0"></script>
-<script src="lohncheck.js?v=1.229.0"></script>
-<script src="personalbudget.js?v=1.229.0"></script>
-<script src="jahresbudget.js?v=1.229.0"></script>
-<script src="budgetpositionen.js?v=1.229.0"></script>
-<script src="lohnchecklistetemp.js?v=1.229.0"></script>
+<script src="apriko-filters.js?v=1.230.0"></script>
+<script src="apriko-api.js?v=1.230.0"></script>
+<script src="lohncheck.js?v=1.230.0"></script>
+<script src="personalbudget.js?v=1.230.0"></script>
+<script src="jahresbudget.js?v=1.230.0"></script>
+<script src="budgetpositionen.js?v=1.230.0"></script>
+<script src="lohnchecklistetemp.js?v=1.230.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -980,7 +980,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.229.0</span> · <span id="app-build-date">15.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.230.0</span> · <span id="app-build-date">15.09.2026</span>
     </div>
   </aside>
 
@@ -1220,6 +1220,20 @@ const ACTIVITY_TYPES = ["Note", "Call", "Email", "Meeting", "Task"];
 const INDUSTRIES = ["Nur SaaS", "SaaS und BPO", "Nur BPO", "BPO inkl. SaaS"];
 const SEGMENTS = ["Nur SaaS", "SaaS und BPO", "Nur BPO", "BPO inkl. SaaS"];
 const BPO_MODELS = ["Prozentual", "Stundensatz"];
+/* SaaS-Modell (Kundenstamm, Spalten SaaSModel [Text] + SaaSRate [Number]):
+   "Lizenz" (Standard: Lizenzen × Preis/Lizenz) oder "Prozentual" (SaaSRate %
+   auf den Aussenumsatz — derselbe Aussenumsatz wie fürs BPO). */
+const SAAS_MODELS = ["Lizenz", "Prozentual"];
+function saasIsPercent(customer) {
+  return segmentShowsSaaS(customer?.Segment) && customer?.SaaSModel === "Prozentual";
+}
+function saasOfMonth(rec, customer, pricePerLic) {
+  if (!segmentShowsSaaS(customer?.Segment)) return 0;
+  if (saasIsPercent(customer)) {
+    return (parseFloat(rec?.ExternalRevenue) || 0) * (parseFloat(customer?.SaaSRate) || 0) / 100;
+  }
+  return (parseInt(rec?.Licenses) || 0) * (pricePerLic || 0);
+}
 
 // Welche Felder pro Segment relevant sind
 function segmentNeedsLicenses(segment) {
@@ -1239,7 +1253,8 @@ function segmentChargesSaaS(segment) {
 
 // Was wird vom BPO-Modell als Input gebraucht?
 function needsExternal(customer) {
-  return segmentNeedsBPO(customer?.Segment) && (customer?.BPOModel || "Prozentual") === "Prozentual";
+  return (segmentNeedsBPO(customer?.Segment) && (customer?.BPOModel || "Prozentual") === "Prozentual")
+    || saasIsPercent(customer);
 }
 function needsHours(customer) {
   return segmentNeedsBPO(customer?.Segment) && customer?.BPOModel === "Stundensatz";
@@ -1294,12 +1309,21 @@ function calcRevenue(rec, customer, year, month) {
   const pricePerLic = year && month
     ? getPriceForMonth(customer, year, month)
     : (parseFloat(customer?.PricePerLicense) || 0);
-  const lic = parseInt(rec?.Licenses) || 0;
-  const saasComponent = lic * pricePerLic;
+  let saasComponent = saasOfMonth(rec, customer, pricePerLic);
 
   // BPO berechnen — mit oder ohne YTD-Kumulation
   let bpoGross = grossBPOofMonth(rec, customer);
   let ytdInfo = null;
+
+  // YTD + prozentuales SaaS: auch der SaaS-Anteil ist die Differenz zum Vormonatsstand
+  if (customer?.BPOYtd && saasIsPercent(customer) && year && month) {
+    let prevSaas = 0;
+    for (let m = month - 1; m >= 1; m--) {
+      const mr = (typeof findRev === "function") ? findRev(customer.id, year, m) : null;
+      if (mr && (parseFloat(mr.ExternalRevenue) || 0) > 0) { prevSaas = saasOfMonth(mr, customer, pricePerLic); break; }
+    }
+    if (saasComponent > 0) saasComponent -= prevSaas;
+  }
 
   if (customer?.BPOYtd && segmentNeedsBPO(seg) && year && month) {
     // YTD-Logik: Der eingegebene Aussenumsatz/Stunden ist BEREITS der kumulierte
@@ -2244,7 +2268,7 @@ function budgetSuggest(refType, refId, btype) {
     }
   } else {
     // BPO: Satz aus dem Kundenstamm; SaaSPct: eigener Satz (manuell, z.B. 0.35)
-    out.Rate = btype === "BPO" ? (parseFloat(c.BPORate) || 0) : 0;
+    out.Rate = btype === "BPO" ? (parseFloat(c.BPORate) || 0) : (parseFloat(c.SaaSRate) || 0);
     let withExt = recs.filter(r => (parseFloat(r.ExternalRevenue) || 0) > 0);
     if (withExt.length) {
       // Nur das JÜNGSTE Jahr mit Daten verwenden — ältere Jahre würden die
@@ -4481,7 +4505,8 @@ function renderRevenueByMonth(el) {
 
           // Sub-Info pro Kunde
           const subParts = [escape(c.Segment||"")];
-          if (c.PricePerLicense) subParts.push(`${parseFloat(c.PricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/Liz`);
+          if (saasIsPercent(c)) subParts.push(`SaaS ${parseFloat(c.SaaSRate || 0).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%`);
+          else if (c.PricePerLicense) subParts.push(`${parseFloat(c.PricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/Liz`);
           if (useHrs && c.HourlyRate) subParts.push(`${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h`);
           else if (useExt && c.BPORate) subParts.push(`${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%`);
 
@@ -4600,7 +4625,7 @@ function renderRevenueByCustomer(el) {
 
   // Sub-Info
   const subParts = [`<strong style="color:var(--text)">${escape(cust.Segment||"")}</strong>`];
-  if (cust.PricePerLicense) {
+  if (cust.PricePerLicense && !saasIsPercent(cust)) {
     let priceLabel = `${parseFloat(cust.PricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/Lizenz`;
     // Wenn Preis-Historie existiert, das markieren
     try {
@@ -4611,10 +4636,12 @@ function renderRevenueByCustomer(el) {
     } catch(e){}
     subParts.push(priceLabel);
   }
+  if (saasIsPercent(cust)) subParts.push(`SaaS ${parseFloat(cust.SaaSRate || 0).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}% auf Aussenumsatz`);
   if (useHrs && cust.HourlyRate) subParts.push(`${parseFloat(cust.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})} CHF/h`);
-  else if (useExt && cust.BPORate) subParts.push(`${parseFloat(cust.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}% auf Aussenumsatz`);
+  else if (segmentNeedsBPO(cust.Segment) && useExt && cust.BPORate) subParts.push(`BPO ${parseFloat(cust.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}% auf Aussenumsatz`);
 
-  const incomplete = (needLic && !cust.PricePerLicense) || (useExt && !cust.BPORate) || (useHrs && !cust.HourlyRate);
+  const incomplete = (needLic && !saasIsPercent(cust) && !cust.PricePerLicense) || (saasIsPercent(cust) && !cust.SaaSRate)
+    || (segmentNeedsBPO(cust.Segment) && useExt && !cust.BPORate) || (useHrs && !cust.HourlyRate);
 
   // BPO-Spalten-Header je nach Modell
   const bpoColHeader = useExt ? "Aussenumsatz" : (useHrs ? "Stunden" : "BPO-Input");
@@ -4998,6 +5025,7 @@ async function faktImportCsv(custId, year, file, bisIso, monat, faktBisFeld) {
   const cust = cache.customers.find(c => c.id == custId);
   if (!cust) return;
   if (!needsExternal(cust)) { toast("Dieser Kunde rechnet nicht über den Aussenumsatz ab.", true); return; }
+  if (!(parseFloat(cust.BPORate) > 0) && !(parseFloat(cust.SaaSRate) > 0)) { toast("Beim Kunden fehlt der Prozentsatz (BPO-Satz bzw. SaaS-Satz).", true); return; }
   let text;
   try { text = await file.text(); } catch (e) { toast("Datei nicht lesbar: " + e.message, true); return; }
   const zeilen = faktParseCsv(text);
@@ -5133,6 +5161,10 @@ async function faktNachFakturierung(custId, year, month) {
   } catch (err) { console.warn("Fakturiert-bis nicht gesetzt:", err.message); }
 }
 /* Zu verrechnen: Netto der Rechnungen nach «Fakturiert bis» bis zum letzten Import-Stichtag × Satz. */
+/* SaaS-Honorar auf einem Netto-Betrag (nur bei prozentualem SaaS-Modell, sonst 0). */
+function faktSaasHonorar(cust, netto) {
+  return saasIsPercent(cust) ? netto * (parseFloat(cust.SaaSRate) || 0) / 100 : 0;
+}
 function faktOffen(cust, year) {
   const e = faktStand && faktStand[cust.id + "_" + year];
   const faktBis = (faktStand && faktStand["c" + cust.id] && faktStand["c" + cust.id].faktBis) || "";
@@ -5147,7 +5179,7 @@ function faktOffen(cust, year) {
     const fakturiert = !!(r && r.InvoicedBPO);
     const b = faktYtdBasis(cust, year);
     const wert = Math.round((stand - b.betrag) * 100) / 100;
-    return { ytd: true, monat, stand, vormonate: b.betrag, fakturiert, netto: wert,
+    return { ytd: true, monat, stand, vormonate: b.betrag, fakturiert, netto: wert, saasHonorar: fakturiert ? 0 : faktSaasHonorar(cust, wert),
              ytdBis: b.bis, ytdBasis: b.betrag, ytdQuelle: b.quelle,
              honorar: fakturiert ? 0 : wert * rate / 100, faktBis, bis, von: "", anzahlTage: wert ? 1 : 0, rate };
   }
@@ -5157,7 +5189,7 @@ function faktOffen(cust, year) {
       if (d > faktBis && d <= bis) { netto += e.tage[d]; anzahlTage++; if (!von) von = d; }
     });
   }
-  return { netto: Math.round(netto * 100) / 100, honorar: netto * rate / 100, faktBis, bis, von, anzahlTage, rate };
+  return { netto: Math.round(netto * 100) / 100, honorar: netto * rate / 100, saasHonorar: faktSaasHonorar(cust, netto), faktBis, bis, von, anzahlTage, rate };
 }
 /* «Zu verrechnen»-Kasten für den Pro-Kunde-Modus. */
 function faktRenderKasten(cust, year) {
@@ -5204,8 +5236,9 @@ function faktRenderKasten(cust, year) {
   return `
     <div style="border:1px solid var(--border);border-left:3px solid var(--accent-2);border-radius:6px;padding:10px 14px;margin-bottom:14px;display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;background:var(--bg-card)">
       <div style="flex:1;min-width:280px">
-        <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em">Zu verrechnen (BPO${segmentChargesSaaS(cust.Segment) ? "" : ", inkl. SaaS-Anteil"})</div>
-        <div style="font-family:var(--font-mono);font-size:22px;font-weight:600;color:${o.honorar > 0 ? "var(--accent-2)" : "var(--text-dim)"}">CHF ${o.honorar ? faktFmt(o.honorar) : "0.00"}${nurLizenz ? ` <span style="color:var(--warn);font-size:11px;font-weight:400">BPO-Satz fehlt beim Kunden</span>` : ""}</div>
+        <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em">Zu verrechnen (${segmentNeedsBPO(cust.Segment) ? "BPO" + (segmentChargesSaaS(cust.Segment) ? "" : ", inkl. SaaS-Anteil") : "SaaS"})</div>
+        <div style="font-family:var(--font-mono);font-size:22px;font-weight:600;color:${(segmentNeedsBPO(cust.Segment) ? o.honorar : o.saasHonorar) > 0 ? "var(--accent-2)" : "var(--text-dim)"}">CHF ${faktFmt(segmentNeedsBPO(cust.Segment) ? o.honorar : o.saasHonorar)}${nurLizenz && segmentNeedsBPO(cust.Segment) ? ` <span style="color:var(--warn);font-size:11px;font-weight:400">BPO-Satz fehlt beim Kunden</span>` : ""}</div>
+        ${saasIsPercent(cust) && segmentNeedsBPO(cust.Segment) ? `<div style="font-family:var(--font-mono);font-size:13px;color:var(--accent);margin-top:2px">+ SaaS ${parseFloat(cust.SaaSRate || 0).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})} %: CHF ${faktFmt(o.saasHonorar)}</div>` : ""}
         <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${detail}</div>${abweichung}
         <div style="font-size:11px;color:var(--text-faint);margin-top:6px">${importInfo}</div>
       </div>
@@ -11049,6 +11082,7 @@ function openCustomer(id) {
         } catch(e){}
         return "";
       })()}</dd>
+      <dt>SaaS-Modell</dt><dd>${saasIsPercent(c) ? `Prozentual · ${parseFloat(c.SaaSRate || 0).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}% auf Aussenumsatz` : "Pro Lizenz"}</dd>
       <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}${c.BPOYtd ? ` · <span style="color:var(--accent-3)">YTD-kumulativ</span>` : ""}</dd>
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Link</dt><dd>${appLinkText(c.id, c.Link) ? `<a href="${escape(appLinkText(c.id, c.Link))}" target="_blank" rel="noopener" style="color:var(--accent-2)">${escape(appLinkText(c.id, c.Link))} ↗</a>` : "—"}</dd>
@@ -11092,6 +11126,17 @@ function editCustomer(id) {
       <div class="field"><label>Ende</label><input id="f-end" type="date" value="${c.EndDate?c.EndDate.slice(0,10):""}"></div>
     </div>
     <h4 style="margin:18px 0 8px;font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Preismodell</h4>
+    <div class="field"><label>SaaS-Modell</label>
+      <select id="f-saasmodel" onchange="document.getElementById('saas-percent-row').style.display=this.value==='Prozentual'?'block':'none';document.getElementById('saas-license-block').style.display=this.value==='Prozentual'?'none':'block'">
+        <option value="Lizenz" ${c.SaaSModel!=="Prozentual"?"selected":""}>Pro Lizenz (Lizenzen × Preis/Lizenz)</option>
+        <option value="Prozentual" ${c.SaaSModel==="Prozentual"?"selected":""}>Prozentual auf Aussenumsatz</option>
+      </select>
+    </div>
+    <div id="saas-percent-row" class="field" style="display:${c.SaaSModel==='Prozentual'?'block':'none'}">
+      <label>SaaS-Satz (% auf Aussenumsatz)</label>
+      <input id="f-saasrate" type="number" step="0.01" min="0" max="100" value="${c.SaaSRate||""}" placeholder="z.B. 0.35">
+    </div>
+    <div id="saas-license-block" style="display:${c.SaaSModel==='Prozentual'?'none':'block'}">
     <div class="field"><label>Preis pro Lizenz (CHF/Monat)</label><input id="f-pricelic" type="number" step="0.01" min="0" value="${c.PricePerLicense||""}" placeholder="z.B. 340"></div>
     <input type="hidden" id="f-pricehistory" value='${escape(c.PriceHistory||"")}'>
     <div class="field">
@@ -11107,6 +11152,7 @@ function editCustomer(id) {
         <div id="ph-list"></div>
         <button type="button" class="btn btn-sm" onclick="addPriceHistoryRow()" style="font-size:11px;padding:4px 10px;margin-top:6px">+ Periode hinzufügen</button>
       </div>
+    </div>
     </div>
     <div class="field"><label>BPO-Modell</label>
       <select id="f-bpomodel" onchange="document.getElementById('bpo-percent-row').style.display=this.value==='Prozentual'?'block':'none';document.getElementById('bpo-hourly-row').style.display=this.value==='Stundensatz'?'block':'none'">
@@ -11244,6 +11290,8 @@ async function saveCustomer(id) {
     Owner: val("f-owner") || null,
     PricePerLicense: val("f-pricelic") ? parseFloat(val("f-pricelic")) : null,
     PriceHistory: val("f-pricehistory") || null,
+    SaaSModel: val("f-saasmodel") === "Prozentual" ? "Prozentual" : null,
+    SaaSRate: val("f-saasrate") ? parseFloat(val("f-saasrate")) : null,
     BPOModel: val("f-bpomodel") || null,
     BPORate: val("f-bporate") ? parseFloat(val("f-bporate")) : null,
     HourlyRate: val("f-hourlyrate") ? parseFloat(val("f-hourlyrate")) : null,
