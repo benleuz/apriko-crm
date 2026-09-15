@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.228.0"></script>
-<script src="apriko-api.js?v=1.228.0"></script>
-<script src="lohncheck.js?v=1.228.0"></script>
-<script src="personalbudget.js?v=1.228.0"></script>
-<script src="jahresbudget.js?v=1.228.0"></script>
-<script src="budgetpositionen.js?v=1.228.0"></script>
-<script src="lohnchecklistetemp.js?v=1.228.0"></script>
+<script src="apriko-filters.js?v=1.229.0"></script>
+<script src="apriko-api.js?v=1.229.0"></script>
+<script src="lohncheck.js?v=1.229.0"></script>
+<script src="personalbudget.js?v=1.229.0"></script>
+<script src="jahresbudget.js?v=1.229.0"></script>
+<script src="budgetpositionen.js?v=1.229.0"></script>
+<script src="lohnchecklistetemp.js?v=1.229.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -980,7 +980,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.228.0</span> · <span id="app-build-date">15.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.229.0</span> · <span id="app-build-date">15.09.2026</span>
     </div>
   </aside>
 
@@ -4936,7 +4936,7 @@ function faktRechnungsDatum(z) {
 }
 /* CSV auswerten → { tage:{iso:netto}, monate:{m:netto}, anzahl, storno, fest, fremdesJahr, nachStichtag, letzterMonat } */
 function faktAuswerten(zeilen, year, bisIso) {
-  const out = { tage: {}, monate: {}, anzahl: 0, storno: 0, fest: 0, fremdesJahr: 0, nachStichtag: 0, letzterMonat: 0, netto: 0 };
+  const out = { tage: {}, anzahlProTag: {}, monate: {}, anzahl: 0, storno: 0, fest: 0, fremdesJahr: 0, nachStichtag: 0, letzterMonat: 0, netto: 0 };
   for (const z of zeilen) {
     const art = (z["Fakturaart"] || "").toLowerCase();
     const status = (z["Status"] || "").toLowerCase();
@@ -4949,6 +4949,7 @@ function faktAuswerten(zeilen, year, bisIso) {
     const monat = parseInt(iso.slice(5, 7));
     const netto = faktNum(z["Netto"]);
     out.tage[iso] = (out.tage[iso] || 0) + netto;
+    out.anzahlProTag[iso] = (out.anzahlProTag[iso] || 0) + 1;
     out.monate[monat] = (out.monate[monat] || 0) + netto;
     out.netto += netto; out.anzahl++;
     if (monat > out.letzterMonat) out.letzterMonat = monat;
@@ -4985,12 +4986,15 @@ function faktUploadStarten(custId, year) {
   let monat = monEl ? parseInt(monEl.value) : parseInt(bis.slice(5, 7));
   if (cust && cust.BPOYtd) bis = faktMonatsende(year, monat);   // YTD: immer Monatsletzter
   if (parseInt(bis.slice(0, 4)) !== year) { toast(`Stichtag «Rechnungen bis» muss im Jahr ${year} liegen.`, true); return; }
+  // «Fakturiert bis» direkt aus dem Feld übernehmen (was dort steht, gilt — auch wenn noch nicht gespeichert)
+  const fbEl = document.getElementById("fakt-faktbis-" + custId);
+  const faktBisFeld = fbEl ? (fbEl.value || "") : undefined;
   const inp = document.createElement("input");
   inp.type = "file"; inp.accept = ".csv,text/csv";
-  inp.onchange = () => { if (inp.files && inp.files[0]) faktImportCsv(custId, year, inp.files[0], bis, monat); };
+  inp.onchange = () => { if (inp.files && inp.files[0]) faktImportCsv(custId, year, inp.files[0], bis, monat, faktBisFeld); };
   inp.click();
 }
-async function faktImportCsv(custId, year, file, bisIso, monat) {
+async function faktImportCsv(custId, year, file, bisIso, monat, faktBisFeld) {
   const cust = cache.customers.find(c => c.id == custId);
   if (!cust) return;
   if (!needsExternal(cust)) { toast("Dieser Kunde rechnet nicht über den Aussenumsatz ab.", true); return; }
@@ -5003,12 +5007,17 @@ async function faktImportCsv(custId, year, file, bisIso, monat) {
 
   await faktLaden(false);
   const e = faktJahr(custId, year);
+  if (!cust.BPOYtd && faktBisFeld !== undefined) {
+    const k = faktKunde(custId);
+    if ((k.faktBis || "") !== faktBisFeld) { if (faktBisFeld) k.faktBis = faktBisFeld; else delete k.faktBis; }
+  }
   const faktBis = cust.BPOYtd ? "" : (faktKunde(custId).faktBis || "");
   if (faktBis && faktBis >= bisIso) { toast(`Stichtag ${faktFmtDatum(bisIso)} liegt nicht nach «Fakturiert bis» ${faktFmtDatum(faktBis)} — nichts zu importieren.`, true); return; }
   // Monats-Kunde: Periode (Fakturiert bis, Rechnungen bis] → komplett in den Abrechnungsmonat.
   // YTD-Kunde: kumulierter Jahresstand bis Monatsende (faktBis leer → alle Tage des Jahres bis Stichtag).
   let periode = 0, von = "";
-  Object.keys(a.tage).sort().forEach(d => { if (d > faktBis) { periode += a.tage[d]; if (!von) von = d; } });
+  a.tage_vor = 0;
+  Object.keys(a.tage).sort().forEach(d => { if (d > faktBis) { periode += a.tage[d]; if (!von) von = d; } else a.tage_vor += (a.anzahlProTag[d] || 0); });
   periode = Math.round(periode * 100) / 100;
   const rVorher = findRev(custId, year, monat);
   const vorher = { [monat]: rVorher ? (parseFloat(rVorher.ExternalRevenue) || 0) : 0 };
@@ -5023,6 +5032,10 @@ async function faktImportCsv(custId, year, file, bisIso, monat) {
   }
   // YTD: die Zeile trägt den kumulierten Jahresstand (wie die Vormonate); Monats-Kunde: Periodenwert
   const nachher = { [monat]: cust.BPOYtd ? stand : ziel };
+  const frage = cust.BPOYtd
+    ? `Jahresstand per ${faktFmtDatum(bisIso)}: CHF ${faktFmt(stand)} → Zeile ${MONTH_NAMES[monat - 1]} ${year}\nZu verrechnen (− CHF ${faktFmt(vormonate)} verrechnet): CHF ${faktFmt(ziel)} netto`
+    : `Periode ${faktBis ? faktFmtDatum(faktBis) + " (exkl.)" : "Jahresbeginn"} – ${faktFmtDatum(bisIso)}: CHF ${faktFmt(ziel)} netto aus ${a.anzahl - a.tage_vor} Rechnungen → Zeile ${MONTH_NAMES[monat - 1]} ${year}`;
+  if (!confirm(frage + `\n(ausgeschlossen: ${a.storno} Storno, ${a.fest} Festvermittlung, ${a.nachStichtag} nach Stichtag)\n\nImportieren?`)) return;
   toast(cust.BPOYtd ? `Importiere YTD-Stand per ${faktFmtDatum(bisIso)} in ${MONTH_NAMES[monat - 1]} …`
                     : `Importiere Periode ${faktFmtDatum(von || bisIso)} – ${faktFmtDatum(bisIso)} in ${MONTH_NAMES[monat - 1]} …`);
   let geschrieben = 0;
@@ -5201,7 +5214,7 @@ function faktRenderKasten(cust, year) {
           <input type="date" value="${o.ytdBis}" onchange="faktYtdBasisSetzen(${cust.id}, this.value, undefined)" title="Datum des zuletzt verrechneten Jahresstands (Monatsletzter)" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-family:inherit"></label>
         <label style="display:flex;align-items:center;gap:8px;justify-content:space-between" title="${o.ytdQuelle === "manuell" ? "Manuell eingetragen" : "Automatisch aus der Zeile des Monats «Verrechnet bis» — nur übertippen, wenn die Rechnung abweicht"}">auf Jahresstand CHF${o.ytdQuelle && o.ytdQuelle !== "manuell" ? ` <span style="color:var(--text-faint)">(${o.ytdQuelle})</span>` : ""}
           <input type="text" value="${o.ytdBasis ? faktFmt(o.ytdBasis) : ""}" placeholder="aus Zeile" onfocus="this.select()" onchange="faktYtdBasisSetzen(${cust.id}, undefined, this.value)" title="Netto-Aussenumsatz, auf dem die letzte YTD-Rechnung basiert — Vorgabe: Zeile des Monats «Verrechnet bis»" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-family:var(--font-mono);width:130px;text-align:right"></label>` : `<label style="display:flex;align-items:center;gap:8px;justify-content:space-between">Fakturiert bis
-          <input type="date" value="${o.faktBis}" onchange="faktBisSetzen(${cust.id}, this.value)" title="Letzter verrechneter Tag — alles danach gilt als offen" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-family:inherit"></label>
+          <input type="date" id="fakt-faktbis-${cust.id}" value="${o.faktBis}" onchange="faktBisSetzen(${cust.id}, this.value)" title="Letzter verrechneter Tag — alles danach gilt als offen" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-family:inherit"></label>
         <label style="display:flex;align-items:center;gap:8px;justify-content:space-between">Rechnungen bis
           <input type="date" id="fakt-bis-${cust.id}" value="${stichtagDefault}" title="Stichtag für den nächsten Import — spätere Rechnungen werden ignoriert" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-family:inherit"></label>`}
         <label style="display:flex;align-items:center;gap:8px;justify-content:space-between">Abrechnungsmonat
