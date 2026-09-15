@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.219.0"></script>
-<script src="apriko-api.js?v=1.219.0"></script>
-<script src="lohncheck.js?v=1.219.0"></script>
-<script src="personalbudget.js?v=1.219.0"></script>
-<script src="jahresbudget.js?v=1.219.0"></script>
-<script src="budgetpositionen.js?v=1.219.0"></script>
-<script src="lohnchecklistetemp.js?v=1.219.0"></script>
+<script src="apriko-filters.js?v=1.220.0"></script>
+<script src="apriko-api.js?v=1.220.0"></script>
+<script src="lohncheck.js?v=1.220.0"></script>
+<script src="personalbudget.js?v=1.220.0"></script>
+<script src="jahresbudget.js?v=1.220.0"></script>
+<script src="budgetpositionen.js?v=1.220.0"></script>
+<script src="lohnchecklistetemp.js?v=1.220.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -980,7 +980,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.219.0</span> · <span id="app-build-date">15.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.220.0</span> · <span id="app-build-date">15.09.2026</span>
     </div>
   </aside>
 
@@ -4799,23 +4799,23 @@ async function toggleInvoiced(customerId, year, month, type) {
       });
     }
     await reload("MonthlyRevenue");
-    if (type === "BPO") await faktBasisMerken(customerId, year, month, newValue);
     render();
     toast(newValue ? `${type} als fakturiert markiert` : `${type}-Faktura zurückgesetzt`);
   } catch (e) { toast(e.message, true); }
 }
 
 /* ---------- Fakturierung: Aussenumsatz-CSV-Import (Pro Kunde) ----------
-   Liest den Rechnungs-Export des Kunden (Semikolon-CSV: Filiale;Fakturajahr;
-   Fakturamonat;…;Netto;…;Status;Fakturaart), streicht Festvermittlung und
-   Storno, summiert Netto pro Fakturamonat und schreibt die Werte direkt als
-   Aussenumsatz in die Monatszeilen (YTD-Kunden: kumuliert). Vorher-Werte
-   werden pro Kunde+Jahr in CRM-Budgetdaten/fakt_import.json gesichert
-   (Rückgängig). Dieselbe Datei merkt sich pro fakturiertem Monat den
-   Aussenumsatz zum Zeitpunkt der Fakturierung («Basis») — weicht der
-   Import später davon ab, wird die Differenz als Nachtrag ausgewiesen. */
+   Liest den Rechnungs-Export des Kunden (Semikolon-CSV mit Rechnungsdatum,
+   Netto, Status, Fakturaart), streicht Festvermittlung und Storno und
+   berücksichtigt nur Rechnungen bis zum beim Import angegebenen Stichtag
+   («Rechnungen bis»). Die Monatswerte bis zum Stichtag werden direkt als
+   Aussenumsatz geschrieben (Stichtag-Monat = Teilsumme; spätere Monate
+   bleiben unberührt; YTD-Kunden kumuliert). Pro Kunde wird «Fakturiert bis»
+   (letzter verrechneter Tag) geführt: Zu verrechnen = Netto der Rechnungen
+   nach «Fakturiert bis» bis zum Import-Stichtag × BPO-Satz. Tagessummen
+   und Vorher-Werte (Rückgängig) liegen in CRM-Budgetdaten/fakt_import.json. */
 const FAKT_PFAD = "CRM-Budgetdaten/fakt_import.json";
-let faktStand = null;          // { "<custId>_<year>": {...} }
+let faktStand = null;          // { "c<custId>": {faktBis}, "<custId>_<year>": {tage, letzterImport} }
 let faktStandLaedt = false;
 async function faktLaden(force) {
   if (!force && faktStand) return faktStand;
@@ -4835,17 +4835,27 @@ async function faktSpeichern() {
     await graph(`/sites/${siteId}/drive/root:/${FAKT_PFAD}:/content`, { method: "PUT", body });
   }
 }
-function faktKey(custId, year) { return custId + "_" + year; }
-function faktEintrag(custId, year) {
-  if (!faktStand) return null;
-  return faktStand[faktKey(custId, year)] || null;
-}
-function faktEintragSicher(custId, year) {
+function faktJahr(custId, year) {
   if (!faktStand) faktStand = {};
-  const k = faktKey(custId, year);
-  if (!faktStand[k]) faktStand[k] = { basis: {} };
-  if (!faktStand[k].basis) faktStand[k].basis = {};
+  const k = custId + "_" + year;
+  if (!faktStand[k]) faktStand[k] = { tage: {} };
+  if (!faktStand[k].tage) faktStand[k].tage = {};
   return faktStand[k];
+}
+function faktKunde(custId) {
+  if (!faktStand) faktStand = {};
+  if (!faktStand["c" + custId]) faktStand["c" + custId] = {};
+  return faktStand["c" + custId];
+}
+function faktFmtDatum(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  return `${d}.${m}.${y}`;
+}
+function faktLetzterTagVormonat() {
+  const h = new Date();
+  const d = new Date(h.getFullYear(), h.getMonth(), 0);
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
 }
 
 /* Semikolon-CSV mit Anführungszeichen, BOM und CRLF robust parsen. */
@@ -4875,26 +4885,33 @@ function faktNum(v) {
   const n = parseFloat(String(v == null ? "" : v).replace(/'/g, "").replace(/\s/g, "").replace(",", "."));
   return isNaN(n) ? 0 : n;
 }
-/* CSV auswerten → { monate:{m:netto}, anzahl, storno, fest, fremdesJahr, letzterMonat } */
-function faktAuswerten(zeilen, year) {
-  const out = { monate: {}, anzahl: 0, storno: 0, fest: 0, fremdesJahr: 0, letzterMonat: 0, netto: 0 };
+/* Rechnungsdatum als ISO (YYYY-MM-DD); Fallback Fakturajahr/-monat (1. des Monats). */
+function faktRechnungsDatum(z) {
+  const m = /(\d{1,2})\.(\d{1,2})\.(\d{4})/.exec(z["Rechnungsdatum"] || "");
+  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  const j = parseInt(z["Fakturajahr"]) || 0, mo = parseInt(z["Fakturamonat"]) || 0;
+  return (j && mo) ? `${j}-${String(mo).padStart(2, "0")}-01` : "";
+}
+/* CSV auswerten → { tage:{iso:netto}, monate:{m:netto}, anzahl, storno, fest, fremdesJahr, nachStichtag, letzterMonat } */
+function faktAuswerten(zeilen, year, bisIso) {
+  const out = { tage: {}, monate: {}, anzahl: 0, storno: 0, fest: 0, fremdesJahr: 0, nachStichtag: 0, letzterMonat: 0, netto: 0 };
   for (const z of zeilen) {
     const art = (z["Fakturaart"] || "").toLowerCase();
     const status = (z["Status"] || "").toLowerCase();
     if (/festverm|feststell/.test(art)) { out.fest++; continue; }
     if (/storn/.test(status) || z["Storniert am"]) { out.storno++; continue; }
-    let jahr = parseInt(z["Fakturajahr"]) || 0, monat = parseInt(z["Fakturamonat"]) || 0;
-    if (!jahr || !monat) {                       // Fallback: Rechnungsdatum dd.mm.yyyy
-      const m = /(\d{1,2})\.(\d{1,2})\.(\d{4})/.exec(z["Rechnungsdatum"] || "");
-      if (m) { monat = parseInt(m[2]); jahr = parseInt(m[3]); }
-    }
-    if (jahr !== year) { out.fremdesJahr++; continue; }
-    if (monat < 1 || monat > 12) continue;
+    const iso = faktRechnungsDatum(z);
+    if (!iso) continue;
+    if (parseInt(iso.slice(0, 4)) !== year) { out.fremdesJahr++; continue; }
+    if (bisIso && iso > bisIso) { out.nachStichtag++; continue; }
+    const monat = parseInt(iso.slice(5, 7));
     const netto = faktNum(z["Netto"]);
+    out.tage[iso] = (out.tage[iso] || 0) + netto;
     out.monate[monat] = (out.monate[monat] || 0) + netto;
     out.netto += netto; out.anzahl++;
     if (monat > out.letzterMonat) out.letzterMonat = monat;
   }
+  Object.keys(out.tage).forEach(k => out.tage[k] = Math.round(out.tage[k] * 100) / 100);
   Object.keys(out.monate).forEach(m => out.monate[m] = Math.round(out.monate[m] * 100) / 100);
   return out;
 }
@@ -4919,12 +4936,15 @@ async function faktSchreibeExtRev(cust, year, month, value) {
   return true;
 }
 function faktUploadStarten(custId, year) {
+  const bisEl = document.getElementById("fakt-bis-" + custId);
+  const bis = bisEl && bisEl.value ? bisEl.value : faktLetzterTagVormonat();
+  if (parseInt(bis.slice(0, 4)) !== year) { toast(`Stichtag «Rechnungen bis» muss im Jahr ${year} liegen.`, true); return; }
   const inp = document.createElement("input");
   inp.type = "file"; inp.accept = ".csv,text/csv";
-  inp.onchange = () => { if (inp.files && inp.files[0]) faktImportCsv(custId, year, inp.files[0]); };
+  inp.onchange = () => { if (inp.files && inp.files[0]) faktImportCsv(custId, year, inp.files[0], bis); };
   inp.click();
 }
-async function faktImportCsv(custId, year, file) {
+async function faktImportCsv(custId, year, file, bisIso) {
   const cust = cache.customers.find(c => c.id == custId);
   if (!cust) return;
   if (!needsExternal(cust)) { toast("Dieser Kunde rechnet nicht über den Aussenumsatz ab.", true); return; }
@@ -4932,39 +4952,37 @@ async function faktImportCsv(custId, year, file) {
   try { text = await file.text(); } catch (e) { toast("Datei nicht lesbar: " + e.message, true); return; }
   const zeilen = faktParseCsv(text);
   if (!zeilen.length || !("Netto" in zeilen[0])) { toast("Keine Spalte «Netto» gefunden — ist das der Rechnungs-Export?", true); return; }
-  const a = faktAuswerten(zeilen, year);
-  if (!a.anzahl) { toast(`Keine verwertbaren Rechnungen für ${year} in der Datei (${a.storno} Storno, ${a.fest} Festvermittlung, ${a.fremdesJahr} anderes Jahr).`, true); return; }
+  const a = faktAuswerten(zeilen, year, bisIso);
+  if (!a.anzahl) { toast(`Keine verwertbaren Rechnungen bis ${faktFmtDatum(bisIso)} in der Datei (${a.storno} Storno, ${a.fest} Festvermittlung, ${a.nachStichtag} nach Stichtag, ${a.fremdesJahr} anderes Jahr).`, true); return; }
 
   await faktLaden(false);
-  const e = faktEintragSicher(custId, year);
+  const e = faktJahr(custId, year);
   const vorher = {};
   for (let m = 1; m <= 12; m++) { const r = findRev(custId, year, m); vorher[m] = r ? (parseFloat(r.ExternalRevenue) || 0) : 0; }
-  // Fakturierte Monate ohne Basis: der bisherige Wert galt bei der Fakturierung
-  for (let m = 1; m <= 12; m++) {
-    const r = findRev(custId, year, m);
-    if (r && r.InvoicedBPO && e.basis[m] === undefined) e.basis[m] = vorher[m];
-  }
-  // Zielwerte: monatlich = Monatssumme; YTD = kumuliert bis zum letzten CSV-Monat
+  // Zielwerte nur bis zum Stichtag-Monat: monatlich = Monatssumme, YTD = kumuliert.
+  const bisMonat = parseInt(bisIso.slice(5, 7));
   const nachher = {}; let kum = 0;
-  for (let m = 1; m <= a.letzterMonat; m++) {
+  for (let m = 1; m <= bisMonat; m++) {
     kum += a.monate[m] || 0;
     nachher[m] = cust.BPOYtd ? Math.round(kum * 100) / 100 : (a.monate[m] || 0);
   }
-  toast(`Importiere ${a.anzahl} Rechnungen …`);
+  toast(`Importiere ${a.anzahl} Rechnungen bis ${faktFmtDatum(bisIso)} …`);
   let geschrieben = 0;
   try {
     for (const m of Object.keys(nachher)) {
       if (await faktSchreibeExtRev(cust, year, parseInt(m), nachher[m])) geschrieben++;
     }
     await reload("MonthlyRevenue");
+    // Tagessummen: alles bis zum Stichtag ersetzen, spätere (ältere Importe) bleiben
+    Object.keys(e.tage).forEach(d => { if (d <= bisIso) delete e.tage[d]; });
+    Object.assign(e.tage, a.tage);
     e.letzterImport = {
-      dateiname: file.name, am: new Date().toISOString(),
-      anzahl: a.anzahl, storno: a.storno, fest: a.fest, fremdesJahr: a.fremdesJahr,
-      netto: Math.round(a.netto * 100) / 100, letzterMonat: a.letzterMonat,
-      vorher, nachher
+      dateiname: file.name, am: new Date().toISOString(), bis: bisIso,
+      anzahl: a.anzahl, storno: a.storno, fest: a.fest, fremdesJahr: a.fremdesJahr, nachStichtag: a.nachStichtag,
+      netto: Math.round(a.netto * 100) / 100, vorher, nachher
     };
     await faktSpeichern();
-    toast(`${a.anzahl} Rechnungen importiert (${a.storno} Storno, ${a.fest} Festvermittlung ausgeschlossen) — ${geschrieben} Monat${geschrieben === 1 ? "" : "e"} aktualisiert.`);
+    toast(`${a.anzahl} Rechnungen bis ${faktFmtDatum(bisIso)} importiert (ausgeschlossen: ${a.storno} Storno, ${a.fest} Festvermittlung, ${a.nachStichtag} nach Stichtag) — ${geschrieben} Monat${geschrieben === 1 ? "" : "e"} aktualisiert.`);
   } catch (err) {
     await reload("MonthlyRevenue");
     toast("Import unvollständig: " + err.message, true);
@@ -4974,7 +4992,7 @@ async function faktImportCsv(custId, year, file) {
 async function faktImportRueckgaengig(custId, year) {
   const cust = cache.customers.find(c => c.id == custId);
   await faktLaden(false);
-  const e = faktEintrag(custId, year);
+  const e = faktStand[custId + "_" + year];
   if (!cust || !e || !e.letzterImport) { toast("Kein Import zum Rückgängigmachen.", true); return; }
   if (!confirm(`Import vom ${new Date(e.letzterImport.am).toLocaleString("de-CH")} rückgängig machen? Die Aussenumsätze werden auf den Stand davor zurückgesetzt.`)) return;
   try {
@@ -4982,32 +5000,35 @@ async function faktImportRueckgaengig(custId, year) {
       await faktSchreibeExtRev(cust, year, parseInt(m), e.letzterImport.vorher[m] || 0);
     }
     await reload("MonthlyRevenue");
+    Object.keys(e.tage).forEach(d => { if (d <= e.letzterImport.bis) delete e.tage[d]; });
     delete e.letzterImport;
     await faktSpeichern();
     toast("Import rückgängig gemacht.");
   } catch (err) { await reload("MonthlyRevenue"); toast("Rückgängig unvollständig: " + err.message, true); }
   render();
 }
-/* Basis bei Fakturierung merken (aus toggleInvoiced) — best effort. */
-async function faktBasisMerken(custId, year, month, fakturiert) {
-  try {
-    await faktLaden(false);
-    const e = faktEintragSicher(custId, year);
-    if (fakturiert) {
-      const r = findRev(custId, year, month);
-      e.basis[month] = r ? (parseFloat(r.ExternalRevenue) || 0) : 0;
-    } else delete e.basis[month];
-    await faktSpeichern();
-  } catch (err) { console.warn("Fakt-Basis nicht gespeichert:", err.message); }
+/* «Fakturiert bis» (letzter verrechneter Tag) pro Kunde setzen. */
+async function faktBisSetzen(custId, iso) {
+  await faktLaden(false);
+  const k = faktKunde(custId);
+  if (!iso) delete k.faktBis; else k.faktBis = iso;
+  try { await faktSpeichern(); toast(iso ? `Fakturiert bis ${faktFmtDatum(iso)} gespeichert.` : "Fakturiert-bis gelöscht."); }
+  catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  render();
 }
-/* Rechnungsbetrag eines Aussenumsatzes: bei separater SaaS-Faktura nur der
-   BPO-Anteil, sonst (Nur BPO / BPO inkl. SaaS) der ganze Betrag. */
-function faktHonorar(cust, ext) {
+/* Zu verrechnen: Netto der Rechnungen nach «Fakturiert bis» bis zum letzten Import-Stichtag × Satz. */
+function faktOffen(cust, year) {
+  const e = faktStand && faktStand[cust.id + "_" + year];
+  const faktBis = (faktStand && faktStand["c" + cust.id] && faktStand["c" + cust.id].faktBis) || "";
+  const bis = e && e.letzterImport ? e.letzterImport.bis : "";
+  let netto = 0, anzahlTage = 0, von = "";
+  if (e && bis) {
+    Object.keys(e.tage).sort().forEach(d => {
+      if (d > faktBis && d <= bis) { netto += e.tage[d]; anzahlTage++; if (!von) von = d; }
+    });
+  }
   const rate = parseFloat(cust.BPORate) || 0;
-  return ext * rate / 100;
-}
-function faktRechnungsBetrag(cust, calc) {
-  return segmentChargesSaaS(cust.Segment) ? calc.bpo : calc.total;
+  return { netto: Math.round(netto * 100) / 100, honorar: netto * rate / 100, faktBis, bis, von, anzahlTage, rate };
 }
 /* «Zu verrechnen»-Kasten für den Pro-Kunde-Modus. */
 function faktRenderKasten(cust, year) {
@@ -5016,49 +5037,36 @@ function faktRenderKasten(cust, year) {
     faktStandLaedt = true;
     faktLaden(false).then(() => { faktStandLaedt = false; if (currentView === "revenue") render(); });
   }
-  const e = faktEintrag(cust.id, year) || { basis: {} };
-  const basis = e.basis || {};
-  const posten = [];
-  let total = 0;
-  if (cust.BPOYtd) {
-    let lastM = 0, lastFaktM = 0;
-    for (let m = 1; m <= 12; m++) {
-      const r = findRev(cust.id, year, m);
-      if (r && (parseFloat(r.ExternalRevenue) || 0) > 0) { lastM = m; if (r.InvoicedBPO) lastFaktM = m; }
-    }
-    if (lastM) {
-      const stand = faktHonorar(cust, parseFloat(findRev(cust.id, year, lastM).ExternalRevenue) || 0);
-      const fakt = lastFaktM ? faktHonorar(cust, parseFloat(findRev(cust.id, year, lastFaktM).ExternalRevenue) || 0) : 0;
-      total = stand - fakt;
-      posten.push(`YTD-Stand ${MONTH_NAMES[lastM - 1]}: CHF ${fmtCHFShort(stand)}`);
-      posten.push(lastFaktM ? `bereits fakturiert bis ${MONTH_NAMES[lastFaktM - 1]}: CHF ${fmtCHFShort(fakt)}` : "noch nichts fakturiert");
-    }
-  } else {
-    for (let m = 1; m <= 12; m++) {
-      const r = findRev(cust.id, year, m);
-      if (!r) continue;
-      const ext = parseFloat(r.ExternalRevenue) || 0;
-      if (!r.InvoicedBPO) {
-        if (ext > 0) { const b = faktRechnungsBetrag(cust, calcRevenue(r, cust, year, m)); total += b; posten.push(`${MONTH_NAMES[m - 1]} offen: CHF ${fmtCHFShort(b)}`); }
-      } else if (basis[m] !== undefined && Math.abs(ext - basis[m]) >= 0.5) {
-        const d = faktHonorar(cust, ext - basis[m]); total += d;
-        posten.push(`${MONTH_NAMES[m - 1]} Nachtrag: CHF ${(d < 0 ? "−" : "") + fmtCHFShort(Math.abs(d))} <span style="color:var(--text-faint)">(Aussenumsatz ${fmtCHFShort(basis[m])} → ${fmtCHFShort(ext)})</span>`);
-      }
-    }
-  }
+  const e = (faktStand && faktStand[cust.id + "_" + year]) || {};
+  const o = faktOffen(cust, year);
   const li = e.letzterImport;
+  const stichtagDefault = li && li.bis ? li.bis : faktLetzterTagVormonat();
+  const nurLizenz = !(parseFloat(cust.BPORate) > 0);
+  let detail;
+  if (!li) detail = `Noch kein Import für ${year}.`;
+  else if (!o.anzahlTage) detail = o.faktBis && o.faktBis >= o.bis
+    ? `Bis ${faktFmtDatum(o.bis)} importiert und bis ${faktFmtDatum(o.faktBis)} fakturiert — nichts offen.`
+    : `Keine Rechnungen zwischen ${o.faktBis ? faktFmtDatum(o.faktBis) : "Jahresbeginn"} und ${faktFmtDatum(o.bis)}.`;
+  else detail = `Rechnungen ${faktFmtDatum(o.von)} – ${faktFmtDatum(o.bis)}: CHF ${fmtCHFShort(o.netto)} netto × ${o.rate.toLocaleString("de-CH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %${o.faktBis ? ` · fakturiert bis ${faktFmtDatum(o.faktBis)}` : " · noch nichts fakturiert"}`;
   const importInfo = li
-    ? `Letzter Import: ${escape(li.dateiname || "")} · ${new Date(li.am).toLocaleString("de-CH", { dateStyle: "short", timeStyle: "short" })} · ${li.anzahl} Rechnungen, CHF ${fmtCHFShort(li.netto)} netto (ausgeschlossen: ${li.storno} Storno, ${li.fest} Festvermittlung${li.fremdesJahr ? `, ${li.fremdesJahr} anderes Jahr` : ""}) <a href="#" onclick="faktImportRueckgaengig(${cust.id},${year});return false;" style="color:var(--accent-3)">Rückgängig</a>`
-    : `Noch kein CSV-Import für ${year}. Rechnungs-Export des Kunden hochladen — Festvermittlung und Storno werden automatisch ausgeschlossen, Netto pro Fakturamonat als Aussenumsatz eingetragen${cust.BPOYtd ? " (YTD: kumuliert)" : ""}.`;
+    ? `Letzter Import: ${escape(li.dateiname || "")} · ${new Date(li.am).toLocaleString("de-CH", { dateStyle: "short", timeStyle: "short" })} · Rechnungen bis ${faktFmtDatum(li.bis)}: ${li.anzahl} Stück, CHF ${fmtCHFShort(li.netto)} netto (ausgeschlossen: ${li.storno} Storno, ${li.fest} Festvermittlung, ${li.nachStichtag} nach Stichtag${li.fremdesJahr ? `, ${li.fremdesJahr} anderes Jahr` : ""}) <a href="#" onclick="faktImportRueckgaengig(${cust.id},${year});return false;" style="color:var(--accent-3)">Rückgängig</a>`
+    : `Rechnungs-Export des Kunden hochladen — Festvermittlung, Storno und Rechnungen nach dem Stichtag werden ausgeschlossen, Netto pro Fakturamonat als Aussenumsatz eingetragen${cust.BPOYtd ? " (YTD: kumuliert)" : ""}.`;
   return `
     <div style="border:1px solid var(--border);border-left:3px solid var(--accent-2);border-radius:6px;padding:10px 14px;margin-bottom:14px;display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;background:var(--bg-card)">
-      <div style="flex:1;min-width:260px">
+      <div style="flex:1;min-width:280px">
         <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em">Zu verrechnen (BPO${segmentChargesSaaS(cust.Segment) ? "" : ", inkl. SaaS-Anteil"})</div>
-        <div style="font-family:var(--font-mono);font-size:22px;font-weight:600;color:${total > 0 ? "var(--accent-2)" : "var(--text-dim)"}">CHF ${total ? (total < 0 ? "−" : "") + fmtCHFShort(Math.abs(total)) : "0"}</div>
-        ${posten.length ? `<div style="font-size:11px;color:var(--text-dim);margin-top:4px">${posten.join(" · ")}</div>` : `<div style="font-size:11px;color:var(--text-faint);margin-top:4px">Nichts offen.</div>`}
+        <div style="font-family:var(--font-mono);font-size:22px;font-weight:600;color:${o.honorar > 0 ? "var(--accent-2)" : "var(--text-dim)"}">CHF ${o.honorar ? fmtCHFShort(o.honorar) : "0"}${nurLizenz ? ` <span style="color:var(--warn);font-size:11px;font-weight:400">BPO-Satz fehlt beim Kunden</span>` : ""}</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${detail}</div>
         <div style="font-size:11px;color:var(--text-faint);margin-top:6px">${importInfo}</div>
       </div>
-      <div><button class="btn btn-sm" onclick="faktUploadStarten(${cust.id},${year})">⇧ Aussenumsatz-CSV importieren</button></div>
+      <div style="display:flex;flex-direction:column;gap:8px;font-size:11px;color:var(--text-dim)">
+        <label style="display:flex;align-items:center;gap:8px;justify-content:space-between">Fakturiert bis
+          <input type="date" value="${o.faktBis}" onchange="faktBisSetzen(${cust.id}, this.value)" title="Letzter verrechneter Tag — alles danach gilt als offen" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-family:inherit"></label>
+        <label style="display:flex;align-items:center;gap:8px;justify-content:space-between">Rechnungen bis
+          <input type="date" id="fakt-bis-${cust.id}" value="${stichtagDefault}" title="Stichtag für den nächsten Import — spätere Rechnungen werden ignoriert" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-family:inherit"></label>
+        <button class="btn btn-sm" onclick="faktUploadStarten(${cust.id},${year})">⇧ Aussenumsatz-CSV importieren</button>
+        ${li && o.faktBis !== li.bis ? `<button class="btn btn-sm" onclick="faktBisSetzen(${cust.id},'${li.bis}')" title="Setzt «Fakturiert bis» auf den Import-Stichtag">✓ Fakturiert bis ${faktFmtDatum(li.bis)}</button>` : ""}
+      </div>
     </div>`;
 }
 
