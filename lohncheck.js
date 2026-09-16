@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.123.0";
+const LC_VERSION = "1.125.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -675,10 +675,95 @@ function lcCheckAll(slips) {
       const need = [[/Ferien/i, "Ferienvergütung"], [/Feiertag/i, "Feiertagsentschädigung"], [/13\.\s*Monat/i, "13. Monatslohn"]];
       need.forEach(([re, nm]) => { if (!s.rows.some(r => re.test(r.label) && r.code < 4900)) add(s, "gelb", "Bestandteil fehlt", nm + " fehlt bei Stundenlohn."); });
     }
+    lcUeberzeitCheck(s, add);
   }
   const order = { rot: 0, gelb: 1, grau: 2 };
   issues.sort((a, b) => order[a.sev] - order[b.sev] || a.ma.localeCompare(b.ma, "de") || a.periode.localeCompare(b.periode));
   return issues;
+}
+
+/* ---------- Überzeit-Ansatz (GAV Personalverleih, Ergänzung 16.09.2026) ----------
+   Jede Lohnposition mit «Überzeit» im Namen: Der verwendete Stundenansatz muss auf
+   Grundlohn/Basislohn + 8.33 % Anteil 13. Monatslohn beruhen (Art. 12 GAV PVL, SPKP-
+   Kommentar). Ferien- und Feiertagsentschädigung gehören NICHT in die Basis.
+   Erwartet: Basis × (1 + Zuschlag) [Stunden voll über die Überzeit-Lohnart] oder
+   Basis × Zuschlag [nur der Zuschlag, Stunden laufen über den Stundenlohn].
+   Zuschlag aus der Bezeichnung (25 %/50 %), sonst 25 % (Art. 12). Es wird nicht
+   angenommen, dass 50 % generell GAV-Regel ist — nur die Basis wird geprüft.
+   GAV-Zuordnung: Nur GAV Personalverleih. Belege mit FAR-Abzug (Bauhauptgewerbe →
+   Basis Bruttolohn, andere PK-Regel) werden übersprungen (grauer Hinweis). */
+const LC_ANTEIL_13 = 0.0833;
+function lcGrundlohnAnsatz(slip) {
+  // Grundlohn/Basislohn-Zeile (Bestandteil unter 1005 oder eigenständig): Ansatz = Grundlohn/h
+  const cands = slip.rows.filter(r => r.code < 4900 && !r.isTotal && /Grundlohn|Basislohn/i.test(r.label) && r.ansatz !== null && r.ansatz > 0 && !/Ferien|Feiertag|13\./i.test(r.label));
+  if (cands.length) return { wert: cands[0].ansatz, quelle: cands[0].code + " " + cands[0].label };
+  const g1000 = slip.rows.find(r => r.code === 1000 && r.ansatz !== null && r.ansatz > 0);
+  if (g1000) return { wert: g1000.ansatz, quelle: "1000 " + g1000.label };
+  // Fallback: Grundlohn-Betrag / Stunden
+  const gRow = slip.rows.find(r => r.code < 4900 && /Grundlohn|Basislohn/i.test(r.label) && r.betrag > 0);
+  const std = slip.rows.filter(r => (r.code === 1005 || /^Stundenlohn/i.test(r.label)) && !r.isTotal && r.level === 0 && r.anzahl !== null).reduce((a, r) => a + r.anzahl, 0);
+  if (gRow && std > 0) return { wert: Math.round(gRow.betrag / std * 100) / 100, quelle: gRow.code + " " + gRow.label + " ÷ " + lcFmt(std) + " h" };
+  return null;
+}
+function lcStundenlohnVoll(slip) {
+  const r = slip.rows.find(x => (x.code === 1005 || /^Stundenlohn/i.test(x.label)) && !x.isTotal && x.level === 0 && x.ansatz !== null && x.ansatz > 0);
+  return r ? r.ansatz : null;
+}
+/* GAV-Zuordnung des Belegs (Beleg nennt den GAV nicht): FAR-Abzug → Bauhauptgewerbe, sonst GAV Personalverleih.
+   Die Überzeit-Basis kommt aus Parameter → Überzeit (window.crmParameter.ueberzeit); ohne Eintrag gilt die Vorgabe. */
+function lcUeberzeitParam(gav) {
+  const liste = (window.crmParameter && Array.isArray(window.crmParameter.ueberzeit)) ? window.crmParameter.ueberzeit : [];
+  const hit = liste.find(p => (p.gav || "").toLowerCase() === gav.toLowerCase());
+  if (hit) return hit.basis === "brutto" ? "brutto" : "basis13";
+  return /bauhaupt/i.test(gav) ? "brutto" : "basis13";
+}
+function lcUeberzeitCheck(s, add) {
+  const uzRows = s.rows.filter(r => r.code < 4900 && !r.isTotal && /[ÜU]e?berzeit/i.test(r.label));
+  if (!uzRows.length) return;
+  const istBau = s.rows.some(r => r.code === 5110 || /\bFAR\b/i.test(r.label || ""));
+  const gav = istBau ? "Bauhauptgewerbe (LMV)" : "GAV Personalverleih";
+  const modus = lcUeberzeitParam(gav);
+  const g = lcGrundlohnAnsatz(s);
+  const voll = lcStundenlohnVoll(s);
+  const tol = 0.03;
+  let basis, basisTxt;
+  if (modus === "brutto") {
+    if (!voll) { add(s, "grau", "Überzeit", "Überzeit vorhanden (" + gav + ": Basis Bruttolohn), aber kein Stundenlohn-Ansatz erkennbar — manuell prüfen."); return; }
+    basis = voll; basisTxt = "Bruttolohn/h " + lcFmt(voll) + " (" + gav + ")";
+  } else {
+    if (!g) { add(s, "grau", "Überzeit", "Überzeit vorhanden, aber kein Grundlohn/Basislohn-Ansatz pro Stunde erkennbar — Basis (Grundlohn + 8.33 % 13. ML) manuell prüfen."); return; }
+    basis = Math.round(g.wert * (1 + LC_ANTEIL_13) * 100) / 100;
+    basisTxt = "Grundlohn " + lcFmt(g.wert) + " (" + g.quelle + ") + 8.33 % Anteil 13. ML = Basis " + lcFmt(basis) + " (" + gav + ")";
+  }
+  for (const r of uzRows) {
+    const pm = /(\d{1,3}(?:[.,]\d+)?)\s*%/.exec(r.label);
+    const zuschlag = pm ? parseFloat(pm[1].replace(",", ".")) / 100 : 0.25;
+    const pctTxt = Math.round(zuschlag * 100) + " %";
+    let ansatz = r.ansatz;
+    if ((ansatz === null || ansatz === 0) && r.anzahl) ansatz = Math.round(r.betrag / r.anzahl * 100) / 100;
+    if (ansatz === null || !isFinite(ansatz) || ansatz === 0) { add(s, "grau", "Überzeit", r.code + " " + r.label + ": kein Stundenansatz erkennbar (Betrag " + lcFmt(r.betrag) + ") — Basis manuell prüfen."); continue; }
+    const erwVoll = basis * (1 + zuschlag), erwZus = basis * zuschlag;
+    const nahe = (a, b) => Math.abs(a - b) <= tol;
+    if (nahe(ansatz, erwVoll) || nahe(ansatz, erwZus)) {
+      // Betrag rechnerisch prüfen
+      if (r.anzahl && !lcNear(r.anzahl * ansatz, r.betrag, 0.06)) add(s, "gelb", "Überzeit", r.code + " " + r.label + ": " + lcFmt(r.anzahl) + " h × " + lcFmt(ansatz) + " = " + lcFmt(r.anzahl * ansatz) + " ≠ Betrag " + lcFmt(r.betrag) + ".");
+      continue;
+    }
+    // Ursache benennen
+    let grund = "";
+    if (g && (nahe(ansatz, g.wert * (1 + zuschlag)) || nahe(ansatz, g.wert * zuschlag))) grund = "Basis ist der Grundlohn OHNE Anteil 13. Monatslohn (8.33 %).";
+    else if (modus !== "brutto" && voll && (nahe(ansatz, voll * (1 + zuschlag)) || nahe(ansatz, voll * zuschlag))) grund = "Basis ist der volle Stundenlohn " + lcFmt(voll) + " inkl. Ferien/Feiertage — die gehören nicht in die Überzeitbasis.";
+    else if (modus === "brutto" && g && (nahe(ansatz, g.wert * (1 + LC_ANTEIL_13) * (1 + zuschlag)) || nahe(ansatz, g.wert * (1 + LC_ANTEIL_13) * zuschlag))) grund = "Basis ist Grundlohn + 13. ML statt Bruttolohn (Parameter → Überzeit prüfen).";
+    else if (nahe(ansatz, basis)) grund = "Ansatz entspricht der Basis ohne Zuschlag (" + pctTxt + " fehlt).";
+    else {
+      // anderer Zuschlag auf korrekter Basis? (z.B. 50 % statt 25 %)
+      const implied = ansatz / basis;
+      const alt = [0.25, 0.5, 1.25, 1.5].find(f => nahe(ansatz, basis * f));
+      if (alt) grund = "Ansatz entspricht " + Math.round(alt * 100) + " % auf korrekter Basis — Lohnart sagt " + pctTxt + "; Zuschlag der hinterlegten Regel prüfen.";
+      else grund = "Ansatz entspricht " + lcFmt(implied * 100, 1) + " % der erwarteten Basis — nicht nachvollziehbar.";
+    }
+    add(s, "rot", "Überzeitansatz prüfen", "Für " + r.code + " " + r.label + " wurde ein Ansatz von CHF " + lcFmt(ansatz) + " verwendet. Gemäss " + basisTxt + " wären " + lcFmt(erwVoll) + " (Stunden voll, " + pctTxt + ") bzw. " + lcFmt(erwZus) + " (nur Zuschlag) zu erwarten. " + grund + " Bitte überprüfen.");
+  }
 }
 
 /* ---------- Totalisierung ---------- */
@@ -1479,6 +1564,7 @@ function lcSevBadge(sev) {
   return `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${c};margin-right:6px;vertical-align:middle"></span>`;
 }
 async function renderLohncheck(el) {
+  if (typeof parameterLaden === "function" && !window.crmParameter) { try { await parameterLaden(false); } catch (e) {} }
   await lcLoadLohnartenliste(false);
   document.getElementById("view-actions").innerHTML = `
     <span style="font-size:11px;color:var(--text-faint);align-self:center;margin-right:4px">Check v${LC_VERSION}</span>

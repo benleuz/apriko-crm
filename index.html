@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.231.0"></script>
-<script src="apriko-api.js?v=1.231.0"></script>
-<script src="lohncheck.js?v=1.231.0"></script>
-<script src="personalbudget.js?v=1.231.0"></script>
-<script src="jahresbudget.js?v=1.231.0"></script>
-<script src="budgetpositionen.js?v=1.231.0"></script>
-<script src="lohnchecklistetemp.js?v=1.231.0"></script>
+<script src="apriko-filters.js?v=1.232.0"></script>
+<script src="apriko-api.js?v=1.232.0"></script>
+<script src="lohncheck.js?v=1.232.0"></script>
+<script src="personalbudget.js?v=1.232.0"></script>
+<script src="jahresbudget.js?v=1.232.0"></script>
+<script src="budgetpositionen.js?v=1.232.0"></script>
+<script src="lohnchecklistetemp.js?v=1.232.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -956,6 +956,7 @@
           <button data-view="lohnartenstamm"><span class="ic">📋</span> Lohnartenstamm</button>
           <button data-view="tarifarten"><span class="ic">🏷️</span> Tarifarten</button>
           <button data-view="lohncheck"><span class="ic">🧾</span> Ultimativer Check</button>
+          <button data-view="parameter"><span class="ic">⚙</span> Parameter</button>
         </div>
       </div>
       <div class="nav-group" data-group="spielwiese">
@@ -980,7 +981,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.231.0</span> · <span id="app-build-date">15.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.232.0</span> · <span id="app-build-date">16.09.2026</span>
     </div>
   </aside>
 
@@ -1454,7 +1455,7 @@ let currentView = DEMO_ANON ? "einsatzdash" : "dashboard";
    Berechtigungssystem
    =========================================================== */
 const SUPER_ADMIN_EMAIL = "benjamin@apriko.com";  // hat immer volle Rechte
-const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","lohncheck","apipoc","profiles"];
+const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","lohncheck","parameter","apipoc","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
@@ -1467,7 +1468,7 @@ const VIEW_TITLES = {
   lohnartenstamm: "Lohnartenstamm",
   tarifarten: "Tarifarten",
   rapport: "Rapport", einsatzdash: "Kundendashboard", konzern: "Konzernanalyse",
-  lohncheck: "Ultimativer Check", apipoc: "Apriko API (POC)",
+  lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)",
   profiles: "Profile"
 };
 
@@ -1938,6 +1939,7 @@ function render() {
   else if (currentView === "lohncheck") renderLohncheck(content);
   else if (currentView === "lohnartenstamm") renderLohnartenstamm(content);
   else if (currentView === "tarifarten") renderTarifarten(content);
+  else if (currentView === "parameter") renderParameter(content);
   else if (currentView === "personalbudget") renderPersonalBudget(content);
   else if (currentView === "jahresbudget") renderJahresbudget(content);
   else if (currentView === "budgetpos") renderBudgetpositionen(content);
@@ -7078,6 +7080,96 @@ function tarifartenCsvExport() {
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(a.href);
 }
+/* ============ Parameter (Workflows) ============
+   Zentrale, erweiterbare Parameter für die Workflows/Checks. Persistenz wie Tarifarten:
+   SharePoint-JSON CRM-Budgetdaten/parameter.json. Aktuell Block «Überzeit»: pro GAV die
+   Lohnbasis, auf der der Überzeitansatz berechnet wird — der Ultimative Check liest
+   window.crmParameter.ueberzeit (lcUeberzeitCheck in lohncheck.js). */
+const PARAMETER_PFAD = "CRM-Budgetdaten/parameter.json";
+const PARAM_GAV_LISTE = ["GAV Personalverleih", "Bauhauptgewerbe (LMV)", "Ausbaugewerbe Westschweiz", "Elektro- und Telekommunikations-Installationsgewerbe",
+  "Gebäudetechnik", "Metallgewerbe", "Maler- und Gipsergewerbe", "Schreinergewerbe", "Holzbau", "Plattenleger", "Gerüstbau", "Dach- und Wandgewerbe (Gebäudehülle)",
+  "Reinigung", "Gastgewerbe (L-GAV)", "Autogewerbe", "Carrosseriegewerbe", "Sicherheitsdienstleistungen", "Andere"];
+const PARAM_UZ_BASEN = [["basis13", "Basis + 13. Gehalt (Grundlohn + 8.33 %)"], ["brutto", "auf Bruttolohn (Stundenlohn inkl. Ferien/Feiertage/13.)"]];
+let crmParameter = null;
+async function parameterLaden(force) {
+  if (!force && crmParameter) return crmParameter;
+  let data = null;
+  try { data = await graph(`/sites/${siteId}/drive/root:/${PARAMETER_PFAD}:/content`); }
+  catch (e) { data = null; }
+  if (!data || typeof data !== "object") data = {};
+  if (!Array.isArray(data.ueberzeit) || !data.ueberzeit.length) {
+    data.ueberzeit = [{ gav: "GAV Personalverleih", basis: "basis13" }, { gav: "Bauhauptgewerbe (LMV)", basis: "brutto" }];
+  }
+  crmParameter = data;
+  window.crmParameter = data;
+  return data;
+}
+async function parameterSpeichern() {
+  const body = JSON.stringify(crmParameter || {});
+  try { await graph(`/sites/${siteId}/drive/root:/${PARAMETER_PFAD}:/content`, { method: "PUT", body }); }
+  catch (e) {
+    if (!/404|itemNotFound|400/i.test(e.message)) throw e;
+    await graph(`/sites/${siteId}/drive/root/children`, { method: "POST", body: JSON.stringify({ name: "CRM-Budgetdaten", folder: {}, "@microsoft.graph.conflictBehavior": "replace" }) });
+    await graph(`/sites/${siteId}/drive/root:/${PARAMETER_PFAD}:/content`, { method: "PUT", body });
+  }
+  window.crmParameter = crmParameter;
+  toast("Parameter gespeichert");
+}
+function paramUzRow(i, r) {
+  const gavBekannt = PARAM_GAV_LISTE.includes(r.gav);
+  return `<tr>
+    <td><select onchange="paramUzSet(${i}, 'gav', this.value)" style="min-width:260px">
+      ${PARAM_GAV_LISTE.map(g => `<option value="${escape(g)}" ${(gavBekannt ? r.gav === g : g === "Andere") ? "selected" : ""}>${escape(g)}</option>`).join("")}
+    </select>
+    ${!gavBekannt || r.gav === "Andere" ? `<input type="text" value="${escape(gavBekannt ? "" : r.gav)}" placeholder="GAV-Bezeichnung" onchange="paramUzSet(${i}, 'gav', this.value)" style="margin-left:6px;min-width:220px">` : ""}</td>
+    <td><select onchange="paramUzSet(${i}, 'basis', this.value)" style="min-width:300px">
+      ${PARAM_UZ_BASEN.map(([k, l]) => `<option value="${k}" ${r.basis === k ? "selected" : ""}>${l}</option>`).join("")}
+    </select></td>
+    <td><input type="text" value="${escape(r.notiz || "")}" placeholder="Notiz (z.B. Art. 12, PK-Merkblatt)" onchange="paramUzSet(${i}, 'notiz', this.value)" style="min-width:240px"></td>
+    <td><button class="btn btn-sm" onclick="paramUzDel(${i})" title="Zeile entfernen">✕</button></td>
+  </tr>`;
+}
+async function paramUzSet(i, feld, wert) {
+  await parameterLaden(false);
+  const r = crmParameter.ueberzeit[i]; if (!r) return;
+  if (feld === "gav" && wert === "Andere") { r.gav = "Andere"; render(); return; }
+  r[feld] = wert;
+  try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  render();
+}
+async function paramUzAdd() {
+  await parameterLaden(false);
+  crmParameter.ueberzeit.push({ gav: "Andere", basis: "basis13" });
+  render();
+}
+async function paramUzDel(i) {
+  await parameterLaden(false);
+  const r = crmParameter.ueberzeit[i];
+  if (!r || !confirm(`Eintrag «${r.gav}» entfernen?`)) return;
+  crmParameter.ueberzeit.splice(i, 1);
+  try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  render();
+}
+async function renderParameter(el) {
+  await parameterLaden(false);
+  document.getElementById("view-actions").innerHTML = `<button class="btn btn-sm" onclick="parameterLaden(true).then(() => render())">🔄 Neu laden</button>`;
+  const uz = crmParameter.ueberzeit || [];
+  el.innerHTML = `
+    <div class="card" style="padding:14px 16px;margin-bottom:14px">
+      <h3 style="margin:0 0 4px">Überzeit</h3>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">
+        Lohnbasis, auf der der Überzeitansatz (Zuschlag 25 % / 50 %) berechnet wird — pro GAV. Wird vom Ultimativen Check verwendet:
+        «Basis + 13. Gehalt» = Grundlohn/Basislohn + 8.33 % Anteil 13. Monatslohn (ohne Ferien/Feiertage, GAV Personalverleih Art. 12);
+        «auf Bruttolohn» = voller Stundenlohn inkl. Ferien-, Feiertagsentschädigung und 13. ML. Änderungen werden sofort gespeichert.
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>GAV</th><th>Überzeit-Basis</th><th>Notiz</th><th></th></tr></thead>
+        <tbody>${uz.map((r, i) => paramUzRow(i, r)).join("")}</tbody>
+      </table></div>
+      <button class="btn btn-sm" onclick="paramUzAdd()" style="margin-top:8px">+ GAV hinzufügen</button>
+    </div>`;
+}
+
 async function renderTarifarten(el) {
   await tarifartenLaden(false);
   const ta = tarifartenStamm;
