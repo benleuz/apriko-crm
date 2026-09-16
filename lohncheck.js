@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.125.0";
+const LC_VERSION = "1.126.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -717,23 +717,64 @@ function lcUeberzeitParam(gav) {
   if (hit) return hit.basis === "brutto" ? "brutto" : "basis13";
   return /bauhaupt/i.test(gav) ? "brutto" : "basis13";
 }
+/* GAV des Belegs über die Einsatznummer(n) auf der Abrechnung («Einsatz Nr. 12345 (…)») in der
+   Einsatzliste (Spalten Einsatz-Nr + GAV) nachschlagen. Rückgabe { gav, quelle } oder null. */
+function lcGavAusEinsatzliste(slip) {
+  const kl = lcState.kontrolllisten;
+  if (!kl || !kl.listen) return null;
+  const listen = kl.listen.filter(l => l.typ === "Einsatzliste" && l.spaltenMap && l.spaltenMap.einsatznr && l.spaltenMap.gav);
+  if (!listen.length) return null;
+  const nrs = lcAbgerechneteEinsaetze(slip).map(e => String(e.nr).replace(/^0+/, ""));
+  const gefunden = [];
+  for (const l of listen) {
+    for (const z of l.zeilen) {
+      const nr = String(z[l.spaltenMap.einsatznr] || "").replace(/\D/g, "").replace(/^0+/, "");
+      if (nr && nrs.includes(nr)) { const g = String(z[l.spaltenMap.gav] || "").trim(); if (g && !gefunden.some(x => x.gav === g)) gefunden.push({ gav: g, nr }); }
+    }
+  }
+  if (!gefunden.length) return null;
+  return { gav: gefunden[0].gav, quelle: "Einsatzliste, Einsatz Nr. " + gefunden[0].nr, mehrere: gefunden.length > 1 ? gefunden.map(x => x.gav) : null };
+}
+/* GAV-Bezeichnung der Einsatzliste auf die Parameter-Zeile abbilden (exakt, sonst Schlüsselwörter). */
+function lcParamZeileFuerGav(gavText) {
+  const liste = (window.crmParameter && Array.isArray(window.crmParameter.ueberzeit)) ? window.crmParameter.ueberzeit : [];
+  const t = String(gavText || "").toLowerCase();
+  let hit = liste.find(p => (p.gav || "").toLowerCase() === t);
+  if (!hit) {
+    const kw = [[/personalverleih|pvl|verleih/, /personalverleih/], [/bauhaupt|lmv|baumeister/, /bauhaupt/], [/elektro|telekom/, /elektro/], [/gebäudetechnik|gebaeudetechnik|sanitär|heizung|lüftung/, /gebäudetechnik/],
+      [/metall/, /metall/], [/maler|gipser/, /maler/], [/schreiner/, /schreiner/], [/holzbau/, /holzbau/], [/platten/, /platten/], [/gerüst|geruest/, /gerüst/], [/dach|gebäudehülle|gebaeudehuelle/, /dach/],
+      [/reinig/, /reinig/], [/gastro|gastgewerbe|l-gav/, /gast/], [/auto/, /autogewerbe/], [/carrosserie/, /carrosserie/], [/sicherheit/, /sicherheit/], [/ausbau/, /ausbau/]];
+    for (const [reText, reParam] of kw) { if (reText.test(t)) { hit = liste.find(p => reParam.test((p.gav || "").toLowerCase())); if (hit) break; } }
+  }
+  return hit || null;
+}
 function lcUeberzeitCheck(s, add) {
   const uzRows = s.rows.filter(r => r.code < 4900 && !r.isTotal && /[ÜU]e?berzeit/i.test(r.label));
   if (!uzRows.length) return;
-  const istBau = s.rows.some(r => r.code === 5110 || /\bFAR\b/i.test(r.label || ""));
-  const gav = istBau ? "Bauhauptgewerbe (LMV)" : "GAV Personalverleih";
-  const modus = lcUeberzeitParam(gav);
+  // 1. GAV über Einsatznummer aus der Einsatzliste; 2. Fallback FAR-Abzug → Bauhauptgewerbe, sonst Personalverleih
+  const el = lcGavAusEinsatzliste(s);
+  let gav, modus, gavQuelle;
+  if (el) {
+    const pz = lcParamZeileFuerGav(el.gav);
+    if (!pz) { add(s, "gelb", "Überzeit", "GAV «" + el.gav + "» (" + el.quelle + ") hat keine Zeile unter Parameter → Überzeit — Basis nicht geprüft. Bitte dort hinterlegen."); return; }
+    gav = el.gav; modus = pz.basis === "brutto" ? "brutto" : "basis13"; gavQuelle = el.quelle;
+    if (el.mehrere) add(s, "grau", "Überzeit", "Mehrere GAV in der Periode (" + el.mehrere.join(", ") + ") — geprüft wird mit «" + gav + "».");
+  } else {
+    const istBau = s.rows.some(r => r.code === 5110 || /\bFAR\b/i.test(r.label || ""));
+    gav = istBau ? "Bauhauptgewerbe (LMV)" : "GAV Personalverleih";
+    modus = lcUeberzeitParam(gav); gavQuelle = istBau ? "Annahme wegen FAR-Abzug" : "Annahme, keine Einsatzliste mit Einsatz-Nr/GAV";
+  }
   const g = lcGrundlohnAnsatz(s);
   const voll = lcStundenlohnVoll(s);
   const tol = 0.03;
   let basis, basisTxt;
   if (modus === "brutto") {
     if (!voll) { add(s, "grau", "Überzeit", "Überzeit vorhanden (" + gav + ": Basis Bruttolohn), aber kein Stundenlohn-Ansatz erkennbar — manuell prüfen."); return; }
-    basis = voll; basisTxt = "Bruttolohn/h " + lcFmt(voll) + " (" + gav + ")";
+    basis = voll; basisTxt = "Bruttolohn/h " + lcFmt(voll) + " (" + gav + " · " + gavQuelle + ")";
   } else {
     if (!g) { add(s, "grau", "Überzeit", "Überzeit vorhanden, aber kein Grundlohn/Basislohn-Ansatz pro Stunde erkennbar — Basis (Grundlohn + 8.33 % 13. ML) manuell prüfen."); return; }
     basis = Math.round(g.wert * (1 + LC_ANTEIL_13) * 100) / 100;
-    basisTxt = "Grundlohn " + lcFmt(g.wert) + " (" + g.quelle + ") + 8.33 % Anteil 13. ML = Basis " + lcFmt(basis) + " (" + gav + ")";
+    basisTxt = "Grundlohn " + lcFmt(g.wert) + " (" + g.quelle + ") + 8.33 % Anteil 13. ML = Basis " + lcFmt(basis) + " (" + gav + " · " + gavQuelle + ")";
   }
   for (const r of uzRows) {
     const pm = /(\d{1,3}(?:[.,]\d+)?)\s*%/.exec(r.label);
@@ -983,7 +1024,9 @@ const LC_SPALTEN_MUSTER = {
   vorname: /vorname/i,
   geburtsdatum: /geburt|geb\.?[-\s]?datum/i,
   von: /^von$|beginn|start|eintritt|einsatzbeginn/i,
-  bis: /^bis$|ende|austritt|einsatzende/i
+  bis: /^bis$|ende|austritt|einsatzende/i,
+  einsatznr: /einsatz[-\s]?(nr|nummer|id)|^einsatz$|assignment/i,
+  gav: /^gav$|gesamtarbeitsvertrag|\bgav\b|cct|ccl/i
 };
 function lcErkenneSpalten(spalten) {
   const out = {};
@@ -1529,7 +1572,7 @@ function lcRenderKontrolllistenPanel() {
 }
 function lcRenderListRow(l) {
   const map = l.spaltenMap || {};
-  const feldLabel = { ahv: "AHV-Nr", name: "Name", vorname: "Vorname", geburtsdatum: "Geburtsdatum", von: "Von", bis: "Bis" };
+  const feldLabel = { ahv: "AHV-Nr", name: "Name", vorname: "Vorname", geburtsdatum: "Geburtsdatum", von: "Von", bis: "Bis", einsatznr: "Einsatz-Nr", gav: "GAV" };
   return `
     <div style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:8px">
       <div style="display:flex;align-items:center;gap:6px">
