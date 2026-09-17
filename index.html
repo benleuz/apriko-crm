@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.245.0"></script>
-<script src="apriko-api.js?v=1.245.0"></script>
-<script src="lohncheck.js?v=1.245.0"></script>
-<script src="personalbudget.js?v=1.245.0"></script>
-<script src="jahresbudget.js?v=1.245.0"></script>
-<script src="budgetpositionen.js?v=1.245.0"></script>
-<script src="lohnchecklistetemp.js?v=1.245.0"></script>
+<script src="apriko-filters.js?v=1.246.0"></script>
+<script src="apriko-api.js?v=1.246.0"></script>
+<script src="lohncheck.js?v=1.246.0"></script>
+<script src="personalbudget.js?v=1.246.0"></script>
+<script src="jahresbudget.js?v=1.246.0"></script>
+<script src="budgetpositionen.js?v=1.246.0"></script>
+<script src="lohnchecklistetemp.js?v=1.246.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -982,7 +982,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.245.0</span> · <span id="app-build-date">17.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.246.0</span> · <span id="app-build-date">17.09.2026</span>
     </div>
   </aside>
 
@@ -7390,22 +7390,7 @@ function abaBuchungen() {
     const z = pa.zusatz[b.code];
     if (z && b.betrag && z.soll && z.haben) extra.push({ code: b.code, bezeichnung: b.bezeichnung + " (Zusatzbuchung)", betrag: b.betrag, soll: z.soll, haben: z.haben, ok: true, zusatz: true, grund: "Zusatzbuchung (Parameter)", quelleSoll: "Zusatz", quelleHaben: "Zusatz", imStamm: true });
   });
-  const alle = out.concat(extra);
-  // Rundungsausgleich: Zeilen werden einzeln auf Rappen gerundet — die Summe kann um wenige Rappen vom
-  // Durchlaufkonto-Saldo 0 abweichen. Differenz (< 1 CHF) auf die grösste Buchung am Durchlaufkonto legen.
-  const dk = pa.durchlauf;
-  if (dk) {
-    let saldo = 0;
-    alle.filter(b => b.ok).forEach(b => { let sl = b.soll, hb = b.haben, v = b.betrag; if (v < 0) { const t = sl; sl = hb; hb = t; v = -v; } if (sl === dk) saldo += v; if (hb === dk) saldo -= v; });
-    saldo = Math.round(saldo * 100) / 100;
-    if (saldo !== 0 && Math.abs(saldo) < 1) {
-      // saldo > 0: zu viel im Soll → grösste Haben-Buchung am DK erhöhen (oder Soll-Buchung senken)
-      const kand = alle.filter(b => b.ok && (b.soll === dk || b.haben === dk)).sort((a, b) => Math.abs(b.betrag) - Math.abs(a.betrag));
-      const z = kand.find(b => { const dkImHaben = (b.betrag >= 0 ? b.haben : b.soll) === dk; return saldo > 0 ? dkImHaben : !dkImHaben; }) || kand[0];
-      if (z) { const dkImHaben = (z.betrag >= 0 ? z.haben : z.soll) === dk; const delta = (saldo > 0) === dkImHaben ? Math.abs(saldo) : -Math.abs(saldo); z.betrag = Math.round((z.betrag + (z.betrag >= 0 ? delta : -delta)) * 100) / 100; z.rundung = (delta > 0 ? "+" : "−") + Math.abs(saldo).toFixed(2); }
-    }
-  }
-  return alle;
+  return out.concat(extra);
 }
 /* Kontierung pro Lohnart ergänzen/überschreiben — persistent in parameter.json (abacus.kontierung) */
 async function abaOverride(code, feld, wert) {
@@ -7429,6 +7414,18 @@ function abaDurchlaufCheck(buchungen) {
     if (h === dk) haben += betrag;
   });
   return { konto: dk, soll: Math.round(soll * 100) / 100, haben: Math.round(haben * 100) / 100, saldo: Math.round((soll - haben) * 100) / 100 };
+}
+/* Kontenübersicht wie im Excel (Lobu-Journal): pro Konto Soll/Haben, Gesamtsumme Soll = Haben, Durchlaufkonto-Differenz */
+function abaKontenUebersicht(buchungen) {
+  const k = {};
+  buchungen.filter(b => b.ok).forEach(b => {
+    let s = b.soll, h = b.haben, v = b.betrag;
+    if (v < 0) { const t = s; s = h; h = t; v = -v; }
+    k[s] = k[s] || { soll: 0, haben: 0 }; k[h] = k[h] || { soll: 0, haben: 0 };
+    k[s].soll += v; k[h].haben += v;
+  });
+  const zeilen = Object.keys(k).sort().map(nr => ({ konto: nr, soll: k[nr].soll, haben: k[nr].haben, saldo: k[nr].soll - k[nr].haben }));
+  return { zeilen, totalSoll: zeilen.reduce((a, z) => a + z.soll, 0), totalHaben: zeilen.reduce((a, z) => a + z.haben, 0) };
 }
 function abaDurchlaufVorschlag(buchungen) {
   const cnt = {};
@@ -7555,12 +7552,13 @@ function renderAbacus(el) {
       </div>
       ${!lcState.lohnartenliste ? `<div style="font-size:11px;color:var(--warn);margin-bottom:8px">Lohnartenstamm nicht geladen — Soll/Haben können nicht aufgelöst werden (Workflows → Lohnartenstamm).</div>` : ""}
       ${lcState.lohnartenliste && !(lcState.lohnartenliste.spalten || []).includes("Brutto") ? `<div style="font-size:11px;color:var(--warn);margin-bottom:8px">Der gespeicherte Lohnartenstamm hat noch keine Spalten Brutto/Abzug — im Lohnartenstamm einmal «Neu laden» aus Apriko, damit Nettolohn-Bestandteile ohne Kontierung erkannt werden.</div>` : ""}
-      ${(() => { const d = abaDurchlaufCheck(buchungen); if (!d) return ""; const ok = Math.abs(d.saldo) < 0.05; return `<div style="font-size:12px;margin-bottom:8px;padding:6px 10px;border-left:3px solid ${ok ? "var(--accent-2)" : "var(--danger)"};background:var(--bg)">Durchlaufkonto <input type="text" value="${escape(abaParam().durchlauf || d.konto)}" onchange="abaDurchlaufSetzen(this.value)" style="width:70px;font-family:var(--font-mono);font-size:12px;padding:2px 5px" title="Konto, das am Ende auf 0 aufgehen muss"> · Soll CHF ${fmt(d.soll)} − Haben CHF ${fmt(d.haben)} = <strong style="color:${ok ? "var(--accent-2)" : "var(--danger)"}">CHF ${fmt(d.saldo)}</strong> ${ok ? "✓ geht auf" : "⚠ geht nicht auf — Kontierung oder ausgelassene Lohnarten prüfen"}</div>`; })()}
+      ${(() => { const d = abaDurchlaufCheck(buchungen); if (!d) return ""; const ok = Math.abs(d.saldo) < 0.05; const ku = abaKontenUebersicht(buchungen); return `<details style="font-size:12px;margin-bottom:8px;padding:6px 10px;border-left:3px solid ${ok ? "var(--accent-2)" : "var(--danger)"};background:var(--bg)"><summary style="cursor:pointer">Kontrolle wie im Excel: Durchlaufkonto <input type="text" value="${escape(abaParam().durchlauf || d.konto)}" onchange="abaDurchlaufSetzen(this.value)" onclick="event.preventDefault()" style="width:70px;font-family:var(--font-mono);font-size:12px;padding:2px 5px"> Soll CHF ${fmt(d.soll)} · Haben CHF ${fmt(d.haben)} · Differenz <strong style="color:${ok ? "var(--accent-2)" : "var(--danger)"}">CHF ${fmt(d.saldo)}</strong> ${ok ? "✓ Soll = Haben" : "⚠ Soll ≠ Haben"} · Gesamt Soll ${fmt(ku.totalSoll)} / Haben ${fmt(ku.totalHaben)}</summary>
+        <table style="font-size:11px;margin-top:6px"><thead><tr><th>Konto</th><th style="text-align:right">Soll</th><th style="text-align:right">Haben</th><th style="text-align:right">Saldo</th></tr></thead><tbody>${ku.zeilen.map(z => `<tr${z.konto === d.konto ? ' style="font-weight:600"' : ""}><td style="font-family:var(--font-mono)">${escape(z.konto)}</td><td style="text-align:right;font-family:var(--font-mono)">${z.soll ? fmt(z.soll) : ""}</td><td style="text-align:right;font-family:var(--font-mono)">${z.haben ? fmt(z.haben) : ""}</td><td style="text-align:right;font-family:var(--font-mono);color:${z.konto === d.konto && Math.abs(z.saldo) >= 0.05 ? "var(--danger)" : "inherit"}">${fmt(z.saldo)}</td></tr>`).join("")}</tbody></table></details>`; })()}
       <div class="table-wrap"><table>
         <thead><tr><th>Lohnart</th><th>Bezeichnung</th><th style="text-align:right">Betrag</th><th>Soll</th><th>Haben</th><th>Regel</th><th></th></tr></thead>
         <tbody>${buchungen.map(b => { const um = q => /^Umkontierung/.test(q) ? `<span style="font-size:10px;color:var(--accent-3);margin-left:4px" title="${escape(q)}">${escape(q.replace("Umkontierung ", ""))}</span>` : (q === "Lohnart" ? `<span style="font-size:10px;color:var(--accent);margin-left:4px" title="Lohnart-Kontierung aus Parameter">LA</span>` : ""); return `<tr${b.zusatz ? ' style="color:var(--text-dim)"' : ""}>
           <td style="font-family:var(--font-mono)">${escape(b.code)}</td>
-          <td>${escape(b.bezeichnung)}${b.imStamm ? "" : ` <span style="font-size:9px;color:var(--warn)">nicht im Stamm</span>`}${b.aggregatInfo ? ` <span style="font-size:9px;color:var(--accent-3)" title="Aggregat-Regel">${escape(b.aggregatInfo)}</span>` : ""}${b.rundung ? ` <span style="font-size:9px;color:var(--warn)" title="Rundungsausgleich, damit das Durchlaufkonto auf 0 aufgeht">Rundung ${escape(b.rundung)}</span>` : ""}</td>
+          <td>${escape(b.bezeichnung)}${b.imStamm ? "" : ` <span style="font-size:9px;color:var(--warn)">nicht im Stamm</span>`}${b.aggregatInfo ? ` <span style="font-size:9px;color:var(--accent-3)" title="Aggregat-Regel">${escape(b.aggregatInfo)}</span>` : ""}</td>
           <td style="text-align:right;font-family:var(--font-mono)">${fmt(b.betrag)}</td>
           <td>${b.zusatz ? `<span style="font-family:var(--font-mono)">${escape(b.soll)}</span>` : `<input type="text" value="${escape(b.soll)}" onchange="abaOverride('${escape(b.code)}','soll',this.value)" style="width:60px;font-family:var(--font-mono);font-size:12px;padding:2px 5px">${um(b.quelleSoll)}`}</td>
           <td>${b.zusatz ? `<span style="font-family:var(--font-mono)">${escape(b.haben)}</span>` : `<input type="text" value="${escape(b.haben)}" onchange="abaOverride('${escape(b.code)}','haben',this.value)" style="width:60px;font-family:var(--font-mono);font-size:12px;padding:2px 5px">${um(b.quelleHaben)}`}</td>
