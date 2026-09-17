@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.128.0";
+const LC_VERSION = "1.129.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -815,10 +815,13 @@ function lcUeberzeitCheck(s, add) {
 /* Überzeit-Rückrechnung für einen Beleg — Datenbasis für die Excel-Liste (Spezialtool):
    pro Überzeit-Lohnart: Stunden, Ansatz, Betrag, Grundlohn/h, voller Stundenlohn/h, Basis+13, erwartete Werte
    nach beiden Varianten, erkannte Berechnungsweise (wie wurde gerechnet), GAV und Soll-Basis aus Parameter. */
-function lcUeberzeitAnalyse(s) {
+function lcUeberzeitAnalyse(s, einsatzlisten) {
   const uzRows = s.rows.filter(r => r.code < 4900 && !r.isTotal && /[ÜU]e?berzeit/i.test(r.label));
   if (!uzRows.length) return [];
-  const el = lcGavAusEinsatzliste(s);
+  // Optional eigene Einsatzlisten (Spielwiese → Überzeit-Check) statt der Kontrolllisten des Ultimativen Checks
+  let el;
+  if (einsatzlisten) { const save = lcState.kontrolllisten; lcState.kontrolllisten = { listen: einsatzlisten }; try { el = lcGavAusEinsatzliste(s); } finally { lcState.kontrolllisten = save; } }
+  else el = lcGavAusEinsatzliste(s);
   const istBau = s.rows.some(r => r.code === 5110 || /\bFAR\b/i.test(r.label || ""));
   let gav, gavQuelle, pz = null;
   if (el) { gav = el.gav; gavQuelle = el.quelle; pz = lcParamZeileFuerGav(el.gav); }
@@ -859,9 +862,9 @@ function lcUeberzeitAnalyse(s) {
   });
 }
 /* Excel-Export: alle Mitarbeiter, alle Überzeit-Positionen mit Rückrechnung */
-async function lcUeberzeitExcel() {
+async function lcUeberzeitExcel(slips, einsatzlisten) {
   const zeilen = [];
-  lcState.slips.forEach(s => lcUeberzeitAnalyse(s).forEach(z => zeilen.push(z)));
+  (slips || lcState.slips).forEach(s => lcUeberzeitAnalyse(s, einsatzlisten).forEach(z => zeilen.push(z)));
   if (!zeilen.length) { toast("Keine Überzeit-Positionen in den geladenen Belegen.", true); return; }
   await lcLoadXlsx();
   const hdr = ["Mitarbeiter", "AHV-Nr", "Pers-Nr", "Periode", "Lohnart", "Bezeichnung", "Zuschlag %", "Stunden", "Ansatz", "Betrag",
@@ -882,6 +885,82 @@ async function lcUeberzeitExcel() {
   window.XLSX.utils.book_append_sheet(wb, ws2, "Pro Mitarbeiter");
   window.XLSX.writeFile(wb, "Ueberzeit-Liste_" + new Date().toISOString().slice(0, 10) + ".xlsx");
   toast(zeilen.length + " Überzeit-Positionen von " + Object.keys(perMa).length + " Mitarbeitenden exportiert.");
+}
+
+/* ============ Spielwiese → Überzeit-Check (eigenständig, nichts wird gespeichert) ============
+   Einsatzliste (CSV/XLSX mit Einsatz-Nr + GAV) und beliebig viele Lohnabrechnungs-PDFs (alle Monate YTD)
+   hochladen → Liste aller Überzeit-Positionen mit Rückrechnung, Excel-Export wie im Ultimativen Check. */
+const uzState = { einsatzlisten: [], slips: [], files: [], busy: false };
+async function uzUploadEinsatzliste(input) {
+  const files = [...(input.files || [])]; input.value = "";
+  for (const file of files) {
+    try {
+      const { zeilen, spalten } = await lcParseListDatei(file);
+      const spaltenMap = lcErkenneSpalten(spalten);
+      uzState.einsatzlisten.push({ id: "uz" + Date.now().toString(36), typ: "Einsatzliste", dateiname: file.name, spalten, spaltenMap, zeilen });
+      if (!spaltenMap.einsatznr || !spaltenMap.gav) toast(file.name + ": Spalten Einsatz-Nr/GAV nicht automatisch erkannt — unten zuordnen.", true);
+    } catch (e) { toast("Einsatzliste nicht lesbar: " + e.message, true); }
+  }
+  render();
+}
+function uzSetSpalte(id, feld, spalte) { const l = uzState.einsatzlisten.find(x => x.id === id); if (l) { l.spaltenMap[feld] = spalte || null; render(); } }
+function uzDelEinsatzliste(id) { uzState.einsatzlisten = uzState.einsatzlisten.filter(x => x.id !== id); render(); }
+async function uzUploadPdf(input) {
+  const files = [...(input.files || [])].sort((a, b) => a.name.localeCompare(b.name, "de", { numeric: true })); input.value = "";
+  if (!files.length) return;
+  uzState.busy = true; render();
+  try {
+    let idx = 0;
+    for (const file of files) {
+      idx++;
+      if (!/\.pdf$/i.test(file.name)) { toast(file.name + ": nur PDF", true); continue; }
+      toast("PDF wird gelesen (" + idx + "/" + files.length + "): " + file.name + " …");
+      const pages = await lcReadPdf(await file.arrayBuffer());
+      const slips = lcSplitSlips(pages, file.name);
+      slips.forEach(sl => { sl.id = uzState.slips.length + 1; uzState.slips.push(sl); });
+      uzState.files.push(file.name + " (" + slips.length + " Abr.)");
+    }
+    lcPropagateNames(uzState.slips);
+  } catch (e) { toast("Import fehlgeschlagen: " + e.message, true); }
+  uzState.busy = false; render();
+}
+function uzReset() { uzState.slips = []; uzState.files = []; render(); }
+function uzZeilen() { const out = []; uzState.slips.forEach(s => lcUeberzeitAnalyse(s, uzState.einsatzlisten).forEach(z => out.push(z))); return out; }
+async function renderUeberzeitCheck(el) {
+  if (typeof parameterLaden === "function" && !window.crmParameter) { try { await parameterLaden(false); } catch (e) {} }
+  document.getElementById("view-actions").innerHTML = "";
+  const zeilen = uzState.slips.length ? uzZeilen() : [];
+  const fmt = v => v == null ? "—" : lcFmt(v);
+  const feldLabel = { einsatznr: "Einsatz-Nr", gav: "GAV" };
+  const pruefen = zeilen.filter(z => !z.ok).length;
+  el.innerHTML = `
+    <div class="card" style="padding:14px 16px;margin-bottom:14px">
+      <h3 style="margin:0 0 4px">Überzeit-Check</h3>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">1. Einsatzliste (CSV/XLSX mit Einsatz-Nr und GAV) hochladen · 2. Lohnabrechnungen als PDF (alle Monate, beliebig viele) · 3. Liste ziehen. Basis-Regel pro GAV kommt aus Parameter → Überzeit. Es wird nichts gespeichert.</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <label class="btn btn-sm">⇧ Einsatzliste<input type="file" accept=".csv,.xlsx,.xls,.txt" multiple style="display:none" onchange="uzUploadEinsatzliste(this)"></label>
+        <label class="btn btn-sm">⇧ Lohnabrechnungen (PDF)<input type="file" accept=".pdf" multiple style="display:none" onchange="uzUploadPdf(this)"></label>
+        ${uzState.slips.length ? `<button class="btn btn-sm" onclick="lcUeberzeitExcel(uzState.slips, uzState.einsatzlisten)">⇩ Überzeit-Liste (Excel)</button><button class="btn btn-sm" onclick="uzReset()">✕ Belege leeren</button>` : ""}
+        ${uzState.busy ? `<span style="font-size:11px;color:var(--text-dim)">Lese PDFs …</span>` : ""}
+      </div>
+      ${uzState.einsatzlisten.length ? `<div style="margin-top:10px;font-size:11px">${uzState.einsatzlisten.map(l => `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:4px"><strong>${escape(l.dateiname)}</strong> · ${l.zeilen.length} Zeilen
+        ${["einsatznr", "gav"].map(f => `<label>${feldLabel[f]}: <select onchange="uzSetSpalte('${l.id}','${f}',this.value)"><option value="">—</option>${l.spalten.map(sp => `<option value="${escape(sp)}" ${l.spaltenMap[f] === sp ? "selected" : ""}>${escape(sp)}</option>`).join("")}</select></label>`).join(" ")}
+        <a href="#" onclick="uzDelEinsatzliste('${l.id}');return false;" style="color:var(--text-faint)">✕</a></div>`).join("")}</div>` : `<div style="margin-top:8px;font-size:11px;color:var(--warn)">Noch keine Einsatzliste — GAV wird dann nur angenommen (FAR-Abzug → Bauhauptgewerbe, sonst Personalverleih).</div>`}
+      ${uzState.files.length ? `<div style="margin-top:6px;font-size:11px;color:var(--text-dim)">Belege: ${uzState.files.map(escape).join(" · ")} — ${uzState.slips.length} Abrechnungen</div>` : ""}
+    </div>
+    ${uzState.slips.length ? `
+    <div class="card" style="padding:14px 16px">
+      <div style="margin-bottom:8px"><strong>${zeilen.length} Überzeit-Positionen</strong> · ${new Set(zeilen.map(z => z.name + "|" + z.ahv)).size} Mitarbeitende${pruefen ? ` · <span style="color:var(--danger)">${pruefen} zu prüfen</span>` : " · alle OK"}</div>
+      <div class="table-wrap"><table style="font-size:11px">
+        <thead><tr><th>Mitarbeiter</th><th>Periode</th><th>Lohnart</th><th style="text-align:right">Std</th><th style="text-align:right">Ansatz</th><th style="text-align:right">Betrag</th><th style="text-align:right">Grundlohn</th><th style="text-align:right">Grund+13.</th><th style="text-align:right">Brutto/h</th><th>Berechnet als</th><th>GAV</th><th>Soll-Basis</th><th style="text-align:right">Erwartet</th><th style="text-align:right">Diff</th><th></th></tr></thead>
+        <tbody>${zeilen.map(z => `<tr style="${z.ok ? "" : "color:var(--danger)"}">
+          <td>${escape(z.name)}</td><td>${escape(z.periode)}</td><td>${z.code} ${escape(z.lohnart)}</td>
+          <td style="text-align:right;font-family:var(--font-mono)">${fmt(z.stunden)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.ansatz)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.betrag)}</td>
+          <td style="text-align:right;font-family:var(--font-mono)">${fmt(z.grundlohn)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.basis13)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.bruttolohn)}</td>
+          <td>${escape(z.berechnet)}</td><td title="${escape(z.gavQuelle)}">${escape(z.gav)}</td><td>${escape(z.sollBasis)}</td>
+          <td style="text-align:right;font-family:var(--font-mono)">${fmt(z.erwartetVoll)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.differenz)}</td><td>${z.ok ? "✓" : "⚠"}</td></tr>`).join("")}</tbody>
+      </table></div>
+    </div>` : ""}`;
 }
 
 /* ---------- Totalisierung ---------- */

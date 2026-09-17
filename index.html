@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.249.0"></script>
-<script src="apriko-api.js?v=1.249.0"></script>
-<script src="lohncheck.js?v=1.249.0"></script>
-<script src="personalbudget.js?v=1.249.0"></script>
-<script src="jahresbudget.js?v=1.249.0"></script>
-<script src="budgetpositionen.js?v=1.249.0"></script>
-<script src="lohnchecklistetemp.js?v=1.249.0"></script>
+<script src="apriko-filters.js?v=1.250.0"></script>
+<script src="apriko-api.js?v=1.250.0"></script>
+<script src="lohncheck.js?v=1.250.0"></script>
+<script src="personalbudget.js?v=1.250.0"></script>
+<script src="jahresbudget.js?v=1.250.0"></script>
+<script src="budgetpositionen.js?v=1.250.0"></script>
+<script src="lohnchecklistetemp.js?v=1.250.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -967,6 +967,7 @@
           <button data-view="konzern"><span class="ic">🏢</span> Konzernanalyse</button>
           <button data-view="apipoc"><span class="ic">🔌</span> Apriko API (POC)</button>
           <button data-view="abacus"><span class="ic">🧮</span> Abacus Schnittstelle</button>
+          <button data-view="uzcheck"><span class="ic">⏱</span> Überzeit-Check</button>
         </div>
       </div>
       <div class="nav-group" data-group="admin">
@@ -982,7 +983,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.249.0</span> · <span id="app-build-date">17.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.250.0</span> · <span id="app-build-date">17.09.2026</span>
     </div>
   </aside>
 
@@ -1470,7 +1471,7 @@ let currentView = DEMO_ANON ? "einsatzdash" : "dashboard";
    Berechtigungssystem
    =========================================================== */
 const SUPER_ADMIN_EMAIL = "benjamin@apriko.com";  // hat immer volle Rechte
-const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","lohncheck","parameter","apipoc","abacus","profiles"];
+const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","lohncheck","parameter","apipoc","abacus","uzcheck","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
@@ -1483,7 +1484,7 @@ const VIEW_TITLES = {
   lohnartenstamm: "Lohnartenstamm",
   tarifarten: "Tarifarten",
   rapport: "Rapport", einsatzdash: "Kundendashboard", konzern: "Konzernanalyse",
-  lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)", abacus: "Abacus Schnittstelle",
+  lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)", abacus: "Abacus Schnittstelle", uzcheck: "Überzeit-Check",
   profiles: "Profile"
 };
 
@@ -1956,6 +1957,7 @@ function render() {
   else if (currentView === "tarifarten") renderTarifarten(content);
   else if (currentView === "parameter") renderParameter(content);
   else if (currentView === "abacus") renderAbacus(content);
+  else if (currentView === "uzcheck") renderUeberzeitCheck(content);
   else if (currentView === "personalbudget") renderPersonalBudget(content);
   else if (currentView === "jahresbudget") renderJahresbudget(content);
   else if (currentView === "budgetpos") renderBudgetpositionen(content);
