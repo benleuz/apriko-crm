@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.131.0";
+const LC_VERSION = "1.132.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -253,7 +253,7 @@ function lcParseSlip(slip) {
       const codeItem = l.items[0];
       if (!/^\d{4}\b/.test(codeItem.s.trim())) continue;
       // Tokens klassifizieren
-      let basis = null, ansatz = null, anzahl = null, betrag = null;
+      let basis = null, ansatz = null, anzahl = null, betrag = null, ansatzPct = false;
       const labelParts = [];
       const nums = [];
       l.items.forEach((it, k) => {
@@ -270,8 +270,7 @@ function lcParseSlip(slip) {
           }
         }
         if (col) {
-          if (col === "basis") basis = n.v; else if (col === "ansatz") ansatz = n.v; else if (col === "anzahl") anzahl = n.v; else betrag = n.v;
-          if (n.pct && col === "ansatz") ansatz = n.v;
+          if (col === "basis") basis = n.v; else if (col === "ansatz") { ansatz = n.v; ansatzPct = !!n.pct; } else if (col === "anzahl") anzahl = n.v; else betrag = n.v;
           nums.push(n);
         } else if (n !== null && (!cols || it.x > cols.labelMax)) {
           nums.push(n); // ohne Spaltenraster → Position später per Regel
@@ -282,14 +281,14 @@ function lcParseSlip(slip) {
         const rest = nums.slice();
         betrag = rest.pop().v;
         const pIdx = rest.findIndex(n => n.pct);
-        if (pIdx >= 0) { ansatz = rest[pIdx].v; rest.splice(pIdx, 1); }
+        if (pIdx >= 0) { ansatz = rest[pIdx].v; ansatzPct = true; rest.splice(pIdx, 1); }
         if (rest.length >= 1) basis = rest[0].v;
         if (rest.length >= 2) anzahl = rest[1].v;
       }
       if (betrag === null) continue;
       const label = labelParts.join(" ").replace(/\s+/g, " ").trim();
       codeXs.push(codeItem.x);
-      slip.rows.push({ code, label, basis, ansatz, anzahl, betrag, x: codeItem.x, page: pg.n,
+      slip.rows.push({ code, label, basis, ansatz, ansatzPct, anzahl, betrag, x: codeItem.x, page: pg.n,
         isTotal: LC_TOTAL_CODES.has(code) || /^Total\b|^Bruttolohn$|^Nettolohn$|^Abgerechnet$/i.test(label) });
     }
   }
@@ -693,12 +692,21 @@ function lcCheckAll(slips) {
    GAV-Zuordnung: Nur GAV Personalverleih. Belege mit FAR-Abzug (Bauhauptgewerbe →
    Basis Bruttolohn, andere PK-Regel) werden übersprungen (grauer Hinweis). */
 const LC_ANTEIL_13 = 0.0833;
+/* CHF-Stundensatz einer Zeile: im Apriko-Layout steht der CHF/h in «Basis» und «Ansatz» ist ein Prozent
+   (100 % beim Stundenlohn); ältere Layouts haben den CHF/h direkt im Ansatz. */
+function lcChfProStunde(r) {
+  if (!r) return null;
+  if (r.basis !== null && r.basis > 0 && (r.ansatzPct || r.ansatz === null || r.ansatz === 100)) return r.basis;
+  if (r.ansatz !== null && r.ansatz > 0 && !r.ansatzPct) return r.ansatz;
+  if (r.basis !== null && r.basis > 0) return r.basis;
+  return null;
+}
 function lcGrundlohnAnsatz(slip) {
-  // Grundlohn/Basislohn-Zeile (Bestandteil unter 1005 oder eigenständig): Ansatz = Grundlohn/h
-  const cands = slip.rows.filter(r => r.code < 4900 && !r.isTotal && /Grundlohn|Basislohn/i.test(r.label) && r.ansatz !== null && r.ansatz > 0 && !/Ferien|Feiertag|13\./i.test(r.label));
-  if (cands.length) return { wert: cands[0].ansatz, quelle: cands[0].code + " " + cands[0].label };
-  const g1000 = slip.rows.find(r => r.code === 1000 && r.ansatz !== null && r.ansatz > 0);
-  if (g1000) return { wert: g1000.ansatz, quelle: "1000 " + g1000.label };
+  // Grundlohn/Basislohn-Zeile (Bestandteil unter 1005 oder eigenständig): CHF/h = Grundlohn
+  const cands = slip.rows.filter(r => r.code < 4900 && !r.isTotal && /Grundlohn|Basislohn/i.test(r.label) && lcChfProStunde(r) && !/Ferien|Feiertag|13\./i.test(r.label));
+  if (cands.length) return { wert: lcChfProStunde(cands[0]), quelle: cands[0].code + " " + cands[0].label };
+  const g1000 = slip.rows.find(r => r.code === 1000 && lcChfProStunde(r));
+  if (g1000) return { wert: lcChfProStunde(g1000), quelle: "1000 " + g1000.label };
   // Fallback: Grundlohn-Betrag / Stunden
   const gRow = slip.rows.find(r => r.code < 4900 && /Grundlohn|Basislohn/i.test(r.label) && r.betrag > 0);
   const std = slip.rows.filter(r => (r.code === 1005 || /^Stundenlohn/i.test(r.label)) && !r.isTotal && r.level === 0 && r.anzahl !== null).reduce((a, r) => a + r.anzahl, 0);
@@ -706,8 +714,8 @@ function lcGrundlohnAnsatz(slip) {
   return null;
 }
 function lcStundenlohnVoll(slip) {
-  const r = slip.rows.find(x => (x.code === 1005 || /^Stundenlohn/i.test(x.label)) && !x.isTotal && x.level === 0 && x.ansatz !== null && x.ansatz > 0);
-  return r ? r.ansatz : null;
+  const r = slip.rows.find(x => (x.code === 1005 || /^Stundenlohn/i.test(x.label)) && !x.isTotal && x.level === 0 && lcChfProStunde(x));
+  return r ? lcChfProStunde(r) : null;
 }
 /* GAV-Zuordnung des Belegs (Beleg nennt den GAV nicht): FAR-Abzug → Bauhauptgewerbe, sonst GAV Personalverleih.
    Die Überzeit-Basis kommt aus Parameter → Überzeit (window.crmParameter.ueberzeit); ohne Eintrag gilt die Vorgabe. */
@@ -754,64 +762,14 @@ function lcParamZeileFuerGav(gavText) {
   return hit || null;
 }
 function lcUeberzeitCheck(s, add) {
-  const uzRows = s.rows.filter(r => r.code < 4900 && !r.isTotal && /[ÜU]e?berzeit/i.test(r.label));
-  if (!uzRows.length) return;
-  // 1. GAV über Einsatznummer aus der Einsatzliste; 2. Fallback FAR-Abzug → Bauhauptgewerbe, sonst Personalverleih
-  const el = lcGavAusEinsatzliste(s);
-  let gav, modus, gavQuelle;
-  if (el) {
-    const pz = lcParamZeileFuerGav(el.gav);
-    if (!pz) { add(s, "gelb", "Überzeit", "GAV «" + el.gav + "» (" + el.quelle + ") hat keine Zeile unter Parameter → Überzeit — Basis nicht geprüft. Bitte dort hinterlegen."); return; }
-    gav = el.gav; modus = pz.basis === "brutto" ? "brutto" : "basis13"; gavQuelle = el.quelle;
-    if (el.mehrere) add(s, "grau", "Überzeit", "Mehrere GAV in der Periode (" + el.mehrere.join(", ") + ") — geprüft wird mit «" + gav + "».");
-  } else {
-    const istBau = s.rows.some(r => r.code === 5110 || /\bFAR\b/i.test(r.label || ""));
-    gav = istBau ? "Bauhauptgewerbe (LMV)" : "GAV Personalverleih";
-    modus = lcUeberzeitParam(gav); gavQuelle = istBau ? "Annahme wegen FAR-Abzug" : "Annahme, keine Einsatzliste mit Einsatz-Nr/GAV";
-  }
-  const g = lcGrundlohnAnsatz(s);
-  const voll = lcStundenlohnVoll(s);
-  const tol = 0.03;
-  let basis, basisTxt;
-  if (modus === "brutto") {
-    if (!voll) { add(s, "grau", "Überzeit", "Überzeit vorhanden (" + gav + ": Basis Bruttolohn), aber kein Stundenlohn-Ansatz erkennbar — manuell prüfen."); return; }
-    basis = voll; basisTxt = "Bruttolohn/h " + lcFmt(voll) + " (" + gav + " · " + gavQuelle + ")";
-  } else {
-    if (!g) { add(s, "grau", "Überzeit", "Überzeit vorhanden, aber kein Grundlohn/Basislohn-Ansatz pro Stunde erkennbar — Basis (Grundlohn + 8.33 % 13. ML) manuell prüfen."); return; }
-    basis = Math.round(g.wert * (1 + LC_ANTEIL_13) * 100) / 100;
-    basisTxt = "Grundlohn " + lcFmt(g.wert) + " (" + g.quelle + ") + 8.33 % Anteil 13. ML = Basis " + lcFmt(basis) + " (" + gav + " · " + gavQuelle + ")";
-  }
-  for (const r of uzRows) {
-    const pm = /(\d{1,3}(?:[.,]\d+)?)\s*%/.exec(r.label);
-    const zuschlag = pm ? parseFloat(pm[1].replace(",", ".")) / 100 : 0.25;
-    const pctTxt = Math.round(zuschlag * 100) + " %";
-    let ansatz = r.ansatz;
-    if ((ansatz === null || ansatz === 0) && r.anzahl) ansatz = Math.round(r.betrag / r.anzahl * 100) / 100;
-    if (ansatz === null || !isFinite(ansatz) || ansatz === 0) { add(s, "grau", "Überzeit", r.code + " " + r.label + ": kein Stundenansatz erkennbar (Betrag " + lcFmt(r.betrag) + ") — Basis manuell prüfen."); continue; }
-    const erwVoll = basis * (1 + zuschlag), erwZus = basis * zuschlag;
-    const nahe = (a, b) => Math.abs(a - b) <= tol;
-    if (nahe(ansatz, erwVoll) || nahe(ansatz, erwZus)) {
-      // Betrag rechnerisch prüfen
-      if (r.anzahl && !lcNear(r.anzahl * ansatz, r.betrag, 0.06)) add(s, "gelb", "Überzeit", r.code + " " + r.label + ": " + lcFmt(r.anzahl) + " h × " + lcFmt(ansatz) + " = " + lcFmt(r.anzahl * ansatz) + " ≠ Betrag " + lcFmt(r.betrag) + ".");
-      continue;
-    }
-    // Ursache benennen
-    let grund = "";
-    if (g && (nahe(ansatz, g.wert * (1 + zuschlag)) || nahe(ansatz, g.wert * zuschlag))) grund = "Basis ist der Grundlohn OHNE Anteil 13. Monatslohn (8.33 %).";
-    else if (modus !== "brutto" && voll && (nahe(ansatz, voll * (1 + zuschlag)) || nahe(ansatz, voll * zuschlag))) grund = "Basis ist der volle Stundenlohn " + lcFmt(voll) + " inkl. Ferien/Feiertage — die gehören nicht in die Überzeitbasis.";
-    else if (modus === "brutto" && g && (nahe(ansatz, g.wert * (1 + LC_ANTEIL_13) * (1 + zuschlag)) || nahe(ansatz, g.wert * (1 + LC_ANTEIL_13) * zuschlag))) grund = "Basis ist Grundlohn + 13. ML statt Bruttolohn (Parameter → Überzeit prüfen).";
-    else if (nahe(ansatz, basis)) grund = "Ansatz entspricht der Basis ohne Zuschlag (" + pctTxt + " fehlt).";
-    else {
-      // anderer Zuschlag auf korrekter Basis? (z.B. 50 % statt 25 %)
-      const implied = ansatz / basis;
-      const alt = [0.25, 0.5, 1.25, 1.5].find(f => nahe(ansatz, basis * f));
-      if (alt) grund = "Ansatz entspricht " + Math.round(alt * 100) + " % auf korrekter Basis — Lohnart sagt " + pctTxt + "; Zuschlag der hinterlegten Regel prüfen.";
-      else grund = "Ansatz entspricht " + lcFmt(implied * 100, 1) + " % der erwarteten Basis — nicht nachvollziehbar.";
-    }
-    add(s, "rot", "Überzeitansatz prüfen", "Für " + r.code + " " + r.label + " wurde ein Ansatz von CHF " + lcFmt(ansatz) + " verwendet. Gemäss " + basisTxt + " wären " + lcFmt(erwVoll) + " (Stunden voll, " + pctTxt + ") bzw. " + lcFmt(erwZus) + " (nur Zuschlag) zu erwarten. " + grund + " Bitte überprüfen.");
+  const zeilen = lcUeberzeitAnalyse(s).filter(z => z.typ === "Überzeit");
+  for (const z of zeilen) {
+    if (z.ansatz == null) { add(s, "grau", "Überzeit", z.code + " " + z.lohnart + ": kein Stundenansatz erkennbar — Basis manuell prüfen."); continue; }
+    if (z.grundlohn == null && z.bruttolohn == null) { add(s, "grau", "Überzeit", z.code + " " + z.lohnart + ": Grundlohn/Bruttolohn pro Stunde nicht erkennbar — Basis manuell prüfen."); continue; }
+    if (z.ok) { if (z.stunden && z.ansatz && !lcNear(z.stunden * z.ansatz, z.betrag, 0.06)) add(s, "gelb", "Überzeit", z.code + " " + z.lohnart + ": " + lcFmt(z.stunden) + " h × " + lcFmt(z.ansatz) + " = " + lcFmt(z.stunden * z.ansatz) + " ≠ Betrag " + lcFmt(z.betrag) + "."); continue; }
+    add(s, "rot", "Überzeitansatz prüfen", "Für " + z.code + " " + z.lohnart + " wurde " + z.berechnet + " verwendet (CHF " + lcFmt(z.ansatz) + "/h). Gemäss " + z.gav + " (" + z.gavQuelle + ") ist die Basis «" + z.sollBasis + "» (" + lcFmt(z.sollBasis === "Bruttolohn" ? z.bruttolohn : z.basis13) + "): erwartet CHF " + lcFmt(z.erwartetVoll) + " (Stunden voll) bzw. CHF " + lcFmt(z.erwartetZuschlag) + " (nur Zuschlag)" + (z.differenz != null ? ", Differenz CHF " + lcFmt(z.differenz) + "/h" : "") + ". Bitte überprüfen.");
   }
 }
-
 /* Überzeit-Rückrechnung für einen Beleg — Datenbasis für die Excel-Liste (Spezialtool):
    pro Überzeit-Lohnart: Stunden, Ansatz, Betrag, Grundlohn/h, voller Stundenlohn/h, Basis+13, erwartete Werte
    nach beiden Varianten, erkannte Berechnungsweise (wie wurde gerechnet), GAV und Soll-Basis aus Parameter. */
@@ -837,30 +795,55 @@ function lcUeberzeitAnalyse(s, einsatzlisten) {
   return uzRows.map(r => {
     const zt = lcZulageTyp(r.label);
     const pm = /(\d{1,3}(?:[.,]\d+)?)\s*%/.exec(r.label);
-    const zuschlag = pm ? parseFloat(pm[1].replace(",", ".")) / 100 : zt.zuschlag;
-    let ansatz = r.ansatz;
-    if ((ansatz === null || ansatz === 0) && r.anzahl) ansatz = Math.round(r.betrag / r.anzahl * 100) / 100;
-    // Erkennen, wie gerechnet wurde
-    const varianten = [];
-    if (basis13 != null) { varianten.push(["Grundlohn + 13. × " + Math.round((1 + zuschlag) * 100) + " %", basis13 * (1 + zuschlag), "Basis + 13."]); varianten.push(["Grundlohn + 13. × " + Math.round(zuschlag * 100) + " % (nur Zuschlag)", basis13 * zuschlag, "Basis + 13."]); }
-    if (voll != null) { varianten.push(["Bruttolohn × " + Math.round((1 + zuschlag) * 100) + " %", voll * (1 + zuschlag), "auf Bruttolohn"]); varianten.push(["Bruttolohn × " + Math.round(zuschlag * 100) + " % (nur Zuschlag)", voll * zuschlag, "auf Bruttolohn"]); }
-    if (grund != null) { varianten.push(["Grundlohn ohne 13. × " + Math.round((1 + zuschlag) * 100) + " %", grund * (1 + zuschlag), "Grundlohn ohne 13."]); varianten.push(["Grundlohn ohne 13. × " + Math.round(zuschlag * 100) + " % (nur Zuschlag)", grund * zuschlag, "Grundlohn ohne 13."]); }
-    if (basis13 != null) [0.5, 1.5].forEach(f => varianten.push(["Grundlohn + 13. × " + Math.round(f * 100) + " %", basis13 * f, "Basis + 13. (anderer Zuschlag)"]));
-    if (voll != null) [0.5, 1.5].forEach(f => varianten.push(["Bruttolohn × " + Math.round(f * 100) + " %", voll * f, "auf Bruttolohn (anderer Zuschlag)"]));
-    const hit = varianten.find(v => nahe(ansatz, v[1]));
-    const istBasis = hit ? hit[2] : "nicht nachvollziehbar";
-    const sollKurz = /brutto/i.test(sollBasis) ? "auf Bruttolohn" : "Basis + 13.";
-    const ok = hit ? (hit[2].startsWith(sollKurz) && !/anderer Zuschlag/.test(hit[2])) : false;
-    const erwSoll = sollKurz === "auf Bruttolohn" ? (voll != null ? voll * (1 + zuschlag) : null) : (basis13 != null ? basis13 * (1 + zuschlag) : null);
-    const erwSollZus = sollKurz === "auf Bruttolohn" ? (voll != null ? voll * zuschlag : null) : (basis13 != null ? basis13 * zuschlag : null);
+    // Prozent-Zeile (Apriko-Layout): Basis = verwendete Lohnbasis CHF/h, Ansatz = Prozent, Betrag = Basis × % × Std
+    const pctMode = r.ansatzPct && r.basis !== null && r.basis > 0;
+    let zuschlag, nurZuschlag, chfProStd, basisVerwendet = null;
+    if (pctMode) {
+      const p = r.ansatz / 100;
+      nurZuschlag = p < 1; zuschlag = nurZuschlag ? p : p - 1;
+      basisVerwendet = r.basis; chfProStd = Math.round(r.basis * p * 100) / 100;
+    } else {
+      zuschlag = pm ? parseFloat(pm[1].replace(",", ".")) / 100 : zt.zuschlag;
+      chfProStd = r.ansatz;
+      if ((chfProStd === null || chfProStd === 0) && r.anzahl) chfProStd = Math.round(r.betrag / r.anzahl * 100) / 100;
+      nurZuschlag = null; // wird über die Rückrechnung bestimmt
+    }
+    const pctTxt = Math.round(zuschlag * 100) + " %";
+    // Welche Basis wurde verwendet? Grundlohn / Grundlohn + 13. / Bruttolohn (alles drin)
+    const basen = [];
+    if (basis13 != null) basen.push(["Grundlohn + 13.", basis13]);
+    if (voll != null) basen.push(["Bruttolohn", voll]);
+    if (grund != null) basen.push(["Grundlohn", grund]);
+    let istBasis = "nicht nachvollziehbar", berechnet = "?", modus = nurZuschlag;
+    if (pctMode) {
+      const hit = basen.find(b => nahe(basisVerwendet, b[1]));
+      istBasis = hit ? hit[0] : "andere Basis (" + lcFmt(basisVerwendet) + ")";
+      berechnet = (hit ? hit[0] : "Basis") + " " + lcFmt(basisVerwendet) + " × " + Math.round(r.ansatz) + " %" + (nurZuschlag ? " (nur Zuschlag)" : " (Stunden voll)");
+    } else if (chfProStd) {
+      let hit = null;
+      for (const b of basen) {
+        if (nahe(chfProStd, b[1] * (1 + zuschlag))) { hit = [b[0], false]; break; }
+        if (nahe(chfProStd, b[1] * zuschlag)) { hit = [b[0], true]; break; }
+      }
+      if (!hit) for (const b of basen) for (const f of [0.5, 1.5, 1.0, 2.0]) if (nahe(chfProStd, b[1] * f)) { hit = [b[0] + " (anderer Zuschlag " + Math.round(f * 100) + " %)", f < 1]; break; }
+      if (hit) { istBasis = hit[0]; modus = hit[1]; berechnet = hit[0].replace(/ \(anderer.*\)/, "") + " × " + (hit[1] ? pctTxt : Math.round((1 + zuschlag) * 100) + " %") + (hit[1] ? " (nur Zuschlag)" : " (Stunden voll)"); }
+      else berechnet = "Ansatz " + lcFmt(chfProStd) + " = " + (basis13 ? (chfProStd / basis13 * 100).toFixed(1) + " % von Grundlohn + 13." : "?");
+    }
+    // Soll aus Parameter
+    const sollKurz = /brutto/i.test(sollBasis) ? "Bruttolohn" : "Grundlohn + 13.";
+    const sollWert = sollKurz === "Bruttolohn" ? voll : basis13;
+    const erwVoll = sollWert != null ? Math.round(sollWert * (1 + zuschlag) * 100) / 100 : null;
+    const erwZus = sollWert != null ? Math.round(sollWert * zuschlag * 100) / 100 : null;
+    const ok = istBasis === sollKurz;
+    const erwartet = modus === false ? erwVoll : (modus === true ? erwZus : null);
     return {
       name: s.anzeige || s.name || "", ahv: s.ahv || "", persNr: s.persNr || "", periode: s.periode || "", datei: s.file || s.datei || "",
-      typ: zt.typ, code: r.code, lohnart: r.label, zuschlag: Math.round(zuschlag * 100), stunden: r.anzahl, ansatz, betrag: r.betrag,
+      typ: zt.typ, code: r.code, lohnart: r.label, zuschlag: Math.round(zuschlag * 100), stunden: r.anzahl, ansatz: chfProStd, betrag: r.betrag,
+      ansatzPct: pctMode ? r.ansatz : null, basisVerwendet,
       grundlohn: grund, basis13, bruttolohn: voll,
-      erwartetVoll: erwSoll != null ? Math.round(erwSoll * 100) / 100 : null, erwartetZuschlag: erwSollZus != null ? Math.round(erwSollZus * 100) / 100 : null,
-      berechnet: hit ? hit[0] : (ansatz && basis13 ? "Ansatz = " + (ansatz / basis13 * 100).toFixed(1) + " % von Grundlohn+13." : "?"),
-      istBasis, gav, gavQuelle, sollBasis, ok,
-      differenz: (erwSoll != null && ansatz != null) ? Math.round((ansatz - (nahe(ansatz, erwSollZus) ? erwSollZus : erwSoll)) * 100) / 100 : null
+      erwartetVoll: erwVoll, erwartetZuschlag: erwZus,
+      berechnet, istBasis, gav, gavQuelle, sollBasis: sollKurz, ok,
+      differenz: (erwartet != null && chfProStd != null) ? Math.round((chfProStd - erwartet) * 100) / 100 : null
     };
   });
 }
@@ -870,12 +853,12 @@ async function lcUeberzeitExcel(slips, einsatzlisten) {
   (slips || lcState.slips).forEach(s => lcUeberzeitAnalyse(s, einsatzlisten).forEach(z => zeilen.push(z)));
   if (!zeilen.length) { toast("Keine Überzeit-Positionen in den geladenen Belegen.", true); return; }
   await lcLoadXlsx();
-  const hdr = ["Mitarbeiter", "AHV-Nr", "Pers-Nr", "Periode", "Typ", "Lohnart", "Bezeichnung", "Zuschlag %", "Stunden", "Ansatz", "Betrag",
-    "Grundlohn/h", "Grundlohn + 13.", "Bruttolohn/h", "Berechnet als", "Effektive Basis", "GAV", "GAV-Quelle", "Soll-Basis (Parameter)", "Erwartet Ansatz voll", "Erwartet nur Zuschlag", "Differenz", "Status"];
-  const rows = zeilen.map(z => [z.name, z.ahv, z.persNr, z.periode, z.typ, z.code, z.lohnart, z.zuschlag, z.stunden, z.ansatz, z.betrag,
+  const hdr = ["Mitarbeiter", "AHV-Nr", "Pers-Nr", "Periode", "Typ", "Lohnart", "Bezeichnung", "Zuschlag %", "Stunden", "Basis verwendet (CHF/h)", "Ansatz %", "Ansatz CHF/h", "Betrag",
+    "Grundlohn/h", "Grundlohn + 13.", "Bruttolohn/h (alles drin)", "Berechnet als", "Effektive Basis", "GAV", "GAV-Quelle", "Soll-Basis (Parameter)", "Erwartet CHF/h voll", "Erwartet nur Zuschlag", "Differenz CHF/h", "Status"];
+  const rows = zeilen.map(z => [z.name, z.ahv, z.persNr, z.periode, z.typ, z.code, z.lohnart, z.zuschlag, z.stunden, z.basisVerwendet, z.ansatzPct, z.ansatz, z.betrag,
     z.grundlohn, z.basis13, z.bruttolohn, z.berechnet, z.istBasis, z.gav, z.gavQuelle, z.sollBasis, z.erwartetVoll, z.erwartetZuschlag, z.differenz, z.ok ? "OK" : "PRÜFEN"]);
   const ws = window.XLSX.utils.aoa_to_sheet([hdr].concat(rows));
-  ws["!cols"] = hdr.map((h, i) => ({ wch: [22, 16, 8, 10, 9, 8, 26, 9, 8, 9, 10, 11, 13, 12, 34, 22, 30, 26, 22, 12, 12, 10, 8][i] || 12 }));
+  ws["!cols"] = hdr.map((h, i) => ({ wch: [22, 16, 8, 10, 9, 8, 26, 9, 8, 12, 9, 10, 10, 11, 13, 14, 38, 20, 30, 26, 18, 12, 12, 10, 8][i] || 12 }));
   ws["!autofilter"] = { ref: "A1:" + window.XLSX.utils.encode_col(hdr.length - 1) + (rows.length + 1) };
   const wb = window.XLSX.utils.book_new();
   window.XLSX.utils.book_append_sheet(wb, ws, "Zulagen");
@@ -955,13 +938,13 @@ async function renderUeberzeitCheck(el) {
     <div class="card" style="padding:14px 16px">
       <div style="margin-bottom:8px"><strong>${zeilen.length} Positionen</strong> (${["Überzeit", "Sonntag", "Nacht"].map(t => t + " " + zeilen.filter(z => z.typ === t).length).join(" · ")}) · ${new Set(zeilen.map(z => z.name + "|" + z.ahv)).size} Mitarbeitende${pruefen ? ` · <span style="color:var(--danger)">${pruefen} zu prüfen</span>` : " · alle OK"}</div>
       <div class="table-wrap"><table style="font-size:11px">
-        <thead><tr><th>Mitarbeiter</th><th>Periode</th><th>Typ</th><th>Lohnart</th><th style="text-align:right">Std</th><th style="text-align:right">Ansatz</th><th style="text-align:right">Betrag</th><th style="text-align:right">Grundlohn</th><th style="text-align:right">Grund+13.</th><th style="text-align:right">Brutto/h</th><th>Berechnet als</th><th>GAV</th><th>Soll-Basis</th><th style="text-align:right">Erwartet</th><th style="text-align:right">Diff</th><th></th></tr></thead>
+        <thead><tr><th>Mitarbeiter</th><th>Periode</th><th>Typ</th><th>Lohnart</th><th style="text-align:right">Std</th><th style="text-align:right">Basis verw.</th><th style="text-align:right">%</th><th style="text-align:right">CHF/h</th><th style="text-align:right">Betrag</th><th style="text-align:right">Grundlohn</th><th style="text-align:right">Grund+13.</th><th style="text-align:right">Brutto/h</th><th>Berechnet als</th><th>GAV</th><th>Soll-Basis</th><th style="text-align:right">Erwartet voll / Zuschlag</th><th style="text-align:right">Diff</th><th></th></tr></thead>
         <tbody>${zeilen.map(z => `<tr style="${z.ok ? "" : "color:var(--danger)"}">
           <td>${escape(z.name)}</td><td>${escape(z.periode)}</td><td>${escape(z.typ)}</td><td>${z.code} ${escape(z.lohnart)}</td>
-          <td style="text-align:right;font-family:var(--font-mono)">${fmt(z.stunden)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.ansatz)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.betrag)}</td>
+          <td style="text-align:right;font-family:var(--font-mono)">${fmt(z.stunden)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.basisVerwendet)}</td><td style="text-align:right;font-family:var(--font-mono)">${z.ansatzPct != null ? z.ansatzPct + " %" : "—"}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.ansatz)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.betrag)}</td>
           <td style="text-align:right;font-family:var(--font-mono)">${fmt(z.grundlohn)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.basis13)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.bruttolohn)}</td>
           <td>${escape(z.berechnet)}</td><td title="${escape(z.gavQuelle)}">${escape(z.gav)}</td><td>${escape(z.sollBasis)}</td>
-          <td style="text-align:right;font-family:var(--font-mono)">${fmt(z.erwartetVoll)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.differenz)}</td><td>${z.ok ? "✓" : "⚠"}</td></tr>`).join("")}</tbody>
+          <td style="text-align:right;font-family:var(--font-mono)">${fmt(z.erwartetVoll)} / ${fmt(z.erwartetZuschlag)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.differenz)}</td><td>${z.ok ? "✓" : "⚠"}</td></tr>`).join("")}</tbody>
       </table></div>
     </div>` : ""}`;
 }
