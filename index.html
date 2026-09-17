@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.246.0"></script>
-<script src="apriko-api.js?v=1.246.0"></script>
-<script src="lohncheck.js?v=1.246.0"></script>
-<script src="personalbudget.js?v=1.246.0"></script>
-<script src="jahresbudget.js?v=1.246.0"></script>
-<script src="budgetpositionen.js?v=1.246.0"></script>
-<script src="lohnchecklistetemp.js?v=1.246.0"></script>
+<script src="apriko-filters.js?v=1.247.0"></script>
+<script src="apriko-api.js?v=1.247.0"></script>
+<script src="lohncheck.js?v=1.247.0"></script>
+<script src="personalbudget.js?v=1.247.0"></script>
+<script src="jahresbudget.js?v=1.247.0"></script>
+<script src="budgetpositionen.js?v=1.247.0"></script>
+<script src="lohnchecklistetemp.js?v=1.247.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -982,7 +982,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.246.0</span> · <span id="app-build-date">17.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.247.0</span> · <span id="app-build-date">17.09.2026</span>
     </div>
   </aside>
 
@@ -7290,6 +7290,18 @@ const ABA_HELVA_STANDARD = {
 function abaParam() {
   if (!crmParameter) return Object.assign({ erzwungen: [], ausgeschlossen: [] }, JSON.parse(JSON.stringify(ABA_HELVA_STANDARD)));
   if (!crmParameter.abacus) { crmParameter.abacus = JSON.parse(JSON.stringify(ABA_HELVA_STANDARD)); crmParameter.abacus.standardGeladen = "Helva Juli 2026"; }
+  else if (!crmParameter.abacus.standardGeladen) {
+    // Block aus v1.243 (nur manuelle Kontierungen) → Standard-Regelwerk ergänzen, eigene Einträge behalten
+    const std = JSON.parse(JSON.stringify(ABA_HELVA_STANDARD)), a0 = crmParameter.abacus;
+    a0.umkontierung = Object.assign({}, std.umkontierung, a0.umkontierung || {});
+    a0.kontierung = Object.assign({}, std.kontierung, a0.kontierung || {});
+    a0.aggregat = Object.assign({}, std.aggregat, a0.aggregat || {});
+    a0.zusatz = Object.assign({}, std.zusatz, a0.zusatz || {});
+    a0.nichtBuchen = (a0.nichtBuchen && a0.nichtBuchen.length) ? a0.nichtBuchen : std.nichtBuchen;
+    if (!a0.durchlauf) a0.durchlauf = std.durchlauf;
+    a0.standardGeladen = "Helva Juli 2026 (ergänzt)";
+    abaParamSpeichern();
+  }
   const a = crmParameter.abacus;
   a.kontierung = a.kontierung || {}; a.erzwungen = a.erzwungen || []; a.ausgeschlossen = a.ausgeschlossen || [];
   a.umkontierung = a.umkontierung || {}; a.aggregat = a.aggregat || {}; a.zusatz = a.zusatz || {}; a.nichtBuchen = a.nichtBuchen || [];
@@ -7552,8 +7564,10 @@ function renderAbacus(el) {
       </div>
       ${!lcState.lohnartenliste ? `<div style="font-size:11px;color:var(--warn);margin-bottom:8px">Lohnartenstamm nicht geladen — Soll/Haben können nicht aufgelöst werden (Workflows → Lohnartenstamm).</div>` : ""}
       ${lcState.lohnartenliste && !(lcState.lohnartenliste.spalten || []).includes("Brutto") ? `<div style="font-size:11px;color:var(--warn);margin-bottom:8px">Der gespeicherte Lohnartenstamm hat noch keine Spalten Brutto/Abzug — im Lohnartenstamm einmal «Neu laden» aus Apriko, damit Nettolohn-Bestandteile ohne Kontierung erkannt werden.</div>` : ""}
-      ${(() => { const d = abaDurchlaufCheck(buchungen); if (!d) return ""; const ok = Math.abs(d.saldo) < 0.05; const ku = abaKontenUebersicht(buchungen); return `<details style="font-size:12px;margin-bottom:8px;padding:6px 10px;border-left:3px solid ${ok ? "var(--accent-2)" : "var(--danger)"};background:var(--bg)"><summary style="cursor:pointer">Kontrolle wie im Excel: Durchlaufkonto <input type="text" value="${escape(abaParam().durchlauf || d.konto)}" onchange="abaDurchlaufSetzen(this.value)" onclick="event.preventDefault()" style="width:70px;font-family:var(--font-mono);font-size:12px;padding:2px 5px"> Soll CHF ${fmt(d.soll)} · Haben CHF ${fmt(d.haben)} · Differenz <strong style="color:${ok ? "var(--accent-2)" : "var(--danger)"}">CHF ${fmt(d.saldo)}</strong> ${ok ? "✓ Soll = Haben" : "⚠ Soll ≠ Haben"} · Gesamt Soll ${fmt(ku.totalSoll)} / Haben ${fmt(ku.totalHaben)}</summary>
-        <table style="font-size:11px;margin-top:6px"><thead><tr><th>Konto</th><th style="text-align:right">Soll</th><th style="text-align:right">Haben</th><th style="text-align:right">Saldo</th></tr></thead><tbody>${ku.zeilen.map(z => `<tr${z.konto === d.konto ? ' style="font-weight:600"' : ""}><td style="font-family:var(--font-mono)">${escape(z.konto)}</td><td style="text-align:right;font-family:var(--font-mono)">${z.soll ? fmt(z.soll) : ""}</td><td style="text-align:right;font-family:var(--font-mono)">${z.haben ? fmt(z.haben) : ""}</td><td style="text-align:right;font-family:var(--font-mono);color:${z.konto === d.konto && Math.abs(z.saldo) >= 0.05 ? "var(--danger)" : "inherit"}">${fmt(z.saldo)}</td></tr>`).join("")}</tbody></table></details>`; })()}
+      ${(() => { const d = abaDurchlaufCheck(buchungen); if (!d) return ""; const ok = Math.abs(d.saldo) < 0.05; const ku = abaKontenUebersicht(buchungen); const gesamtOk = Math.abs(ku.totalSoll - ku.totalHaben) < 0.05; return `<details open style="font-size:12px;margin-bottom:8px;padding:6px 10px;border-left:3px solid ${ok ? "var(--accent-2)" : "var(--danger)"};background:var(--bg)"><summary style="cursor:pointer">Abstimmung wie im Excel (Lobu-Journal) — Durchlaufkonto <input type="text" value="${escape(abaParam().durchlauf || d.konto)}" onchange="abaDurchlaufSetzen(this.value)" onclick="event.preventDefault()" style="width:70px;font-family:var(--font-mono);font-size:12px;padding:2px 5px"></summary>
+        <table style="font-size:11px;margin-top:6px;min-width:520px"><thead><tr><th>Konto</th><th style="text-align:right">Soll</th><th style="text-align:right">Haben</th><th style="text-align:right">Saldo</th><th>Check</th></tr></thead>
+        <tbody>${ku.zeilen.map(z => { const dk = z.konto === d.konto; const zok = Math.abs(z.saldo) < 0.05; return `<tr${dk ? ' style="font-weight:600"' : ""}><td style="font-family:var(--font-mono)">${escape(z.konto)}</td><td style="text-align:right;font-family:var(--font-mono)">${z.soll ? fmt(z.soll) : ""}</td><td style="text-align:right;font-family:var(--font-mono)">${z.haben ? fmt(z.haben) : ""}</td><td style="text-align:right;font-family:var(--font-mono);color:${dk && !zok ? "var(--danger)" : "inherit"}">${fmt(z.saldo)}</td><td style="color:${dk ? (zok ? "var(--accent-2)" : "var(--danger)") : "var(--text-faint)"}">${dk ? (zok ? "Soll = Haben ✓" : "Soll ≠ Haben — Differenz " + fmt(z.saldo)) : ""}</td></tr>`; }).join("")}</tbody>
+        <tfoot><tr style="font-weight:600;border-top:2px solid var(--border)"><td>Total</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(ku.totalSoll)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(ku.totalHaben)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(ku.totalSoll - ku.totalHaben)}</td><td style="color:${gesamtOk ? "var(--accent-2)" : "var(--danger)"}">${gesamtOk ? "Soll = Haben ✓" : "Soll ≠ Haben"}</td></tr></tfoot></table></details>`; })()}
       <div class="table-wrap"><table>
         <thead><tr><th>Lohnart</th><th>Bezeichnung</th><th style="text-align:right">Betrag</th><th>Soll</th><th>Haben</th><th>Regel</th><th></th></tr></thead>
         <tbody>${buchungen.map(b => { const um = q => /^Umkontierung/.test(q) ? `<span style="font-size:10px;color:var(--accent-3);margin-left:4px" title="${escape(q)}">${escape(q.replace("Umkontierung ", ""))}</span>` : (q === "Lohnart" ? `<span style="font-size:10px;color:var(--accent);margin-left:4px" title="Lohnart-Kontierung aus Parameter">LA</span>` : ""); return `<tr${b.zusatz ? ' style="color:var(--text-dim)"' : ""}>
