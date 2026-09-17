@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.239.0"></script>
-<script src="apriko-api.js?v=1.239.0"></script>
-<script src="lohncheck.js?v=1.239.0"></script>
-<script src="personalbudget.js?v=1.239.0"></script>
-<script src="jahresbudget.js?v=1.239.0"></script>
-<script src="budgetpositionen.js?v=1.239.0"></script>
-<script src="lohnchecklistetemp.js?v=1.239.0"></script>
+<script src="apriko-filters.js?v=1.240.0"></script>
+<script src="apriko-api.js?v=1.240.0"></script>
+<script src="lohncheck.js?v=1.240.0"></script>
+<script src="personalbudget.js?v=1.240.0"></script>
+<script src="jahresbudget.js?v=1.240.0"></script>
+<script src="budgetpositionen.js?v=1.240.0"></script>
+<script src="lohnchecklistetemp.js?v=1.240.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -981,7 +981,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.239.0</span> · <span id="app-build-date">17.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.240.0</span> · <span id="app-build-date">17.09.2026</span>
     </div>
   </aside>
 
@@ -2270,6 +2270,11 @@ function budgetFormulaMonths(b, saisonOverride) {
   const sollAktiv = Math.round(jahr * saison.reduce((s, p, i) => (i + 1) >= sm && !nachEnde(i) ? s + p : s, 0) / 100);
   const summeVor = werte.slice(0, letzter).reduce((s, v) => s + v, 0);
   if (letzter >= 0 && letzter <= 11) werte[letzter] = sollAktiv - summeVor;
+  // Mindesthonorar (CHF/Monat) aus dem Kundenstamm: aktive Monate unter dem Minimum werden angehoben
+  if (cEnd) {
+    const min = kundenMin(cEnd.id, b.BType === "BPO" ? "minBpo" : "minSaas");
+    if (min > 0) for (let i = 0; i < 12; i++) if ((i + 1) >= sm && !nachEnde(i) && werte[i] < min) werte[i] = min;
+  }
   return werte;
 }
 
