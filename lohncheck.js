@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.132.0";
+const LC_VERSION = "1.133.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -843,7 +843,9 @@ function lcUeberzeitAnalyse(s, einsatzlisten) {
       grundlohn: grund, basis13, bruttolohn: voll,
       erwartetVoll: erwVoll, erwartetZuschlag: erwZus,
       berechnet, istBasis, gav, gavQuelle, sollBasis: sollKurz, ok,
-      differenz: (erwartet != null && chfProStd != null) ? Math.round((chfProStd - erwartet) * 100) / 100 : null
+      differenz: (erwartet != null && chfProStd != null) ? Math.round((chfProStd - erwartet) * 100) / 100 : null,
+      differenzTotal: (erwartet != null && chfProStd != null && r.anzahl) ? Math.round((chfProStd - erwartet) * r.anzahl * 100) / 100 : null,
+      erwartetBetrag: (erwartet != null && r.anzahl) ? Math.round(erwartet * r.anzahl * 100) / 100 : null
     };
   });
 }
@@ -854,20 +856,20 @@ async function lcUeberzeitExcel(slips, einsatzlisten) {
   if (!zeilen.length) { toast("Keine Überzeit-Positionen in den geladenen Belegen.", true); return; }
   await lcLoadXlsx();
   const hdr = ["Mitarbeiter", "AHV-Nr", "Pers-Nr", "Periode", "Typ", "Lohnart", "Bezeichnung", "Zuschlag %", "Stunden", "Basis verwendet (CHF/h)", "Ansatz %", "Ansatz CHF/h", "Betrag",
-    "Grundlohn/h", "Grundlohn + 13.", "Bruttolohn/h (alles drin)", "Berechnet als", "Effektive Basis", "GAV", "GAV-Quelle", "Soll-Basis (Parameter)", "Erwartet CHF/h voll", "Erwartet nur Zuschlag", "Differenz CHF/h", "Status"];
+    "Grundlohn/h", "Grundlohn + 13.", "Bruttolohn/h (alles drin)", "Berechnet als", "Effektive Basis", "GAV", "GAV-Quelle", "Soll-Basis (Parameter)", "Erwartet CHF/h voll", "Erwartet nur Zuschlag", "Differenz CHF/h", "Erwartet Betrag", "Differenz Betrag (zu viel bezahlt +)", "Status"];
   const rows = zeilen.map(z => [z.name, z.ahv, z.persNr, z.periode, z.typ, z.code, z.lohnart, z.zuschlag, z.stunden, z.basisVerwendet, z.ansatzPct, z.ansatz, z.betrag,
-    z.grundlohn, z.basis13, z.bruttolohn, z.berechnet, z.istBasis, z.gav, z.gavQuelle, z.sollBasis, z.erwartetVoll, z.erwartetZuschlag, z.differenz, z.ok ? "OK" : "PRÜFEN"]);
+    z.grundlohn, z.basis13, z.bruttolohn, z.berechnet, z.istBasis, z.gav, z.gavQuelle, z.sollBasis, z.erwartetVoll, z.erwartetZuschlag, z.differenz, z.erwartetBetrag, z.differenzTotal, z.ok ? "OK" : "PRÜFEN"]);
   const ws = window.XLSX.utils.aoa_to_sheet([hdr].concat(rows));
-  ws["!cols"] = hdr.map((h, i) => ({ wch: [22, 16, 8, 10, 9, 8, 26, 9, 8, 12, 9, 10, 10, 11, 13, 14, 38, 20, 30, 26, 18, 12, 12, 10, 8][i] || 12 }));
+  ws["!cols"] = hdr.map((h, i) => ({ wch: [22, 16, 8, 10, 9, 8, 26, 9, 8, 12, 9, 10, 10, 11, 13, 14, 38, 20, 30, 26, 18, 12, 12, 10, 12, 14, 8][i] || 12 }));
   ws["!autofilter"] = { ref: "A1:" + window.XLSX.utils.encode_col(hdr.length - 1) + (rows.length + 1) };
   const wb = window.XLSX.utils.book_new();
   window.XLSX.utils.book_append_sheet(wb, ws, "Zulagen");
   // Zusammenfassung pro Mitarbeiter
   const perMa = {};
-  zeilen.forEach(z => { const k = z.name + "|" + z.ahv; perMa[k] = perMa[k] || { name: z.name, ahv: z.ahv, n: 0, std: 0, betrag: 0, pruefen: 0, basen: new Set(), gav: z.gav }; const m = perMa[k]; m.n++; m.std += z.stunden || 0; m.betrag += z.betrag || 0; if (!z.ok) m.pruefen++; m.basen.add(z.istBasis); });
-  const ws2 = window.XLSX.utils.aoa_to_sheet([["Mitarbeiter", "AHV-Nr", "GAV", "Positionen", "Stunden", "Betrag", "Effektive Basis(en)", "Zu prüfen"]]
-    .concat(Object.values(perMa).sort((a, b) => a.name.localeCompare(b.name)).map(m => [m.name, m.ahv, m.gav, m.n, Math.round(m.std * 100) / 100, Math.round(m.betrag * 100) / 100, [...m.basen].join(", "), m.pruefen])));
-  ws2["!cols"] = [22, 16, 30, 10, 9, 11, 40, 10].map(w => ({ wch: w }));
+  zeilen.forEach(z => { const k = z.name + "|" + z.ahv; perMa[k] = perMa[k] || { name: z.name, ahv: z.ahv, n: 0, std: 0, betrag: 0, diff: 0, pruefen: 0, basen: new Set(), gav: z.gav }; const m = perMa[k]; m.n++; m.std += z.stunden || 0; m.betrag += z.betrag || 0; m.diff += z.differenzTotal || 0; if (!z.ok) m.pruefen++; m.basen.add(z.istBasis); });
+  const ws2 = window.XLSX.utils.aoa_to_sheet([["Mitarbeiter", "AHV-Nr", "GAV", "Positionen", "Stunden", "Betrag", "Differenz Betrag (zu viel bezahlt +)", "Effektive Basis(en)", "Zu prüfen"]]
+    .concat(Object.values(perMa).sort((a, b) => a.name.localeCompare(b.name)).map(m => [m.name, m.ahv, m.gav, m.n, Math.round(m.std * 100) / 100, Math.round(m.betrag * 100) / 100, Math.round(m.diff * 100) / 100, [...m.basen].join(", "), m.pruefen])));
+  ws2["!cols"] = [22, 16, 30, 10, 9, 11, 14, 40, 10].map(w => ({ wch: w }));
   window.XLSX.utils.book_append_sheet(wb, ws2, "Pro Mitarbeiter");
   window.XLSX.writeFile(wb, "Ueberzeit-Liste_" + new Date().toISOString().slice(0, 10) + ".xlsx");
   toast(zeilen.length + " Positionen (Überzeit/Sonntag/Nacht) von " + Object.keys(perMa).length + " Mitarbeitenden exportiert.");
@@ -936,15 +938,15 @@ async function renderUeberzeitCheck(el) {
     </div>
     ${uzState.slips.length ? `
     <div class="card" style="padding:14px 16px">
-      <div style="margin-bottom:8px"><strong>${zeilen.length} Positionen</strong> (${["Überzeit", "Sonntag", "Nacht"].map(t => t + " " + zeilen.filter(z => z.typ === t).length).join(" · ")}) · ${new Set(zeilen.map(z => z.name + "|" + z.ahv)).size} Mitarbeitende${pruefen ? ` · <span style="color:var(--danger)">${pruefen} zu prüfen</span>` : " · alle OK"}</div>
+      <div style="margin-bottom:8px"><strong>${zeilen.length} Positionen</strong> (${["Überzeit", "Sonntag", "Nacht"].map(t => t + " " + zeilen.filter(z => z.typ === t).length).join(" · ")}) · Differenz total CHF ${lcFmt(zeilen.reduce((a, z) => a + (z.differenzTotal || 0), 0))} · ${new Set(zeilen.map(z => z.name + "|" + z.ahv)).size} Mitarbeitende${pruefen ? ` · <span style="color:var(--danger)">${pruefen} zu prüfen</span>` : " · alle OK"}</div>
       <div class="table-wrap"><table style="font-size:11px">
-        <thead><tr><th>Mitarbeiter</th><th>Periode</th><th>Typ</th><th>Lohnart</th><th style="text-align:right">Std</th><th style="text-align:right">Basis verw.</th><th style="text-align:right">%</th><th style="text-align:right">CHF/h</th><th style="text-align:right">Betrag</th><th style="text-align:right">Grundlohn</th><th style="text-align:right">Grund+13.</th><th style="text-align:right">Brutto/h</th><th>Berechnet als</th><th>GAV</th><th>Soll-Basis</th><th style="text-align:right">Erwartet voll / Zuschlag</th><th style="text-align:right">Diff</th><th></th></tr></thead>
+        <thead><tr><th>Mitarbeiter</th><th>Periode</th><th>Typ</th><th>Lohnart</th><th style="text-align:right">Std</th><th style="text-align:right">Basis verw.</th><th style="text-align:right">%</th><th style="text-align:right">CHF/h</th><th style="text-align:right">Betrag</th><th style="text-align:right">Grundlohn</th><th style="text-align:right">Grund+13.</th><th style="text-align:right">Brutto/h</th><th>Berechnet als</th><th>GAV</th><th>Soll-Basis</th><th style="text-align:right">Erwartet voll / Zuschlag</th><th style="text-align:right">Diff/h</th><th style="text-align:right">Diff CHF</th><th></th></tr></thead>
         <tbody>${zeilen.map(z => `<tr style="${z.ok ? "" : "color:var(--danger)"}">
           <td>${escape(z.name)}</td><td>${escape(z.periode)}</td><td>${escape(z.typ)}</td><td>${z.code} ${escape(z.lohnart)}</td>
           <td style="text-align:right;font-family:var(--font-mono)">${fmt(z.stunden)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.basisVerwendet)}</td><td style="text-align:right;font-family:var(--font-mono)">${z.ansatzPct != null ? z.ansatzPct + " %" : "—"}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.ansatz)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.betrag)}</td>
           <td style="text-align:right;font-family:var(--font-mono)">${fmt(z.grundlohn)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.basis13)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.bruttolohn)}</td>
           <td>${escape(z.berechnet)}</td><td title="${escape(z.gavQuelle)}">${escape(z.gav)}</td><td>${escape(z.sollBasis)}</td>
-          <td style="text-align:right;font-family:var(--font-mono)">${fmt(z.erwartetVoll)} / ${fmt(z.erwartetZuschlag)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.differenz)}</td><td>${z.ok ? "✓" : "⚠"}</td></tr>`).join("")}</tbody>
+          <td style="text-align:right;font-family:var(--font-mono)">${fmt(z.erwartetVoll)} / ${fmt(z.erwartetZuschlag)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.differenz)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.differenzTotal)}</td><td>${z.ok ? "✓" : "⚠"}</td></tr>`).join("")}</tbody>
       </table></div>
     </div>` : ""}`;
 }
