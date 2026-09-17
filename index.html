@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.241.0"></script>
-<script src="apriko-api.js?v=1.241.0"></script>
-<script src="lohncheck.js?v=1.241.0"></script>
-<script src="personalbudget.js?v=1.241.0"></script>
-<script src="jahresbudget.js?v=1.241.0"></script>
-<script src="budgetpositionen.js?v=1.241.0"></script>
-<script src="lohnchecklistetemp.js?v=1.241.0"></script>
+<script src="apriko-filters.js?v=1.243.0"></script>
+<script src="apriko-api.js?v=1.243.0"></script>
+<script src="lohncheck.js?v=1.243.0"></script>
+<script src="personalbudget.js?v=1.243.0"></script>
+<script src="jahresbudget.js?v=1.243.0"></script>
+<script src="budgetpositionen.js?v=1.243.0"></script>
+<script src="lohnchecklistetemp.js?v=1.243.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -982,7 +982,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.241.0</span> · <span id="app-build-date">17.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.243.0</span> · <span id="app-build-date">17.09.2026</span>
     </div>
   </aside>
 
@@ -7092,6 +7092,7 @@ async function apSpeichereAlsLohnartenstamm(stumm) {
   const zeilen = rows.filter(r => typeof r.number === "number").map(r => {
     const ins = new Set([].concat(r.compulsoryInsurances || []));
     const z = { Code: r.number, Bezeichnung: r.name || r.displayName || "", Bereich: r.section === "None" ? "" : r.section };
+    z["Brutto"] = r.isGross ? "Ja" : ""; z["Abzug"] = r.isDeduction ? "Ja" : ""; z["Aktiv"] = r.isActive ? "Ja" : "";
     z["Soll-Konto"] = kontoAufloesen(r.debitNumberId || r.overrideDebitNumberId || r.factoryDefaultDebitNumberId);
     z["Haben-Konto"] = kontoAufloesen(r.creditNumberId || r.overrideCreditNumberId || r.factoryDefaultCreditNumberId);
     z["QST-pflichtig"] = r.isTaxable ? "Ja" : "";
@@ -7105,7 +7106,7 @@ async function apSpeichereAlsLohnartenstamm(stumm) {
   lcState.lohnartenliste = {
     dateiname: "Apriko API (SalaryTypes, live übernommen " + new Date().toLocaleDateString("de-CH") + ")",
     hochgeladenAm: new Date().toISOString(),
-    spalten: ["Code", "Bezeichnung", "Bereich", "Soll-Konto", "Haben-Konto"].concat(AP_SV_SPALTEN.map(x => x[1])).concat(["QST-pflichtig", "Periodizität", "QST-Satzbestimmend"]),
+    spalten: ["Code", "Bezeichnung", "Bereich", "Brutto", "Abzug", "Soll-Konto", "Haben-Konto"].concat(AP_SV_SPALTEN.map(x => x[1])).concat(["QST-pflichtig", "Periodizität", "QST-Satzbestimmend", "Aktiv"]),
     spaltenMap: { code: "Code", bezeichnung: "Bezeichnung" },
     zeilen
   };
@@ -7236,7 +7237,11 @@ async function abaUpload(input) {
   } catch (e) { toast("Datei nicht lesbar: " + e.message, true); }
   render();
 }
-/* Lohnartenstamm: Code → {soll, haben, bezeichnung} */
+/* Lohnartenstamm: Code → {soll, haben, bezeichnung, relevant, grund} — relevant = fliesst in den
+   Nettolohn (Brutto- oder Abzugs-Lohnart) oder ist ein Arbeitgeberbeitrag; Basen/Statistik/Info nicht. */
+const ABA_AG_RE = /arbeitgeber|\bAG\b|AG[-\s]?(beitrag|anteil)|employer/i;
+const ABA_BASIS_RE = /^(basis|base|info|statist|memo|quantity|hours?|days?|calc)/i;
+const ABA_BASIS_NAME_RE = /\b(basis|base|bemessung|stunden|std\.?|tage|anzahl|ansatz|prozent|satz|total|summe|zwischentotal|info)\b/i;
 function abaStammIndex() {
   const la = lcState.lohnartenliste;
   const idx = {};
@@ -7245,9 +7250,43 @@ function abaStammIndex() {
   const cBez = (la.spaltenMap && la.spaltenMap.bezeichnung) || "Bezeichnung";
   la.zeilen.forEach(z => {
     const code = String(z[cCode] || "").trim();
-    if (code) idx[code] = { soll: abaKontoNr(z["Soll-Konto"]), haben: abaKontoNr(z["Haben-Konto"]), bezeichnung: z[cBez] || "" };
+    if (!code) return;
+    const bez = z[cBez] || "", bereich = String(z["Bereich"] || "");
+    const soll = abaKontoNr(z["Soll-Konto"]), haben = abaKontoNr(z["Haben-Konto"]);
+    let relevant = false, grund = "";
+    if (soll || haben) { relevant = true; grund = "Kontierung im Stamm"; }
+    else if (z["Brutto"] === "Ja") { relevant = true; grund = "Brutto-Lohnart (Nettolohn)"; }
+    else if (z["Abzug"] === "Ja") { relevant = true; grund = "Abzug (Nettolohn)"; }
+    else if (ABA_AG_RE.test(bereich) || ABA_AG_RE.test(bez)) { relevant = true; grund = "Arbeitgeberbeitrag"; }
+    else if (ABA_BASIS_RE.test(bereich) || ABA_BASIS_NAME_RE.test(bez)) { relevant = false; grund = "Basis/Info"; }
+    else grund = "keine Kontierung, kein Brutto/Abzug/AG";
+    idx[code] = { soll, haben, bezeichnung: bez, relevant, grund };
   });
   return idx;
+}
+/* Persistente Ergänzungen (Parameter → abacus): kontierung {code:{soll,haben}}, erzwungen [codes], ausgeschlossen [codes], durchlauf */
+function abaParam() {
+  if (!crmParameter) return { kontierung: {}, erzwungen: [], ausgeschlossen: [], durchlauf: "" };
+  if (!crmParameter.abacus) crmParameter.abacus = {};
+  const a = crmParameter.abacus;
+  a.kontierung = a.kontierung || {}; a.erzwungen = a.erzwungen || []; a.ausgeschlossen = a.ausgeschlossen || [];
+  return a;
+}
+async function abaParamSpeichern() {
+  try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+}
+async function abaErzwingen(code, ja) {
+  await parameterLaden(false);
+  const a = abaParam();
+  a.erzwungen = a.erzwungen.filter(c => c !== code); a.ausgeschlossen = a.ausgeschlossen.filter(c => c !== code);
+  if (ja === true) a.erzwungen.push(code); else if (ja === false) a.ausgeschlossen.push(code);
+  abaState.xml = "";
+  await abaParamSpeichern(); render();
+}
+async function abaDurchlaufSetzen(v) {
+  await parameterLaden(false);
+  abaParam().durchlauf = String(v || "").trim();
+  await abaParamSpeichern(); render();
 }
 /* Buchungszeilen für den gewählten Monat aufbauen */
 function abaBuchungen() {
@@ -7277,23 +7316,55 @@ function abaBuchungen() {
     if (!summen[code]) summen[code] = { code, bezeichnung: z[sp.bezeichnung] || (idx[code] || {}).bezeichnung || "", betrag: 0 };
     summen[code].betrag += betrag;
   });
-  return Object.values(summen).sort((a, b) => parseInt(a.code) - parseInt(b.code)).map(b => {
+  abaState.ausgelassen = [];
+  const pa = abaParam();
+  return Object.values(summen).sort((a, b) => parseInt(a.code) - parseInt(b.code)).filter(b => {
+    // Nicht buchen: Basen/Info-Lohnarten (kein Nettolohn-Bestandteil, kein AG-Beitrag) — ausser manuell erzwungen
+    const st = idx[b.code];
+    if (pa.ausgeschlossen.includes(b.code)) { abaState.ausgelassen.push({ code: b.code, bezeichnung: b.bezeichnung, betrag: b.betrag, grund: "manuell ausgeschlossen" }); return false; }
+    if (pa.erzwungen.includes(b.code)) { b.grund = "manuell eingeschlossen"; return true; }
+    if (st && st.relevant) { b.grund = st.grund; return true; }
+    abaState.ausgelassen.push({ code: b.code, bezeichnung: b.bezeichnung, betrag: b.betrag, grund: st ? st.grund : "nicht im Stamm" });
+    return false;
+  }).map(b => {
     const st = idx[b.code] || {};
-    const ov = abaState.overrides[b.code] || {};
+    const pk = pa.kontierung[b.code] || {};
     b.betrag = Math.round(b.betrag * 100) / 100;
-    b.soll = ov.soll !== undefined ? ov.soll : (st.soll || "");
-    b.haben = ov.haben !== undefined ? ov.haben : (st.haben || "");
+    b.soll = pk.soll || st.soll || "";
+    b.haben = pk.haben || st.haben || "";
     if (!b.bezeichnung) b.bezeichnung = st.bezeichnung || "";
     b.imStamm = !!idx[b.code];
     b.ok = !!(b.soll && b.haben && b.betrag);
     return b;
   });
 }
-function abaOverride(code, feld, wert) {
-  abaState.overrides[code] = abaState.overrides[code] || {};
-  abaState.overrides[code][feld] = String(wert || "").trim();
+/* Kontierung pro Lohnart ergänzen/überschreiben — persistent in parameter.json (abacus.kontierung) */
+async function abaOverride(code, feld, wert) {
+  await parameterLaden(false);
+  const a = abaParam();
+  a.kontierung[code] = a.kontierung[code] || {};
+  a.kontierung[code][feld] = String(wert || "").trim();
+  if (!a.kontierung[code].soll && !a.kontierung[code].haben) delete a.kontierung[code];
   abaState.xml = "";
-  render();
+  await abaParamSpeichern(); render();
+}
+/* Durchlaufkonto-Check: Soll − Haben über alle Buchungen auf dem Durchlaufkonto muss 0 sein */
+function abaDurchlaufCheck(buchungen) {
+  const dk = abaParam().durchlauf || abaDurchlaufVorschlag(buchungen);
+  if (!dk) return null;
+  let soll = 0, haben = 0;
+  buchungen.filter(b => b.ok).forEach(b => {
+    let s = b.soll, h = b.haben, betrag = b.betrag;
+    if (betrag < 0) { const t = s; s = h; h = t; betrag = -betrag; }
+    if (s === dk) soll += betrag;
+    if (h === dk) haben += betrag;
+  });
+  return { konto: dk, soll: Math.round(soll * 100) / 100, haben: Math.round(haben * 100) / 100, saldo: Math.round((soll - haben) * 100) / 100 };
+}
+function abaDurchlaufVorschlag(buchungen) {
+  const cnt = {};
+  buchungen.forEach(b => { if (b.haben) cnt[b.haben] = (cnt[b.haben] || 0) + 1; if (b.soll) cnt[b.soll] = (cnt[b.soll] || 0) + 1; });
+  return Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0] || "";
 }
 function abaEsc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
 function abaXmlBauen(buchungen) {
@@ -7383,6 +7454,7 @@ function renderAbacus(el) {
   if (!lcState.lohnartenliste && typeof lcLoadLohnartenliste === "function") {
     lcLoadLohnartenliste(false).then(() => { if (currentView === "abacus") render(); }).catch(() => {});
   }
+  if (!crmParameter) { parameterLaden(false).then(() => { if (currentView === "abacus") render(); }).catch(() => {}); }
   const s = abaSettings();
   const sp = abaState.spalten.length ? abaSpaltenErkennen(abaState.spalten) : null;
   const buchungen = abaState.zeilen.length ? abaBuchungen() : [];
@@ -7393,7 +7465,7 @@ function renderAbacus(el) {
   el.innerHTML = `
     <div class="card" style="padding:14px 16px;margin-bottom:14px">
       <h3 style="margin:0 0 4px">Abacus-Schnittstelle (FIBU-Import)</h3>
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">Lohnkontoblatt hochladen (CSV/XLSX), Monat wählen — die Beträge werden pro Lohnart summiert, Soll/Haben kommen aus dem Lohnartenstamm, Ergebnis als AbaConnect-XML (Sammelbuchung mit einer Einzelbuchung pro Lohnart, Buchungsdatum = Monatsletzter). Negative Beträge werden mit vertauschten Konten gebucht.</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">Lohnkontoblatt hochladen (CSV/XLSX), Monat wählen — die Beträge werden pro Lohnart summiert, Soll/Haben kommen aus dem Lohnartenstamm, Ergebnis als AbaConnect-XML (Sammelbuchung mit einer Einzelbuchung pro Lohnart, Buchungsdatum = Monatsletzter). Gebucht wird, was in den Nettolohn fliesst (Brutto-/Abzugs-Lohnarten) und alle Arbeitgeberbeiträge; Basen und Info-Lohnarten nicht. Fehlende Konten trägst du in der Zeile ein — sie werden dauerhaft gemerkt (Parameter). Negative Beträge werden mit vertauschten Konten gebucht.</div>
       <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
         <label class="btn btn-sm">⇧ Lohnkontoblatt hochladen<input type="file" accept=".csv,.xlsx,.xls,.txt" style="display:none" onchange="abaUpload(this)"></label>
         <label style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--text-dim)">Monat<select onchange="abaState.monat=parseInt(this.value);abaState.xml='';render()" style="padding:4px 6px">${MONTH_NAMES.map((n, i) => `<option value="${i + 1}" ${i + 1 === abaState.monat ? "selected" : ""}>${n}</option>`).join("")}</select></label>
@@ -7409,10 +7481,12 @@ function renderAbacus(el) {
     ${abaState.zeilen.length ? `
     <div class="card" style="padding:14px 16px">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px">
-        <div><strong>${MONTH_NAMES[abaState.monat - 1]} ${abaState.jahr}</strong> · ${buchungen.length} Lohnarten · Buchungssumme CHF ${fmt(total)}${offen ? ` · <span style="color:var(--warn)">${offen} ohne Kontierung</span>` : ""}</div>
+        <div><strong>${MONTH_NAMES[abaState.monat - 1]} ${abaState.jahr}</strong> · ${buchungen.length} Lohnarten · Buchungssumme CHF ${fmt(total)}${offen ? ` · <span style="color:var(--warn)">${offen} unvollständig kontiert</span>` : ""}${(abaState.ausgelassen || []).length ? ` · <span style="color:var(--text-faint)">${abaState.ausgelassen.length} nicht gebucht</span>` : ""}</div>
         <button class="btn btn-sm" onclick="abaXmlErzeugen()" ${buchungen.some(b => b.ok) ? "" : "disabled"}>⇩ AbaConnect-XML erzeugen</button>
       </div>
       ${!lcState.lohnartenliste ? `<div style="font-size:11px;color:var(--warn);margin-bottom:8px">Lohnartenstamm nicht geladen — Soll/Haben können nicht aufgelöst werden (Workflows → Lohnartenstamm).</div>` : ""}
+      ${lcState.lohnartenliste && !(lcState.lohnartenliste.spalten || []).includes("Brutto") ? `<div style="font-size:11px;color:var(--warn);margin-bottom:8px">Der gespeicherte Lohnartenstamm hat noch keine Spalten Brutto/Abzug — im Lohnartenstamm einmal «Neu laden» aus Apriko, damit Nettolohn-Bestandteile ohne Kontierung erkannt werden.</div>` : ""}
+      ${(() => { const d = abaDurchlaufCheck(buchungen); if (!d) return ""; const ok = Math.abs(d.saldo) < 0.05; return `<div style="font-size:12px;margin-bottom:8px;padding:6px 10px;border-left:3px solid ${ok ? "var(--accent-2)" : "var(--danger)"};background:var(--bg)">Durchlaufkonto <input type="text" value="${escape(abaParam().durchlauf || d.konto)}" onchange="abaDurchlaufSetzen(this.value)" style="width:70px;font-family:var(--font-mono);font-size:12px;padding:2px 5px" title="Konto, das am Ende auf 0 aufgehen muss"> · Soll CHF ${fmt(d.soll)} − Haben CHF ${fmt(d.haben)} = <strong style="color:${ok ? "var(--accent-2)" : "var(--danger)"}">CHF ${fmt(d.saldo)}</strong> ${ok ? "✓ geht auf" : "⚠ geht nicht auf — Kontierung oder ausgelassene Lohnarten prüfen"}</div>`; })()}
       <div class="table-wrap"><table>
         <thead><tr><th>Lohnart</th><th>Bezeichnung</th><th style="text-align:right">Betrag</th><th>Soll</th><th>Haben</th><th></th></tr></thead>
         <tbody>${buchungen.map(b => `<tr>
@@ -7421,9 +7495,11 @@ function renderAbacus(el) {
           <td style="text-align:right;font-family:var(--font-mono)">${fmt(b.betrag)}</td>
           <td><input type="text" value="${escape(b.soll)}" onchange="abaOverride('${escape(b.code)}','soll',this.value)" style="width:70px;font-family:var(--font-mono);font-size:12px;padding:2px 5px"></td>
           <td><input type="text" value="${escape(b.haben)}" onchange="abaOverride('${escape(b.code)}','haben',this.value)" style="width:70px;font-family:var(--font-mono);font-size:12px;padding:2px 5px"></td>
-          <td style="font-size:11px;color:${b.ok ? "var(--accent-2)" : "var(--danger)"}">${b.ok ? "✓" : "Konto fehlt"}</td>
+          <td style="font-size:11px;color:${b.ok ? "var(--accent-2)" : "var(--danger)"}" title="${escape(b.grund || "")}">${b.ok ? "✓" : "Konto fehlt"} <a href="#" onclick="abaErzwingen('${escape(b.code)}', false);return false;" style="color:var(--text-faint);font-size:10px" title="Diese Lohnart nicht buchen">✕</a></td>
         </tr>`).join("")}</tbody>
       </table></div>
+      ${(abaState.ausgelassen || []).length ? `<details style="margin-top:10px"><summary style="font-size:11px;color:var(--text-dim);cursor:pointer">${abaState.ausgelassen.length} Lohnarten nicht gebucht (Basen, Info, manuell ausgeschlossen)</summary>
+        <table style="font-size:11px;margin-top:6px"><tbody>${abaState.ausgelassen.map(x => `<tr><td style="font-family:var(--font-mono)">${escape(x.code)}</td><td>${escape(x.bezeichnung)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(x.betrag)}</td><td style="color:var(--text-faint)">${escape(x.grund)}</td><td><a href="#" onclick="abaErzwingen('${escape(x.code)}', ${x.grund === "manuell ausgeschlossen" ? "null" : "true"});return false;" style="color:var(--accent-3)">${x.grund === "manuell ausgeschlossen" ? "wieder automatisch" : "doch buchen"}</a></td></tr>`).join("")}</tbody></table></details>` : ""}
       ${abaState.xml ? `<details style="margin-top:10px"><summary style="font-size:11px;color:var(--text-dim);cursor:pointer">XML-Vorschau</summary><pre style="font-size:10px;max-height:320px;overflow:auto;background:var(--bg);padding:8px;border-radius:4px">${escape(abaState.xml)}</pre></details>` : ""}
     </div>` : ""}`;
 }
