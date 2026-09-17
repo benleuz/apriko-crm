@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.234.0"></script>
-<script src="apriko-api.js?v=1.234.0"></script>
-<script src="lohncheck.js?v=1.234.0"></script>
-<script src="personalbudget.js?v=1.234.0"></script>
-<script src="jahresbudget.js?v=1.234.0"></script>
-<script src="budgetpositionen.js?v=1.234.0"></script>
-<script src="lohnchecklistetemp.js?v=1.234.0"></script>
+<script src="apriko-filters.js?v=1.236.0"></script>
+<script src="apriko-api.js?v=1.236.0"></script>
+<script src="lohncheck.js?v=1.236.0"></script>
+<script src="personalbudget.js?v=1.236.0"></script>
+<script src="jahresbudget.js?v=1.236.0"></script>
+<script src="budgetpositionen.js?v=1.236.0"></script>
+<script src="lohnchecklistetemp.js?v=1.236.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -981,7 +981,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.234.0</span> · <span id="app-build-date">17.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.236.0</span> · <span id="app-build-date">17.09.2026</span>
     </div>
   </aside>
 
@@ -2295,9 +2295,11 @@ function budgetSuggest(refType, refId, btype) {
     // BPO: Satz aus dem Kundenstamm; SaaSPct: eigener Satz (manuell, z.B. 0.35)
     out.Rate = btype === "BPO" ? (parseFloat(c.BPORate) || 0) : (parseFloat(c.SaaSRate) || 0);
     let withExt = recs.filter(r => (parseFloat(r.ExternalRevenue) || 0) > 0);
+    // Vorjahr des Planjahrs bevorzugen; sonst das jüngste Jahr mit Daten
+    // (ältere Jahre würden die aktuelle Run-Rate verwässern; recs sind absteigend sortiert)
+    const vorjahr = withExt.filter(r => r.Year == filters.budgetYear - 1);
+    if (vorjahr.length) withExt = vorjahr;
     if (withExt.length) {
-      // Nur das JÜNGSTE Jahr mit Daten verwenden — ältere Jahre würden die
-      // aktuelle Run-Rate verwässern (recs sind absteigend sortiert)
       const latestYear = withExt[0].Year;
       withExt = withExt.filter(r => r.Year == latestYear);
       if (c.BPOYtd) {
@@ -2319,13 +2321,24 @@ function budgetSuggest(refType, refId, btype) {
   return out;
 }
 
+/* Vertragsfamilie einer Budget-Position: ein Kunde hat gleichzeitig höchstens EINEN SaaS-Vertrag
+   (SaaS oder SaaS %) und EINEN BPO-Vertrag (BPO oder BPO h). */
+function budgetFamilie(btype) { return (btype === "SaaS" || btype === "SaaSPct") ? "SaaS" : "BPO"; }
+const BUDGET_TYP_LABEL = { SaaS: "SaaS", SaaSPct: "SaaS %", BPO: "BPO", BPOStd: "BPO h" };
+
 /* Neue Budget-Zeile anlegen (mit Formel-Füllung der Monate) */
 async function budgetCreate(refType, refId, btype, opts) {
   opts = opts || {};
   const year = filters.budgetYear;
-  const dupe = budgetRows().find(b => b.BYear == year && b.BType === btype && b.RefType === refType &&
-    (refType === "text" ? (b.RefName === opts.name) : b.RefId == refId));
+  const gleicheRef = b => b.BYear == year && b.RefType === refType && (refType === "text" ? (b.RefName === opts.name) : b.RefId == refId);
+  const dupe = budgetRows().find(b => gleicheRef(b) && b.BType === btype);
   if (dupe) { toast("Diese Position existiert im " + year + " bereits.", true); return; }
+  // Gleiche Vertragsfamilie mit anderem Modell → nur eine Zeile pro Familie: alte ersetzen
+  const geschwister = budgetRows().find(b => gleicheRef(b) && budgetFamilie(b.BType) === budgetFamilie(btype));
+  if (geschwister) {
+    if (!confirm("Für diese Firma gibt es im " + year + " bereits eine " + budgetFamilie(btype) + "-Zeile (" + BUDGET_TYP_LABEL[geschwister.BType] + "). Ein Kunde hat nur einen " + budgetFamilie(btype) + "-Vertrag — bestehende Zeile durch " + BUDGET_TYP_LABEL[btype] + " ersetzen?")) return;
+    try { await deleteItem("Budget", geschwister.id); } catch (e) { toast("Alte Zeile konnte nicht entfernt werden: " + e.message, true); return; }
+  }
   budgetLastError = "";
   if (!listIds["Budget"]) { budgetLastError = "Budget-Liste fehlt und konnte nicht angelegt werden — 🔧 Diagnose ausführen oder Liste 'Budget' manuell auf der Site anlegen (leere Liste reicht)."; render(); return; }
   try {
@@ -2436,7 +2449,7 @@ async function budgetTakeoverActive() {
   const year = filters.budgetYear;
   const active = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv");
   const existing = budgetRows();
-  const jobs = [];
+  const jobs = [], veraltet = [];
   active.forEach(c => {
     const want = [];
     const bpoTyp = (c.BPOModel === "Stundensatz") ? "BPOStd" : "BPO";
@@ -2448,12 +2461,27 @@ async function budgetTakeoverActive() {
       const exists = existing.find(b => b.BYear == year && b.RefType === "customer" && b.RefId == c.id && b.BType === t);
       if (!exists) jobs.push({ id: c.id, t });
     });
+    // Modell im Planjahr gewechselt → Zeile des alten Modells fällt weg (ein SaaS- und ein BPO-Vertrag pro Kunde)
+    if (segmentChargesSaaS(c.Segment)) {
+      const alt = saasTyp === "SaaSPct" ? "SaaS" : "SaaSPct";
+      existing.filter(b => b.BYear == year && b.RefType === "customer" && b.RefId == c.id && b.BType === alt)
+        .forEach(b => veraltet.push({ id: b.id, name: c.Title, t: alt }));
+    }
+    if (segmentNeedsBPO(c.Segment)) {
+      const altB = bpoTyp === "BPOStd" ? "BPO" : "BPOStd";
+      existing.filter(b => b.BYear == year && b.RefType === "customer" && b.RefId == c.id && b.BType === altB)
+        .forEach(b => veraltet.push({ id: b.id, name: c.Title, t: altB }));
+    }
   });
-  if (!jobs.length) { toast("Alle aktiven Kunden sind für " + year + " bereits erfasst."); return; }
+  if (!jobs.length && !veraltet.length) { toast("Alle aktiven Kunden sind für " + year + " bereits erfasst."); return; }
   if (!listIds["Budget"]) { budgetLastError = "Budget-Liste fehlt und konnte nicht angelegt werden — 🔧 Diagnose ausführen oder Liste 'Budget' manuell auf der Site anlegen (leere Liste reicht)."; render(); return; }
-  if (!confirm(jobs.length + " Budget-Positionen für aktive Kunden anlegen (mit Vorschlagswerten aus den Ist-Zahlen)?")) return;
+  const frage = (jobs.length ? jobs.length + " Budget-Positionen für aktive Kunden anlegen (Vorschlag: Vorjahres-Aussenumsatz, sonst Ziel-Aussenumsatz)" : "")
+    + (veraltet.length ? (jobs.length ? "\n" : "") + veraltet.length + " veraltete Zeile(n) entfernen (Modell im Planjahr gewechselt): " + veraltet.map(v => v.name + " · " + BUDGET_TYP_LABEL[v.t]).join(", ") : "")
+    + "?";
+  if (!confirm(frage)) return;
   budgetLastError = "";
   try {
+    for (const v of veraltet) { budgetShowLoading("Veraltete Zeile wird entfernt …", v.name); await deleteItem("Budget", v.id); }
     let done = 0;
     for (const j of jobs) {
       done++;
