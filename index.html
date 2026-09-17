@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.243.0"></script>
-<script src="apriko-api.js?v=1.243.0"></script>
-<script src="lohncheck.js?v=1.243.0"></script>
-<script src="personalbudget.js?v=1.243.0"></script>
-<script src="jahresbudget.js?v=1.243.0"></script>
-<script src="budgetpositionen.js?v=1.243.0"></script>
-<script src="lohnchecklistetemp.js?v=1.243.0"></script>
+<script src="apriko-filters.js?v=1.245.0"></script>
+<script src="apriko-api.js?v=1.245.0"></script>
+<script src="lohncheck.js?v=1.245.0"></script>
+<script src="personalbudget.js?v=1.245.0"></script>
+<script src="jahresbudget.js?v=1.245.0"></script>
+<script src="budgetpositionen.js?v=1.245.0"></script>
+<script src="lohnchecklistetemp.js?v=1.245.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -982,7 +982,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.243.0</span> · <span id="app-build-date">17.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.245.0</span> · <span id="app-build-date">17.09.2026</span>
     </div>
   </aside>
 
@@ -7264,13 +7264,46 @@ function abaStammIndex() {
   });
   return idx;
 }
-/* Persistente Ergänzungen (Parameter → abacus): kontierung {code:{soll,haben}}, erzwungen [codes], ausgeschlossen [codes], durchlauf */
+/* Regelwerk (Parameter → abacus), abgeleitet aus der manuellen Buchungsmaske Juli 2026 (Helva) und gegen
+   sie verifiziert (alle 30 Kontenpaare identisch, Durchlaufkonto 1091 geht auf):
+   - umkontierung {von: nach}: Apriko-Standardkonto → Konto im Kontenplan des Mandanten (z.B. 4400 → 5400)
+   - kontierung {code: {soll, haben}}: Lohnart-Kontierung, wenn der Stamm keine hat oder abweicht
+     (Konten in der Richtung eines POSITIVEN Betrags — negative Beträge werden generell vertauscht)
+   - aggregat {code: [codes]}: Lohnart enthält andere Lohnarten (1005 Stundenlohn enthält 1000/1160/1161/1200
+     im Lohnkontoblatt) → nur der Rest wird gebucht
+   - zusatz {code: {soll, haben}}: Zusatzbuchung mit demselben Betrag (BVG-Korrektur AN 5091 → AG-Spiegel 2272/5472)
+   - nichtBuchen [muster]: Totale/Basen/Umbuchungen (8610–8720, 9xxx …), «86*» = Präfix
+   - erzwungen / ausgeschlossen [codes]: manuelle Ein-/Ausschlüsse aus der Oberfläche; durchlauf: Durchlaufkonto */
+const ABA_HELVA_STANDARD = {
+  durchlauf: "1091",
+  umkontierung: { "4400": "5400", "4401": "5400", "4491": "5490", "4492": "5490", "4470": "5470", "4471": "5471", "4472": "5472", "4473": "5473", "4474": "5474", "4475": "5475", "4476": "5476", "1094": "1096", "2271": "2270", "2270": "2272", "2272": "2271", "2277": "2275", "2279": "2278" },
+  kontierung: { "1066": { soll: "5400", haben: "1091" }, "1100": { soll: "5400", haben: "1091" }, "3001": { soll: "1096", haben: "1091" }, "5091": { soll: "2272", haben: "1091" }, "5401": { soll: "2278", haben: "1091" },
+    "6310": { soll: "5490", haben: "1091" }, "6390": { soll: "6990", haben: "1091" }, "8020": { soll: "1091", haben: "2215" }, "8030": { soll: "1091", haben: "2216" }, "8040": { soll: "1091", haben: "1094" }, "8050": { soll: "1091", haben: "2218" },
+    "8105": { soll: "1140", haben: "1091" }, "8115": { soll: "1020", haben: "1091" }, "8120": { soll: "2215", haben: "1091" }, "8125": { soll: "1020", haben: "1091" }, "8130": { soll: "2216", haben: "1091" }, "8135": { soll: "1020", haben: "1091" },
+    "8150": { soll: "2218", haben: "1091" }, "8155": { soll: "1020", haben: "1091" }, "8300": { soll: "1142", haben: "1091" }, "8900": { soll: "1091", haben: "1020" },
+    // Aus den Monaten Jan–Aug 2026 zusätzlich nötig (im Juli 0, daher nicht in der Buchungsmaske): Konto noch offen = ""
+    "6300": { soll: "1094", haben: "1091" }, "2000": { soll: "", haben: "1091" }, "8110": { soll: "", haben: "1091" } },
+  aggregat: { "1005": ["1000", "1160", "1161", "1200"] },
+  zusatz: { "5091": { soll: "2272", haben: "5472" } },
+  nichtBuchen: ["3500", "4500", "4900", "5500", "5900", "6500", "6900", "7500", "8500", "86*", "87*", "8995", "9*"]
+};
 function abaParam() {
-  if (!crmParameter) return { kontierung: {}, erzwungen: [], ausgeschlossen: [], durchlauf: "" };
-  if (!crmParameter.abacus) crmParameter.abacus = {};
+  if (!crmParameter) return Object.assign({ erzwungen: [], ausgeschlossen: [] }, JSON.parse(JSON.stringify(ABA_HELVA_STANDARD)));
+  if (!crmParameter.abacus) { crmParameter.abacus = JSON.parse(JSON.stringify(ABA_HELVA_STANDARD)); crmParameter.abacus.standardGeladen = "Helva Juli 2026"; }
   const a = crmParameter.abacus;
   a.kontierung = a.kontierung || {}; a.erzwungen = a.erzwungen || []; a.ausgeschlossen = a.ausgeschlossen || [];
+  a.umkontierung = a.umkontierung || {}; a.aggregat = a.aggregat || {}; a.zusatz = a.zusatz || {}; a.nichtBuchen = a.nichtBuchen || [];
   return a;
+}
+function abaNichtBuchen(code, pa) {
+  return (pa.nichtBuchen || []).some(m => m.endsWith("*") ? String(code).startsWith(m.slice(0, -1)) : String(code) === m);
+}
+function abaUmkonto(konto, pa) { return konto && pa.umkontierung[konto] ? pa.umkontierung[konto] : konto; }
+async function abaStandardLaden() {
+  await parameterLaden(false);
+  if (!confirm("Regelwerk auf den Helva-Standard (Buchungsmaske Juli 2026) zurücksetzen? Eigene Umkontierungen/Kontierungen gehen verloren.")) return;
+  crmParameter.abacus = JSON.parse(JSON.stringify(ABA_HELVA_STANDARD)); crmParameter.abacus.standardGeladen = "Helva Juli 2026";
+  await abaParamSpeichern(); render();
 }
 async function abaParamSpeichern() {
   try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
@@ -7318,11 +7351,22 @@ function abaBuchungen() {
   });
   abaState.ausgelassen = [];
   const pa = abaParam();
-  return Object.values(summen).sort((a, b) => parseInt(a.code) - parseInt(b.code)).filter(b => {
-    // Nicht buchen: Basen/Info-Lohnarten (kein Nettolohn-Bestandteil, kein AG-Beitrag) — ausser manuell erzwungen
+  // Aggregat-Regeln: enthaltene Lohnarten vom Aggregat abziehen (nur der Rest wird gebucht)
+  Object.keys(pa.aggregat).forEach(code => {
+    if (!summen[code]) return;
+    const teile = pa.aggregat[code].filter(c => summen[c]);
+    if (!teile.length) return;
+    summen[code].betrag -= teile.reduce((a, c) => a + summen[c].betrag, 0);
+    summen[code].aggregatInfo = "abzüglich " + teile.join("/");
+  });
+  const out = Object.values(summen).sort((a, b) => parseInt(a.code) - parseInt(b.code)).filter(b => {
+    if (Math.abs(b.betrag) < 0.005) return false;   // 0 nach Aggregat-Abzug → nichts zu buchen
     const st = idx[b.code];
+    const kont = pa.kontierung[b.code];
     if (pa.ausgeschlossen.includes(b.code)) { abaState.ausgelassen.push({ code: b.code, bezeichnung: b.bezeichnung, betrag: b.betrag, grund: "manuell ausgeschlossen" }); return false; }
     if (pa.erzwungen.includes(b.code)) { b.grund = "manuell eingeschlossen"; return true; }
+    if (kont && (kont.soll || kont.haben)) { b.grund = "Lohnart-Kontierung (Parameter)"; return true; }
+    if (abaNichtBuchen(b.code, pa)) { abaState.ausgelassen.push({ code: b.code, bezeichnung: b.bezeichnung, betrag: b.betrag, grund: "Regel «nicht buchen» (Total/Basis/Umbuchung)" }); return false; }
     if (st && st.relevant) { b.grund = st.grund; return true; }
     abaState.ausgelassen.push({ code: b.code, bezeichnung: b.bezeichnung, betrag: b.betrag, grund: st ? st.grund : "nicht im Stamm" });
     return false;
@@ -7330,13 +7374,38 @@ function abaBuchungen() {
     const st = idx[b.code] || {};
     const pk = pa.kontierung[b.code] || {};
     b.betrag = Math.round(b.betrag * 100) / 100;
-    b.soll = pk.soll || st.soll || "";
-    b.haben = pk.haben || st.haben || "";
+    b.stammSoll = st.soll || ""; b.stammHaben = st.haben || "";
+    b.soll = pk.soll || abaUmkonto(st.soll, pa) || "";
+    b.haben = pk.haben || abaUmkonto(st.haben, pa) || "";
+    b.quelleSoll = pk.soll ? "Lohnart" : (st.soll && b.soll !== st.soll ? "Umkontierung " + st.soll + " → " + b.soll : "Stamm");
+    b.quelleHaben = pk.haben ? "Lohnart" : (st.haben && b.haben !== st.haben ? "Umkontierung " + st.haben + " → " + b.haben : "Stamm");
     if (!b.bezeichnung) b.bezeichnung = st.bezeichnung || "";
     b.imStamm = !!idx[b.code];
     b.ok = !!(b.soll && b.haben && b.betrag);
     return b;
   });
+  // Zusatzbuchungen (gleicher Betrag, andere Konten)
+  const extra = [];
+  out.forEach(b => {
+    const z = pa.zusatz[b.code];
+    if (z && b.betrag && z.soll && z.haben) extra.push({ code: b.code, bezeichnung: b.bezeichnung + " (Zusatzbuchung)", betrag: b.betrag, soll: z.soll, haben: z.haben, ok: true, zusatz: true, grund: "Zusatzbuchung (Parameter)", quelleSoll: "Zusatz", quelleHaben: "Zusatz", imStamm: true });
+  });
+  const alle = out.concat(extra);
+  // Rundungsausgleich: Zeilen werden einzeln auf Rappen gerundet — die Summe kann um wenige Rappen vom
+  // Durchlaufkonto-Saldo 0 abweichen. Differenz (< 1 CHF) auf die grösste Buchung am Durchlaufkonto legen.
+  const dk = pa.durchlauf;
+  if (dk) {
+    let saldo = 0;
+    alle.filter(b => b.ok).forEach(b => { let sl = b.soll, hb = b.haben, v = b.betrag; if (v < 0) { const t = sl; sl = hb; hb = t; v = -v; } if (sl === dk) saldo += v; if (hb === dk) saldo -= v; });
+    saldo = Math.round(saldo * 100) / 100;
+    if (saldo !== 0 && Math.abs(saldo) < 1) {
+      // saldo > 0: zu viel im Soll → grösste Haben-Buchung am DK erhöhen (oder Soll-Buchung senken)
+      const kand = alle.filter(b => b.ok && (b.soll === dk || b.haben === dk)).sort((a, b) => Math.abs(b.betrag) - Math.abs(a.betrag));
+      const z = kand.find(b => { const dkImHaben = (b.betrag >= 0 ? b.haben : b.soll) === dk; return saldo > 0 ? dkImHaben : !dkImHaben; }) || kand[0];
+      if (z) { const dkImHaben = (z.betrag >= 0 ? z.haben : z.soll) === dk; const delta = (saldo > 0) === dkImHaben ? Math.abs(saldo) : -Math.abs(saldo); z.betrag = Math.round((z.betrag + (z.betrag >= 0 ? delta : -delta)) * 100) / 100; z.rundung = (delta > 0 ? "+" : "−") + Math.abs(saldo).toFixed(2); }
+    }
+  }
+  return alle;
 }
 /* Kontierung pro Lohnart ergänzen/überschreiben — persistent in parameter.json (abacus.kontierung) */
 async function abaOverride(code, feld, wert) {
@@ -7465,7 +7534,7 @@ function renderAbacus(el) {
   el.innerHTML = `
     <div class="card" style="padding:14px 16px;margin-bottom:14px">
       <h3 style="margin:0 0 4px">Abacus-Schnittstelle (FIBU-Import)</h3>
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">Lohnkontoblatt hochladen (CSV/XLSX), Monat wählen — die Beträge werden pro Lohnart summiert, Soll/Haben kommen aus dem Lohnartenstamm, Ergebnis als AbaConnect-XML (Sammelbuchung mit einer Einzelbuchung pro Lohnart, Buchungsdatum = Monatsletzter). Gebucht wird, was in den Nettolohn fliesst (Brutto-/Abzugs-Lohnarten) und alle Arbeitgeberbeiträge; Basen und Info-Lohnarten nicht. Fehlende Konten trägst du in der Zeile ein — sie werden dauerhaft gemerkt (Parameter). Negative Beträge werden mit vertauschten Konten gebucht.</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">Lohnkontoblatt hochladen (CSV/XLSX), Monat wählen — die Beträge werden pro Lohnart summiert, Soll/Haben kommen aus dem Lohnartenstamm und werden nach dem Regelwerk (Parameter → Abacus: Umkontierung, Lohnart-Kontierung, Aggregat, Zusatzbuchung, nicht buchen) umgesetzt. Ergebnis als AbaConnect-XML (Sammelbuchung mit einer Einzelbuchung pro Lohnart, Buchungsdatum = Monatsletzter). Fehlende Konten trägst du in der Zeile ein — dauerhaft gemerkt. Negative Beträge werden mit vertauschten Konten gebucht.${(abaParam().standardGeladen) ? ` Regelwerk: <strong>${escape(abaParam().standardGeladen)}</strong> (verifiziert gegen die manuelle Buchungsmaske).` : ""}</div>
       <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
         <label class="btn btn-sm">⇧ Lohnkontoblatt hochladen<input type="file" accept=".csv,.xlsx,.xls,.txt" style="display:none" onchange="abaUpload(this)"></label>
         <label style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--text-dim)">Monat<select onchange="abaState.monat=parseInt(this.value);abaState.xml='';render()" style="padding:4px 6px">${MONTH_NAMES.map((n, i) => `<option value="${i + 1}" ${i + 1 === abaState.monat ? "selected" : ""}>${n}</option>`).join("")}</select></label>
@@ -7488,15 +7557,16 @@ function renderAbacus(el) {
       ${lcState.lohnartenliste && !(lcState.lohnartenliste.spalten || []).includes("Brutto") ? `<div style="font-size:11px;color:var(--warn);margin-bottom:8px">Der gespeicherte Lohnartenstamm hat noch keine Spalten Brutto/Abzug — im Lohnartenstamm einmal «Neu laden» aus Apriko, damit Nettolohn-Bestandteile ohne Kontierung erkannt werden.</div>` : ""}
       ${(() => { const d = abaDurchlaufCheck(buchungen); if (!d) return ""; const ok = Math.abs(d.saldo) < 0.05; return `<div style="font-size:12px;margin-bottom:8px;padding:6px 10px;border-left:3px solid ${ok ? "var(--accent-2)" : "var(--danger)"};background:var(--bg)">Durchlaufkonto <input type="text" value="${escape(abaParam().durchlauf || d.konto)}" onchange="abaDurchlaufSetzen(this.value)" style="width:70px;font-family:var(--font-mono);font-size:12px;padding:2px 5px" title="Konto, das am Ende auf 0 aufgehen muss"> · Soll CHF ${fmt(d.soll)} − Haben CHF ${fmt(d.haben)} = <strong style="color:${ok ? "var(--accent-2)" : "var(--danger)"}">CHF ${fmt(d.saldo)}</strong> ${ok ? "✓ geht auf" : "⚠ geht nicht auf — Kontierung oder ausgelassene Lohnarten prüfen"}</div>`; })()}
       <div class="table-wrap"><table>
-        <thead><tr><th>Lohnart</th><th>Bezeichnung</th><th style="text-align:right">Betrag</th><th>Soll</th><th>Haben</th><th></th></tr></thead>
-        <tbody>${buchungen.map(b => `<tr>
+        <thead><tr><th>Lohnart</th><th>Bezeichnung</th><th style="text-align:right">Betrag</th><th>Soll</th><th>Haben</th><th>Regel</th><th></th></tr></thead>
+        <tbody>${buchungen.map(b => { const um = q => /^Umkontierung/.test(q) ? `<span style="font-size:10px;color:var(--accent-3);margin-left:4px" title="${escape(q)}">${escape(q.replace("Umkontierung ", ""))}</span>` : (q === "Lohnart" ? `<span style="font-size:10px;color:var(--accent);margin-left:4px" title="Lohnart-Kontierung aus Parameter">LA</span>` : ""); return `<tr${b.zusatz ? ' style="color:var(--text-dim)"' : ""}>
           <td style="font-family:var(--font-mono)">${escape(b.code)}</td>
-          <td>${escape(b.bezeichnung)}${b.imStamm ? "" : ` <span style="font-size:9px;color:var(--warn)">nicht im Stamm</span>`}</td>
+          <td>${escape(b.bezeichnung)}${b.imStamm ? "" : ` <span style="font-size:9px;color:var(--warn)">nicht im Stamm</span>`}${b.aggregatInfo ? ` <span style="font-size:9px;color:var(--accent-3)" title="Aggregat-Regel">${escape(b.aggregatInfo)}</span>` : ""}${b.rundung ? ` <span style="font-size:9px;color:var(--warn)" title="Rundungsausgleich, damit das Durchlaufkonto auf 0 aufgeht">Rundung ${escape(b.rundung)}</span>` : ""}</td>
           <td style="text-align:right;font-family:var(--font-mono)">${fmt(b.betrag)}</td>
-          <td><input type="text" value="${escape(b.soll)}" onchange="abaOverride('${escape(b.code)}','soll',this.value)" style="width:70px;font-family:var(--font-mono);font-size:12px;padding:2px 5px"></td>
-          <td><input type="text" value="${escape(b.haben)}" onchange="abaOverride('${escape(b.code)}','haben',this.value)" style="width:70px;font-family:var(--font-mono);font-size:12px;padding:2px 5px"></td>
-          <td style="font-size:11px;color:${b.ok ? "var(--accent-2)" : "var(--danger)"}" title="${escape(b.grund || "")}">${b.ok ? "✓" : "Konto fehlt"} <a href="#" onclick="abaErzwingen('${escape(b.code)}', false);return false;" style="color:var(--text-faint);font-size:10px" title="Diese Lohnart nicht buchen">✕</a></td>
-        </tr>`).join("")}</tbody>
+          <td>${b.zusatz ? `<span style="font-family:var(--font-mono)">${escape(b.soll)}</span>` : `<input type="text" value="${escape(b.soll)}" onchange="abaOverride('${escape(b.code)}','soll',this.value)" style="width:60px;font-family:var(--font-mono);font-size:12px;padding:2px 5px">${um(b.quelleSoll)}`}</td>
+          <td>${b.zusatz ? `<span style="font-family:var(--font-mono)">${escape(b.haben)}</span>` : `<input type="text" value="${escape(b.haben)}" onchange="abaOverride('${escape(b.code)}','haben',this.value)" style="width:60px;font-family:var(--font-mono);font-size:12px;padding:2px 5px">${um(b.quelleHaben)}`}</td>
+          <td style="font-size:10px;color:var(--text-faint)">${escape(b.grund || "")}</td>
+          <td style="font-size:11px;color:${b.ok ? "var(--accent-2)" : "var(--danger)"}">${b.ok ? "✓" : "Konto fehlt"} ${b.zusatz ? "" : `<a href="#" onclick="abaErzwingen('${escape(b.code)}', false);return false;" style="color:var(--text-faint);font-size:10px" title="Diese Lohnart nicht buchen">✕</a>`}</td>
+        </tr>`; }).join("")}</tbody>
       </table></div>
       ${(abaState.ausgelassen || []).length ? `<details style="margin-top:10px"><summary style="font-size:11px;color:var(--text-dim);cursor:pointer">${abaState.ausgelassen.length} Lohnarten nicht gebucht (Basen, Info, manuell ausgeschlossen)</summary>
         <table style="font-size:11px;margin-top:6px"><tbody>${abaState.ausgelassen.map(x => `<tr><td style="font-family:var(--font-mono)">${escape(x.code)}</td><td>${escape(x.bezeichnung)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(x.betrag)}</td><td style="color:var(--text-faint)">${escape(x.grund)}</td><td><a href="#" onclick="abaErzwingen('${escape(x.code)}', ${x.grund === "manuell ausgeschlossen" ? "null" : "true"});return false;" style="color:var(--accent-3)">${x.grund === "manuell ausgeschlossen" ? "wieder automatisch" : "doch buchen"}</a></td></tr>`).join("")}</tbody></table></details>` : ""}
@@ -7591,8 +7661,62 @@ async function renderParameter(el) {
         <tbody>${uz.map((r, i) => paramUzRow(i, r)).join("")}</tbody>
       </table></div>
       <button class="btn btn-sm" onclick="paramUzAdd()" style="margin-top:8px">+ GAV hinzufügen</button>
+    </div>
+    ${paramAbacusBlock()}`;
+}
+/* Parameter → Abacus: Regelwerk sichtbar und editierbar */
+function paramAbacusBlock() {
+  const a = abaParam();
+  const inp = (v, on, w) => `<input type="text" value="${escape(v)}" onchange="${on}" style="width:${w || 60}px;font-family:var(--font-mono);font-size:12px;padding:2px 5px">`;
+  const um = Object.keys(a.umkontierung).sort();
+  const ko = Object.keys(a.kontierung).sort((x, y) => parseInt(x) - parseInt(y));
+  return `
+    <div class="card" style="padding:14px 16px;margin-bottom:14px">
+      <h3 style="margin:0 0 4px">Abacus-Schnittstelle</h3>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">Regelwerk für Spielwiese → Abacus Schnittstelle${a.standardGeladen ? ` · Basis: ${escape(a.standardGeladen)}` : ""}. Änderungen werden sofort gespeichert. <a href="#" onclick="abaStandardLaden();return false;" style="color:var(--accent-3)">Helva-Standard laden</a></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div>
+          <div style="font-size:11px;font-weight:600;margin-bottom:4px">Durchlaufkonto</div>
+          ${inp(a.durchlauf || "", "abaDurchlaufSetzen(this.value)")}
+          <div style="font-size:11px;font-weight:600;margin:12px 0 4px">Umkontierung Konto → Konto <span style="color:var(--text-faint);font-weight:400">(Apriko-Standardkonto → Mandant)</span></div>
+          <table style="font-size:12px"><tbody>${um.map(k => `<tr><td>${inp(k, `paramAbaUm('${escape(k)}', this.value, null)`)}</td><td>→</td><td>${inp(a.umkontierung[k], `paramAbaUm('${escape(k)}', null, this.value)`)}</td><td><a href="#" onclick="paramAbaUm('${escape(k)}', '', '');return false;" style="color:var(--text-faint)">✕</a></td></tr>`).join("")}
+          <tr><td>${inp("", "paramAbaUm(this.value, this.value, '')")}</td><td>→</td><td colspan="2" style="color:var(--text-faint);font-size:11px">neues Konto links eintragen</td></tr></tbody></table>
+          <div style="font-size:11px;font-weight:600;margin:12px 0 4px">Aggregat-Regeln <span style="color:var(--text-faint);font-weight:400">(Lohnart: enthaltene Lohnarten — nur der Rest wird gebucht)</span></div>
+          <textarea rows="2" onchange="paramAbaText('aggregat', this.value)" style="width:100%;font-family:var(--font-mono);font-size:12px">${escape(Object.keys(a.aggregat).map(k => k + ": " + a.aggregat[k].join(",")).join("\n"))}</textarea>
+          <div style="font-size:11px;font-weight:600;margin:12px 0 4px">Zusatzbuchungen <span style="color:var(--text-faint);font-weight:400">(Lohnart: Soll/Haben — gleicher Betrag nochmals)</span></div>
+          <textarea rows="2" onchange="paramAbaText('zusatz', this.value)" style="width:100%;font-family:var(--font-mono);font-size:12px">${escape(Object.keys(a.zusatz).map(k => k + ": " + a.zusatz[k].soll + "/" + a.zusatz[k].haben).join("\n"))}</textarea>
+          <div style="font-size:11px;font-weight:600;margin:12px 0 4px">Nicht buchen <span style="color:var(--text-faint);font-weight:400">(Codes, kommagetrennt, «9*» = Präfix)</span></div>
+          <textarea rows="2" onchange="paramAbaText('nichtBuchen', this.value)" style="width:100%;font-family:var(--font-mono);font-size:12px">${escape(a.nichtBuchen.join(", "))}</textarea>
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:600;margin-bottom:4px">Lohnart-Kontierungen <span style="color:var(--text-faint);font-weight:400">(ersetzen den Stamm; Richtung für positiven Betrag)</span></div>
+          <table style="font-size:12px"><thead><tr><th>Lohnart</th><th>Soll</th><th>Haben</th><th></th></tr></thead><tbody>${ko.map(k => `<tr><td style="font-family:var(--font-mono)">${escape(k)}</td><td>${inp(a.kontierung[k].soll || "", `abaOverride('${escape(k)}','soll',this.value)`)}</td><td>${inp(a.kontierung[k].haben || "", `abaOverride('${escape(k)}','haben',this.value)`)}</td><td><a href="#" onclick="paramAbaKontDel('${escape(k)}');return false;" style="color:var(--text-faint)">✕</a></td></tr>`).join("")}
+          <tr><td>${inp("", "paramAbaKontNeu(this.value)")}</td><td colspan="3" style="color:var(--text-faint);font-size:11px">Lohnart-Code eintragen, dann Konten</td></tr></tbody></table>
+          ${a.erzwungen.length || a.ausgeschlossen.length ? `<div style="font-size:11px;color:var(--text-dim);margin-top:10px">Manuell: eingeschlossen ${escape(a.erzwungen.join(", ") || "—")} · ausgeschlossen ${escape(a.ausgeschlossen.join(", ") || "—")}</div>` : ""}
+        </div>
+      </div>
     </div>`;
 }
+async function paramAbaUm(von, neuVon, nach) {
+  await parameterLaden(false);
+  const a = abaParam();
+  von = String(von || "").trim();
+  if (neuVon !== null && neuVon !== undefined && nach === "" ) { const nv = String(neuVon).trim(); if (!nv) return; if (nv !== von && a.umkontierung[von] !== undefined) { a.umkontierung[nv] = a.umkontierung[von]; delete a.umkontierung[von]; } else if (a.umkontierung[nv] === undefined) a.umkontierung[nv] = ""; }
+  if (nach !== null && nach !== undefined && nach !== "") a.umkontierung[von] = String(nach).trim();
+  if (neuVon === "" && nach === "") delete a.umkontierung[von];
+  await abaParamSpeichern(); render();
+}
+async function paramAbaText(feld, text) {
+  await parameterLaden(false);
+  const a = abaParam();
+  const zeilen = String(text || "").split(/\n/).map(z => z.trim()).filter(Boolean);
+  if (feld === "aggregat") { a.aggregat = {}; zeilen.forEach(z => { const m = /^(\d+)\s*:\s*(.+)$/.exec(z); if (m) a.aggregat[m[1]] = m[2].split(/[,\s]+/).filter(Boolean); }); }
+  if (feld === "zusatz") { a.zusatz = {}; zeilen.forEach(z => { const m = /^(\d+)\s*:\s*(\d+)\s*\/\s*(\d+)$/.exec(z); if (m) a.zusatz[m[1]] = { soll: m[2], haben: m[3] }; }); }
+  if (feld === "nichtBuchen") a.nichtBuchen = String(text || "").split(/[,\s]+/).map(x => x.trim()).filter(Boolean);
+  await abaParamSpeichern(); render();
+}
+async function paramAbaKontDel(code) { await parameterLaden(false); delete abaParam().kontierung[code]; await abaParamSpeichern(); render(); }
+async function paramAbaKontNeu(code) { code = String(code || "").trim(); if (!code) return; await parameterLaden(false); const a = abaParam(); if (!a.kontierung[code]) a.kontierung[code] = { soll: "", haben: "" }; render(); }
 
 async function renderTarifarten(el) {
   await tarifartenLaden(false);
