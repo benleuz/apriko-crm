@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.237.0"></script>
-<script src="apriko-api.js?v=1.237.0"></script>
-<script src="lohncheck.js?v=1.237.0"></script>
-<script src="personalbudget.js?v=1.237.0"></script>
-<script src="jahresbudget.js?v=1.237.0"></script>
-<script src="budgetpositionen.js?v=1.237.0"></script>
-<script src="lohnchecklistetemp.js?v=1.237.0"></script>
+<script src="apriko-filters.js?v=1.238.0"></script>
+<script src="apriko-api.js?v=1.238.0"></script>
+<script src="lohncheck.js?v=1.238.0"></script>
+<script src="personalbudget.js?v=1.238.0"></script>
+<script src="jahresbudget.js?v=1.238.0"></script>
+<script src="budgetpositionen.js?v=1.238.0"></script>
+<script src="lohnchecklistetemp.js?v=1.238.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -981,7 +981,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.237.0</span> · <span id="app-build-date">17.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.238.0</span> · <span id="app-build-date">17.09.2026</span>
     </div>
   </aside>
 
@@ -2243,10 +2243,20 @@ function budgetFormulaMonths(b, saisonOverride) {
     return BUDGET_MONTH_FIELDS.map((f, i) => (i + 1) < smS || nachEnde(i) ? 0 : m);
   }
   if (b.BType === "BPOStd") {
-    // Stundensatz-Modell: die Monatswerte SIND Stunden und werden manuell
-    // gepflegt — die "Formel" lässt sie unverändert (Satz ändert nur die
-    // CHF-Bewertung, nicht die Stunden).
-    return BUDGET_MONTH_FIELDS.map(f => parseFloat(b[f]) || 0);
+    // Stundensatz-Modell: die Monatswerte SIND Stunden. Mit Jahresstunden (Feld ExtRev
+    // = «h/Jahr») werden sie linear auf die aktiven Monate verteilt (Startmonat bis
+    // Vertragsende); ohne Jahresstunden bleiben sie manuell gepflegt.
+    const jahresStd = parseFloat(b.ExtRev) || 0;
+    if (!jahresStd) return BUDGET_MONTH_FIELDS.map(f => parseFloat(b[f]) || 0);
+    const smH = parseInt(b.StartMonth) || 1;
+    const aktiv = BUDGET_MONTH_FIELDS.map((f, i) => (i + 1) >= smH && !nachEnde(i));
+    const n = aktiv.filter(Boolean).length;
+    if (!n) return BUDGET_MONTH_FIELDS.map(() => 0);
+    const proMonat = Math.round(jahresStd / n * 10) / 10;
+    const werte = aktiv.map(a => a ? proMonat : 0);
+    const letzterIdx = aktiv.lastIndexOf(true);
+    werte[letzterIdx] = Math.round((jahresStd - proMonat * (n - 1)) * 10) / 10;
+    return werte;
   }
   // BPO (prozentual) und SaaSPct (% vom Umsatz): saisonal verteilt.
   // Startmonat > Jan: frühere Monate bleiben 0, das Total ist der
@@ -2389,8 +2399,10 @@ async function budgetParamChange(id, field, value) {
   const b = budgetRows().find(x => x.id == id);
   if (!b) return;
   b[field] = parseFloat(value) || 0;
-  const mw = budgetFormulaMonths(b);
-  BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
+  if (!(b.BType === "BPOStd" && field === "Rate")) {
+    const mw = budgetFormulaMonths(b);
+    BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
+  }
   budgetRenderKeepFocus();
   try {
     await budgetSave(b);
@@ -4130,7 +4142,7 @@ function renderBudget(el) {
       `<input id="bud-p-${b.id}-Lic" class="bud-in bud-p1" value="${num(b.Lic)}" onchange="budgetParamChange(${b.id},'Lic',this.value)" title="Lizenzen">`, "×",
       `<input id="bud-p-${b.id}-Price" class="bud-in bud-p2" value="${num(b.Price)}" onchange="budgetParamChange(${b.id},'Price',this.value)" title="Preis pro Lizenz/Monat">`, "");
     if (b.BType === "BPOStd") return grid(
-      "", "",
+      `<input id="bud-p-${b.id}-ExtRev" class="bud-in bud-p1" value="${num(b.ExtRev) || ""}" placeholder="h/Jahr" onchange="budgetParamChange(${b.id},'ExtRev',this.value)" title="Stunden pro Jahr — werden linear auf die aktiven Monate verteilt (leer = Monate manuell pflegen)">`, "h ×",
       `<input id="bud-p-${b.id}-Rate" class="bud-in bud-p2" value="${num(b.Rate)}" onchange="budgetParamChange(${b.id},'Rate',this.value)" title="Stundensatz CHF/h — Monatszellen = Stunden">`, "/h");
     // BPO + SaaSPct: Aussenumsatz × Satz%
     return grid(
