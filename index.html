@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.240.0"></script>
-<script src="apriko-api.js?v=1.240.0"></script>
-<script src="lohncheck.js?v=1.240.0"></script>
-<script src="personalbudget.js?v=1.240.0"></script>
-<script src="jahresbudget.js?v=1.240.0"></script>
-<script src="budgetpositionen.js?v=1.240.0"></script>
-<script src="lohnchecklistetemp.js?v=1.240.0"></script>
+<script src="apriko-filters.js?v=1.241.0"></script>
+<script src="apriko-api.js?v=1.241.0"></script>
+<script src="lohncheck.js?v=1.241.0"></script>
+<script src="personalbudget.js?v=1.241.0"></script>
+<script src="jahresbudget.js?v=1.241.0"></script>
+<script src="budgetpositionen.js?v=1.241.0"></script>
+<script src="lohnchecklistetemp.js?v=1.241.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -966,6 +966,7 @@
           <button data-view="einsatzdash"><span class="ic">📊</span> Kundendashboard</button>
           <button data-view="konzern"><span class="ic">🏢</span> Konzernanalyse</button>
           <button data-view="apipoc"><span class="ic">🔌</span> Apriko API (POC)</button>
+          <button data-view="abacus"><span class="ic">🧮</span> Abacus Schnittstelle</button>
         </div>
       </div>
       <div class="nav-group" data-group="admin">
@@ -981,7 +982,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.240.0</span> · <span id="app-build-date">17.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.241.0</span> · <span id="app-build-date">17.09.2026</span>
     </div>
   </aside>
 
@@ -1469,7 +1470,7 @@ let currentView = DEMO_ANON ? "einsatzdash" : "dashboard";
    Berechtigungssystem
    =========================================================== */
 const SUPER_ADMIN_EMAIL = "benjamin@apriko.com";  // hat immer volle Rechte
-const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","lohncheck","parameter","apipoc","profiles"];
+const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","lohncheck","parameter","apipoc","abacus","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
@@ -1482,7 +1483,7 @@ const VIEW_TITLES = {
   lohnartenstamm: "Lohnartenstamm",
   tarifarten: "Tarifarten",
   rapport: "Rapport", einsatzdash: "Kundendashboard", konzern: "Konzernanalyse",
-  lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)",
+  lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)", abacus: "Abacus Schnittstelle",
   profiles: "Profile"
 };
 
@@ -1954,6 +1955,7 @@ function render() {
   else if (currentView === "lohnartenstamm") renderLohnartenstamm(content);
   else if (currentView === "tarifarten") renderTarifarten(content);
   else if (currentView === "parameter") renderParameter(content);
+  else if (currentView === "abacus") renderAbacus(content);
   else if (currentView === "personalbudget") renderPersonalBudget(content);
   else if (currentView === "jahresbudget") renderJahresbudget(content);
   else if (currentView === "budgetpos") renderBudgetpositionen(content);
@@ -7175,6 +7177,257 @@ function tarifartenCsvExport() {
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(a.href);
 }
+/* ============ Abacus-Schnittstelle (Spielwiese) ============
+   Lohnkontoblatt (CSV/XLSX) hochladen → pro Lohnart und gewähltem Monat den Betrag summieren →
+   Soll/Haben aus dem Lohnartenstamm (Workflows → Lohnartenstamm, Spalten Soll-/Haben-Konto) →
+   AbaConnect-XML (FIBU, MapId AbaDefault, Version 2015; Sammelbuchung EntryType S mit je einer
+   SingleInformation — gleiches Muster wie die Lohnschnittstelle Helva). Mandant-Konstanten
+   sind hier editierbar (localStorage aba-settings). Erkennung des Blatts: entweder Monats-
+   spalten (Jan…Dez / 01…12 / 2026-08) = Breitformat, oder Spalten Lohnart/Betrag(/Monat) = Langformat. */
+const ABA_DEFAULTS = { client: "99999", division: "0", currency: "CHF", mapId: "AbaDefault", version: "2015", docCode: "B", textPrefix: "Lohn", mwstKonten: "5490:200:I" };
+let abaState = { datei: "", zeilen: [], spalten: [], monat: new Date().getMonth() || 12, jahr: new Date().getFullYear(), overrides: {}, xml: "" };
+function abaSettings() {
+  try { return Object.assign({}, ABA_DEFAULTS, JSON.parse(localStorage.getItem("aba-settings") || "{}")); } catch (e) { return Object.assign({}, ABA_DEFAULTS); }
+}
+function abaSettingSet(k, v) {
+  const s = abaSettings(); s[k] = v; localStorage.setItem("aba-settings", JSON.stringify(s)); render();
+}
+const ABA_MONATE_RE = [/^jan/i, /^feb/i, /^m[aä]r/i, /^apr/i, /^mai|^may/i, /^jun/i, /^jul/i, /^aug/i, /^sep/i, /^okt|^oct/i, /^nov/i, /^dez|^dec/i];
+/* Spaltenname → Monat (1..12) oder 0 */
+function abaMonatAusSpalte(name) {
+  const n = String(name || "").trim();
+  for (let i = 0; i < 12; i++) if (ABA_MONATE_RE[i].test(n)) return i + 1;
+  let m = /^(\d{4})[-./](\d{1,2})$/.exec(n) || /^(\d{1,2})[-./](\d{4})$/.exec(n);
+  if (m) { const mo = parseInt(m[1].length === 4 ? m[2] : m[1]); if (mo >= 1 && mo <= 12) return mo; }
+  m = /^(0?[1-9]|1[0-2])$/.exec(n);
+  return m ? parseInt(m[1]) : 0;
+}
+function abaNum(v) {
+  if (typeof v === "number") return v;
+  let t = String(v == null ? "" : v).replace(/['’\s]/g, "").replace(/CHF/i, "");
+  if (/^\(.*\)$/.test(t)) t = "-" + t.slice(1, -1);
+  if (/,\d{1,2}$/.test(t) && !/\./.test(t)) t = t.replace(",", ".");
+  t = t.replace(/,/g, "");
+  const n = parseFloat(t);
+  return isNaN(n) ? 0 : n;
+}
+function abaKontoNr(v) { const m = /^\s*(\d{3,6})/.exec(String(v || "")); return m ? m[1] : ""; }
+function abaSpaltenErkennen(spalten) {
+  const find = re => spalten.find(s => re.test(String(s).trim())) || "";
+  const monate = {};
+  spalten.forEach(s => { const m = abaMonatAusSpalte(s); if (m) monate[m] = s; });
+  return {
+    code: find(/^(lohnart|la|code|nr|nummer|lohnart[-\s]?(nr|code|nummer))$/i) || find(/lohnart/i) || spalten[0] || "",
+    bezeichnung: find(/bezeichnung|text|name|beschreibung/i),
+    betrag: find(/^(betrag|total|summe|chf|wert)/i),
+    monatSpalte: find(/^(monat|periode|abrechnungsmonat|datum|valuta)$/i),
+    monate, breit: Object.keys(monate).length >= 3
+  };
+}
+async function abaUpload(input) {
+  const file = (input.files || [])[0]; input.value = "";
+  if (!file) return;
+  try {
+    const { zeilen, spalten } = await lcParseListDatei(file);
+    abaState.datei = file.name; abaState.zeilen = zeilen; abaState.spalten = spalten; abaState.overrides = {}; abaState.xml = "";
+    const m = /(20\d{2})[-_.]?(0[1-9]|1[0-2])/.exec(file.name);
+    if (m) { abaState.jahr = parseInt(m[1]); abaState.monat = parseInt(m[2]); }
+    toast(zeilen.length + " Zeilen aus " + file.name + " gelesen.");
+  } catch (e) { toast("Datei nicht lesbar: " + e.message, true); }
+  render();
+}
+/* Lohnartenstamm: Code → {soll, haben, bezeichnung} */
+function abaStammIndex() {
+  const la = lcState.lohnartenliste;
+  const idx = {};
+  if (!la || !la.zeilen) return idx;
+  const cCode = (la.spaltenMap && la.spaltenMap.code) || "Code";
+  const cBez = (la.spaltenMap && la.spaltenMap.bezeichnung) || "Bezeichnung";
+  la.zeilen.forEach(z => {
+    const code = String(z[cCode] || "").trim();
+    if (code) idx[code] = { soll: abaKontoNr(z["Soll-Konto"]), haben: abaKontoNr(z["Haben-Konto"]), bezeichnung: z[cBez] || "" };
+  });
+  return idx;
+}
+/* Buchungszeilen für den gewählten Monat aufbauen */
+function abaBuchungen() {
+  const sp = abaSpaltenErkennen(abaState.spalten);
+  const idx = abaStammIndex();
+  const summen = {};
+  abaState.zeilen.forEach(z => {
+    const code = String(z[sp.code] || "").trim();
+    if (!code || !/^\d+/.test(code)) return;
+    let betrag = 0;
+    if (sp.breit) {
+      const col = sp.monate[abaState.monat];
+      if (!col) return;
+      betrag = abaNum(z[col]);
+    } else {
+      if (sp.monatSpalte) {
+        const mv = String(z[sp.monatSpalte] || "");
+        const mm = /(\d{4})[-./](\d{1,2})|(\d{1,2})[-./](\d{4})|(\d{1,2})\.(\d{1,2})\.(\d{4})/.exec(mv);
+        let mon = 0;
+        if (mm) mon = parseInt(mm[2] || mm[3] || mm[6]);
+        else mon = abaMonatAusSpalte(mv);
+        if (mon && mon !== abaState.monat) return;
+      }
+      betrag = abaNum(z[sp.betrag]);
+    }
+    if (!betrag) return;
+    if (!summen[code]) summen[code] = { code, bezeichnung: z[sp.bezeichnung] || (idx[code] || {}).bezeichnung || "", betrag: 0 };
+    summen[code].betrag += betrag;
+  });
+  return Object.values(summen).sort((a, b) => parseInt(a.code) - parseInt(b.code)).map(b => {
+    const st = idx[b.code] || {};
+    const ov = abaState.overrides[b.code] || {};
+    b.betrag = Math.round(b.betrag * 100) / 100;
+    b.soll = ov.soll !== undefined ? ov.soll : (st.soll || "");
+    b.haben = ov.haben !== undefined ? ov.haben : (st.haben || "");
+    if (!b.bezeichnung) b.bezeichnung = st.bezeichnung || "";
+    b.imStamm = !!idx[b.code];
+    b.ok = !!(b.soll && b.haben && b.betrag);
+    return b;
+  });
+}
+function abaOverride(code, feld, wert) {
+  abaState.overrides[code] = abaState.overrides[code] || {};
+  abaState.overrides[code][feld] = String(wert || "").trim();
+  abaState.xml = "";
+  render();
+}
+function abaEsc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+function abaXmlBauen(buchungen) {
+  const s = abaSettings();
+  const jahr = abaState.jahr, monat = abaState.monat;
+  const datum = jahr + "-" + String(monat).padStart(2, "0") + "-" + String(new Date(jahr, monat, 0).getDate()).padStart(2, "0");
+  const mwst = {};
+  String(s.mwstKonten || "").split(/[,;]/).map(x => x.trim()).filter(Boolean).forEach(x => { const p = x.split(":"); if (p[0]) mwst[p[0]] = { code: p[1] || "", incl: p[2] || "I" }; });
+  const taxData = konto => mwst[konto] ? `\n        <TaxData mode="SAVE">\n          <TaxIncluded>${abaEsc(mwst[konto].incl)}</TaxIncluded>\n          <TaxType>1</TaxType>\n          <UseCode>1</UseCode>\n          <TaxCode>${abaEsc(mwst[konto].code)}</TaxCode>\n        </TaxData>` : "";
+  const entries = buchungen.filter(b => b.ok).map((b, i) => {
+    let soll = b.soll, haben = b.haben, betrag = b.betrag;
+    if (betrag < 0) { const t = soll; soll = haben; haben = t; betrag = -betrag; }
+    const amt = betrag.toFixed(2);
+    const text = abaEsc(((s.textPrefix ? s.textPrefix + " " : "") + b.code + " " + b.bezeichnung + " " + String(monat).padStart(2, "0") + "." + jahr).trim().slice(0, 80));
+    return `    <Entry mode="SAVE">
+      <CollectiveInformation mode="SAVE">
+        <EntryLevel>A</EntryLevel>
+        <EntryType>S</EntryType>
+        <DebitCredit>D</DebitCredit>
+        <Client>${abaEsc(s.client)}</Client>
+        <Division>${abaEsc(s.division)}</Division>
+        <KeyCurrency>${abaEsc(s.currency)}</KeyCurrency>
+        <EntryDate>${datum}</EntryDate>
+        <ValueDate>${datum}</ValueDate>
+        <AmountData mode="SAVE">
+          <Amount>${amt}</Amount>
+          <Currency>${abaEsc(s.currency)}</Currency>
+        </AmountData>
+        <KeyAmount>${amt}</KeyAmount>
+        <Account>${abaEsc(soll)}</Account>
+        <IntercompanyNumber>0</IntercompanyNumber>
+        <Text1>${text}</Text1>${taxData(soll)}
+        <DocumentCode>${abaEsc(s.docCode)}</DocumentCode>
+        <SingleCount>1</SingleCount>
+        <Number>${i + 1}</Number>
+      </CollectiveInformation>
+      <SingleInformation mode="SAVE">
+        <DebitCredit>C</DebitCredit>
+        <Client>${abaEsc(s.client)}</Client>
+        <Division>${abaEsc(s.division)}</Division>
+        <KeyCurrency>${abaEsc(s.currency)}</KeyCurrency>
+        <EntryDate>${datum}</EntryDate>
+        <ValueDate>${datum}</ValueDate>
+        <AmountData mode="SAVE">
+          <Amount>${amt}</Amount>
+          <Currency>${abaEsc(s.currency)}</Currency>
+        </AmountData>
+        <KeyAmount>${amt}</KeyAmount>
+        <Account>${abaEsc(haben)}</Account>
+        <IntercompanyNumber>0</IntercompanyNumber>
+        <Text1>${text}</Text1>${taxData(haben)}
+        <DocumentCode>${abaEsc(s.docCode)}</DocumentCode>
+        <Number>${i + 1}</Number>
+      </SingleInformation>
+    </Entry>`;
+  });
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<AbaConnectContainer>
+  <TaskCount>1</TaskCount>
+  <Task>
+    <Parameter>
+      <Application>FIBU</Application>
+      <Id>XML Buchungen</Id>
+      <MapId>${abaEsc(s.mapId)}</MapId>
+      <Version>${abaEsc(s.version)}</Version>
+    </Parameter>
+    <Transaction>
+${entries.join("\n")}
+    </Transaction>
+  </Task>
+</AbaConnectContainer>
+`;
+}
+function abaXmlErzeugen() {
+  const b = abaBuchungen();
+  if (!b.some(x => x.ok)) { toast("Keine buchbaren Zeilen (Soll/Haben oder Betrag fehlt).", true); return; }
+  abaState.xml = abaXmlBauen(b);
+  const blob = new Blob([abaState.xml], { type: "application/xml;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `BuBel_Abacus_${abaState.jahr}${String(abaState.monat).padStart(2, "0")}.xml`;
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  render();
+}
+function renderAbacus(el) {
+  document.getElementById("view-actions").innerHTML = "";
+  if (!lcState.lohnartenliste && typeof lcLoadLohnartenliste === "function") {
+    lcLoadLohnartenliste(false).then(() => { if (currentView === "abacus") render(); }).catch(() => {});
+  }
+  const s = abaSettings();
+  const sp = abaState.spalten.length ? abaSpaltenErkennen(abaState.spalten) : null;
+  const buchungen = abaState.zeilen.length ? abaBuchungen() : [];
+  const total = buchungen.reduce((a, b) => a + (b.ok ? Math.abs(b.betrag) : 0), 0);
+  const offen = buchungen.filter(b => !b.ok).length;
+  const fmt = v => (Math.round(v * 100) / 100).toLocaleString("de-CH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const inp = (k, w, label, title) => `<label style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--text-dim)" title="${escape(title || "")}">${label}<input type="text" value="${escape(s[k])}" onchange="abaSettingSet('${k}', this.value)" style="width:${w}px;font-family:var(--font-mono);font-size:12px;padding:3px 6px"></label>`;
+  el.innerHTML = `
+    <div class="card" style="padding:14px 16px;margin-bottom:14px">
+      <h3 style="margin:0 0 4px">Abacus-Schnittstelle (FIBU-Import)</h3>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">Lohnkontoblatt hochladen (CSV/XLSX), Monat wählen — die Beträge werden pro Lohnart summiert, Soll/Haben kommen aus dem Lohnartenstamm, Ergebnis als AbaConnect-XML (Sammelbuchung mit einer Einzelbuchung pro Lohnart, Buchungsdatum = Monatsletzter). Negative Beträge werden mit vertauschten Konten gebucht.</div>
+      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+        <label class="btn btn-sm">⇧ Lohnkontoblatt hochladen<input type="file" accept=".csv,.xlsx,.xls,.txt" style="display:none" onchange="abaUpload(this)"></label>
+        <label style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--text-dim)">Monat<select onchange="abaState.monat=parseInt(this.value);abaState.xml='';render()" style="padding:4px 6px">${MONTH_NAMES.map((n, i) => `<option value="${i + 1}" ${i + 1 === abaState.monat ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+        <label style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--text-dim)">Jahr<input type="number" value="${abaState.jahr}" onchange="abaState.jahr=parseInt(this.value)||abaState.jahr;abaState.xml='';render()" style="width:70px;padding:4px 6px"></label>
+        ${abaState.datei ? `<span style="font-size:11px;color:var(--text-dim)">Datei: ${escape(abaState.datei)} · ${abaState.zeilen.length} Zeilen · ${sp.breit ? "Breitformat (Monatsspalten " + Object.keys(sp.monate).length + ")" : "Langformat (Spalte «" + escape(sp.betrag || "?") + "»" + (sp.monatSpalte ? ", Monat aus «" + escape(sp.monatSpalte) + "»" : ", ohne Monatsspalte → alle Zeilen") + ")"}</span>` : ""}
+      </div>
+      <details style="margin-top:10px"><summary style="font-size:11px;color:var(--text-dim);cursor:pointer">Mandant / XML-Parameter</summary>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
+          ${inp("client", 70, "Client")}${inp("division", 50, "Division")}${inp("currency", 50, "Währung")}${inp("mapId", 90, "MapId")}${inp("version", 60, "Version")}${inp("docCode", 50, "DocumentCode")}${inp("textPrefix", 90, "Text-Präfix")}${inp("mwstKonten", 160, "MwSt-Konten (Konto:Code:I/E, kommagetrennt)", "z.B. 5490:200:I — für diese Konten wird TaxData mitgegeben")}
+        </div>
+      </details>
+    </div>
+    ${abaState.zeilen.length ? `
+    <div class="card" style="padding:14px 16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px">
+        <div><strong>${MONTH_NAMES[abaState.monat - 1]} ${abaState.jahr}</strong> · ${buchungen.length} Lohnarten · Buchungssumme CHF ${fmt(total)}${offen ? ` · <span style="color:var(--warn)">${offen} ohne Kontierung</span>` : ""}</div>
+        <button class="btn btn-sm" onclick="abaXmlErzeugen()" ${buchungen.some(b => b.ok) ? "" : "disabled"}>⇩ AbaConnect-XML erzeugen</button>
+      </div>
+      ${!lcState.lohnartenliste ? `<div style="font-size:11px;color:var(--warn);margin-bottom:8px">Lohnartenstamm nicht geladen — Soll/Haben können nicht aufgelöst werden (Workflows → Lohnartenstamm).</div>` : ""}
+      <div class="table-wrap"><table>
+        <thead><tr><th>Lohnart</th><th>Bezeichnung</th><th style="text-align:right">Betrag</th><th>Soll</th><th>Haben</th><th></th></tr></thead>
+        <tbody>${buchungen.map(b => `<tr>
+          <td style="font-family:var(--font-mono)">${escape(b.code)}</td>
+          <td>${escape(b.bezeichnung)}${b.imStamm ? "" : ` <span style="font-size:9px;color:var(--warn)">nicht im Stamm</span>`}</td>
+          <td style="text-align:right;font-family:var(--font-mono)">${fmt(b.betrag)}</td>
+          <td><input type="text" value="${escape(b.soll)}" onchange="abaOverride('${escape(b.code)}','soll',this.value)" style="width:70px;font-family:var(--font-mono);font-size:12px;padding:2px 5px"></td>
+          <td><input type="text" value="${escape(b.haben)}" onchange="abaOverride('${escape(b.code)}','haben',this.value)" style="width:70px;font-family:var(--font-mono);font-size:12px;padding:2px 5px"></td>
+          <td style="font-size:11px;color:${b.ok ? "var(--accent-2)" : "var(--danger)"}">${b.ok ? "✓" : "Konto fehlt"}</td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+      ${abaState.xml ? `<details style="margin-top:10px"><summary style="font-size:11px;color:var(--text-dim);cursor:pointer">XML-Vorschau</summary><pre style="font-size:10px;max-height:320px;overflow:auto;background:var(--bg);padding:8px;border-radius:4px">${escape(abaState.xml)}</pre></details>` : ""}
+    </div>` : ""}`;
+}
+
 /* ============ Parameter (Workflows) ============
    Zentrale, erweiterbare Parameter für die Workflows/Checks. Persistenz wie Tarifarten:
    SharePoint-JSON CRM-Budgetdaten/parameter.json. Aktuell Block «Überzeit»: pro GAV die
