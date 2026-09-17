@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.238.0"></script>
-<script src="apriko-api.js?v=1.238.0"></script>
-<script src="lohncheck.js?v=1.238.0"></script>
-<script src="personalbudget.js?v=1.238.0"></script>
-<script src="jahresbudget.js?v=1.238.0"></script>
-<script src="budgetpositionen.js?v=1.238.0"></script>
-<script src="lohnchecklistetemp.js?v=1.238.0"></script>
+<script src="apriko-filters.js?v=1.239.0"></script>
+<script src="apriko-api.js?v=1.239.0"></script>
+<script src="lohncheck.js?v=1.239.0"></script>
+<script src="personalbudget.js?v=1.239.0"></script>
+<script src="jahresbudget.js?v=1.239.0"></script>
+<script src="budgetpositionen.js?v=1.239.0"></script>
+<script src="lohnchecklistetemp.js?v=1.239.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -981,7 +981,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.238.0</span> · <span id="app-build-date">17.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.239.0</span> · <span id="app-build-date">17.09.2026</span>
     </div>
   </aside>
 
@@ -2358,6 +2358,7 @@ const BUDGET_TYP_LABEL = { SaaS: "SaaS", SaaSPct: "SaaS %", BPO: "BPO", BPOStd: 
 async function budgetCreate(refType, refId, btype, opts) {
   opts = opts || {};
   const year = filters.budgetYear;
+  if (crmKundenFlags === null) { try { await crmLoadKundenFlags(); } catch (e) {} }
   const gleicheRef = b => b.BYear == year && b.RefType === refType && (refType === "text" ? (b.RefName === opts.name) : b.RefId == refId);
   const dupe = budgetRows().find(b => gleicheRef(b) && b.BType === btype);
   if (dupe) { toast("Diese Position existiert im " + year + " bereits.", true); return; }
@@ -2477,6 +2478,7 @@ async function budgetDelete(id) {
 /* Alle aktiven Kunden gemäss Segment übernehmen (nur fehlende) */
 async function budgetTakeoverActive() {
   const year = filters.budgetYear;
+  if (crmKundenFlags === null) { try { await crmLoadKundenFlags(); } catch (e) {} }
   const active = cache.customers.filter(c => budgetKundeAktivImJahr(c, year));
   const existing = budgetRows();
   const jobs = [], veraltet = [];
@@ -4106,6 +4108,9 @@ function renderFbMonate(el, ctx) {
 
 function renderBudget(el) {
   const year = filters.budgetYear;
+  if (crmKundenFlags === null && typeof siteId !== "undefined" && siteId) {
+    crmLoadKundenFlags().then(() => { if (currentView === "budget") render(); });
+  }
   const rows = budgetRows()
     .filter(b => b.BYear == year)
     .sort((a,b) =>
@@ -4133,7 +4138,10 @@ function renderBudget(el) {
      in bestimmten Abläufen das change-Event (erste Eingabe wurde "gefressen").
      Stattdessen: Kurzform anzeigen, beim Fokus alles markieren, Eingabe
      überschreibt; der Parser versteht "2000000" wie "2.0 Mio". */
-  const extRevInput = b => `<input id="bud-p-${b.id}-ExtRev" class="bud-in bud-p1" value="${budFmtParam(b.ExtRev)}" onfocus="this.select()" onchange="budgetParamChange(${b.id},'ExtRev',budParseParam(this.value))" title="Aussenumsatz pro Jahr: ${num(b.ExtRev).toLocaleString("de-CH")} — Eingabe auch als '4.2 Mio', '500k' oder '2000000' möglich">`;
+  const extRevInput = b => {
+    const vorschlag = (!num(b.ExtRev) && b.RefType === "customer") ? (budgetSuggest("customer", b.RefId, b.BType).ExtRev || 0) : 0;
+    return `<input id="bud-p-${b.id}-ExtRev" class="bud-in bud-p1" value="${budFmtParam(b.ExtRev)}" onfocus="this.select()" onchange="budgetParamChange(${b.id},'ExtRev',budParseParam(this.value))" title="Aussenumsatz pro Jahr: ${num(b.ExtRev).toLocaleString("de-CH")} — Eingabe auch als '4.2 Mio', '500k' oder '2000000' möglich">${vorschlag ? `<button class="icon-btn" style="margin-left:2px;font-size:10px" onclick="budgetParamChange(${b.id},'ExtRev',${vorschlag})" title="Vorschlag übernehmen: ${vorschlag.toLocaleString("de-CH")} (Vorjahr / Ziel-Aussenumsatz)">↺</button>` : ""}`;
+  };
   /* Einheitliches Raster [Wert1][×][Wert2][Suffix] — Zweitwerte (Preis, Satz,
      Stundensatz) und Suffixe fluchten über alle Modelle hinweg */
   const paramCell = b => {
