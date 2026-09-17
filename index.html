@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.236.0"></script>
-<script src="apriko-api.js?v=1.236.0"></script>
-<script src="lohncheck.js?v=1.236.0"></script>
-<script src="personalbudget.js?v=1.236.0"></script>
-<script src="jahresbudget.js?v=1.236.0"></script>
-<script src="budgetpositionen.js?v=1.236.0"></script>
-<script src="lohnchecklistetemp.js?v=1.236.0"></script>
+<script src="apriko-filters.js?v=1.237.0"></script>
+<script src="apriko-api.js?v=1.237.0"></script>
+<script src="lohncheck.js?v=1.237.0"></script>
+<script src="personalbudget.js?v=1.237.0"></script>
+<script src="jahresbudget.js?v=1.237.0"></script>
+<script src="budgetpositionen.js?v=1.237.0"></script>
+<script src="lohnchecklistetemp.js?v=1.237.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -981,7 +981,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.236.0</span> · <span id="app-build-date">17.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.237.0</span> · <span id="app-build-date">17.09.2026</span>
     </div>
   </aside>
 
@@ -2233,10 +2233,14 @@ async function budgetRedistributeBPO(saison) {
    Dezember gleicht Rundungsdifferenzen aus, damit das Jahrestotal exakt
    ExtRev × Satz ergibt. */
 function budgetFormulaMonths(b, saisonOverride) {
+  // Vertragsende im Planjahr (Kundenstamm «Ende»): spätere Monate bleiben 0
+  const cEnd = b.RefType === "customer" ? cache.customers.find(c => c.id == b.RefId) : null;
+  const endM = cEnd ? budgetEndMonat(cEnd, b.BYear) : null;
+  const nachEnde = i => endM !== null && (i + 1) > endM;
   if (b.BType === "SaaS") {
     const smS = parseInt(b.StartMonth) || 1;
     const m = Math.round((parseFloat(b.Lic) || 0) * (parseFloat(b.Price) || 0));
-    return BUDGET_MONTH_FIELDS.map((f, i) => (i + 1) < smS ? 0 : m);
+    return BUDGET_MONTH_FIELDS.map((f, i) => (i + 1) < smS || nachEnde(i) ? 0 : m);
   }
   if (b.BType === "BPOStd") {
     // Stundensatz-Modell: die Monatswerte SIND Stunden und werden manuell
@@ -2250,11 +2254,12 @@ function budgetFormulaMonths(b, saisonOverride) {
   const sm = parseInt(b.StartMonth) || 1;
   const saison = saisonOverride || budgetSaison();
   const jahr = (parseFloat(b.ExtRev) || 0) * (parseFloat(b.Rate) || 0) / 100;
-  const werte = saison.map((p, i) => (i + 1) < sm ? 0 : Math.round(jahr * p / 100));
-  // Dezember gleicht Rundung aus — gegen das Soll der AKTIVEN Monate
-  const sollAktiv = Math.round(jahr * saison.reduce((s, p, i) => (i + 1) >= sm ? s + p : s, 0) / 100);
-  const summe11 = werte.slice(0, 11).reduce((s, v) => s + v, 0);
-  werte[11] = sollAktiv - summe11;
+  const werte = saison.map((p, i) => (i + 1) < sm || nachEnde(i) ? 0 : Math.round(jahr * p / 100));
+  // Letzter aktiver Monat gleicht Rundung aus — gegen das Soll der AKTIVEN Monate
+  const letzter = endM !== null ? Math.max(sm, endM) - 1 : 11;
+  const sollAktiv = Math.round(jahr * saison.reduce((s, p, i) => (i + 1) >= sm && !nachEnde(i) ? s + p : s, 0) / 100);
+  const summeVor = werte.slice(0, letzter).reduce((s, v) => s + v, 0);
+  if (letzter >= 0 && letzter <= 11) werte[letzter] = sollAktiv - summeVor;
   return werte;
 }
 
@@ -2321,6 +2326,19 @@ function budgetSuggest(refType, refId, btype) {
   return out;
 }
 
+/* Vertragsende eines Kunden im Planjahr: null = kein Ende im/vor dem Jahr, 0 = vor dem Jahr beendet, 1..12 = letzter aktiver Monat */
+function budgetEndMonat(c, year) {
+  if (!c || !c.EndDate) return null;
+  const y = parseInt(c.EndDate.slice(0, 4)), m = parseInt(c.EndDate.slice(5, 7));
+  if (y < year) return 0;
+  if (y > year) return null;
+  return m;
+}
+function budgetKundeAktivImJahr(c, year) {
+  if ((c.Status || "Aktiv") !== "Aktiv") return false;
+  const e = budgetEndMonat(c, year);
+  return e !== 0;
+}
 /* Vertragsfamilie einer Budget-Position: ein Kunde hat gleichzeitig höchstens EINEN SaaS-Vertrag
    (SaaS oder SaaS %) und EINEN BPO-Vertrag (BPO oder BPO h). */
 function budgetFamilie(btype) { return (btype === "SaaS" || btype === "SaaSPct") ? "SaaS" : "BPO"; }
@@ -2447,9 +2465,14 @@ async function budgetDelete(id) {
 /* Alle aktiven Kunden gemäss Segment übernehmen (nur fehlende) */
 async function budgetTakeoverActive() {
   const year = filters.budgetYear;
-  const active = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv");
+  const active = cache.customers.filter(c => budgetKundeAktivImJahr(c, year));
   const existing = budgetRows();
   const jobs = [], veraltet = [];
+  // Kunden, die vor dem Planjahr gekündigt/beendet sind: bestehende Zeilen fallen weg
+  cache.customers.filter(c => !budgetKundeAktivImJahr(c, year)).forEach(c => {
+    existing.filter(b => b.BYear == year && b.RefType === "customer" && b.RefId == c.id)
+      .forEach(b => veraltet.push({ id: b.id, name: c.Title + " (" + (budgetEndMonat(c, year) === 0 ? "Ende " + c.EndDate.slice(0, 10) : c.Status) + ")", t: b.BType }));
+  });
   active.forEach(c => {
     const want = [];
     const bpoTyp = (c.BPOModel === "Stundensatz") ? "BPOStd" : "BPO";
@@ -2476,7 +2499,7 @@ async function budgetTakeoverActive() {
   if (!jobs.length && !veraltet.length) { toast("Alle aktiven Kunden sind für " + year + " bereits erfasst."); return; }
   if (!listIds["Budget"]) { budgetLastError = "Budget-Liste fehlt und konnte nicht angelegt werden — 🔧 Diagnose ausführen oder Liste 'Budget' manuell auf der Site anlegen (leere Liste reicht)."; render(); return; }
   const frage = (jobs.length ? jobs.length + " Budget-Positionen für aktive Kunden anlegen (Vorschlag: Vorjahres-Aussenumsatz, sonst Ziel-Aussenumsatz)" : "")
-    + (veraltet.length ? (jobs.length ? "\n" : "") + veraltet.length + " veraltete Zeile(n) entfernen (Modell im Planjahr gewechselt): " + veraltet.map(v => v.name + " · " + BUDGET_TYP_LABEL[v.t]).join(", ") : "")
+    + (veraltet.length ? (jobs.length ? "\n" : "") + veraltet.length + " veraltete Zeile(n) entfernen (Modell gewechselt oder Vertrag beendet): " + veraltet.map(v => v.name + " · " + BUDGET_TYP_LABEL[v.t]).join(", ") : "")
     + "?";
   if (!confirm(frage)) return;
   budgetLastError = "";
@@ -4176,7 +4199,7 @@ function renderBudget(el) {
       <tbody>
         ${rows.map(b => `
           <tr>
-            <td title="${escape(budgetRefName(b))}${b.StartMonth > 1 ? " — ab " + MONTH_NAMES[b.StartMonth-1] : ""}" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escape(budgetRefName(b))}${b.RefType === "company" || b.RefType === "text" ? ` <span style="font-size:9px;color:var(--text-faint)">(Lead)</span>` : ""}${b.StartMonth > 1 ? ` <span style="font-size:9px;color:var(--accent-2)">ab ${MONTH_NAMES[b.StartMonth-1]}</span>` : ""}</td>
+            <td title="${escape(budgetRefName(b))}${b.StartMonth > 1 ? " — ab " + MONTH_NAMES[b.StartMonth-1] : ""}" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escape(budgetRefName(b))}${b.RefType === "company" || b.RefType === "text" ? ` <span style="font-size:9px;color:var(--text-faint)">(Lead)</span>` : ""}${(() => { const c = b.RefType === "customer" ? cache.customers.find(x => x.id == b.RefId) : null; if (!c) return ""; const e = budgetEndMonat(c, year); if (e === 0 || (c.Status || "Aktiv") !== "Aktiv") return ` <span style="font-size:9px;color:var(--danger)" title="Vertrag beendet — Zeile mit «Aktive Kunden übernehmen» oder ✕ entfernen">beendet</span>`; if (e) return ` <span style="font-size:9px;color:var(--warn)" title="Vertragsende ${c.EndDate.slice(0,10)}">bis ${MONTH_NAMES[e-1]}</span>`; return ""; })()}${b.StartMonth > 1 ? ` <span style="font-size:9px;color:var(--accent-2)">ab ${MONTH_NAMES[b.StartMonth-1]}</span>` : ""}</td>
             <td>${typCell(b)}</td>
             <td>${paramCell(b)}</td>
             ${BUDGET_MONTH_FIELDS.map(f => `<td style="text-align:right"><input id="bud-c-${b.id}-${f}" class="bud-in bud-in-m" ${b.BType === "BPOStd" ? `style="color:var(--accent-2)" title="${num(b[f])} h × ${num(b.Rate)} = CHF ${Math.round(budgetChfOf(b, b[f])).toLocaleString("de-CH")}"` : ""} value="${num(b[f])}" onchange="budgetCellChange(${b.id},'${f}',this.value)">${b.BType === "BPOStd" ? `<div style="font-size:8.5px;color:var(--text-faint);text-align:right;padding-right:4px">${Math.round(budgetChfOf(b, b[f])).toLocaleString("de-CH")}</div>` : ""}</td>`).join("")}
