@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.126.0";
+const LC_VERSION = "1.128.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -741,9 +741,14 @@ function lcParamZeileFuerGav(gavText) {
   const t = String(gavText || "").toLowerCase();
   let hit = liste.find(p => (p.gav || "").toLowerCase() === t);
   if (!hit) {
-    const kw = [[/personalverleih|pvl|verleih/, /personalverleih/], [/bauhaupt|lmv|baumeister/, /bauhaupt/], [/elektro|telekom/, /elektro/], [/gebäudetechnik|gebaeudetechnik|sanitär|heizung|lüftung/, /gebäudetechnik/],
-      [/metall/, /metall/], [/maler|gipser/, /maler/], [/schreiner/, /schreiner/], [/holzbau/, /holzbau/], [/platten/, /platten/], [/gerüst|geruest/, /gerüst/], [/dach|gebäudehülle|gebaeudehuelle/, /dach/],
-      [/reinig/, /reinig/], [/gastro|gastgewerbe|l-gav/, /gast/], [/auto/, /autogewerbe/], [/carrosserie/, /carrosserie/], [/sicherheit/, /sicherheit/], [/ausbau/, /ausbau/]];
+    // Reihenfolge: spezifische (regionale) Muster vor den allgemeinen
+    // «Personalverleih Elektrobranche» ⇒ Branchen-GAV; darum steht Personalverleih ganz am Schluss
+    const kw = [[/bauhaupt|lmv|baumeister/, /bauhaupt/], [/elektro|telekom/, /elektro/], [/gebäudetechnik|gebaeudetechnik|sanitär|heizung|lüftung|spengler/, /gebäudetechnik/],
+      [/basler ausbau|ausbau.*\bbs\b/, /basler ausbau/], [/ausbau.*(bl|baselland|solothurn|\bso\b)/, /ausbaugewerbe bl/], [/ausbau.*(west|romand)/, /westschweiz/], [/ausbau/, /ausbau/],
+      [/(maler|gipser).*(\bbl\b|baselland)/, /(maler|gipser).*\bbl\b/], [/gipser.*(\bbs\b|basel-stadt|basel stadt)/, /gipsergewerbe bs/], [/maler|gipser/, /maler/],
+      [/dach.*(\bbl\b|baselland)/, /dach.*\bbl\b/], [/dach|gebäudehülle|gebaeudehuelle|wand/, /gebäudehülle|dach/],
+      [/metall/, /metall/], [/schreiner/, /schreiner/], [/holzbau/, /holzbau/], [/platten/, /platten/], [/gerüst|geruest/, /gerüst/], [/isolier/, /isolier/], [/marmor|granit/, /marmor/], [/gärtner|gaertner|landschaft/, /gärtner/],
+      [/reinig/, /reinig/], [/gastro|gastgewerbe|l-gav/, /gast/], [/auto/, /autogewerbe/], [/carrosserie/, /carrosserie/], [/sicherheit/, /sicherheit/], [/detailhandel/, /detailhandel/], [/coiffeur/, /coiffeur/], [/personalverleih|pvl|verleih/, /personalverleih/]];
     for (const [reText, reParam] of kw) { if (reText.test(t)) { hit = liste.find(p => reParam.test((p.gav || "").toLowerCase())); if (hit) break; } }
   }
   return hit || null;
@@ -805,6 +810,78 @@ function lcUeberzeitCheck(s, add) {
     }
     add(s, "rot", "Überzeitansatz prüfen", "Für " + r.code + " " + r.label + " wurde ein Ansatz von CHF " + lcFmt(ansatz) + " verwendet. Gemäss " + basisTxt + " wären " + lcFmt(erwVoll) + " (Stunden voll, " + pctTxt + ") bzw. " + lcFmt(erwZus) + " (nur Zuschlag) zu erwarten. " + grund + " Bitte überprüfen.");
   }
+}
+
+/* Überzeit-Rückrechnung für einen Beleg — Datenbasis für die Excel-Liste (Spezialtool):
+   pro Überzeit-Lohnart: Stunden, Ansatz, Betrag, Grundlohn/h, voller Stundenlohn/h, Basis+13, erwartete Werte
+   nach beiden Varianten, erkannte Berechnungsweise (wie wurde gerechnet), GAV und Soll-Basis aus Parameter. */
+function lcUeberzeitAnalyse(s) {
+  const uzRows = s.rows.filter(r => r.code < 4900 && !r.isTotal && /[ÜU]e?berzeit/i.test(r.label));
+  if (!uzRows.length) return [];
+  const el = lcGavAusEinsatzliste(s);
+  const istBau = s.rows.some(r => r.code === 5110 || /\bFAR\b/i.test(r.label || ""));
+  let gav, gavQuelle, pz = null;
+  if (el) { gav = el.gav; gavQuelle = el.quelle; pz = lcParamZeileFuerGav(el.gav); }
+  else { gav = istBau ? "Bauhauptgewerbe (LMV)" : "GAV Personalverleih"; gavQuelle = istBau ? "Annahme (FAR-Abzug)" : "Annahme (keine Einsatzliste)"; pz = lcParamZeileFuerGav(gav); }
+  const sollBasis = pz ? (pz.basis === "brutto" ? "auf Bruttolohn" : "Basis + 13.") : (lcUeberzeitParam(gav) === "brutto" ? "auf Bruttolohn (Vorgabe)" : "Basis + 13. (Vorgabe)");
+  const g = lcGrundlohnAnsatz(s);
+  const voll = lcStundenlohnVoll(s);
+  const grund = g ? g.wert : null;
+  const basis13 = grund != null ? Math.round(grund * (1 + LC_ANTEIL_13) * 100) / 100 : null;
+  const tol = 0.03, nahe = (a, b) => a != null && b != null && Math.abs(a - b) <= tol;
+  return uzRows.map(r => {
+    const pm = /(\d{1,3}(?:[.,]\d+)?)\s*%/.exec(r.label);
+    const zuschlag = pm ? parseFloat(pm[1].replace(",", ".")) / 100 : 0.25;
+    let ansatz = r.ansatz;
+    if ((ansatz === null || ansatz === 0) && r.anzahl) ansatz = Math.round(r.betrag / r.anzahl * 100) / 100;
+    // Erkennen, wie gerechnet wurde
+    const varianten = [];
+    if (basis13 != null) { varianten.push(["Grundlohn + 13. × " + Math.round((1 + zuschlag) * 100) + " %", basis13 * (1 + zuschlag), "Basis + 13."]); varianten.push(["Grundlohn + 13. × " + Math.round(zuschlag * 100) + " % (nur Zuschlag)", basis13 * zuschlag, "Basis + 13."]); }
+    if (voll != null) { varianten.push(["Bruttolohn × " + Math.round((1 + zuschlag) * 100) + " %", voll * (1 + zuschlag), "auf Bruttolohn"]); varianten.push(["Bruttolohn × " + Math.round(zuschlag * 100) + " % (nur Zuschlag)", voll * zuschlag, "auf Bruttolohn"]); }
+    if (grund != null) { varianten.push(["Grundlohn ohne 13. × " + Math.round((1 + zuschlag) * 100) + " %", grund * (1 + zuschlag), "Grundlohn ohne 13."]); varianten.push(["Grundlohn ohne 13. × " + Math.round(zuschlag * 100) + " % (nur Zuschlag)", grund * zuschlag, "Grundlohn ohne 13."]); }
+    if (basis13 != null) [0.5, 1.5].forEach(f => varianten.push(["Grundlohn + 13. × " + Math.round(f * 100) + " %", basis13 * f, "Basis + 13. (anderer Zuschlag)"]));
+    if (voll != null) [0.5, 1.5].forEach(f => varianten.push(["Bruttolohn × " + Math.round(f * 100) + " %", voll * f, "auf Bruttolohn (anderer Zuschlag)"]));
+    const hit = varianten.find(v => nahe(ansatz, v[1]));
+    const istBasis = hit ? hit[2] : "nicht nachvollziehbar";
+    const sollKurz = /brutto/i.test(sollBasis) ? "auf Bruttolohn" : "Basis + 13.";
+    const ok = hit ? (hit[2].startsWith(sollKurz) && !/anderer Zuschlag/.test(hit[2])) : false;
+    const erwSoll = sollKurz === "auf Bruttolohn" ? (voll != null ? voll * (1 + zuschlag) : null) : (basis13 != null ? basis13 * (1 + zuschlag) : null);
+    const erwSollZus = sollKurz === "auf Bruttolohn" ? (voll != null ? voll * zuschlag : null) : (basis13 != null ? basis13 * zuschlag : null);
+    return {
+      name: s.anzeige || s.name || "", ahv: s.ahv || "", persNr: s.persNr || "", periode: s.periode || "", datei: s.file || s.datei || "",
+      code: r.code, lohnart: r.label, zuschlag: Math.round(zuschlag * 100), stunden: r.anzahl, ansatz, betrag: r.betrag,
+      grundlohn: grund, basis13, bruttolohn: voll,
+      erwartetVoll: erwSoll != null ? Math.round(erwSoll * 100) / 100 : null, erwartetZuschlag: erwSollZus != null ? Math.round(erwSollZus * 100) / 100 : null,
+      berechnet: hit ? hit[0] : (ansatz && basis13 ? "Ansatz = " + (ansatz / basis13 * 100).toFixed(1) + " % von Grundlohn+13." : "?"),
+      istBasis, gav, gavQuelle, sollBasis, ok,
+      differenz: (erwSoll != null && ansatz != null) ? Math.round((ansatz - (nahe(ansatz, erwSollZus) ? erwSollZus : erwSoll)) * 100) / 100 : null
+    };
+  });
+}
+/* Excel-Export: alle Mitarbeiter, alle Überzeit-Positionen mit Rückrechnung */
+async function lcUeberzeitExcel() {
+  const zeilen = [];
+  lcState.slips.forEach(s => lcUeberzeitAnalyse(s).forEach(z => zeilen.push(z)));
+  if (!zeilen.length) { toast("Keine Überzeit-Positionen in den geladenen Belegen.", true); return; }
+  await lcLoadXlsx();
+  const hdr = ["Mitarbeiter", "AHV-Nr", "Pers-Nr", "Periode", "Lohnart", "Bezeichnung", "Zuschlag %", "Stunden", "Ansatz", "Betrag",
+    "Grundlohn/h", "Grundlohn + 13.", "Bruttolohn/h", "Berechnet als", "Effektive Basis", "GAV", "GAV-Quelle", "Soll-Basis (Parameter)", "Erwartet Ansatz voll", "Erwartet nur Zuschlag", "Differenz", "Status"];
+  const rows = zeilen.map(z => [z.name, z.ahv, z.persNr, z.periode, z.code, z.lohnart, z.zuschlag, z.stunden, z.ansatz, z.betrag,
+    z.grundlohn, z.basis13, z.bruttolohn, z.berechnet, z.istBasis, z.gav, z.gavQuelle, z.sollBasis, z.erwartetVoll, z.erwartetZuschlag, z.differenz, z.ok ? "OK" : "PRÜFEN"]);
+  const ws = window.XLSX.utils.aoa_to_sheet([hdr].concat(rows));
+  ws["!cols"] = hdr.map((h, i) => ({ wch: [22, 16, 8, 10, 8, 26, 9, 8, 9, 10, 11, 13, 12, 34, 22, 30, 26, 22, 12, 12, 10, 8][i] || 12 }));
+  ws["!autofilter"] = { ref: "A1:" + window.XLSX.utils.encode_col(hdr.length - 1) + (rows.length + 1) };
+  const wb = window.XLSX.utils.book_new();
+  window.XLSX.utils.book_append_sheet(wb, ws, "Überzeit");
+  // Zusammenfassung pro Mitarbeiter
+  const perMa = {};
+  zeilen.forEach(z => { const k = z.name + "|" + z.ahv; perMa[k] = perMa[k] || { name: z.name, ahv: z.ahv, n: 0, std: 0, betrag: 0, pruefen: 0, basen: new Set(), gav: z.gav }; const m = perMa[k]; m.n++; m.std += z.stunden || 0; m.betrag += z.betrag || 0; if (!z.ok) m.pruefen++; m.basen.add(z.istBasis); });
+  const ws2 = window.XLSX.utils.aoa_to_sheet([["Mitarbeiter", "AHV-Nr", "GAV", "Positionen", "Stunden", "Betrag", "Effektive Basis(en)", "Zu prüfen"]]
+    .concat(Object.values(perMa).sort((a, b) => a.name.localeCompare(b.name)).map(m => [m.name, m.ahv, m.gav, m.n, Math.round(m.std * 100) / 100, Math.round(m.betrag * 100) / 100, [...m.basen].join(", "), m.pruefen])));
+  ws2["!cols"] = [22, 16, 30, 10, 9, 11, 40, 10].map(w => ({ wch: w }));
+  window.XLSX.utils.book_append_sheet(wb, ws2, "Pro Mitarbeiter");
+  window.XLSX.writeFile(wb, "Ueberzeit-Liste_" + new Date().toISOString().slice(0, 10) + ".xlsx");
+  toast(zeilen.length + " Überzeit-Positionen von " + Object.keys(perMa).length + " Mitarbeitenden exportiert.");
 }
 
 /* ---------- Totalisierung ---------- */
@@ -1614,6 +1691,7 @@ async function renderLohncheck(el) {
     <label class="btn btn-sm" style="cursor:pointer">⇪ Lohnabrechnungen (PDF)
       <input type="file" accept=".pdf" multiple style="display:none" onchange="lcUpload(this)"></label>
     ${lcState.slips.length ? `<button class="btn btn-sm" onclick="lcExport()">⇩ CSV</button>
+    <button class="btn btn-sm" onclick="lcUeberzeitExcel()" title="Alle Überzeit-Positionen aller Belege mit Rückrechnung der Basis als Excel">⇩ Überzeit-Liste (Excel)</button>
     <button class="btn btn-sm" onclick="lcReset()" title="Alles zurücksetzen">↺</button>` : ""}`;
   if (lcState.busy) { el.innerHTML = `<div class="full-loading"><div class="loading"></div></div>`; return; }
   lcInstallGlobalDrop();

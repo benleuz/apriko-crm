@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.247.0"></script>
-<script src="apriko-api.js?v=1.247.0"></script>
-<script src="lohncheck.js?v=1.247.0"></script>
-<script src="personalbudget.js?v=1.247.0"></script>
-<script src="jahresbudget.js?v=1.247.0"></script>
-<script src="budgetpositionen.js?v=1.247.0"></script>
-<script src="lohnchecklistetemp.js?v=1.247.0"></script>
+<script src="apriko-filters.js?v=1.249.0"></script>
+<script src="apriko-api.js?v=1.249.0"></script>
+<script src="lohncheck.js?v=1.249.0"></script>
+<script src="personalbudget.js?v=1.249.0"></script>
+<script src="jahresbudget.js?v=1.249.0"></script>
+<script src="budgetpositionen.js?v=1.249.0"></script>
+<script src="lohnchecklistetemp.js?v=1.249.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -982,7 +982,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.247.0</span> · <span id="app-build-date">17.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.249.0</span> · <span id="app-build-date">17.09.2026</span>
     </div>
   </aside>
 
@@ -7592,9 +7592,11 @@ function renderAbacus(el) {
    Lohnbasis, auf der der Überzeitansatz berechnet wird — der Ultimative Check liest
    window.crmParameter.ueberzeit (lcUeberzeitCheck in lohncheck.js). */
 const PARAMETER_PFAD = "CRM-Budgetdaten/parameter.json";
-const PARAM_GAV_LISTE = ["GAV Personalverleih", "Bauhauptgewerbe (LMV)", "Ausbaugewerbe Westschweiz", "Elektro- und Telekommunikations-Installationsgewerbe",
-  "Gebäudetechnik", "Metallgewerbe", "Maler- und Gipsergewerbe", "Schreinergewerbe", "Holzbau", "Plattenleger", "Gerüstbau", "Dach- und Wandgewerbe (Gebäudehülle)",
-  "Reinigung", "Gastgewerbe (L-GAV)", "Autogewerbe", "Carrosseriegewerbe", "Sicherheitsdienstleistungen", "Andere"];
+const PARAM_GAV_LISTE = ["GAV Personalverleih", "Bauhauptgewerbe (LMV)", "Basler Ausbaugewerbe (BS)", "Ausbaugewerbe BL/BS/SO", "Ausbaugewerbe Westschweiz",
+  "Elektro- und Telekommunikations-Installationsgewerbe", "Gebäudetechnik", "Gebäudehüllengewerbe (Dach und Wand)", "Dach- und Wandgewerbe BL",
+  "Metallgewerbe", "Maler- und Gipsergewerbe (Deutschschweiz/TI)", "Maler- und Gipsergewerbe BL", "Gipsergewerbe BS", "Schreinergewerbe", "Holzbau",
+  "Plattenleger", "Gerüstbau", "Isoliergewerbe", "Marmor- und Granitgewerbe", "Gärtnerei/Landschaftsbau", "Reinigung", "Gastgewerbe (L-GAV)",
+  "Autogewerbe", "Carrosseriegewerbe", "Sicherheitsdienstleistungen", "Detailhandel", "Coiffeurgewerbe", "Andere"];
 const PARAM_UZ_BASEN = [["basis13", "Basis + 13. Gehalt (Grundlohn + 8.33 %)"], ["brutto", "auf Bruttolohn (Stundenlohn inkl. Ferien/Feiertage/13.)"]];
 let crmParameter = null;
 async function parameterLaden(force) {
