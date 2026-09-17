@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.133.0";
+const LC_VERSION = "1.134.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -713,6 +713,13 @@ function lcGrundlohnAnsatz(slip) {
   if (gRow && std > 0) return { wert: Math.round(gRow.betrag / std * 100) / 100, quelle: gRow.code + " " + gRow.label + " ÷ " + lcFmt(std) + " h" };
   return null;
 }
+/* Anteil 13. Monatslohn pro Stunde: bevorzugt der effektive Bestandteil auf dem Beleg (Zeile 1200 unter 1005 —
+   Apriko rechnet ihn auf Grundlohn + Ferien + Feiertage), sonst 8.33 % des Grundlohns. */
+function lcAnteil13(slip, grund) {
+  const r = slip.rows.find(x => x.code < 4900 && !x.isTotal && (x.code === 1200 || /13\.\s*Monatslohn/i.test(x.label)) && lcChfProStunde(x));
+  if (r) return { wert: lcChfProStunde(r), quelle: "Beleg " + r.code };
+  return grund != null ? { wert: Math.round(grund * LC_ANTEIL_13 * 100) / 100, quelle: "8.33 %" } : null;
+}
 function lcStundenlohnVoll(slip) {
   const r = slip.rows.find(x => (x.code === 1005 || /^Stundenlohn/i.test(x.label)) && !x.isTotal && x.level === 0 && lcChfProStunde(x));
   return r ? lcChfProStunde(r) : null;
@@ -790,7 +797,8 @@ function lcUeberzeitAnalyse(s, einsatzlisten) {
   const g = lcGrundlohnAnsatz(s);
   const voll = lcStundenlohnVoll(s);
   const grund = g ? g.wert : null;
-  const basis13 = grund != null ? Math.round(grund * (1 + LC_ANTEIL_13) * 100) / 100 : null;
+  const a13 = grund != null ? lcAnteil13(s, grund) : null;
+  const basis13 = a13 ? Math.round((grund + a13.wert) * 100) / 100 : null;
   const tol = 0.03, nahe = (a, b) => a != null && b != null && Math.abs(a - b) <= tol;
   return uzRows.map(r => {
     const zt = lcZulageTyp(r.label);
@@ -844,7 +852,7 @@ function lcUeberzeitAnalyse(s, einsatzlisten) {
       erwartetVoll: erwVoll, erwartetZuschlag: erwZus,
       berechnet, istBasis, gav, gavQuelle, sollBasis: sollKurz, ok,
       differenz: (erwartet != null && chfProStd != null) ? Math.round((chfProStd - erwartet) * 100) / 100 : null,
-      differenzTotal: (erwartet != null && chfProStd != null && r.anzahl) ? Math.round((chfProStd - erwartet) * r.anzahl * 100) / 100 : null,
+      differenzTotal: (erwartet != null && r.anzahl && r.betrag != null) ? Math.round((r.betrag - erwartet * r.anzahl) * 100) / 100 : null,
       erwartetBetrag: (erwartet != null && r.anzahl) ? Math.round(erwartet * r.anzahl * 100) / 100 : null
     };
   });
