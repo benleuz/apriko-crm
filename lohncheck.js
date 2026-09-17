@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.129.0";
+const LC_VERSION = "1.131.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -815,8 +815,10 @@ function lcUeberzeitCheck(s, add) {
 /* Überzeit-Rückrechnung für einen Beleg — Datenbasis für die Excel-Liste (Spezialtool):
    pro Überzeit-Lohnart: Stunden, Ansatz, Betrag, Grundlohn/h, voller Stundenlohn/h, Basis+13, erwartete Werte
    nach beiden Varianten, erkannte Berechnungsweise (wie wurde gerechnet), GAV und Soll-Basis aus Parameter. */
+const LC_ZULAGE_TYPEN = [[/[ÜU]e?berzeit/i, "Überzeit", 0.25], [/sonntag|feiertagsarbeit|feiertagszuschlag|sonn-/i, "Sonntag", 0.5], [/nacht/i, "Nacht", 0.25]];
+function lcZulageTyp(label) { const t = LC_ZULAGE_TYPEN.find(x => x[0].test(label || "")); return t ? { typ: t[1], zuschlag: t[2] } : null; }
 function lcUeberzeitAnalyse(s, einsatzlisten) {
-  const uzRows = s.rows.filter(r => r.code < 4900 && !r.isTotal && /[ÜU]e?berzeit/i.test(r.label));
+  const uzRows = s.rows.filter(r => r.code < 4900 && !r.isTotal && lcZulageTyp(r.label) && !/entsch[äa]digung$|feiertagsentsch/i.test(r.label));
   if (!uzRows.length) return [];
   // Optional eigene Einsatzlisten (Spielwiese → Überzeit-Check) statt der Kontrolllisten des Ultimativen Checks
   let el;
@@ -833,8 +835,9 @@ function lcUeberzeitAnalyse(s, einsatzlisten) {
   const basis13 = grund != null ? Math.round(grund * (1 + LC_ANTEIL_13) * 100) / 100 : null;
   const tol = 0.03, nahe = (a, b) => a != null && b != null && Math.abs(a - b) <= tol;
   return uzRows.map(r => {
+    const zt = lcZulageTyp(r.label);
     const pm = /(\d{1,3}(?:[.,]\d+)?)\s*%/.exec(r.label);
-    const zuschlag = pm ? parseFloat(pm[1].replace(",", ".")) / 100 : 0.25;
+    const zuschlag = pm ? parseFloat(pm[1].replace(",", ".")) / 100 : zt.zuschlag;
     let ansatz = r.ansatz;
     if ((ansatz === null || ansatz === 0) && r.anzahl) ansatz = Math.round(r.betrag / r.anzahl * 100) / 100;
     // Erkennen, wie gerechnet wurde
@@ -852,7 +855,7 @@ function lcUeberzeitAnalyse(s, einsatzlisten) {
     const erwSollZus = sollKurz === "auf Bruttolohn" ? (voll != null ? voll * zuschlag : null) : (basis13 != null ? basis13 * zuschlag : null);
     return {
       name: s.anzeige || s.name || "", ahv: s.ahv || "", persNr: s.persNr || "", periode: s.periode || "", datei: s.file || s.datei || "",
-      code: r.code, lohnart: r.label, zuschlag: Math.round(zuschlag * 100), stunden: r.anzahl, ansatz, betrag: r.betrag,
+      typ: zt.typ, code: r.code, lohnart: r.label, zuschlag: Math.round(zuschlag * 100), stunden: r.anzahl, ansatz, betrag: r.betrag,
       grundlohn: grund, basis13, bruttolohn: voll,
       erwartetVoll: erwSoll != null ? Math.round(erwSoll * 100) / 100 : null, erwartetZuschlag: erwSollZus != null ? Math.round(erwSollZus * 100) / 100 : null,
       berechnet: hit ? hit[0] : (ansatz && basis13 ? "Ansatz = " + (ansatz / basis13 * 100).toFixed(1) + " % von Grundlohn+13." : "?"),
@@ -867,15 +870,15 @@ async function lcUeberzeitExcel(slips, einsatzlisten) {
   (slips || lcState.slips).forEach(s => lcUeberzeitAnalyse(s, einsatzlisten).forEach(z => zeilen.push(z)));
   if (!zeilen.length) { toast("Keine Überzeit-Positionen in den geladenen Belegen.", true); return; }
   await lcLoadXlsx();
-  const hdr = ["Mitarbeiter", "AHV-Nr", "Pers-Nr", "Periode", "Lohnart", "Bezeichnung", "Zuschlag %", "Stunden", "Ansatz", "Betrag",
+  const hdr = ["Mitarbeiter", "AHV-Nr", "Pers-Nr", "Periode", "Typ", "Lohnart", "Bezeichnung", "Zuschlag %", "Stunden", "Ansatz", "Betrag",
     "Grundlohn/h", "Grundlohn + 13.", "Bruttolohn/h", "Berechnet als", "Effektive Basis", "GAV", "GAV-Quelle", "Soll-Basis (Parameter)", "Erwartet Ansatz voll", "Erwartet nur Zuschlag", "Differenz", "Status"];
-  const rows = zeilen.map(z => [z.name, z.ahv, z.persNr, z.periode, z.code, z.lohnart, z.zuschlag, z.stunden, z.ansatz, z.betrag,
+  const rows = zeilen.map(z => [z.name, z.ahv, z.persNr, z.periode, z.typ, z.code, z.lohnart, z.zuschlag, z.stunden, z.ansatz, z.betrag,
     z.grundlohn, z.basis13, z.bruttolohn, z.berechnet, z.istBasis, z.gav, z.gavQuelle, z.sollBasis, z.erwartetVoll, z.erwartetZuschlag, z.differenz, z.ok ? "OK" : "PRÜFEN"]);
   const ws = window.XLSX.utils.aoa_to_sheet([hdr].concat(rows));
-  ws["!cols"] = hdr.map((h, i) => ({ wch: [22, 16, 8, 10, 8, 26, 9, 8, 9, 10, 11, 13, 12, 34, 22, 30, 26, 22, 12, 12, 10, 8][i] || 12 }));
+  ws["!cols"] = hdr.map((h, i) => ({ wch: [22, 16, 8, 10, 9, 8, 26, 9, 8, 9, 10, 11, 13, 12, 34, 22, 30, 26, 22, 12, 12, 10, 8][i] || 12 }));
   ws["!autofilter"] = { ref: "A1:" + window.XLSX.utils.encode_col(hdr.length - 1) + (rows.length + 1) };
   const wb = window.XLSX.utils.book_new();
-  window.XLSX.utils.book_append_sheet(wb, ws, "Überzeit");
+  window.XLSX.utils.book_append_sheet(wb, ws, "Zulagen");
   // Zusammenfassung pro Mitarbeiter
   const perMa = {};
   zeilen.forEach(z => { const k = z.name + "|" + z.ahv; perMa[k] = perMa[k] || { name: z.name, ahv: z.ahv, n: 0, std: 0, betrag: 0, pruefen: 0, basen: new Set(), gav: z.gav }; const m = perMa[k]; m.n++; m.std += z.stunden || 0; m.betrag += z.betrag || 0; if (!z.ok) m.pruefen++; m.basen.add(z.istBasis); });
@@ -884,7 +887,7 @@ async function lcUeberzeitExcel(slips, einsatzlisten) {
   ws2["!cols"] = [22, 16, 30, 10, 9, 11, 40, 10].map(w => ({ wch: w }));
   window.XLSX.utils.book_append_sheet(wb, ws2, "Pro Mitarbeiter");
   window.XLSX.writeFile(wb, "Ueberzeit-Liste_" + new Date().toISOString().slice(0, 10) + ".xlsx");
-  toast(zeilen.length + " Überzeit-Positionen von " + Object.keys(perMa).length + " Mitarbeitenden exportiert.");
+  toast(zeilen.length + " Positionen (Überzeit/Sonntag/Nacht) von " + Object.keys(perMa).length + " Mitarbeitenden exportiert.");
 }
 
 /* ============ Spielwiese → Überzeit-Check (eigenständig, nichts wird gespeichert) ============
@@ -936,7 +939,7 @@ async function renderUeberzeitCheck(el) {
   el.innerHTML = `
     <div class="card" style="padding:14px 16px;margin-bottom:14px">
       <h3 style="margin:0 0 4px">Überzeit-Check</h3>
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">1. Einsatzliste (CSV/XLSX mit Einsatz-Nr und GAV) hochladen · 2. Lohnabrechnungen als PDF (alle Monate, beliebig viele) · 3. Liste ziehen. Basis-Regel pro GAV kommt aus Parameter → Überzeit. Es wird nichts gespeichert.</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">1. Einsatzliste (CSV/XLSX mit Einsatz-Nr und GAV) hochladen · 2. Lohnabrechnungen als PDF (alle Monate, beliebig viele) · 3. Liste ziehen. Geprüft werden alle Lohnarten mit «Überzeit», «Sonntag» oder «Nacht» in der Bezeichnung (Standard-Zuschlag 25 % / 50 % / 25 %, sonst aus der Bezeichnung). Basis-Regel pro GAV kommt aus Parameter → Überzeit. Es wird nichts gespeichert.</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
         <label class="btn btn-sm">⇧ Einsatzliste<input type="file" accept=".csv,.xlsx,.xls,.txt" multiple style="display:none" onchange="uzUploadEinsatzliste(this)"></label>
         <label class="btn btn-sm">⇧ Lohnabrechnungen (PDF)<input type="file" accept=".pdf" multiple style="display:none" onchange="uzUploadPdf(this)"></label>
@@ -950,11 +953,11 @@ async function renderUeberzeitCheck(el) {
     </div>
     ${uzState.slips.length ? `
     <div class="card" style="padding:14px 16px">
-      <div style="margin-bottom:8px"><strong>${zeilen.length} Überzeit-Positionen</strong> · ${new Set(zeilen.map(z => z.name + "|" + z.ahv)).size} Mitarbeitende${pruefen ? ` · <span style="color:var(--danger)">${pruefen} zu prüfen</span>` : " · alle OK"}</div>
+      <div style="margin-bottom:8px"><strong>${zeilen.length} Positionen</strong> (${["Überzeit", "Sonntag", "Nacht"].map(t => t + " " + zeilen.filter(z => z.typ === t).length).join(" · ")}) · ${new Set(zeilen.map(z => z.name + "|" + z.ahv)).size} Mitarbeitende${pruefen ? ` · <span style="color:var(--danger)">${pruefen} zu prüfen</span>` : " · alle OK"}</div>
       <div class="table-wrap"><table style="font-size:11px">
-        <thead><tr><th>Mitarbeiter</th><th>Periode</th><th>Lohnart</th><th style="text-align:right">Std</th><th style="text-align:right">Ansatz</th><th style="text-align:right">Betrag</th><th style="text-align:right">Grundlohn</th><th style="text-align:right">Grund+13.</th><th style="text-align:right">Brutto/h</th><th>Berechnet als</th><th>GAV</th><th>Soll-Basis</th><th style="text-align:right">Erwartet</th><th style="text-align:right">Diff</th><th></th></tr></thead>
+        <thead><tr><th>Mitarbeiter</th><th>Periode</th><th>Typ</th><th>Lohnart</th><th style="text-align:right">Std</th><th style="text-align:right">Ansatz</th><th style="text-align:right">Betrag</th><th style="text-align:right">Grundlohn</th><th style="text-align:right">Grund+13.</th><th style="text-align:right">Brutto/h</th><th>Berechnet als</th><th>GAV</th><th>Soll-Basis</th><th style="text-align:right">Erwartet</th><th style="text-align:right">Diff</th><th></th></tr></thead>
         <tbody>${zeilen.map(z => `<tr style="${z.ok ? "" : "color:var(--danger)"}">
-          <td>${escape(z.name)}</td><td>${escape(z.periode)}</td><td>${z.code} ${escape(z.lohnart)}</td>
+          <td>${escape(z.name)}</td><td>${escape(z.periode)}</td><td>${escape(z.typ)}</td><td>${z.code} ${escape(z.lohnart)}</td>
           <td style="text-align:right;font-family:var(--font-mono)">${fmt(z.stunden)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.ansatz)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.betrag)}</td>
           <td style="text-align:right;font-family:var(--font-mono)">${fmt(z.grundlohn)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.basis13)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.bruttolohn)}</td>
           <td>${escape(z.berechnet)}</td><td title="${escape(z.gavQuelle)}">${escape(z.gav)}</td><td>${escape(z.sollBasis)}</td>
@@ -1770,7 +1773,6 @@ async function renderLohncheck(el) {
     <label class="btn btn-sm" style="cursor:pointer">⇪ Lohnabrechnungen (PDF)
       <input type="file" accept=".pdf" multiple style="display:none" onchange="lcUpload(this)"></label>
     ${lcState.slips.length ? `<button class="btn btn-sm" onclick="lcExport()">⇩ CSV</button>
-    <button class="btn btn-sm" onclick="lcUeberzeitExcel()" title="Alle Überzeit-Positionen aller Belege mit Rückrechnung der Basis als Excel">⇩ Überzeit-Liste (Excel)</button>
     <button class="btn btn-sm" onclick="lcReset()" title="Alles zurücksetzen">↺</button>` : ""}`;
   if (lcState.busy) { el.innerHTML = `<div class="full-loading"><div class="loading"></div></div>`; return; }
   lcInstallGlobalDrop();
