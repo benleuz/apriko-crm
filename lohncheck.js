@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.134.0";
+const LC_VERSION = "1.135.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -744,11 +744,11 @@ function lcGavAusEinsatzliste(slip) {
   for (const l of listen) {
     for (const z of l.zeilen) {
       const nr = String(z[l.spaltenMap.einsatznr] || "").replace(/\D/g, "").replace(/^0+/, "");
-      if (nr && nrs.includes(nr)) { const g = String(z[l.spaltenMap.gav] || "").trim(); if (g && !gefunden.some(x => x.gav === g)) gefunden.push({ gav: g, nr }); }
+      if (nr && nrs.includes(nr)) { const g = String(z[l.spaltenMap.gav] || "").trim(); const b = l.spaltenMap.betrieb ? String(z[l.spaltenMap.betrieb] || "").trim() : ""; if (g && !gefunden.some(x => x.gav === g && x.betrieb === b)) gefunden.push({ gav: g, nr, betrieb: b }); }
     }
   }
   if (!gefunden.length) return null;
-  return { gav: gefunden[0].gav, quelle: "Einsatzliste, Einsatz Nr. " + gefunden[0].nr, mehrere: gefunden.length > 1 ? gefunden.map(x => x.gav) : null };
+  return { gav: gefunden[0].gav, betrieb: [...new Set(gefunden.map(x => x.betrieb).filter(Boolean))].join(" / "), quelle: "Einsatzliste, Einsatz Nr. " + gefunden[0].nr, mehrere: gefunden.length > 1 ? gefunden.map(x => x.gav) : null };
 }
 /* GAV-Bezeichnung der Einsatzliste auf die Parameter-Zeile abbilden (exakt, sonst Schlüsselwörter). */
 function lcParamZeileFuerGav(gavText) {
@@ -790,8 +790,8 @@ function lcUeberzeitAnalyse(s, einsatzlisten) {
   if (einsatzlisten) { const save = lcState.kontrolllisten; lcState.kontrolllisten = { listen: einsatzlisten }; try { el = lcGavAusEinsatzliste(s); } finally { lcState.kontrolllisten = save; } }
   else el = lcGavAusEinsatzliste(s);
   const istBau = s.rows.some(r => r.code === 5110 || /\bFAR\b/i.test(r.label || ""));
-  let gav, gavQuelle, pz = null;
-  if (el) { gav = el.gav; gavQuelle = el.quelle; pz = lcParamZeileFuerGav(el.gav); }
+  let gav, gavQuelle, pz = null, betrieb = "";
+  if (el) { gav = el.gav; gavQuelle = el.quelle; betrieb = el.betrieb || ""; pz = lcParamZeileFuerGav(el.gav); }
   else { gav = istBau ? "Bauhauptgewerbe (LMV)" : "GAV Personalverleih"; gavQuelle = istBau ? "Annahme (FAR-Abzug)" : "Annahme (keine Einsatzliste)"; pz = lcParamZeileFuerGav(gav); }
   const sollBasis = pz ? (pz.basis === "brutto" ? "auf Bruttolohn" : "Basis + 13.") : (lcUeberzeitParam(gav) === "brutto" ? "auf Bruttolohn (Vorgabe)" : "Basis + 13. (Vorgabe)");
   const g = lcGrundlohnAnsatz(s);
@@ -850,7 +850,7 @@ function lcUeberzeitAnalyse(s, einsatzlisten) {
       ansatzPct: pctMode ? r.ansatz : null, basisVerwendet,
       grundlohn: grund, basis13, bruttolohn: voll,
       erwartetVoll: erwVoll, erwartetZuschlag: erwZus,
-      berechnet, istBasis, gav, gavQuelle, sollBasis: sollKurz, ok,
+      berechnet, istBasis, gav, gavQuelle, betrieb, sollBasis: sollKurz, ok,
       differenz: (erwartet != null && chfProStd != null) ? Math.round((chfProStd - erwartet) * 100) / 100 : null,
       differenzTotal: (erwartet != null && r.anzahl && r.betrag != null) ? Math.round((r.betrag - erwartet * r.anzahl) * 100) / 100 : null,
       erwartetBetrag: (erwartet != null && r.anzahl) ? Math.round(erwartet * r.anzahl * 100) / 100 : null
@@ -863,21 +863,21 @@ async function lcUeberzeitExcel(slips, einsatzlisten) {
   (slips || lcState.slips).forEach(s => lcUeberzeitAnalyse(s, einsatzlisten).forEach(z => zeilen.push(z)));
   if (!zeilen.length) { toast("Keine Überzeit-Positionen in den geladenen Belegen.", true); return; }
   await lcLoadXlsx();
-  const hdr = ["Mitarbeiter", "AHV-Nr", "Pers-Nr", "Periode", "Typ", "Lohnart", "Bezeichnung", "Zuschlag %", "Stunden", "Basis verwendet (CHF/h)", "Ansatz %", "Ansatz CHF/h", "Betrag",
+  const hdr = ["Mitarbeiter", "AHV-Nr", "Pers-Nr", "Periode", "Einsatzbetrieb", "Typ", "Lohnart", "Bezeichnung", "Zuschlag %", "Stunden", "Basis verwendet (CHF/h)", "Ansatz %", "Ansatz CHF/h", "Betrag",
     "Grundlohn/h", "Grundlohn + 13.", "Bruttolohn/h (alles drin)", "Berechnet als", "Effektive Basis", "GAV", "GAV-Quelle", "Soll-Basis (Parameter)", "Erwartet CHF/h voll", "Erwartet nur Zuschlag", "Differenz CHF/h", "Erwartet Betrag", "Differenz Betrag (zu viel bezahlt +)", "Status"];
-  const rows = zeilen.map(z => [z.name, z.ahv, z.persNr, z.periode, z.typ, z.code, z.lohnart, z.zuschlag, z.stunden, z.basisVerwendet, z.ansatzPct, z.ansatz, z.betrag,
+  const rows = zeilen.map(z => [z.name, z.ahv, z.persNr, z.periode, z.betrieb, z.typ, z.code, z.lohnart, z.zuschlag, z.stunden, z.basisVerwendet, z.ansatzPct, z.ansatz, z.betrag,
     z.grundlohn, z.basis13, z.bruttolohn, z.berechnet, z.istBasis, z.gav, z.gavQuelle, z.sollBasis, z.erwartetVoll, z.erwartetZuschlag, z.differenz, z.erwartetBetrag, z.differenzTotal, z.ok ? "OK" : "PRÜFEN"]);
   const ws = window.XLSX.utils.aoa_to_sheet([hdr].concat(rows));
-  ws["!cols"] = hdr.map((h, i) => ({ wch: [22, 16, 8, 10, 9, 8, 26, 9, 8, 12, 9, 10, 10, 11, 13, 14, 38, 20, 30, 26, 18, 12, 12, 10, 12, 14, 8][i] || 12 }));
+  ws["!cols"] = hdr.map((h, i) => ({ wch: [22, 16, 8, 10, 26, 9, 8, 26, 9, 8, 12, 9, 10, 10, 11, 13, 14, 38, 20, 30, 26, 18, 12, 12, 10, 12, 14, 8][i] || 12 }));
   ws["!autofilter"] = { ref: "A1:" + window.XLSX.utils.encode_col(hdr.length - 1) + (rows.length + 1) };
   const wb = window.XLSX.utils.book_new();
   window.XLSX.utils.book_append_sheet(wb, ws, "Zulagen");
   // Zusammenfassung pro Mitarbeiter
   const perMa = {};
-  zeilen.forEach(z => { const k = z.name + "|" + z.ahv; perMa[k] = perMa[k] || { name: z.name, ahv: z.ahv, n: 0, std: 0, betrag: 0, diff: 0, pruefen: 0, basen: new Set(), gav: z.gav }; const m = perMa[k]; m.n++; m.std += z.stunden || 0; m.betrag += z.betrag || 0; m.diff += z.differenzTotal || 0; if (!z.ok) m.pruefen++; m.basen.add(z.istBasis); });
-  const ws2 = window.XLSX.utils.aoa_to_sheet([["Mitarbeiter", "AHV-Nr", "GAV", "Positionen", "Stunden", "Betrag", "Differenz Betrag (zu viel bezahlt +)", "Effektive Basis(en)", "Zu prüfen"]]
-    .concat(Object.values(perMa).sort((a, b) => a.name.localeCompare(b.name)).map(m => [m.name, m.ahv, m.gav, m.n, Math.round(m.std * 100) / 100, Math.round(m.betrag * 100) / 100, Math.round(m.diff * 100) / 100, [...m.basen].join(", "), m.pruefen])));
-  ws2["!cols"] = [22, 16, 30, 10, 9, 11, 14, 40, 10].map(w => ({ wch: w }));
+  zeilen.forEach(z => { const k = z.name + "|" + z.ahv; perMa[k] = perMa[k] || { name: z.name, ahv: z.ahv, n: 0, std: 0, betrag: 0, diff: 0, pruefen: 0, basen: new Set(), betriebe: new Set(), gav: z.gav }; const m = perMa[k]; m.n++; if (z.betrieb) m.betriebe.add(z.betrieb); m.std += z.stunden || 0; m.betrag += z.betrag || 0; m.diff += z.differenzTotal || 0; if (!z.ok) m.pruefen++; m.basen.add(z.istBasis); });
+  const ws2 = window.XLSX.utils.aoa_to_sheet([["Mitarbeiter", "AHV-Nr", "Einsatzbetrieb(e)", "GAV", "Positionen", "Stunden", "Betrag", "Differenz Betrag (zu viel bezahlt +)", "Effektive Basis(en)", "Zu prüfen"]]
+    .concat(Object.values(perMa).sort((a, b) => a.name.localeCompare(b.name)).map(m => [m.name, m.ahv, [...m.betriebe].join(", "), m.gav, m.n, Math.round(m.std * 100) / 100, Math.round(m.betrag * 100) / 100, Math.round(m.diff * 100) / 100, [...m.basen].join(", "), m.pruefen])));
+  ws2["!cols"] = [22, 16, 28, 30, 10, 9, 11, 14, 40, 10].map(w => ({ wch: w }));
   window.XLSX.utils.book_append_sheet(wb, ws2, "Pro Mitarbeiter");
   window.XLSX.writeFile(wb, "Ueberzeit-Liste_" + new Date().toISOString().slice(0, 10) + ".xlsx");
   toast(zeilen.length + " Positionen (Überzeit/Sonntag/Nacht) von " + Object.keys(perMa).length + " Mitarbeitenden exportiert.");
@@ -927,7 +927,7 @@ async function renderUeberzeitCheck(el) {
   document.getElementById("view-actions").innerHTML = "";
   const zeilen = uzState.slips.length ? uzZeilen() : [];
   const fmt = v => v == null ? "—" : lcFmt(v);
-  const feldLabel = { einsatznr: "Einsatz-Nr", gav: "GAV" };
+  const feldLabel = { einsatznr: "Einsatz-Nr", gav: "GAV", betrieb: "Einsatzbetrieb" };
   const pruefen = zeilen.filter(z => !z.ok).length;
   el.innerHTML = `
     <div class="card" style="padding:14px 16px;margin-bottom:14px">
@@ -940,7 +940,7 @@ async function renderUeberzeitCheck(el) {
         ${uzState.busy ? `<span style="font-size:11px;color:var(--text-dim)">Lese PDFs …</span>` : ""}
       </div>
       ${uzState.einsatzlisten.length ? `<div style="margin-top:10px;font-size:11px">${uzState.einsatzlisten.map(l => `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:4px"><strong>${escape(l.dateiname)}</strong> · ${l.zeilen.length} Zeilen
-        ${["einsatznr", "gav"].map(f => `<label>${feldLabel[f]}: <select onchange="uzSetSpalte('${l.id}','${f}',this.value)"><option value="">—</option>${l.spalten.map(sp => `<option value="${escape(sp)}" ${l.spaltenMap[f] === sp ? "selected" : ""}>${escape(sp)}</option>`).join("")}</select></label>`).join(" ")}
+        ${["einsatznr", "gav", "betrieb"].map(f => `<label>${feldLabel[f]}: <select onchange="uzSetSpalte('${l.id}','${f}',this.value)"><option value="">—</option>${l.spalten.map(sp => `<option value="${escape(sp)}" ${l.spaltenMap[f] === sp ? "selected" : ""}>${escape(sp)}</option>`).join("")}</select></label>`).join(" ")}
         <a href="#" onclick="uzDelEinsatzliste('${l.id}');return false;" style="color:var(--text-faint)">✕</a></div>`).join("")}</div>` : `<div style="margin-top:8px;font-size:11px;color:var(--warn)">Noch keine Einsatzliste — GAV wird dann nur angenommen (FAR-Abzug → Bauhauptgewerbe, sonst Personalverleih).</div>`}
       ${uzState.files.length ? `<div style="margin-top:6px;font-size:11px;color:var(--text-dim)">Belege: ${uzState.files.map(escape).join(" · ")} — ${uzState.slips.length} Abrechnungen</div>` : ""}
     </div>
@@ -948,9 +948,9 @@ async function renderUeberzeitCheck(el) {
     <div class="card" style="padding:14px 16px">
       <div style="margin-bottom:8px"><strong>${zeilen.length} Positionen</strong> (${["Überzeit", "Sonntag", "Nacht"].map(t => t + " " + zeilen.filter(z => z.typ === t).length).join(" · ")}) · Differenz total CHF ${lcFmt(zeilen.reduce((a, z) => a + (z.differenzTotal || 0), 0))} · ${new Set(zeilen.map(z => z.name + "|" + z.ahv)).size} Mitarbeitende${pruefen ? ` · <span style="color:var(--danger)">${pruefen} zu prüfen</span>` : " · alle OK"}</div>
       <div class="table-wrap"><table style="font-size:11px">
-        <thead><tr><th>Mitarbeiter</th><th>Periode</th><th>Typ</th><th>Lohnart</th><th style="text-align:right">Std</th><th style="text-align:right">Basis verw.</th><th style="text-align:right">%</th><th style="text-align:right">CHF/h</th><th style="text-align:right">Betrag</th><th style="text-align:right">Grundlohn</th><th style="text-align:right">Grund+13.</th><th style="text-align:right">Brutto/h</th><th>Berechnet als</th><th>GAV</th><th>Soll-Basis</th><th style="text-align:right">Erwartet voll / Zuschlag</th><th style="text-align:right">Diff/h</th><th style="text-align:right">Diff CHF</th><th></th></tr></thead>
+        <thead><tr><th>Mitarbeiter</th><th>Periode</th><th>Einsatzbetrieb</th><th>Typ</th><th>Lohnart</th><th style="text-align:right">Std</th><th style="text-align:right">Basis verw.</th><th style="text-align:right">%</th><th style="text-align:right">CHF/h</th><th style="text-align:right">Betrag</th><th style="text-align:right">Grundlohn</th><th style="text-align:right">Grund+13.</th><th style="text-align:right">Brutto/h</th><th>Berechnet als</th><th>GAV</th><th>Soll-Basis</th><th style="text-align:right">Erwartet voll / Zuschlag</th><th style="text-align:right">Diff/h</th><th style="text-align:right">Diff CHF</th><th></th></tr></thead>
         <tbody>${zeilen.map(z => `<tr style="${z.ok ? "" : "color:var(--danger)"}">
-          <td>${escape(z.name)}</td><td>${escape(z.periode)}</td><td>${escape(z.typ)}</td><td>${z.code} ${escape(z.lohnart)}</td>
+          <td>${escape(z.name)}</td><td>${escape(z.periode)}</td><td>${escape(z.betrieb || "")}</td><td>${escape(z.typ)}</td><td>${z.code} ${escape(z.lohnart)}</td>
           <td style="text-align:right;font-family:var(--font-mono)">${fmt(z.stunden)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.basisVerwendet)}</td><td style="text-align:right;font-family:var(--font-mono)">${z.ansatzPct != null ? z.ansatzPct + " %" : "—"}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.ansatz)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.betrag)}</td>
           <td style="text-align:right;font-family:var(--font-mono)">${fmt(z.grundlohn)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.basis13)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(z.bruttolohn)}</td>
           <td>${escape(z.berechnet)}</td><td title="${escape(z.gavQuelle)}">${escape(z.gav)}</td><td>${escape(z.sollBasis)}</td>
@@ -1178,7 +1178,8 @@ const LC_SPALTEN_MUSTER = {
   von: /^von$|beginn|start|eintritt|einsatzbeginn/i,
   bis: /^bis$|ende|austritt|einsatzende/i,
   einsatznr: /einsatz[-\s]?(nr|nummer|id)|^einsatz$|assignment/i,
-  gav: /^gav$|gesamtarbeitsvertrag|\bgav\b|cct|ccl/i
+  gav: /^gav$|gesamtarbeitsvertrag|\bgav\b|cct|ccl/i,
+  betrieb: /einsatzbetrieb|einsatzfirma|^kunde$|kundenname|^firma$|firmenname|^betrieb$|unternehmen|^customer|^company/i
 };
 function lcErkenneSpalten(spalten) {
   const out = {};
@@ -1724,7 +1725,7 @@ function lcRenderKontrolllistenPanel() {
 }
 function lcRenderListRow(l) {
   const map = l.spaltenMap || {};
-  const feldLabel = { ahv: "AHV-Nr", name: "Name", vorname: "Vorname", geburtsdatum: "Geburtsdatum", von: "Von", bis: "Bis", einsatznr: "Einsatz-Nr", gav: "GAV" };
+  const feldLabel = { ahv: "AHV-Nr", name: "Name", vorname: "Vorname", geburtsdatum: "Geburtsdatum", von: "Von", bis: "Bis", einsatznr: "Einsatz-Nr", gav: "GAV", betrieb: "Einsatzbetrieb" };
   return `
     <div style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:8px">
       <div style="display:flex;align-items:center;gap:6px">
