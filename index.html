@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.258.0"></script>
-<script src="apriko-api.js?v=1.258.0"></script>
-<script src="lohncheck.js?v=1.258.0"></script>
-<script src="personalbudget.js?v=1.258.0"></script>
-<script src="jahresbudget.js?v=1.258.0"></script>
-<script src="budgetpositionen.js?v=1.258.0"></script>
-<script src="lohnchecklistetemp.js?v=1.258.0"></script>
+<script src="apriko-filters.js?v=1.259.0"></script>
+<script src="apriko-api.js?v=1.259.0"></script>
+<script src="lohncheck.js?v=1.259.0"></script>
+<script src="personalbudget.js?v=1.259.0"></script>
+<script src="jahresbudget.js?v=1.259.0"></script>
+<script src="budgetpositionen.js?v=1.259.0"></script>
+<script src="lohnchecklistetemp.js?v=1.259.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -983,7 +983,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.258.0</span> · <span id="app-build-date">18.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.259.0</span> · <span id="app-build-date">18.09.2026</span>
     </div>
   </aside>
 
@@ -7183,11 +7183,23 @@ function tarifartenCsvExport() {
    sind hier editierbar (localStorage aba-settings). Erkennung des Blatts: entweder Monats-
    spalten (Jan…Dez / 01…12 / 2026-08) = Breitformat, oder Spalten Lohnart/Betrag(/Monat) = Langformat. */
 const ABA_DEFAULTS = { client: "99999", division: "0", currency: "CHF", mapId: "AbaDefault", version: "2015", docCode: "B", textPrefix: "Lohn", mwstKonten: "5490:200:I" };
-let abaState = { datei: "", zeilen: [], spalten: [], monat: new Date().getMonth() || 12, jahr: new Date().getFullYear(), overrides: {}, xml: "" };
+let abaState = { datei: "", zeilen: [], spalten: [], monat: new Date().getMonth() || 12, jahr: new Date().getFullYear(), overrides: {}, xml: "", kunde: parseInt(localStorage.getItem("aba-kunde") || "0") || 0 };
+/* Kunden mit FIBU-Monatsabschluss (Kundenflag «fibu») — pro Kunde eigenes Regelwerk + Mandant-Parameter
+   in parameter.json (abacusKunden[<id>]); der globale Block «abacus» ist die Vorlage für neue Kunden. */
+function abaFibuKunden() { return cache.customers.filter(c => kundenFlag(c.id, "fibu")).sort((a, b) => (a.Title || "").localeCompare(b.Title || "")); }
+function abaKundeWaehlen(id) { abaState.kunde = parseInt(id) || 0; localStorage.setItem("aba-kunde", String(abaState.kunde)); abaState.xml = ""; render(); }
 function abaSettings() {
-  try { return Object.assign({}, ABA_DEFAULTS, JSON.parse(localStorage.getItem("aba-settings") || "{}")); } catch (e) { return Object.assign({}, ABA_DEFAULTS); }
+  let lokal = {};
+  try { lokal = JSON.parse(localStorage.getItem("aba-settings") || "{}"); } catch (e) {}
+  if (abaState.kunde && crmParameter) { const a = abaParam(); return Object.assign({}, ABA_DEFAULTS, lokal, a.mandant || {}); }
+  return Object.assign({}, ABA_DEFAULTS, lokal);
 }
-function abaSettingSet(k, v) {
+async function abaSettingSet(k, v) {
+  if (abaState.kunde) {
+    await parameterLaden(false);
+    const a = abaParam(); a.mandant = a.mandant || {}; a.mandant[k] = v;
+    await abaParamSpeichern(); render(); return;
+  }
   const s = abaSettings(); s[k] = v; localStorage.setItem("aba-settings", JSON.stringify(s)); render();
 }
 const ABA_MONATE_RE = [/^jan/i, /^feb/i, /^m[aä]r/i, /^apr/i, /^mai|^may/i, /^jun/i, /^jul/i, /^aug/i, /^sep/i, /^okt|^oct/i, /^nov/i, /^dez|^dec/i];
@@ -7284,9 +7296,25 @@ const ABA_HELVA_STANDARD = {
   zusatz: { "5091": { soll: "2272", haben: "5472" } },
   nichtBuchen: ["3500", "4500", "4900", "5500", "5900", "6500", "6900", "7500", "8500", "86*", "87*", "8995", "9*"]
 };
-function abaParam() {
+function abaParam(global) {
   if (!crmParameter) return Object.assign({ erzwungen: [], ausgeschlossen: [] }, JSON.parse(JSON.stringify(ABA_HELVA_STANDARD)));
   if (!crmParameter.abacus) { crmParameter.abacus = JSON.parse(JSON.stringify(ABA_HELVA_STANDARD)); crmParameter.abacus.standardGeladen = "Helva Juli 2026"; }
+  if (!global && abaState.kunde) {
+    // Kundenspezifischer Block: beim ersten Zugriff aus der Vorlage (globaler Block) kopieren
+    crmParameter.abacusKunden = crmParameter.abacusKunden || {};
+    const k = String(abaState.kunde);
+    if (!crmParameter.abacusKunden[k]) {
+      const vorlage = JSON.parse(JSON.stringify(abaParam(true)));
+      vorlage.standardGeladen = "Vorlage kopiert " + new Date().toLocaleDateString("de-CH");
+      vorlage.erzwungen = []; vorlage.ausgeschlossen = []; vorlage.mandant = {};
+      crmParameter.abacusKunden[k] = vorlage;
+      abaParamSpeichern();
+    }
+    const a = crmParameter.abacusKunden[k];
+    a.kontierung = a.kontierung || {}; a.erzwungen = a.erzwungen || []; a.ausgeschlossen = a.ausgeschlossen || [];
+    a.umkontierung = a.umkontierung || {}; a.aggregat = a.aggregat || {}; a.zusatz = a.zusatz || {}; a.nichtBuchen = a.nichtBuchen || []; a.mandant = a.mandant || {};
+    return a;
+  }
   else if (!crmParameter.abacus.standardGeladen) {
     // Block aus v1.243 (nur manuelle Kontierungen) → Standard-Regelwerk ergänzen, eigene Einträge behalten
     const std = JSON.parse(JSON.stringify(ABA_HELVA_STANDARD)), a0 = crmParameter.abacus;
@@ -7310,8 +7338,11 @@ function abaNichtBuchen(code, pa) {
 function abaUmkonto(konto, pa) { return konto && pa.umkontierung[konto] ? pa.umkontierung[konto] : konto; }
 async function abaStandardLaden() {
   await parameterLaden(false);
-  if (!confirm("Regelwerk auf den Helva-Standard (Buchungsmaske Juli 2026) zurücksetzen? Eigene Umkontierungen/Kontierungen gehen verloren.")) return;
-  crmParameter.abacus = JSON.parse(JSON.stringify(ABA_HELVA_STANDARD)); crmParameter.abacus.standardGeladen = "Helva Juli 2026";
+  const ziel = abaState.kunde ? "den gewählten Kunden" : "die Vorlage";
+  if (!confirm("Regelwerk für " + ziel + " auf den Helva-Standard (Buchungsmaske Juli 2026) zurücksetzen? Eigene Umkontierungen/Kontierungen gehen verloren.")) return;
+  const std = JSON.parse(JSON.stringify(ABA_HELVA_STANDARD)); std.standardGeladen = "Helva Juli 2026";
+  if (abaState.kunde) { crmParameter.abacusKunden = crmParameter.abacusKunden || {}; std.mandant = (crmParameter.abacusKunden[String(abaState.kunde)] || {}).mandant || {}; crmParameter.abacusKunden[String(abaState.kunde)] = std; }
+  else crmParameter.abacus = std;
   await abaParamSpeichern(); render();
 }
 async function abaParamSpeichern() {
@@ -7520,7 +7551,8 @@ function abaXmlErzeugen() {
   const blob = new Blob([abaState.xml], { type: "application/xml;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `BuBel_Abacus_${abaState.jahr}${String(abaState.monat).padStart(2, "0")}.xml`;
+  const kn = abaState.kunde ? ((cache.customers.find(c => c.id === abaState.kunde) || {}).Title || "").replace(/[^\w.-]+/g, "_") + "_" : "";
+  a.download = `BuBel_Abacus_${kn}${abaState.jahr}${String(abaState.monat).padStart(2, "0")}.xml`;
   a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   render();
 }
@@ -7542,12 +7574,14 @@ function renderAbacus(el) {
       <h3 style="margin:0 0 4px">Abacus-Schnittstelle (FIBU-Import)</h3>
       <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">Lohnkontoblatt hochladen (CSV/XLSX), Monat wählen — die Beträge werden pro Lohnart summiert, Soll/Haben kommen aus dem Lohnartenstamm und werden nach dem Regelwerk (Parameter → Abacus: Umkontierung, Lohnart-Kontierung, Aggregat, Zusatzbuchung, nicht buchen) umgesetzt. Ergebnis als AbaConnect-XML (Sammelbuchung mit einer Einzelbuchung pro Lohnart, Buchungsdatum = Monatsletzter). Fehlende Konten trägst du in der Zeile ein — dauerhaft gemerkt. Negative Beträge werden mit vertauschten Konten gebucht.${(abaParam().standardGeladen) ? ` Regelwerk: <strong>${escape(abaParam().standardGeladen)}</strong> (verifiziert gegen die manuelle Buchungsmaske).` : ""}</div>
       <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+        <label style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--text-dim)">Kunde (FIBU Monatsabschluss)<select onchange="abaKundeWaehlen(this.value)" style="padding:4px 6px;min-width:220px"><option value="0" ${abaState.kunde ? "" : "selected"}>— Vorlage / kein Kunde —</option>${abaFibuKunden().map(c => `<option value="${c.id}" ${c.id === abaState.kunde ? "selected" : ""}>${escape(c.Title)}</option>`).join("")}</select></label>
         <label class="btn btn-sm">⇧ Lohnkontoblatt hochladen<input type="file" accept=".csv,.xlsx,.xls,.txt" style="display:none" onchange="abaUpload(this)"></label>
         <label style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--text-dim)">Monat<select onchange="abaState.monat=parseInt(this.value);abaState.xml='';render()" style="padding:4px 6px">${MONTH_NAMES.map((n, i) => `<option value="${i + 1}" ${i + 1 === abaState.monat ? "selected" : ""}>${n}</option>`).join("")}</select></label>
         <label style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--text-dim)">Jahr<input type="number" value="${abaState.jahr}" onchange="abaState.jahr=parseInt(this.value)||abaState.jahr;abaState.xml='';render()" style="width:70px;padding:4px 6px"></label>
         ${abaState.datei ? `<span style="font-size:11px;color:var(--text-dim)">Datei: ${escape(abaState.datei)} · ${abaState.zeilen.length} Zeilen · ${sp.breit ? "Breitformat (Monatsspalten " + Object.keys(sp.monate).length + ")" : "Langformat (Spalte «" + escape(sp.betrag || "?") + "»" + (sp.monatSpalte ? ", Monat aus «" + escape(sp.monatSpalte) + "»" : ", ohne Monatsspalte → alle Zeilen") + ")"}</span>` : ""}
       </div>
-      <details style="margin-top:10px"><summary style="font-size:11px;color:var(--text-dim);cursor:pointer">Mandant / XML-Parameter</summary>
+      ${abaFibuKunden().length ? "" : `<div style="font-size:11px;color:var(--warn);margin-top:8px">Kein Kunde mit Häkchen «FIBU Monatsabschluss» im Kundenstamm — dort setzen, dann erscheint er hier.</div>`}
+      <details style="margin-top:10px"><summary style="font-size:11px;color:var(--text-dim);cursor:pointer">Mandant / XML-Parameter${abaState.kunde ? " — gespeichert pro Kunde" : " — lokal (kein Kunde gewählt)"}</summary>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
           ${inp("client", 70, "Client")}${inp("division", 50, "Division")}${inp("currency", 50, "Währung")}${inp("mapId", 90, "MapId")}${inp("version", 60, "Version")}${inp("docCode", 50, "DocumentCode")}${inp("textPrefix", 90, "Text-Präfix")}${inp("mwstKonten", 160, "MwSt-Konten (Konto:Code:I/E, kommagetrennt)", "z.B. 5490:200:I — für diese Konten wird TaxData mitgegeben")}
         </div>
@@ -7678,13 +7712,14 @@ async function renderParameter(el) {
 /* Parameter → Abacus: Regelwerk sichtbar und editierbar */
 function paramAbacusBlock() {
   const a = abaParam();
+  const kundenSel = `<select onchange="abaKundeWaehlen(this.value)" style="padding:3px 6px"><option value="0" ${abaState.kunde ? "" : "selected"}>Vorlage (für neue Kunden)</option>${abaFibuKunden().map(c => `<option value="${c.id}" ${c.id === abaState.kunde ? "selected" : ""}>${escape(c.Title)}</option>`).join("")}</select>`;
   const inp = (v, on, w) => `<input type="text" value="${escape(v)}" onchange="${on}" style="width:${w || 60}px;font-family:var(--font-mono);font-size:12px;padding:2px 5px">`;
   const um = Object.keys(a.umkontierung).sort();
   const ko = Object.keys(a.kontierung).sort((x, y) => parseInt(x) - parseInt(y));
   return `
     <div class="card" style="padding:14px 16px;margin-bottom:14px">
       <h3 style="margin:0 0 4px">Abacus-Schnittstelle</h3>
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">Regelwerk für Spielwiese → Abacus Schnittstelle${a.standardGeladen ? ` · Basis: ${escape(a.standardGeladen)}` : ""}. Änderungen werden sofort gespeichert. <a href="#" onclick="abaStandardLaden();return false;" style="color:var(--accent-3)">Helva-Standard laden</a></div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">Regelwerk für ${kundenSel}${a.standardGeladen ? ` · Basis: ${escape(a.standardGeladen)}` : ""}. Pro Kunde eigenes Regelwerk (beim ersten Öffnen aus der Vorlage kopiert). Änderungen werden sofort gespeichert. <a href="#" onclick="abaStandardLaden();return false;" style="color:var(--accent-3)">Helva-Standard laden</a></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
         <div>
           <div style="font-size:11px;font-weight:600;margin-bottom:4px">Durchlaufkonto</div>
