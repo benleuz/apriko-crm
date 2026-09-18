@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.256.0"></script>
-<script src="apriko-api.js?v=1.256.0"></script>
-<script src="lohncheck.js?v=1.256.0"></script>
-<script src="personalbudget.js?v=1.256.0"></script>
-<script src="jahresbudget.js?v=1.256.0"></script>
-<script src="budgetpositionen.js?v=1.256.0"></script>
-<script src="lohnchecklistetemp.js?v=1.256.0"></script>
+<script src="apriko-filters.js?v=1.258.0"></script>
+<script src="apriko-api.js?v=1.258.0"></script>
+<script src="lohncheck.js?v=1.258.0"></script>
+<script src="personalbudget.js?v=1.258.0"></script>
+<script src="jahresbudget.js?v=1.258.0"></script>
+<script src="budgetpositionen.js?v=1.258.0"></script>
+<script src="lohnchecklistetemp.js?v=1.258.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -983,7 +983,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.256.0</span> · <span id="app-build-date">17.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.258.0</span> · <span id="app-build-date">18.09.2026</span>
     </div>
   </aside>
 
@@ -2305,16 +2305,9 @@ function budgetSuggest(refType, refId, btype) {
     // Keine Ist-Lizenzen: Lizenzen aus Ziel-ARR ableiten (ARR ÷ 12 ÷ Preis)
     if (!out.Lic && out.Price > 0 && (parseFloat(c.TargetARR) || 0) > 0) out.Lic = Math.round(parseFloat(c.TargetARR) / 12 / out.Price);
   } else if (btype === "BPOStd") {
-    // Stundensatz-Modell: Satz aus dem Kundenstamm, Stunden-Vorschlag =
-    // Ø der erfassten Monats-Stunden des jüngsten Jahres (kommt in alle Monate)
+    // Stundensatz-Modell: nur der Satz aus dem Kundenstamm. Stunden werden NICHT aus dem Vorjahr
+    // übertragen (Beni, 18.09.2026) — die Zeile startet leer, Beni trägt h/Jahr oder die Monate ein.
     out.Rate = parseFloat(c.HourlyRate) || 0;
-    let withHrs = recs.filter(r => (parseFloat(r.Hours) || 0) > 0);
-    if (withHrs.length) {
-      const latestYear = withHrs[0].Year;
-      withHrs = withHrs.filter(r => r.Year == latestYear);
-      const sum = withHrs.reduce((s,r) => s + (parseFloat(r.Hours) || 0), 0);
-      out.Hours = Math.round(sum / withHrs.length * 10) / 10;
-    }
   } else {
     // BPO: Satz aus dem Kundenstamm; SaaSPct: eigener Satz (manuell, z.B. 0.35)
     out.Rate = btype === "BPO" ? (parseFloat(c.BPORate) || 0) : (parseFloat(c.SaaSRate) || 0);
@@ -2386,7 +2379,8 @@ async function budgetCreate(refType, refId, btype, opts) {
       RefName: opts.name || "", StartMonth: parseInt(opts.startMonth) || 1,
       Lic: s.Lic, Price: s.Price, ExtRev: s.ExtRev, Rate: s.Rate };
     if (btype === "BPOStd") {
-      BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = (i + 1) < b.StartMonth ? 0 : (s.Hours || 0));
+      b.ExtRev = 0;
+      BUDGET_MONTH_FIELDS.forEach(f => b[f] = 0);   // BPO h: keine Stunden-Übernahme, Zeile startet leer
     } else {
       const mw = budgetFormulaMonths(b);
       BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
@@ -2536,7 +2530,8 @@ async function budgetTakeoverActive() {
       const b = { BYear: year, RefType: "customer", RefId: parseInt(j.id), BType: j.t,
         Lic: s.Lic, Price: s.Price, ExtRev: s.ExtRev, Rate: s.Rate };
       if (j.t === "BPOStd") {
-        BUDGET_MONTH_FIELDS.forEach(f => b[f] = s.Hours || 0);
+        b.ExtRev = 0;
+        BUDGET_MONTH_FIELDS.forEach(f => b[f] = 0);   // BPO h: keine Stunden-Übernahme
       } else {
         const mw = budgetFormulaMonths(b);
         BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
@@ -4158,9 +4153,9 @@ function renderBudget(el) {
     if (b.BType === "SaaS") return grid(
       `<input id="bud-p-${b.id}-Lic" class="bud-in bud-p1" value="${num(b.Lic)}" onchange="budgetParamChange(${b.id},'Lic',this.value)" title="Lizenzen">`, "×",
       `<input id="bud-p-${b.id}-Price" class="bud-in bud-p2" value="${num(b.Price)}" onchange="budgetParamChange(${b.id},'Price',this.value)" title="Preis pro Lizenz/Monat">`, "");
-    if (b.BType === "BPOStd") return grid(
+    if (b.BType === "BPOStd") { return grid(
       `<input id="bud-p-${b.id}-ExtRev" class="bud-in bud-p1" value="${num(b.ExtRev) || ""}" placeholder="h/Jahr" onchange="budgetParamChange(${b.id},'ExtRev',this.value)" title="Stunden pro Jahr — werden linear auf die aktiven Monate verteilt (leer = Monate manuell pflegen)">`, "h ×",
-      `<input id="bud-p-${b.id}-Rate" class="bud-in bud-p2" value="${num(b.Rate)}" onchange="budgetParamChange(${b.id},'Rate',this.value)" title="Stundensatz CHF/h — Monatszellen = Stunden">`, "/h");
+      `<input id="bud-p-${b.id}-Rate" class="bud-in bud-p2" value="${num(b.Rate)}" onchange="budgetParamChange(${b.id},'Rate',this.value)" title="Stundensatz CHF/h — Monatszellen = Stunden">`, "/h"); }
     // BPO + SaaSPct: Aussenumsatz × Satz%
     return grid(
       extRevInput(b), "×",
