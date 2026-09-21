@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.278.0"></script>
-<script src="apriko-api.js?v=1.278.0"></script>
-<script src="lohncheck.js?v=1.278.0"></script>
-<script src="personalbudget.js?v=1.278.0"></script>
-<script src="jahresbudget.js?v=1.278.0"></script>
-<script src="budgetpositionen.js?v=1.278.0"></script>
-<script src="lohnchecklistetemp.js?v=1.278.0"></script>
+<script src="apriko-filters.js?v=1.279.0"></script>
+<script src="apriko-api.js?v=1.279.0"></script>
+<script src="lohncheck.js?v=1.279.0"></script>
+<script src="personalbudget.js?v=1.279.0"></script>
+<script src="jahresbudget.js?v=1.279.0"></script>
+<script src="budgetpositionen.js?v=1.279.0"></script>
+<script src="lohnchecklistetemp.js?v=1.279.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -984,7 +984,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.278.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.279.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -3240,7 +3240,9 @@ function fbParseBuchungen(sheets) {
 /* Gesellschaftsname aus dem Dateinamen ableiten */
 function fbGesFromFilename(name) {
   let s = name.replace(/\.(xlsx|csv|txt)$/i, "");
-  s = s.split(/bilanz|erfolgsrechnung|kontenbl|kontoausz|buchung|journal|_er_|_er$/i)[0];
+  // bexio-Exporte heissen «<Gesellschaft>_<Bericht> …» → alles nach dem ersten «_» ist der Berichtsname
+  if (/^[^_]{2,40}_/.test(s)) s = s.split("_")[0];
+  s = s.split(/bilanz|erfolgsrechnung|kontenbl|kotenbl|kontoausz|buchung|journal|_er_|_er$/i)[0];
   s = s.replace(/[_]+/g, " ").replace(/\s+/g, " ").trim();
   return s || name;
 }
@@ -3467,6 +3469,7 @@ async function fbMultiSelect(input) {
   render();
 }
 function fbPendingSet(i, field, value) { if (fbPending[i]) fbPending[i][field] = value; }
+function fbPendingDrop(i) { fbPending = fbPending.filter((_, k) => k !== i); render(); }
 async function fbMultiRun() {
   const year = filters.budgetYear;
   const meld = [];
@@ -3754,8 +3757,9 @@ function renderBudgetVergleich(el) {
                 ${[1,2,3,4,5,6,7,8,9,10,11].map(n => `<option value="M${n}" ${(e.periode === "M" + n || (n === 6 && (e.periode === "H1" || !e.periode))) ? "selected" : ""}>YTD Jan–${FB_MK[n - 1]} (${n} Mte)</option>`).join("")}
                 <option value="Jahr" ${e.periode === "Jahr" ? "selected" : ""}>Jahr (12 Mte)</option>
               </select>` : ""}
-            <span style="color:var(--text-faint);font-size:11px">${escape(e.info || "")}</span>
+            <span style="color:var(--text-faint);font-size:11px">${escape(e.info || "")}${e.art === "buchungen" ? " · wird mit dem Bestand zusammengeführt (Doppelte übersprungen)" : ""}</span>
             ${e.warn ? `<span style="color:var(--danger);font-size:11px">⚠ ${escape(e.warn)}</span>` : ""}
+            <a href="#" onclick="fbPendingDrop(${i});return false;" style="color:var(--text-faint);font-size:11px;margin-left:auto" title="Diese Datei nicht importieren">✕ weglassen</a>
           </div>`).join("")}
         <div style="display:flex;gap:8px;margin-top:12px">
           <button class="btn btn-sm" onclick="fbMultiRun()">Import starten</button>
