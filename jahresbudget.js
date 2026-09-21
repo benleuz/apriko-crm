@@ -19,7 +19,7 @@
    budgetRows, budgetChfOf, budgetIsSaaS, budgetErloes, BUDGET_MONTH_FIELDS,
    deleteItem, reload, escape, toast, render, currentView. */
 
-const JB_VERSION = "1.113.0";
+const JB_VERSION = "1.114.0";
 const JB_GES = ["Apriko AG", "Maverix AG"];
 const JB_PERSONAL = new Set(["SW_Lohn", "SW_SV", "SW_UebrPA", "BO_Lohn", "BO_SV", "BO_UebrPA"]);
 const JB_ERTRAG = new Set(["SW_Ertrag", "BO_Ertrag"]);
@@ -43,6 +43,31 @@ function jbFmt(v) { return Math.round(v) === 0 ? "—" : Math.round(v).toLocaleS
 function jbNum(v) { const n = parseFloat(String(v == null ? "" : v).replace(/['’\s]/g, "").replace(",", ".")); return isNaN(n) ? null : n; }
 function jbItems(year) { return cache.budget.map(it => fbParse(it, "jb")).filter(d => d && d.y == year); }
 /* Hochrechnung Basisjahr: «M<n>» ist ein YTD-Stand über n Monate (z.B. M7 = Jan–Jul) → Faktor 12/n; ein reiner Monatswert wäre «M» ohne Zahl. */
+/* Personalaufwand-Basis je Key: direkt aus dem Personalbudget (paSums), sonst aus den fb-Positionen des Jahres */
+function jbPersonalBasis(year) {
+  const out = {};
+  if (typeof paSums === "function" && typeof paRows === "function" && typeof paAg === "function") {
+    try {
+      const sums = paSums(paRows(year), paAg(year));
+      Object.entries(PA_FB_KEYS || {}).forEach(([g, k]) => { const sg = sums[g] || {}; out[k.lohn] = sg.jahr || 0; out[k.sv] = sg.agB || 0; out[k.uebr] = (sg.spesen || 0) + (sg.wb || 0); });
+      return out;
+    } catch (e) {}
+  }
+  const fbY = {}; cache.budget.forEach(it => { const d = fbParse(it, "fb"); if (d && d.y == year && Array.isArray(d.m)) fbY[d.k] = d.m; });
+  JB_PERSONAL.forEach(k => { out[k] = (fbY[k] || []).reduce((s, x) => s + (x || 0), 0); });
+  return out;
+}
+/* Zusatzpositionen zum Personalaufwand (Monatswerte je Key) — für den Übertrag in den Budgetvergleich */
+function jbPersonalExtras(year) {
+  const out = {};
+  jbItems(year).forEach(d => {
+    if (!d.man || !d.z || !JB_PERSONAL.has(d.z) || !Array.isArray(d.pos)) return;
+    const m = Array(12).fill(0);
+    d.pos.filter(p => !p.auto).forEach(p => (typeof bpMonths === "function" ? bpMonths(p) : Array(12).fill((parseFloat(p.v) || 0) / 12)).forEach((v, i) => m[i] += v));
+    out[d.z] = m;
+  });
+  return out;
+}
 function jbHochFaktor(p) { const m = /^M(\d{1,2})$/.exec(String(p || "")); if (m) return 12 / Math.max(1, parseInt(m[1], 10)); return p === "Jahr" ? 1 : p === "H1" || p === "H2" ? 2 : /^Q/.test(String(p)) ? 4 : /^M/.test(String(p)) ? 12 : 2; }
 function jbYears() { const s = new Set([2027, new Date().getFullYear() + 1]); jbItems(null); cache.budget.forEach(it => { const d = fbParse(it, "jb"); if (d && d.y) s.add(parseInt(d.y, 10)); }); return [...s].filter(Boolean).sort(); }
 
@@ -81,21 +106,29 @@ function jbBuild(year) {
     const o = over[r.g + "|" + r.kt];
     push(r.key, { ...r, id: o ? o.id : null, bud: o && o.v !== null && o.v !== undefined ? parseFloat(o.v) : null, note: o ? (o.n || "") : "", pos: o && Array.isArray(o.pos) ? o.pos : [], man: false, editable: true });
   });
-  // Manuell ergänzte Konten (ohne Ist-Basis)
+  // Manuell ergänzte Konten (ohne Ist-Basis); Personal-Keys → Zusatzpositionen zum Übertrag (siehe unten)
+  const persExtra = {};
   jbItems(year).forEach(d => {
     if (!d.man) return;
     if (acc[d.g + "|" + d.kt]) return;
     const key = d.z || fbZuordnung(d.kt, jbSameGes(d.g, "Apriko AG"));
+    if (key && JB_PERSONAL.has(key)) { persExtra[key] = d; return; }
     if (!key || JB_PERSONAL.has(key) || JB_ERTRAG.has(key)) return;
     push(key, { key, g: d.g, kt: d.kt, b: d.b || "", ist: 0, hoch: 0, p: "—", id: d.id, bud: d.v !== null && d.v !== undefined ? parseFloat(d.v) : null, note: d.n || "", pos: Array.isArray(d.pos) ? d.pos : [], man: true, editable: true });
   });
   // Ertrag aus Ertragsbudget (beide Ströme über Apriko AG)
   push("SW_Ertrag", { key: "SW_Ertrag", g: "Apriko AG", kt: "34xx", b: "Ertragsbudget " + year + " · SaaS/Lizenzen", ist: null, hoch: eb.saas, p: "EB", bud: eb.saas, note: "", editable: false, src: "Ertragsbudget", months: eb.saasM });
   push("BO_Ertrag", { key: "BO_Ertrag", g: "Apriko AG", kt: "3400", b: "Ertragsbudget " + year + " · BPO", ist: null, hoch: eb.bpo, p: "EB", bud: eb.bpo, note: "", editable: false, src: "Ertragsbudget", months: eb.bpoM });
-  // Personalaufwand aus fb-Positionen (Menüpunkt Budget Personalaufwand)
+  // Personalaufwand: Übertrag aus dem Menüpunkt «Budget Personalaufwand» als automatische Position (1/12),
+  // dazu eigene Zusatzpositionen (in Budgetpositionen erfassbar, gespeichert als jb-Item mit z = Personal-Key)
+  const persBasis = jbPersonalBasis(year);
   JB_PERSONAL.forEach(k => {
-    const v = (fbY[k] || []).reduce((s, x) => s + x, 0);
-    push(k, { key: k, g: JB_PA_GES[k], kt: k.endsWith("Lohn") ? "50xx" : k.endsWith("SV") ? "57xx" : "58xx/59xx", b: "Budget Personalaufwand " + year, ist: null, hoch: v, p: "PA", bud: v, note: "", editable: false, src: "Personalaufwand", months: (fbY[k] || Array(12).fill(0)).map(x => x || 0) });
+    const v = persBasis[k] || 0;
+    const split = Array(12).fill(Math.round(v / 12)); split[11] = Math.round(v) - split.slice(0, 11).reduce((s, x) => s + x, 0);
+    const autoPos = { t: "Übertrag Budget Personalaufwand " + year, n: "aus Menü «Budget Personalaufwand» (1/12)", v, f: "x", m: split, auto: true };
+    const ex = persExtra[k];
+    const extraPos = ex && Array.isArray(ex.pos) ? ex.pos.filter(p => !p.auto) : [];
+    push(k, { key: k, g: JB_PA_GES[k], kt: k.endsWith("Lohn") ? "50xx" : k.endsWith("SV") ? "57xx" : "58xx/59xx", b: "Personalaufwand " + year + (k.endsWith("Lohn") ? " · Lohnaufwand" : k.endsWith("SV") ? " · Arbeitgeberbeiträge" : " · Übriger PA"), ist: null, hoch: v, p: "PA", id: ex ? ex.id : null, bud: null, note: ex ? (ex.n || "") : "", pos: [autoPos].concat(extraPos), man: true, pers: true, editable: true, src: "Personalaufwand" });
   });
   // Automatische Position: Hosting Datenbanken (Anzahl DB pro Monat × CHF pro DB) auf 4400 Apriko AG
   if (typeof budgetDbProMonat === "function" && typeof hostingProDb === "function") {
@@ -194,14 +227,17 @@ function jbToggleBuch(id) { jbState.buch[id] = !jbState.buch[id]; render(); }
 async function jbTransfer() {
   const y = jbState.year, m = jbBuild(y);
   const sums = {};
-  Object.entries(m.byKey).forEach(([k, rows]) => { if (JB_PERSONAL.has(k)) return; sums[k] = rows.reduce((s, r) => s + jbRowBudget(r), 0) * jbErSign(k); });
+  const months = {};
+  Object.entries(m.byKey).forEach(([k, rows]) => {
+    sums[k] = rows.reduce((s, r) => s + jbRowBudget(r), 0) * jbErSign(k);
+    const mm = Array(12).fill(0); rows.forEach(r => jbRowMonths(r).forEach((v, i) => mm[i] += v * jbErSign(k))); months[k] = mm.map(v => Math.round(v));
+  });
   const keys = Object.keys(sums).filter(k => FB_LABELS[k]);
-  if (!confirm("Budgetvergleich " + y + ": " + keys.length + " Positionen (ohne Personalaufwand) überschreiben? Monatsverteilung 1/12.")) return;
+  if (!confirm("Budgetvergleich " + y + ": " + keys.length + " Positionen (inkl. Personalaufwand mit Zusatzpositionen) überschreiben? Monatsverteilung nach Fälligkeit der Positionen.")) return;
   jbState.busy = true; render();
   try {
     const existing = {}; cache.budget.forEach(it => { const d = fbParse(it, "fb"); if (d && d.y == y) existing[d.k] = d.id; });
-    const split = v => { const a = Array(12).fill(Math.round(v / 12)); a[11] = Math.round(v) - a.slice(0, 11).reduce((s, x) => s + x, 0); return a; };
-    for (const k of keys) await fbSaveItem({ cfg: "fb", y, k, m: split(sums[k]) }, existing[k]);
+    for (const k of keys) await fbSaveItem({ cfg: "fb", y, k, m: months[k] }, existing[k]);
     await reload("Budget"); toast("Budget " + y + " in den Budgetvergleich übertragen.");
   } catch (e) { toast("Übertragung fehlgeschlagen: " + e.message, true); }
   jbState.busy = false; render();
@@ -222,7 +258,7 @@ function renderJahresbudget(el) {
     <button class="btn btn-sm" style="${jbState.view === "monate" ? "background:var(--accent);color:#fff" : ""}" onclick="jbState.view='monate';render()">Monate</button>
     <button class="btn btn-sm" onclick="jbState.onlyChanged=!jbState.onlyChanged;render()" style="${jbState.onlyChanged ? "background:var(--accent);color:#fff" : ""}" title="Nur Konten ohne Positionen (noch offen)">⚠ nur offene</button>
     <button class="btn btn-sm" onclick="jbExport()">⇩ CSV</button>
-    <button class="btn btn-sm btn-primary" onclick="jbTransfer()" title="Alle Positionen ausser Personalaufwand als fb-Positionen ins Budgetvergleich-Jahr schreiben">→ Budgetvergleich ${y}</button>`;
+    <button class="btn btn-sm btn-primary" onclick="jbTransfer()" title="Alle Positionen (inkl. Personalaufwand + Zusatzpositionen) als fb-Positionen ins Budgetvergleich-Jahr schreiben">→ Budgetvergleich ${y}</button>`;
   if (jbState.busy) { el.innerHTML = `<div class="full-loading"><div class="loading"></div></div>`; return; }
   const m = jbBuild(y), basis = m.basis;
   // Buchungen des Basisjahrs laden (einmalig, dann Re-Render)

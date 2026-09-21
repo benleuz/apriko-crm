@@ -13,7 +13,7 @@
    Abhängigkeiten aus index.html: cache, fbParse, fbSaveItem, deleteItem,
    reload, escape, toast, render, showModal, closeModal, currentUser. */
 
-const PA_VERSION = "1.111.0";
+const PA_VERSION = "1.112.0";
 const PA_GES = ["Apriko AG", "Maverix AG"];
 /* Budgetvergleich rechnet Personal ÜBER KREUZ (fbZuordnung): Maverix-Löhne = SW_*, Apriko-Löhne = BO_* */
 const PA_FB_KEYS = { "Apriko AG": { lohn: "BO_Lohn", sv: "BO_SV", uebr: "BO_UebrPA" }, "Maverix AG": { lohn: "SW_Lohn", sv: "SW_SV", uebr: "SW_UebrPA" } };
@@ -121,9 +121,12 @@ async function paTransfer() {
     const split = v => { const m = Array(12).fill(Math.round(v / 12)); m[11] = Math.round(v) - m.slice(0, 11).reduce((a, b) => a + b, 0); return m; };
     for (const g of PA_GES) {
       const k = PA_FB_KEYS[g];
-      await fbSaveItem({ cfg: "fb", y, k: k.lohn, m: split(sums[g].jahr) }, existing[k.lohn]);
-      await fbSaveItem({ cfg: "fb", y, k: k.sv, m: split(sums[g].agB) }, existing[k.sv]);
-      await fbSaveItem({ cfg: "fb", y, k: k.uebr, m: split(sums[g].spesen + sums[g].wb) }, existing[k.uebr]);
+      // Zusatzpositionen aus Budgetpositionen (z.B. Boni, Rekrutierung) je Monat dazurechnen
+      const ex = typeof jbPersonalExtras === "function" ? jbPersonalExtras(y) : {};
+      const plus = (key, m) => m.map((v, i) => Math.round(v + ((ex[key] || [])[i] || 0)));
+      await fbSaveItem({ cfg: "fb", y, k: k.lohn, m: plus(k.lohn, split(sums[g].jahr)) }, existing[k.lohn]);
+      await fbSaveItem({ cfg: "fb", y, k: k.sv, m: plus(k.sv, split(sums[g].agB)) }, existing[k.sv]);
+      await fbSaveItem({ cfg: "fb", y, k: k.uebr, m: plus(k.uebr, split(sums[g].spesen + sums[g].wb)) }, existing[k.uebr]);
     }
     await reload("Budget");
     toast("Personalaufwand " + y + " in den Budgetvergleich übertragen.");
