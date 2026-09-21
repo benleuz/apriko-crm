@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.265.0"></script>
-<script src="apriko-api.js?v=1.265.0"></script>
-<script src="lohncheck.js?v=1.265.0"></script>
-<script src="personalbudget.js?v=1.265.0"></script>
-<script src="jahresbudget.js?v=1.265.0"></script>
-<script src="budgetpositionen.js?v=1.265.0"></script>
-<script src="lohnchecklistetemp.js?v=1.265.0"></script>
+<script src="apriko-filters.js?v=1.266.0"></script>
+<script src="apriko-api.js?v=1.266.0"></script>
+<script src="lohncheck.js?v=1.266.0"></script>
+<script src="personalbudget.js?v=1.266.0"></script>
+<script src="jahresbudget.js?v=1.266.0"></script>
+<script src="budgetpositionen.js?v=1.266.0"></script>
+<script src="lohnchecklistetemp.js?v=1.266.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -984,7 +984,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.265.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.266.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -2691,8 +2691,22 @@ function fbBudget(year) {   // key → [12]
   });
   return out;
 }
-function fbIst(year) {      // Liste der Ist-Konten (H1)
+function fbIst(year) {      // Liste der Ist-Konten (YTD-Periode)
   return cache.budget.map(it => fbParse(it, "ist")).filter(d => d && d.y == year);
+}
+/* Ist-Periode: p = "Jahr" (12), "H1" (6, alt) oder "M<n>" (n Monate YTD, z.B. M7 = Jan–Jul). */
+function fbPeriodeMonate(p) { if (p === "Jahr") return 12; const m = /^M(\d{1,2})$/.exec(p || ""); return m ? parseInt(m[1]) : 6; }
+function fbN(year) {        // abgedeckte Monate des Ist-Jahres (grösste Periode der Ist-Zeilen)
+  const ist = fbIst(year); if (!ist.length) return 6;
+  return Math.max(...ist.map(d => fbPeriodeMonate(d.p)));
+}
+const FB_MK = ["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
+function fbPeriodeLabel(n) { return n >= 12 ? "Jahr" : (n === 6 ? "H1" : "Jan–" + FB_MK[n - 1]); }
+function fbPeriodeAusDatei(name) {
+  if (/jan[-_ –]?dez|jahresabschluss|ganzjahr/i.test(name)) return "Jahr";
+  const m = /jan[-_ –]?\s*(feb|m[aä]r|apr|mai|jun|jul|aug|sep|okt|nov|dez)/i.exec(name);
+  if (m) { const idx = ["feb","mär","apr","mai","jun","jul","aug","sep","okt","nov","dez"].indexOf(m[1].toLowerCase().replace("mar","mär")); if (idx >= 0) return "M" + (idx + 2); }
+  return "H1";
 }
 let fbExpanded = {};        // key → true (aufgeklappte Positionen)
 let fbGesellschaften = [];  // aus Ist-Daten abgeleitet
@@ -3371,7 +3385,8 @@ async function fbMultiSelect(input) {
         // Jahr + Periode aus dem Dateinamen (z.B. "Jan-Dez 2025" → Jahresabschluss)
         const jm = f.name.match(/20\d{2}/g);
         entry.jahr = jm ? parseInt(jm[jm.length - 1]) : filters.budgetYear;
-        entry.periode = /jan[-_ ]?dez|jahresabschluss|ganzjahr/i.test(f.name) ? "Jahr" : "H1";
+        entry.periode = fbPeriodeAusDatei(f.name);
+        if (!/jan/i.test(f.name) && /\b(jan|feb|m[aä]r|apr|mai|jun|jul|aug|sep|okt|nov|dez)\b/i.test(f.name)) entry.warn = "Monats-ER erkannt (kein YTD «Jan-…») — bitte die kumulierte ER Jan–<Monat> verwenden";
         entry.info = rows.filter(r => /^\d{4}$/.test(String(r[0] || ""))).length + " Konten";
         const mitSaldo = rows.filter(r => /^\d{4}$/.test(String(r[0] || "")) && String(r[2] ?? "").trim() !== "").length;
         if (!mitSaldo) entry.warn = "keine Salden in Spalte 3!";
@@ -3438,7 +3453,7 @@ async function fbMultiRun() {
         const ges = (e.ges || "").trim();
         if (!ges) { meld.push(e.name + ": übersprungen (keine Gesellschaft)"); continue; }
         const erJahr = e.jahr || year;
-        const erPeriode = e.periode === "Jahr" ? "Jahr" : "H1";
+        const erPeriode = e.periode || "H1";
         const existing = {};
         cache.budget.forEach(it => { const d = fbParse(it, "ist"); if (d && d.y == erJahr && d.g === ges) existing[d.kt] = d.id; });
         let n = 0, leer = 0;
@@ -3559,7 +3574,8 @@ function renderBudgetVergleich(el) {
   fbMigrateZuordnung(ist);
   fbGesellschaften = [...new Set(ist.map(d => d.g))].sort();
   const G = fbGesellschaften;
-  const budH1 = k => (FB_SRC[k] || [k]).reduce((sum, kk) => sum + (bud[kk] || []).slice(0, 6).reduce((s,v) => s + v, 0), 0);
+  const N = fbN(year);   // abgedeckte Ist-Monate (YTD), z.B. 7 für Jan–Jul
+  const budH1 = k => (FB_SRC[k] || [k]).reduce((sum, kk) => sum + (bud[kk] || []).slice(0, N).reduce((s,v) => s + v, 0), 0);
   const budJahr = k => (FB_SRC[k] || [k]).reduce((sum, kk) => sum + (bud[kk] || []).reduce((s,v) => s + v, 0), 0);
   const fkt = k => FB_AUFWAND.has(k) ? -1 : 1;
   const istVal = (k, g) => ist.filter(d => d.z === k && d.g === g).reduce((s,d) => s + (parseFloat(d.v) || 0), 0) * fkt(k);
@@ -3587,11 +3603,11 @@ function renderBudgetVergleich(el) {
     const ih1 = vals.tot[k], bh1 = budH1(k), bj = budJahr(k);
     if (bh1 && bj) return ih1 * (bj / bh1);
     if (bj) return ih1 + (bj - bh1);
-    return ih1 * 2;
+    return ih1 * 12 / N;
   });
-  if (filters.fbView === "monate") { renderFbMonate(el, { year, bud, ist, G, vals, rowsOut, fkt }); return; }
-  if (filters.fbView === "mgmt") { renderFbMgmt(el, { year, ist, vals, fkt }); return; }
-  if (filters.fbView === "vorjahr") { renderFbVorjahr(el, { year, ist, vals, fkt }); return; }
+  if (filters.fbView === "monate") { renderFbMonate(el, { year, bud, ist, G, vals, rowsOut, fkt, N }); return; }
+  if (filters.fbView === "mgmt") { renderFbMgmt(el, { year, ist, vals, fkt, N }); return; }
+  if (filters.fbView === "vorjahr") { renderFbVorjahr(el, { year, ist, vals, fkt, N }); return; }
 
   const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
@@ -3659,8 +3675,8 @@ function renderBudgetVergleich(el) {
               <input type="number" value="${e.jahr || year}" onchange="fbPendingSet(${i},'jahr',parseInt(this.value))" title="Geschäftsjahr"
                 style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;width:66px;font-size:11px">
               <select onchange="fbPendingSet(${i},'periode',this.value)" title="Abgedeckte Periode" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px">
-                <option value="H1" ${e.periode !== "Jahr" ? "selected" : ""}>H1</option>
-                <option value="Jahr" ${e.periode === "Jahr" ? "selected" : ""}>Jahr</option>
+                ${[1,2,3,4,5,6,7,8,9,10,11].map(n => `<option value="M${n}" ${(e.periode === "M" + n || (n === 6 && (e.periode === "H1" || !e.periode))) ? "selected" : ""}>YTD Jan–${FB_MK[n - 1]} (${n} Mte)</option>`).join("")}
+                <option value="Jahr" ${e.periode === "Jahr" ? "selected" : ""}>Jahr (12 Mte)</option>
               </select>` : ""}
             <span style="color:var(--text-faint);font-size:11px">${escape(e.info || "")}</span>
             ${e.warn ? `<span style="color:var(--danger);font-size:11px">⚠ ${escape(e.warn)}</span>` : ""}
@@ -3674,12 +3690,12 @@ function renderBudgetVergleich(el) {
       <label style="color:var(--text-dim);font-size:12px">Jahr:</label>
       <select onchange="filters.budgetYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${yearOpts}</select>
       <div class="bud-tabs">
-        <button class="bud-tab active" onclick="filters.fbView='h1';render()">Übersicht H1</button>
+        <button class="bud-tab active" onclick="filters.fbView='h1';render()">Übersicht ${fbPeriodeLabel(N)}</button>
         <button class="bud-tab" onclick="filters.fbView='monate';render()">Monate</button>
         <button class="bud-tab" onclick="filters.fbView='mgmt';render()">Management</button>
         <button class="bud-tab" onclick="filters.fbView='vorjahr';render()">Vorjahr</button>
       </div>
-      <span style="font-size:11px;color:var(--text-dim)">Ist H1 ÷ 6 = Ø-Monat</span>
+      <span style="font-size:11px;color:var(--text-dim)">Ist ${fbPeriodeLabel(N)} (${N} Mte) ÷ ${N} = Ø-Monat</span>
       <div style="margin-left:auto;display:flex;gap:8px;align-items:center;font-size:11px">
         <select onchange="filters.fbSearchYear=this.value;fbSearchYearChanged()" title="Suche auf ein Geschäftsjahr eingrenzen"
           style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:4px;font-size:11px">
@@ -3710,7 +3726,7 @@ function renderBudgetVergleich(el) {
     <div class="table-wrap"><table class="bud-table" style="min-width:900px">
       <thead><tr>
         <th style="min-width:280px">Position</th>
-        <th style="text-align:right">Budget H1</th>
+        <th style="text-align:right">Budget ${fbPeriodeLabel(N)}</th>
         ${G.map(g => `<th style="text-align:right">Ist ${escape(g)}</th>`).join("")}
         <th style="text-align:right">Ist Konzern</th>
         <th style="text-align:right">Abw. CHF</th>
@@ -3811,7 +3827,7 @@ function fbSearchRender() {
    versicherungen, übriger PA); Total Opex = Betriebsaufwand. Damit gilt:
    Total Ertrag − Total Lohnaufwand − Total Opex = EBITDA (identisch Hauptansicht). */
 function renderFbMgmt(el, ctx) {
-  const { year, ist, vals, fkt } = ctx;
+  const { year, ist, vals, fkt, N } = ctx;
   const fmt = v => Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH");
   const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
@@ -3843,18 +3859,18 @@ function renderFbMgmt(el, ctx) {
       <label style="color:var(--text-dim);font-size:12px">Jahr:</label>
       <select onchange="filters.budgetYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${yearOpts}</select>
       <div class="bud-tabs">
-        <button class="bud-tab" onclick="filters.fbView='h1';render()">Übersicht H1</button>
+        <button class="bud-tab" onclick="filters.fbView='h1';render()">Übersicht ${fbPeriodeLabel(N)}</button>
         <button class="bud-tab" onclick="filters.fbView='monate';render()">Monate</button>
         <button class="bud-tab active" onclick="filters.fbView='mgmt';render()">Management</button>
         <button class="bud-tab" onclick="filters.fbView='vorjahr';render()">Vorjahr</button>
       </div>
-      <span style="font-size:11px;color:var(--text-dim)">H1 ${year} · Konzern</span>
+      <span style="font-size:11px;color:var(--text-dim)">${fbPeriodeLabel(N)} ${year} · Konzern</span>
     </div>
     <div class="table-wrap"><table class="bud-table" style="min-width:640px;max-width:860px">
       <thead><tr>
         <th style="min-width:280px">Position</th>
-        <th style="text-align:right">Budget H1</th>
-        <th style="text-align:right">Ist H1</th>
+        <th style="text-align:right">Budget ${fbPeriodeLabel(N)}</th>
+        <th style="text-align:right">Ist ${fbPeriodeLabel(N)}</th>
         <th style="text-align:right">Abw. CHF</th>
         <th style="text-align:right">Abw. %</th>
       </tr></thead>
@@ -3885,7 +3901,7 @@ function renderFbMgmt(el, ctx) {
    Vorjahres-Jahresabschlüsse (p="Jahr") werden auf H1-Basis normalisiert (÷2);
    die Jahr-Spalte zeigt zusätzlich den vollen Abschluss (H1-Daten ×2). */
 function renderFbVorjahr(el, ctx) {
-  const { year, ist, vals, fkt } = ctx;
+  const { year, ist, vals, fkt, N } = ctx;
   const vy = year - 1;
   const vjIst = fbIst(vy);
   const fmt = v => Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH");
@@ -3895,11 +3911,12 @@ function renderFbVorjahr(el, ctx) {
   // Basiswerte je Key: Jahr und H1-Äquivalent (÷2 bei Jahresabschluss, ×2 umgekehrt)
   const baseJahr = k => vjIst.filter(d => d.z === k).reduce((s, d) => {
     const v = parseFloat(d.v) || 0;
-    return s + (d.p === "Jahr" ? v : v * 2);
+    return s + v * 12 / fbPeriodeMonate(d.p);
   }, 0) * (FB_AUFWAND.has(k) ? -1 : 1);
+  // Vorjahr auf die gleiche YTD-Periode (N Monate) normalisieren
   const baseH1 = k => vjIst.filter(d => d.z === k).reduce((s, d) => {
     const v = parseFloat(d.v) || 0;
-    return s + (d.p === "Jahr" ? v / 2 : v);
+    return s + v * N / fbPeriodeMonate(d.p);
   }, 0) * (FB_AUFWAND.has(k) ? -1 : 1);
   const vjJahr = fbCompute(baseJahr);
   const vjH1 = fbCompute(baseH1);
@@ -3910,7 +3927,7 @@ function renderFbVorjahr(el, ctx) {
     vjIst.filter(d => srcOf(key).includes(d.z)).forEach(d => {
       const id = d.g + "|" + d.kt;
       map[id] = map[id] || { g: d.g, kt: d.kt, b: d.b, vj: 0, cur: 0 };
-      map[id].vj += (parseFloat(d.v) || 0) * (d.p === "Jahr" ? 0.5 : 1);
+      map[id].vj += (parseFloat(d.v) || 0) * N / fbPeriodeMonate(d.p);
     });
     ist.filter(d => srcOf(key).includes(d.z)).forEach(d => {
       const id = d.g + "|" + d.kt;
@@ -3942,12 +3959,12 @@ function renderFbVorjahr(el, ctx) {
       <label style="color:var(--text-dim);font-size:12px">Jahr:</label>
       <select onchange="filters.budgetYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${yearOpts}</select>
       <div class="bud-tabs">
-        <button class="bud-tab" onclick="filters.fbView='h1';render()">Übersicht H1</button>
+        <button class="bud-tab" onclick="filters.fbView='h1';render()">Übersicht ${fbPeriodeLabel(N)}</button>
         <button class="bud-tab" onclick="filters.fbView='monate';render()">Monate</button>
         <button class="bud-tab" onclick="filters.fbView='mgmt';render()">Management</button>
         <button class="bud-tab active" onclick="filters.fbView='vorjahr';render()">Vorjahr</button>
       </div>
-      <span style="font-size:11px;color:var(--text-dim)">${vy} normalisiert auf H1-Basis (Jahresabschluss ÷ 2)</span>
+      <span style="font-size:11px;color:var(--text-dim)">${vy} normalisiert auf ${fbPeriodeLabel(N)}-Basis (${N}/12 des Jahresabschlusses)</span>
     </div>
     ${!hatVJ ? `
       <div style="text-align:center;padding:50px 20px;color:var(--text-dim)">
@@ -3958,8 +3975,8 @@ function renderFbVorjahr(el, ctx) {
       <thead><tr>
         <th style="min-width:280px">Position</th>
         <th style="text-align:right">${vy} Jahr</th>
-        <th style="text-align:right">${vy} H1-Basis</th>
-        <th style="text-align:right">Ist H1 ${year}</th>
+        <th style="text-align:right">${vy} ${fbPeriodeLabel(N)}-Basis</th>
+        <th style="text-align:right">Ist ${fbPeriodeLabel(N)} ${year}</th>
         <th style="text-align:right">Δ CHF</th>
         <th style="text-align:right">Δ %</th>
       </tr></thead>
@@ -3985,12 +4002,12 @@ function renderFbVorjahr(el, ctx) {
         }).join("")}
       </tbody>
     </table></div>
-    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">${vy}er-Jahresabschluss ÷ 2 = H1-Basis (halbes Jahr als Vergleichsgrösse); Δ = Ist H1 ${year} − H1-Basis ${vy}. Aufklappen zeigt die Konten beider Jahre nebeneinander. Ampel: Aufwand über Vorjahr orange/rot, Ertrag über Vorjahr grün.</div>`}
+    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">${vy}er-Werte auf ${N} Monate normalisiert (${fbPeriodeLabel(N)}-Basis); Δ = Ist ${fbPeriodeLabel(N)} ${year} − ${fbPeriodeLabel(N)}-Basis ${vy}. Aufklappen zeigt die Konten beider Jahre nebeneinander. Ampel: Aufwand über Vorjahr orange/rot, Ertrag über Vorjahr grün.</div>`}
   `;
 }
 
 function renderFbMonate(el, ctx) {
-  const { year, bud, ist, G, vals, rowsOut, fkt } = ctx;
+  const { year, bud, ist, G, vals, rowsOut, fkt, N } = ctx;
   const fmt = v => Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH");
   const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
@@ -4009,17 +4026,17 @@ function renderFbMonate(el, ctx) {
     });
   });
   const profil = k => bud[k] || [];
-  const bh1of = k => profil(k).slice(0, 6).reduce((s,v) => s + v, 0);
+  const bh1of = k => profil(k).slice(0, N).reduce((s,v) => s + v, 0);
   const monIst = (k, i) => {
     const bh1 = bh1of(k);
     if (bh1) return (istBase[k] || 0) * ((profil(k)[i] || 0) / bh1);
-    return (istBase[k] || 0) / 6;
+    return (istBase[k] || 0) / N;
   };
   const jahrIst = k => {
     const bh1 = bh1of(k);
     const jahr = profil(k).reduce((s,v) => s + v, 0);
     if (bh1) return (istBase[k] || 0) * jahr / bh1;
-    return (istBase[k] || 0) * 2;
+    return (istBase[k] || 0) * 12 / N;
   };
   const budMon = [...Array(12).keys()].map(i => fbCompute(k => (bud[k] || [])[i] || 0));
   const istMon = [...Array(12).keys()].map(i => fbCompute(k => monIst(k, i)));
@@ -4034,17 +4051,17 @@ function renderFbMonate(el, ctx) {
   };
   const kontoRows = key => {
     const p = posProfil(key);
-    const bh1 = p.slice(0, 6).reduce((s,v) => s + v, 0);
+    const bh1 = p.slice(0, N).reduce((s,v) => s + v, 0);
     return ist.filter(d => srcOf(key).includes(d.z))
       .sort((a,b) => (a.g + a.kt).localeCompare(b.g + b.kt))
       .map(d => {
         const base = (parseFloat(d.v) || 0) * fkt(key);
-        const mv = i => bh1 ? base * ((p[i] || 0) / bh1) : base / 6;
-        const jv = bh1 ? base * p.reduce((s,v) => s + v, 0) / bh1 : base * 2;
+        const mv = i => bh1 ? base * ((p[i] || 0) / bh1) : base / N;
+        const jv = bh1 ? base * p.reduce((s,v) => s + v, 0) / bh1 : base * 12 / N;
         return `
       <tr class="fb-det">
         <td style="padding-left:36px;color:var(--text-faint);font-size:10px">${escape(d.g)} · ${escape(d.kt)} ${escape(d.b || "")}</td>
-        ${MK.map((_, i) => `<td></td><td style="text-align:right;font-family:var(--font-mono);font-size:10px;color:var(--text-faint)${i >= 6 ? ";font-style:italic" : ""}">${fmt(mv(i))}</td><td></td>`).join("")}
+        ${MK.map((_, i) => `<td></td><td style="text-align:right;font-family:var(--font-mono);font-size:10px;color:var(--text-faint)${i >= N ? ";font-style:italic" : ""}">${fmt(mv(i))}</td><td></td>`).join("")}
         <td></td><td style="text-align:right;font-family:var(--font-mono);font-size:10px;color:var(--text-faint);font-style:italic">${fmt(jv)}</td><td></td>
       </tr>`;
       }).join("");
@@ -4066,17 +4083,17 @@ function renderFbMonate(el, ctx) {
         <button class="bud-tab" onclick="filters.fbView='mgmt';render()">Management</button>
         <button class="bud-tab" onclick="filters.fbView='vorjahr';render()">Vorjahr</button>
       </div>
-      <span style="font-size:11px;color:var(--text-dim)">Ist saisonal nach Budget-Kurve · Jul–Dez = Hochrechnung</span>
+      <span style="font-size:11px;color:var(--text-dim)">Ist ${fbPeriodeLabel(N)} saisonal nach Budget-Kurve · ${N < 12 ? FB_MK[N] + "–Dez = Hochrechnung" : "komplett Ist"}</span>
     </div>
     <div class="table-wrap"><table class="bud-table" style="min-width:2700px">
       <thead>
         <tr>
           <th style="min-width:210px" rowspan="2">Position</th>
-          ${MK.map((m, i) => `<th colspan="3" style="text-align:center;${i % 2 ? "background:var(--bg-hover);" : ""}${i === 6 ? "border-left:2px solid var(--border);" : ""}">${m}${i >= 6 ? " ◦" : ""}</th>`).join("")}
+          ${MK.map((m, i) => `<th colspan="3" style="text-align:center;${i % 2 ? "background:var(--bg-hover);" : ""}${i === N ? "border-left:2px solid var(--border);" : ""}">${m}${i >= N ? " ◦" : ""}</th>`).join("")}
           <th colspan="3" style="text-align:center;border-left:2px solid var(--border)">Jahr</th>
         </tr>
         <tr>
-          ${MK.map((m, i) => ["B", i < 6 ? "I" : "F", "Δ"].map(s => `<th style="text-align:right;font-size:9px;${i % 2 ? "background:var(--bg-hover);" : ""}" title="${s === "B" ? "Budget" : s === "I" ? "Ist (saisonal verteilt)" : s === "F" ? "Forecast (hochgerechnet)" : "Abweichung"}">${s}</th>`).join("")).join("")}
+          ${MK.map((m, i) => ["B", i < N ? "I" : "F", "Δ"].map(s => `<th style="text-align:right;font-size:9px;${i % 2 ? "background:var(--bg-hover);" : ""}" title="${s === "B" ? "Budget" : s === "I" ? "Ist (saisonal verteilt)" : s === "F" ? "Forecast (hochgerechnet)" : "Abweichung"}">${s}</th>`).join("")).join("")}
           ${["Budget", "Hochr.", "Δ"].map((s, j) => `<th style="text-align:right;font-size:9px;${j === 0 ? "border-left:2px solid var(--border)" : ""}">${s}</th>`).join("")}
         </tr>
       </thead>
@@ -4094,7 +4111,7 @@ function renderFbMonate(el, ctx) {
             ${MK.map((_, i) => {
               const b = budMon[i][k], istV = istMon[i][k], a = istV - b;
               const zebra = (i % 2 && !bold) ? "background:var(--bg-hover);" : "";
-              const fc = i >= 6 ? "font-style:italic;" : "";
+              const fc = i >= N ? "font-style:italic;" : "";
               const bl = i === 6 ? "border-left:2px solid var(--border);" : "";
               return `<td style="text-align:right;font-family:var(--font-mono);font-size:10px;${zebra}${bl}${style}">${fmt(b)}</td>
                 <td style="text-align:right;font-family:var(--font-mono);font-size:10px;${zebra}${fc}${style}">${fmt(istV)}</td>
@@ -4108,7 +4125,7 @@ function renderFbMonate(el, ctx) {
         }).join("")}
       </tbody>
     </table></div>
-    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">B = Budget · I = Ist (H1-Saldo saisonal nach der Budget-Monatskurve verteilt) · F ◦ = Forecast Jul–Dez (Budget-Monat × erreichtes Ist/Budget-Verhältnis H1) · Jahr-Hochrechnung = Ist H1 × Budget-Jahr ÷ Budget-H1. Positionen ohne Budget-Kurve: lineare Verteilung (÷6, Jahr ×2).</div>
+    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">B = Budget · I = Ist (${fbPeriodeLabel(N)}-Saldo saisonal nach der Budget-Monatskurve verteilt) · F ◦ = Forecast ${N < 12 ? FB_MK[N] + "–Dez" : "—"} (Budget-Monat × erreichtes Ist/Budget-Verhältnis ${fbPeriodeLabel(N)}) · Jahr-Hochrechnung = Ist ${fbPeriodeLabel(N)} × Budget-Jahr ÷ Budget-${fbPeriodeLabel(N)}. Positionen ohne Budget-Kurve: lineare Verteilung (÷${N}, Jahr ×12/${N}).</div>
   `;
 }
 
