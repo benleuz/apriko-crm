@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.269.0"></script>
-<script src="apriko-api.js?v=1.269.0"></script>
-<script src="lohncheck.js?v=1.269.0"></script>
-<script src="personalbudget.js?v=1.269.0"></script>
-<script src="jahresbudget.js?v=1.269.0"></script>
-<script src="budgetpositionen.js?v=1.269.0"></script>
-<script src="lohnchecklistetemp.js?v=1.269.0"></script>
+<script src="apriko-filters.js?v=1.270.0"></script>
+<script src="apriko-api.js?v=1.270.0"></script>
+<script src="lohncheck.js?v=1.270.0"></script>
+<script src="personalbudget.js?v=1.270.0"></script>
+<script src="jahresbudget.js?v=1.270.0"></script>
+<script src="budgetpositionen.js?v=1.270.0"></script>
+<script src="lohnchecklistetemp.js?v=1.270.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -984,7 +984,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.269.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.270.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -2700,6 +2700,23 @@ function fbIst(year) {      // Ist-Konten der JÜNGSTEN Periode (grösstes N) �
   return alle.filter(d => fbPeriodeMonate(d.p) === maxN);
 }
 function fbIstMonate(year, n) { return fbIstAlle(year).filter(d => fbPeriodeMonate(d.p) === n); }
+/* Echte Monatswerte aus den gespeicherten YTD-Ständen: Monat i = YTD(i) − YTD(i−1), wenn beide Stände da sind.
+   Zwischen zwei gespeicherten Ständen a<b wird die Differenz auf die Monate a+1..b nach dem Budgetprofil
+   verteilt (ohne Profil linear). cumFn(n) liefert den YTD-Wert für Periode n (oder null, wenn nicht importiert).
+   Rückgabe: Array[12], Monate > N = 0; zusätzlich .echt[i] = true, wenn der Monat exakt ist. */
+function fbMonatswerte(N, cumFn, profil) {
+  const out = Array(12).fill(0); out.echt = Array(12).fill(false);
+  const punkte = [0]; const cum = { 0: 0 };
+  for (let n = 1; n <= N; n++) { const v = cumFn(n); if (v !== null && v !== undefined) { punkte.push(n); cum[n] = v; } }
+  for (let j = 1; j < punkte.length; j++) {
+    const a = punkte[j - 1], b = punkte[j], diff = cum[b] - cum[a];
+    if (b - a === 1) { out[b - 1] = diff; out.echt[b - 1] = true; continue; }
+    const seg = []; for (let i = a; i < b; i++) seg.push((profil && profil[i]) || 0);
+    const segSum = seg.reduce((x, y) => x + y, 0);
+    for (let i = a; i < b; i++) out[i] = segSum ? diff * seg[i - a] / segSum : diff / (b - a);
+  }
+  return out;
+}
 /* Ist-Periode: p = "Jahr" (12), "H1" (6, alt) oder "M<n>" (n Monate YTD, z.B. M7 = Jan–Jul). */
 function fbPeriodeMonate(p) { if (p === "Jahr") return 12; const m = /^M(\d{1,2})$/.exec(p || ""); return m ? parseInt(m[1]) : 6; }
 function fbN(year) {        // abgedeckte Monate des Ist-Jahres (grösste Periode der Ist-Zeilen)
@@ -4113,11 +4130,14 @@ function renderFbMonate(el, ctx) {
   });
   const profil = k => bud[k] || [];
   const bh1of = k => profil(k).slice(0, N).reduce((s,v) => s + v, 0);
-  const monIst = (k, i) => {
-    const bh1 = bh1of(k);
-    if (bh1) return (istBase[k] || 0) * ((profil(k)[i] || 0) / bh1);
-    return (istBase[k] || 0) / N;
-  };
+  // YTD-Stand je Detail-Key und Periode n (null, wenn diese Periode nicht importiert ist)
+  const alleIst = fbIstAlle(year);
+  const perioden = [...new Set(alleIst.map(d => fbPeriodeMonate(d.p)))];
+  const cumKey = (k, n) => perioden.includes(n) ? alleIst.filter(d => d.z === k && fbPeriodeMonate(d.p) === n).reduce((s, d) => s + (parseFloat(d.v) || 0), 0) * (FB_AUFWAND.has(k) ? -1 : 1) : null;
+  const monCache = {};
+  const monArr = k => monCache[k] || (monCache[k] = fbMonatswerte(N, n => cumKey(k, n), profil(k)));
+  const monIst = (k, i) => monArr(k)[i] || 0;
+  const monEcht = i => perioden.includes(i + 1) && (i === 0 || perioden.includes(i));
   const jahrIst = k => {
     const bh1 = bh1of(k);
     const jahr = profil(k).reduce((s,v) => s + v, 0);
@@ -4142,7 +4162,9 @@ function renderFbMonate(el, ctx) {
       .sort((a,b) => (a.g + a.kt).localeCompare(b.g + b.kt))
       .map(d => {
         const base = (parseFloat(d.v) || 0) * fkt(key);
-        const mv = i => bh1 ? base * ((p[i] || 0) / bh1) : base / N;
+        const cumKonto = n => perioden.includes(n) ? alleIst.filter(x => x.g === d.g && x.kt === d.kt && fbPeriodeMonate(x.p) === n).reduce((s, x) => s + (parseFloat(x.v) || 0), 0) * fkt(key) : null;
+        const arr = fbMonatswerte(N, cumKonto, p);
+        const mv = i => arr[i] || 0;
         const jv = bh1 ? base * p.reduce((s,v) => s + v, 0) / bh1 : base * 12 / N;
         return `
       <tr class="fb-det">
@@ -4176,7 +4198,7 @@ function renderFbMonate(el, ctx) {
       <thead>
         <tr>
           <th style="min-width:230px;position:sticky;left:0;background:var(--bg-card);z-index:3;box-shadow:2px 0 0 var(--border)" rowspan="2">Position</th>
-          ${MKV.map((m, i) => `<th colspan="3" style="text-align:center;${i % 2 ? "background:var(--bg-hover);" : ""}">${m}</th>`).join("")}
+          ${MKV.map((m, i) => `<th colspan="3" style="text-align:center;${i % 2 ? "background:var(--bg-hover);" : ""}" title="${monEcht(i) ? "exakter Monatswert (YTD-Differenz)" : "saisonal aus YTD verteilt (Vormonats-Stand fehlt)"}">${m}${monEcht(i) ? "" : " ~"}</th>`).join("")}
           <th colspan="3" style="text-align:center;border-left:2px solid var(--border)">Jahr</th>
         </tr>
         <tr>
@@ -4212,7 +4234,7 @@ function renderFbMonate(el, ctx) {
         }).join("")}
       </tbody>
     </table></div>
-    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">B = Budget · I = Ist (${fbPeriodeLabel(N)}-Saldo saisonal nach der Budget-Monatskurve verteilt) · Δ = Abweichung · Jahr-Hochrechnung = Ist ${fbPeriodeLabel(N)} × Budget-Jahr ÷ Budget-${fbPeriodeLabel(N)}. Positionen ohne Budget-Kurve: lineare Verteilung (÷${N}, Jahr ×12/${N}). Angezeigt werden nur die importierten Monate (${fbPeriodeLabel(N)}).</div>
+    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">B = Budget · I = Ist des Monats = YTD-Stand − Vormonats-YTD-Stand (exakt, wenn beide Stände importiert sind; Monate mit «~» sind aus dem YTD saisonal nach der Budget-Monatskurve verteilt, weil ein Zwischenstand fehlt) · Δ = Abweichung · Jahr-Hochrechnung = Ist ${fbPeriodeLabel(N)} × Budget-Jahr ÷ Budget-${fbPeriodeLabel(N)}. Angezeigt werden nur die importierten Monate (${fbPeriodeLabel(N)}).</div>
   `;
 }
 
