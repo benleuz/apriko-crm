@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.277.0"></script>
-<script src="apriko-api.js?v=1.277.0"></script>
-<script src="lohncheck.js?v=1.277.0"></script>
-<script src="personalbudget.js?v=1.277.0"></script>
-<script src="jahresbudget.js?v=1.277.0"></script>
-<script src="budgetpositionen.js?v=1.277.0"></script>
-<script src="lohnchecklistetemp.js?v=1.277.0"></script>
+<script src="apriko-filters.js?v=1.278.0"></script>
+<script src="apriko-api.js?v=1.278.0"></script>
+<script src="lohncheck.js?v=1.278.0"></script>
+<script src="personalbudget.js?v=1.278.0"></script>
+<script src="jahresbudget.js?v=1.278.0"></script>
+<script src="budgetpositionen.js?v=1.278.0"></script>
+<script src="lohnchecklistetemp.js?v=1.278.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -984,7 +984,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.277.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.278.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -3500,12 +3500,29 @@ async function fbMultiRun() {
       } else if (e.art === "buchungen") {
         const ges = (e.ges || "").trim();
         if (!ges) { meld.push(e.name + ": übersprungen (keine Gesellschaft)"); continue; }
-        await fbSaveBuchFile(year, ges, e.parsedBuch);
+        // Kontendetails werden ZUSAMMENGEFÜHRT, nicht ersetzt: bestehende Buchungen des Jahres bleiben, neue kommen
+        // dazu, identische (Datum/Text/Betrag) werden übersprungen. So lassen sich «Jan–Jun» und ein separater «Jul»
+        // nacheinander laden — und ein späterer YTD-Export «Jan–Jul» erzeugt keine Doppelten.
+        try { await fbLoadBuch(year); } catch (err) {}
+        const cacheY = fbBuchYearCache[year] || {};
+        const merged = {};
+        Object.entries(cacheY).forEach(([k, obj]) => { if (k.startsWith(ges + "|")) merged[k.slice(ges.length + 1)] = { ...obj, buch: (obj.buch || []).slice() }; });
+        const sig = b => (Array.isArray(b) ? b : [b]).map(x => String(x ?? "").trim()).join("|");
+        const dkey = b => { const m = /^\s*(\d{1,2})\.(\d{1,2})\.(\d{2,4})/.exec(String(b[0] || "")); return m ? (m[3].length === 2 ? "20" + m[3] : m[3]) + m[2].padStart(2, "0") + m[1].padStart(2, "0") : "99999999"; };
+        let neu = 0, dup = 0;
+        Object.entries(e.parsedBuch).forEach(([kt, obj]) => {
+          const m = merged[kt] || (merged[kt] = { ...obj, buch: [] });
+          Object.keys(obj).forEach(k => { if (k !== "buch") m[k] = obj[k]; });
+          const have = new Set(m.buch.map(sig));
+          (obj.buch || []).forEach(b => { const sg = sig(b); if (have.has(sg)) { dup++; return; } have.add(sg); m.buch.push(b); neu++; });
+          m.buch.sort((a, b) => dkey(a).localeCompare(dkey(b)));
+        });
+        await fbSaveBuchFile(year, ges, merged);
         if (!fbBuchYearCache[year]) fbBuchYearCache[year] = {};
-        Object.entries(e.parsedBuch).forEach(([kt, obj]) => { fbBuchYearCache[year][ges + "|" + kt] = obj; });
+        Object.entries(merged).forEach(([kt, obj]) => { fbBuchYearCache[year][ges + "|" + kt] = obj; });
         const kn = Object.keys(e.parsedBuch).length;
-        const bn = Object.values(e.parsedBuch).reduce((s, k) => s + k.buch.length, 0);
-        meld.push(e.name + " → " + ges + ": " + bn + " Buchungen (" + kn + " Konten)");
+        const bn = Object.values(merged).reduce((s, k) => s + k.buch.length, 0);
+        meld.push(e.name + " → " + ges + ": " + neu + " neue Buchungen" + (dup ? " (" + dup + " bereits vorhanden, übersprungen)" : "") + " · Bestand " + year + ": " + bn + " Buchungen in " + Object.keys(merged).length + " Konten (" + kn + " in dieser Datei)");
       } else if (e.art === "er") {
         const ges = (e.ges || "").trim();
         if (!ges) { meld.push(e.name + ": übersprungen (keine Gesellschaft)"); continue; }
