@@ -19,7 +19,7 @@
    budgetRows, budgetChfOf, budgetIsSaaS, budgetErloes, BUDGET_MONTH_FIELDS,
    deleteItem, reload, escape, toast, render, currentView. */
 
-const JB_VERSION = "1.112.0";
+const JB_VERSION = "1.113.0";
 const JB_GES = ["Apriko AG", "Maverix AG"];
 const JB_PERSONAL = new Set(["SW_Lohn", "SW_SV", "SW_UebrPA", "BO_Lohn", "BO_SV", "BO_UebrPA"]);
 const JB_ERTRAG = new Set(["SW_Ertrag", "BO_Ertrag"]);
@@ -42,7 +42,8 @@ function jbErSign(key) { return jbIsErloesmind(key) ? -1 : 1; }
 function jbFmt(v) { return Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH"); }
 function jbNum(v) { const n = parseFloat(String(v == null ? "" : v).replace(/['’\s]/g, "").replace(",", ".")); return isNaN(n) ? null : n; }
 function jbItems(year) { return cache.budget.map(it => fbParse(it, "jb")).filter(d => d && d.y == year); }
-function jbHochFaktor(p) { return p === "Jahr" ? 1 : p === "H1" || p === "H2" ? 2 : /^Q/.test(String(p)) ? 4 : /^M/.test(String(p)) ? 12 : 2; }
+/* Hochrechnung Basisjahr: «M<n>» ist ein YTD-Stand über n Monate (z.B. M7 = Jan–Jul) → Faktor 12/n; ein reiner Monatswert wäre «M» ohne Zahl. */
+function jbHochFaktor(p) { const m = /^M(\d{1,2})$/.exec(String(p || "")); if (m) return 12 / Math.max(1, parseInt(m[1], 10)); return p === "Jahr" ? 1 : p === "H1" || p === "H2" ? 2 : /^Q/.test(String(p)) ? 4 : /^M/.test(String(p)) ? 12 : 2; }
 function jbYears() { const s = new Set([2027, new Date().getFullYear() + 1]); jbItems(null); cache.budget.forEach(it => { const d = fbParse(it, "jb"); if (d && d.y) s.add(parseInt(d.y, 10)); }); return [...s].filter(Boolean).sort(); }
 
 /* Ertragsbudget des Zieljahrs: SaaS → SW_Ertrag, BPO → BO_Ertrag, Erlösminderung gesamt (Info) */
