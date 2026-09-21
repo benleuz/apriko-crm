@@ -10,7 +10,7 @@
    Abhängigkeiten: jahresbudget.js (jbBuild, jbSaveRow, jbFindRow, jbPos*, jbFmt, jbNum, JB_*),
    index.html (fbSaveItem, reload, escape, toast, render, FB_PLAN, FB_LABELS, FB_SRC). */
 
-const BP_VERSION = "1.120.0";
+const BP_VERSION = "1.121.0";
 const BP_MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 const BP_FAELL = [["m", "monatlich (÷12)"], ["q", "quartalsweise (÷4)"], ["e", "einmalig im Monat"], ["h", "halbjährlich (÷2)"], ["r", "von – bis"]];
 
@@ -135,10 +135,9 @@ async function bpAddKonto() {
   catch (e) { toast(e.message, true); }
   render();
 }
-/* Klick auf die Kontozeile klappt Positionen UND Vorjahres-Buchungen gemeinsam auf/zu;
-   der Link «n Buchungen» schaltet die Buchungen weiterhin einzeln. */
-function bpToggle(id) { const o = !bpState.open[id]; bpState.open[id] = o; bpState.buch[id] = o; render(); }
-function bpToggleAll(open) { bpState.open = {}; bpState.buch = {}; if (open) bpRows(bpState.year, bpState.ges).rows.forEach(r => { bpState.open[r.g + "|" + r.kt] = true; bpState.buch[r.g + "|" + r.kt] = true; }); render(); }
+/* Links (▶ vor dem Konto) klappt die erfassten Positionen auf, rechts (▶ n Buchungen) die Vorjahres-Buchungen — unabhängig. */
+function bpToggle(id) { bpState.open[id] = !bpState.open[id]; render(); }
+function bpToggleAll(open) { bpState.open = {}; if (open) bpRows(bpState.year, bpState.ges).rows.forEach(r => { bpState.open[r.g + "|" + r.kt] = true; }); render(); }
 function bpSetGes(g) { bpState.ges = g; bpState.open = {}; render(); }
 function bpSetYear(y) { bpState.year = parseInt(y, 10); jbState.year = bpState.year; render(); }
 function bpExport() {
@@ -193,7 +192,7 @@ function renderBudgetpositionen(el) {
     const buch = buchMap[bid] && buchMap[bid].buch && buchMap[bid].buch.length ? buchMap[bid].buch : null;
     const openB = buch && bpState.buch[bid];
     const kontoRow = `
-      <tr style="border-top:1px solid var(--border-soft);background:var(--bg-elev);cursor:pointer" onclick="bpToggle('${escape(bid).replace(/'/g, "\\'")}')" title="Klicken: Positionen und Vorjahres-Buchungen ${open ? "zuklappen" : "aufklappen"}">
+      <tr style="border-top:1px solid var(--border-soft);background:var(--bg-elev);cursor:pointer" onclick="bpToggle('${escape(bid).replace(/'/g, "\\'")}')" title="Klicken: erfasste Positionen ${open ? "zuklappen" : "aufklappen"} (rechts: Vorjahres-Buchungen)">
         <td style="padding:4px 6px;white-space:nowrap;font-weight:600"><span style="display:inline-block;width:12px;color:var(--accent);font-size:9px">${open ? "▼" : "▶"}</span>${escape(r.kt)} <span style="font-weight:400">${escape(r.b)}</span>${r.man ? ` <span style="color:var(--text-faint);font-size:10px">manuell</span>` : ""}</td>
         <td colspan="4" style="padding:4px 6px;font-size:11px;color:var(--text-faint);white-space:nowrap">${jbHasPos(r) ? r.pos.length + " Pos." : `<span style="color:var(--warn)" title="Noch keine Positionen — zählt mit 0">⚠ offen</span>`}
           <span style="margin-left:8px" title="Ist ${basis} (wie importiert) → Hochrechnung">Ist ${basis}: ${r.ist === null ? "—" : jbFmt(r.ist)} → ${jbFmt(r.hoch)}</span>
