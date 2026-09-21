@@ -10,7 +10,7 @@
    Abhängigkeiten: jahresbudget.js (jbBuild, jbSaveRow, jbFindRow, jbPos*, jbFmt, jbNum, JB_*),
    index.html (fbSaveItem, reload, escape, toast, render, FB_PLAN, FB_LABELS, FB_SRC). */
 
-const BP_VERSION = "1.114.0";
+const BP_VERSION = "1.115.0";
 const BP_MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 const BP_FAELL = [["m", "monatlich (÷12)"], ["q", "quartalsweise (÷4)"], ["e", "einmalig im Monat"], ["h", "halbjährlich (÷2)"], ["r", "von – bis"]];
 
@@ -38,6 +38,9 @@ function bpMonths(p) {
   else spread(Array.from({ length: 12 }, (_, k) => k), v);
   return out;
 }
+/* FIBU-Konto einer Position: eigenes p.kt, sonst das Konto der Zeile, wenn es ein echtes (4-stelliges) Konto ist.
+   Zeilen mit Platzhalter-Konto (50xx, 57xx, 58xx/59xx, 34xx) brauchen pro Position ein Konto. */
+function bpPosKonto(r, p) { const eig = String(p.kt || "").trim(); if (/^\d{4}$/.test(eig)) return eig; return /^\d{4}$/.test(String(r.kt || "")) ? String(r.kt) : ""; }
 function bpFaellText(p) {
   if (p.auto) return "automatisch";
   const f = p.f || "m", sm = parseInt(p.sm, 10) || 1, em = parseInt(p.em, 10) || 12;
@@ -65,6 +68,7 @@ async function bpPosSet(g, kt, i, field, value) {
   const pos = r.pos.map(p => ({ ...p }));
   if (field === "v") pos[i].v = jbNum(value) || 0;
   else if (field === "sm" || field === "em") pos[i][field] = Math.min(12, Math.max(1, parseInt(value, 10) || 1));
+  else if (field === "kt") { const k = String(value).replace(/\D/g, "").slice(0, 4); if (k && k.length !== 4) { toast("FIBU-Konto: 4 Ziffern", true); return; } if (k) pos[i].kt = k; else delete pos[i].kt; }
   else pos[i][field] = String(value).trim();
   if (field === "f") { if (!pos[i].sm) pos[i].sm = 1; if (value === "r" && !pos[i].em) pos[i].em = 12; }
   await jbSaveRow(r, { pos });
@@ -95,8 +99,8 @@ function bpSetYear(y) { bpState.year = parseInt(y, 10); jbState.year = bpState.y
 function bpExport() {
   const { rows } = bpRows(bpState.year, bpState.ges);
   const q = v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
-  const lines = [["Gesellschaft", "Position", "Konto", "Bezeichnung", "Text", "Fälligkeit", "Jahresbetrag", ...BP_MONATE, "Notiz"].map(q).join(";")];
-  rows.forEach(r => (r.pos || []).forEach(p => { const mo = bpMonths(p); lines.push([r.g, r.posLabel, r.kt, r.b, p.t || "", bpFaellText(p), Math.round(p.v || 0), ...mo.map(x => Math.round(x)), p.n || ""].map(q).join(";")); }));
+  const lines = [["Gesellschaft", "Position", "Konto", "Bezeichnung", "FIBU-Konto", "Text", "Fälligkeit", "Jahresbetrag", ...BP_MONATE, "Notiz"].map(q).join(";")];
+  rows.forEach(r => (r.pos || []).forEach(p => { const mo = bpMonths(p); lines.push([r.g, r.posLabel, r.kt, r.b, bpPosKonto(r, p), p.t || "", bpFaellText(p), Math.round(p.v || 0), ...mo.map(x => Math.round(x)), p.n || ""].map(q).join(";")); }));
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" })); a.download = "budgetpositionen-" + bpState.year + "-" + bpState.ges.replace(/\s+/g, "_") + ".csv"; a.click();
 }
 
@@ -132,7 +136,7 @@ function renderBudgetpositionen(el) {
     if (jbHasPos(r)) r.pos.forEach(p => bpMonths(p).forEach((v, i) => kontoM[i] += v));
     // ohne Positionen: 0 (offen)
     kontoM.forEach((v, i) => totalM[i] += v); const kontoJahr = kontoM.reduce((s, v) => s + v, 0); totalJahr += kontoJahr; posCount += (r.pos || []).length;
-    const posHead = r.posLabel !== lastPos ? `<tr><td colspan="19" style="padding:8px 6px 3px;font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;border-top:1px solid var(--border)">${escape(r.posLabel)}</td></tr>` : "";
+    const posHead = r.posLabel !== lastPos ? `<tr><td colspan="20" style="padding:8px 6px 3px;font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;border-top:1px solid var(--border)">${escape(r.posLabel)}</td></tr>` : "";
     lastPos = r.posLabel;
     const bid = r.g + "|" + r.kt, open = !!bpState.open[bid];
     const buch = buchMap[bid] && buchMap[bid].buch && buchMap[bid].buch.length ? buchMap[bid].buch : null;
@@ -140,7 +144,7 @@ function renderBudgetpositionen(el) {
     const kontoRow = `
       <tr style="border-top:1px solid var(--border-soft);background:var(--bg-elev);cursor:pointer" onclick="bpToggle('${escape(bid).replace(/'/g, "\\'")}')" title="Klicken: Positionen und Vorjahres-Buchungen ${open ? "zuklappen" : "aufklappen"}">
         <td style="padding:4px 6px;white-space:nowrap;font-weight:600"><span style="display:inline-block;width:12px;color:var(--accent);font-size:9px">${open ? "▼" : "▶"}</span>${escape(r.kt)} <span style="font-weight:400">${escape(r.b)}</span>${r.man ? ` <span style="color:var(--text-faint);font-size:10px">manuell</span>` : ""}</td>
-        <td colspan="3" style="padding:4px 6px;font-size:11px;color:var(--text-faint);white-space:nowrap">${jbHasPos(r) ? r.pos.length + " Pos." : `<span style="color:var(--warn)" title="Noch keine Positionen — zählt mit 0">⚠ offen</span>`}
+        <td colspan="4" style="padding:4px 6px;font-size:11px;color:var(--text-faint);white-space:nowrap">${jbHasPos(r) ? r.pos.length + " Pos." : `<span style="color:var(--warn)" title="Noch keine Positionen — zählt mit 0">⚠ offen</span>`}
           <span style="margin-left:8px" title="Ist ${basis} (wie importiert) → Hochrechnung">Ist ${basis}: ${r.ist === null ? "—" : jbFmt(r.ist)} → ${jbFmt(r.hoch)}</span>
           ${buch ? ` <span style="cursor:pointer;color:var(--accent);margin-left:6px" onclick="event.stopPropagation();bpToggleBuch('${escape(bid).replace(/'/g, "\\'")}')" title="Buchungen ${basis} ${openB ? "zuklappen" : "anzeigen"}">${openB ? "▼" : "▶"} ${buch.length} Buchungen ${basis}</span>` : ""}</td>
         <td></td>
@@ -153,6 +157,7 @@ function renderBudgetpositionen(el) {
       if (p.auto) return `
       <tr style="background:rgba(127,127,127,.05)">
         <td style="padding:2px 6px 2px 22px;font-size:11.5px;color:var(--accent-2)" title="${escape(p.n || "")}">⚙ ${escape(p.t || "")}</td>
+        <td style="padding:2px 6px;font-size:10.5px;color:var(--text-faint);font-family:var(--font-mono)">${escape(bpPosKonto(r, p) || r.kt)}</td>
         <td style="padding:2px 6px;font-size:10.5px;color:var(--text-faint)">${escape(p.n || "")}</td>
         <td style="padding:2px 4px;font-size:10.5px;color:var(--text-faint)">automatisch</td>
         <td style="text-align:right;font-family:var(--font-mono);font-size:11.5px;padding:2px 6px">${Math.round(p.v || 0).toLocaleString("de-CH")}</td>
@@ -165,6 +170,7 @@ function renderBudgetpositionen(el) {
       return `
       <tr>
         <td style="padding:2px 6px 2px 22px"><input data-bp="${escape(r.g + "|" + r.kt)}" value="${escape(p.t || "")}" placeholder="Text (z.B. Google Cloud)" style="width:100%;min-width:180px;font-size:11.5px;padding:2px 6px" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'t',this.value)"></td>
+        <td style="padding:2px 6px"><input value="${escape(p.kt || "")}" placeholder="${/^\d{4}$/.test(String(r.kt)) ? escape(r.kt) : "Konto?"}" maxlength="4" title="FIBU-Konto dieser Position${/^\d{4}$/.test(String(r.kt)) ? " (leer = " + escape(r.kt) + ")" : " — Pflicht, da die Zeile ein Sammelkonto ist"}" style="width:58px;font-family:var(--font-mono);font-size:11px;padding:2px 6px;${bpPosKonto(r, p) ? "" : "border-color:var(--danger);"}" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'kt',this.value)"></td>
         <td style="padding:2px 6px"><input value="${escape(p.n || "")}" placeholder="Notiz …" style="width:100%;min-width:160px;font-size:11px;padding:2px 6px;${p.n ? "" : "color:var(--text-faint)"}" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'n',this.value)"></td>
         <td style="padding:2px 4px;white-space:nowrap"><select style="font-size:10.5px;padding:1px 2px" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'f',this.value)">${BP_FAELL.map(([k, l]) => `<option value="${k}" ${k === f ? "selected" : ""}>${l}</option>`).join("")}</select>
           ${f === "e" || f === "q" || f === "h" ? ` ${sel("sm", 1, 12, parseInt(p.sm, 10) || 1)}` : f === "r" ? ` ${sel("sm", 1, 12, parseInt(p.sm, 10) || 1)}–${sel("em", 1, 12, parseInt(p.em, 10) || 12)}` : ""}</td>
@@ -179,12 +185,12 @@ function renderBudgetpositionen(el) {
     const vjRow = vj ? `
       <tr style="background:rgba(127,127,127,.04)">
         <td style="padding:2px 6px 2px 22px;font-size:10.5px;color:var(--text-faint);white-space:nowrap">Vorjahr ${basis} nach Monat <span style="opacity:.7">(${buch.length} Buchungen${vj.rest ? ", ohne Datum " + jbFmt(vj.rest) : ""})</span></td>
-        <td></td><td></td><td></td><td></td>
+        <td></td><td></td><td></td><td></td><td></td>
         ${vj.m.map(v => tdm(v, "color:var(--text-faint);font-style:italic")).join("")}
         ${tdm(vj.m.reduce((s, v) => s + v, 0) + vj.rest, "color:var(--text-faint);font-style:italic")}
         <td></td>
       </tr>` : "";
-    const buchRows = openB ? buch.map(b => `<tr><td colspan="19" style="padding:2px 8px 2px 40px;font-family:var(--font-mono);font-size:10px;color:var(--text-faint);border-bottom:1px dotted var(--border)">
+    const buchRows = openB ? buch.map(b => `<tr><td colspan="20" style="padding:2px 8px 2px 40px;font-family:var(--font-mono);font-size:10px;color:var(--text-faint);border-bottom:1px dotted var(--border)">
           <span style="display:inline-block;width:60px">${escape(b[0])}</span><span style="display:inline-block;min-width:280px">${escape(b[1])}</span><span style="display:inline-block;width:90px;text-align:right">${((b[2] || 0) * jbFkt(r.key)).toLocaleString("de-CH", { minimumFractionDigits: 2 })}</span></td></tr>`).join("") : "";
     return posHead + kontoRow + vjRow + buchRows + (open ? posRows : "");
   }).join("");
@@ -197,13 +203,14 @@ function renderBudgetpositionen(el) {
       ${model.hasIst ? "" : `<span style="font-size:12px;color:var(--danger)">Keine Ist-Daten ${y - 1} — Konten stammen nur aus manuellen Ergänzungen</span>`}
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
-      <div class="card stat-card"><div class="stat-label">${escape(ges)} · Aufwand ${y}</div><div class="stat-value">${jbFmt(totalJahr)}</div><div style="font-size:11px;color:var(--text-faint)">${shown.length} Konten · ${posCount} Positionen${(() => { const o = rows.filter(r => !jbHasPos(r)).length; return o ? ` · <span style="color:var(--warn)">${o} offen</span>` : " · alle erfasst"; })()}</div></div>
+      <div class="card stat-card"><div class="stat-label">${escape(ges)} · Aufwand ${y}</div><div class="stat-value">${jbFmt(totalJahr)}</div><div style="font-size:11px;color:var(--text-faint)">${shown.length} Konten · ${posCount} Positionen${(() => { const o = rows.filter(r => !jbHasPos(r)).length; return o ? ` · <span style="color:var(--warn)">${o} offen</span>` : " · alle erfasst"; })()}${(() => { const ok = rows.reduce((n, r) => n + (r.pos || []).filter(p => !p.auto && !bpPosKonto(r, p)).length, 0); return ok ? ` · <span style="color:var(--danger)" title="Positionen ohne FIBU-Konto (rot umrandet)">${ok} ohne FIBU-Konto</span>` : ""; })()}</div></div>
       <div class="card stat-card"><div class="stat-label">Ø pro Monat</div><div class="stat-value">${jbFmt(totalJahr / 12)}</div><div style="font-size:11px;color:var(--text-faint)">Spitze ${BP_MONATE[totalM.indexOf(Math.max(...totalM))]} ${jbFmt(Math.max(...totalM))}</div></div>
     </div>
     <div class="card" style="padding:12px 14px;overflow-x:auto">
       <table style="width:100%;font-size:12px;border-collapse:collapse">
         <tr style="color:var(--text-dim);font-size:10.5px">
           <th style="text-align:left;padding:4px 6px">Konto (Abacus) · Text</th>
+          <th style="text-align:left;padding:4px 6px" title="FIBU-Konto der Position — Vorgabe: Konto der Zeile; bei Personal-/Sammelkonten Pflicht">FIBU-Konto</th>
           <th style="text-align:left;padding:4px 6px">Notiz</th>
           <th style="text-align:left;padding:4px 4px">Fällt an</th>
           <th style="text-align:right;padding:4px 6px">Betrag/Jahr</th>
@@ -211,9 +218,9 @@ function renderBudgetpositionen(el) {
           ${BP_MONATE.map(mn => `<th style="text-align:right;padding:4px 4px">${mn}</th>`).join("")}
           <th style="text-align:right;padding:4px 4px">Total</th>
           <th></th></tr>
-        ${body || `<tr><td colspan="19" class="empty">Keine Konten für ${escape(ges)} ${y}. Ist-Daten ${y - 1} importieren oder «＋ Konto».</td></tr>`}
+        ${body || `<tr><td colspan="20" class="empty">Keine Konten für ${escape(ges)} ${y}. Ist-Daten ${y - 1} importieren oder «＋ Konto».</td></tr>`}
         <tr style="border-top:2px solid var(--border);font-weight:700;background:var(--bg-elev)">
-          <td style="padding:6px">Total ${escape(ges)}</td><td></td><td></td><td></td><td></td>
+          <td style="padding:6px">Total ${escape(ges)}</td><td></td><td></td><td></td><td></td><td></td>
           ${totalM.map(v => tdm(v)).join("")}${tdm(totalJahr)}<td></td></tr>
       </table>
       <div style="font-size:10px;color:var(--text-faint);margin-top:8px">Alle Beträge positiv (Aufwand wie Erlösminderung), negativ = Gutschrift. Betrag = Jahresbetrag; die Fälligkeit verteilt ihn auf die Monate (monatlich ÷12, quartalsweise ÷4 ab gewähltem Monat, einmalig, halbjährlich ÷2, von–bis gleichmässig). Konto-Zeile anklicken (▶) zeigt die Positionen; «＋ Position» klappt automatisch auf. Die kursive Zeile «Vorjahr nach Monat» verteilt die Vorjahresbuchungen auf die Monate (Ist, nicht hochgerechnet); «▶ n Buchungen» zeigt sie einzeln. Konten ohne Positionen sind «⚠ offen» und zählen mit 0 — die Zeile «Vorjahr nach Monat» und «Ist → Hochrechnung» helfen beim Erfassen. Positionen und Beträge sind dieselben wie im Jahresbudget — Änderungen wirken in beiden Ansichten. Die Monatssummen unten sind die Aufwand-Seite des künftigen Liquiditätsplans. · Budgetpositionen v${BP_VERSION}</div>

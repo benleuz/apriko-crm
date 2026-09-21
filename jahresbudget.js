@@ -19,7 +19,7 @@
    budgetRows, budgetChfOf, budgetIsSaaS, budgetErloes, BUDGET_MONTH_FIELDS,
    deleteItem, reload, escape, toast, render, currentView. */
 
-const JB_VERSION = "1.114.0";
+const JB_VERSION = "1.115.0";
 const JB_GES = ["Apriko AG", "Maverix AG"];
 const JB_PERSONAL = new Set(["SW_Lohn", "SW_SV", "SW_UebrPA", "BO_Lohn", "BO_SV", "BO_UebrPA"]);
 const JB_ERTRAG = new Set(["SW_Ertrag", "BO_Ertrag"]);
@@ -246,7 +246,7 @@ function jbExport() {
   const y = jbState.year, m = jbBuild(y);
   const q = v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
   const lines = [["Position", "Gesellschaft", "Konto", "Bezeichnung", "Ist " + m.basis, "Hochrechnung", "Budget " + y, "Notiz"].map(q).join(";")];
-  FB_PLAN.forEach(row => { if (row[0] !== "d" && row[0] !== "d2") return; (FB_SRC[row[1]] || [row[1]]).forEach(k => (m.byKey[k] || []).forEach(r => { lines.push([FB_LABELS[k] || k, r.g, r.kt, r.b, r.ist === null ? "" : Math.round(r.ist), Math.round(r.hoch), Math.round(jbRowBudget(r)), r.note].map(q).join(";")); (r.pos || []).forEach(p => lines.push([FB_LABELS[k] || k, r.g, r.kt, "  └ " + (p.t || ""), "", "", Math.round(p.v || 0), p.n || ""].map(q).join(";"))); })); });
+  FB_PLAN.forEach(row => { if (row[0] !== "d" && row[0] !== "d2") return; (FB_SRC[row[1]] || [row[1]]).forEach(k => (m.byKey[k] || []).forEach(r => { lines.push([FB_LABELS[k] || k, r.g, r.kt, r.b, r.ist === null ? "" : Math.round(r.ist), Math.round(r.hoch), Math.round(jbRowBudget(r)), r.note].map(q).join(";")); (r.pos || []).forEach(p => lines.push([FB_LABELS[k] || k, r.g, (typeof bpPosKonto === "function" ? bpPosKonto(r, p) : "") || r.kt, "  └ " + (p.t || ""), "", "", Math.round(p.v || 0), p.n || ""].map(q).join(";"))); })); });
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" })); a.download = "jahresbudget-" + y + ".csv"; a.click();
 }
 
