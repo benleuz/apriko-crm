@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.259.0"></script>
-<script src="apriko-api.js?v=1.259.0"></script>
-<script src="lohncheck.js?v=1.259.0"></script>
-<script src="personalbudget.js?v=1.259.0"></script>
-<script src="jahresbudget.js?v=1.259.0"></script>
-<script src="budgetpositionen.js?v=1.259.0"></script>
-<script src="lohnchecklistetemp.js?v=1.259.0"></script>
+<script src="apriko-filters.js?v=1.260.0"></script>
+<script src="apriko-api.js?v=1.260.0"></script>
+<script src="lohncheck.js?v=1.260.0"></script>
+<script src="personalbudget.js?v=1.260.0"></script>
+<script src="jahresbudget.js?v=1.260.0"></script>
+<script src="budgetpositionen.js?v=1.260.0"></script>
+<script src="lohnchecklistetemp.js?v=1.260.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -955,6 +955,7 @@
           <button data-view="lct"><span class="ic">☑</span> Checkliste Lohn Temp 2.0</button>
           <button data-view="lohnartenstamm"><span class="ic">📋</span> Lohnartenstamm</button>
           <button data-view="tarifarten"><span class="ic">🏷️</span> Tarifarten</button>
+          <button data-view="onboarding"><span class="ic">🚀</span> Onboarding</button>
           <button data-view="lohncheck"><span class="ic">🧾</span> Ultimativer Check</button>
           <button data-view="parameter"><span class="ic">⚙</span> Parameter</button>
         </div>
@@ -983,7 +984,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.259.0</span> · <span id="app-build-date">18.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.260.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1471,7 +1472,7 @@ let currentView = DEMO_ANON ? "einsatzdash" : "dashboard";
    Berechtigungssystem
    =========================================================== */
 const SUPER_ADMIN_EMAIL = "benjamin@apriko.com";  // hat immer volle Rechte
-const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","lohncheck","parameter","apipoc","abacus","uzcheck","profiles"];
+const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","onboarding","lohncheck","parameter","apipoc","abacus","uzcheck","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
@@ -1484,7 +1485,7 @@ const VIEW_TITLES = {
   lohnartenstamm: "Lohnartenstamm",
   tarifarten: "Tarifarten",
   rapport: "Rapport", einsatzdash: "Kundendashboard", konzern: "Konzernanalyse",
-  lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)", abacus: "Abacus Schnittstelle", uzcheck: "Überzeit-Check",
+  onboarding: "Onboarding", lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)", abacus: "Abacus Schnittstelle", uzcheck: "Überzeit-Check",
   profiles: "Profile"
 };
 
@@ -1956,6 +1957,7 @@ function render() {
   else if (currentView === "lohnartenstamm") renderLohnartenstamm(content);
   else if (currentView === "tarifarten") renderTarifarten(content);
   else if (currentView === "parameter") renderParameter(content);
+  else if (currentView === "onboarding") renderOnboarding(content);
   else if (currentView === "abacus") renderAbacus(content);
   else if (currentView === "uzcheck") renderUeberzeitCheck(content);
   else if (currentView === "personalbudget") renderPersonalBudget(content);
@@ -7615,6 +7617,179 @@ function renderAbacus(el) {
         <table style="font-size:11px;margin-top:6px"><tbody>${abaState.ausgelassen.map(x => `<tr><td style="font-family:var(--font-mono)">${escape(x.code)}</td><td>${escape(x.bezeichnung)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(x.betrag)}</td><td style="color:var(--text-faint)">${escape(x.grund)}</td><td><a href="#" onclick="abaErzwingen('${escape(x.code)}', ${x.grund === "manuell ausgeschlossen" ? "null" : "true"});return false;" style="color:var(--accent-3)">${x.grund === "manuell ausgeschlossen" ? "wieder automatisch" : "doch buchen"}</a></td></tr>`).join("")}</tbody></table></details>` : ""}
       ${abaState.xml ? `<details style="margin-top:10px"><summary style="font-size:11px;color:var(--text-dim);cursor:pointer">XML-Vorschau</summary><pre style="font-size:10px;max-height:320px;overflow:auto;background:var(--bg);padding:8px;border-radius:4px">${escape(abaState.xml)}</pre></details>` : ""}
     </div>` : ""}`;
+}
+
+/* ============ Onboarding (Workflows) ============
+   Neukunden-Onboarding als Checkliste: Aufgaben (Spalten) gelten für alle aufgeführten Kunden und sind
+   zentral editierbar (Phase, Aufgabe, Zuständigkeit, Tage relativ zum Go-Live); pro Kunde Hauptverantwortliche/r
+   (E-Mail aus den Benutzerprofilen), Go-Live-Datum und der Erledigt-Status je Aufgabe mit Zeitstempel und
+   Person (Tooltip). Persistenz: parameter.json → onboarding { aufgaben:[…], kunden:{<custId>:{…}} }. */
+const ONB_STANDARD_AUFGABEN = [
+  ["Vertrag", "Vertrag unterzeichnet", "Kunde", -90],
+  ["Vertrag", "Ansprechpersonen & Projektteam benannt", "beide", -85],
+  ["Kick-off", "Kick-off-Meeting durchgeführt", "Apriko", -80],
+  ["Kick-off", "Projektplan / Timeline abgestimmt", "Apriko", -78],
+  ["Parametrierung", "Parametrierungsbogen vom Kunden ausgefüllt", "Kunde", -70],
+  ["Parametrierung", "Instanz erstellt, Mandant & Filialen angelegt", "Apriko", -65],
+  ["Parametrierung", "Lohnarten, GAV & Zuschläge parametriert", "Apriko", -55],
+  ["Parametrierung", "Sozialversicherungen (AHV/ALV/UVG/KTG/BVG/QST) erfasst", "Apriko", -55],
+  ["Parametrierung", "Vorlagen (Verträge, Rapporte, Rechnungen) eingerichtet", "Apriko", -50],
+  ["Daten", "Stammdaten-Export aus Altsystem geliefert", "Kunde", -50],
+  ["Daten", "Kunden-, Kandidaten- und Mitarbeitendendaten importiert", "Apriko", -40],
+  ["Daten", "Lohnhistorie / offene Salden übernommen", "Apriko", -35],
+  ["Schnittstellen", "FIBU-Schnittstelle konfiguriert & getestet", "Apriko", -30],
+  ["Schnittstellen", "Zahlungsverkehr (pain.001) getestet", "beide", -30],
+  ["Schnittstellen", "Swissdec / ELM-Übermittlung eingerichtet", "Apriko", -28],
+  ["Schulung", "Schulung Disposition & Vermittlung", "Apriko", -25],
+  ["Schulung", "Schulung Lohn & Fakturierung", "Apriko", -20],
+  ["Test", "Testlauf Lohn (Parallelabrechnung) durchgeführt", "beide", -15],
+  ["Test", "Testlauf Fakturierung durchgeführt", "beide", -15],
+  ["Test", "Abnahme durch Kunden", "Kunde", -7],
+  ["Go-Live", "Produktivstart", "beide", 0],
+  ["Go-Live", "Erster produktiver Lohnlauf begleitet", "Apriko", 30],
+  ["Nachbetreuung", "Review-Meeting nach 1 Monat", "Apriko", 30],
+  ["Nachbetreuung", "Übergabe an Support / Projektabschluss", "Apriko", 60]
+];
+function onbParam() {
+  if (!crmParameter) return { aufgaben: [], kunden: {} };
+  if (!crmParameter.onboarding) {
+    crmParameter.onboarding = { aufgaben: ONB_STANDARD_AUFGABEN.map((a, i) => ({ id: "a" + (i + 1), phase: a[0], titel: a[1], zustaendig: a[2], tage: a[3] })), kunden: {} };
+  }
+  const o = crmParameter.onboarding; o.aufgaben = o.aufgaben || []; o.kunden = o.kunden || {};
+  return o;
+}
+async function onbSpeichern() { try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); } }
+function onbUserEmail() { return (currentUser && currentUser.email) || ""; }
+function onbProfileEmails() {
+  const set = new Set((cache.userprofiles || []).map(p => (p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase()).filter(Boolean));
+  if (onbUserEmail()) set.add(onbUserEmail().toLowerCase());
+  return [...set].sort();
+}
+function onbFmtTs(iso) { const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString("de-CH", { dateStyle: "short", timeStyle: "short" }); }
+function onbFmtDatum(iso) { return iso ? iso.slice(8, 10) + "." + iso.slice(5, 7) + "." + iso.slice(0, 4) : ""; }
+function onbFaellig(goLive, tage) { if (!goLive) return ""; const d = new Date(goLive + "T00:00:00"); d.setDate(d.getDate() + (parseInt(tage) || 0)); return d.toISOString().slice(0, 10); }
+/* --- Kunden --- */
+async function onbKundeHinzu(custId) {
+  custId = parseInt(custId); if (!custId) return;
+  await parameterLaden(false);
+  const o = onbParam();
+  if (!o.kunden[custId]) o.kunden[custId] = { verantwortlich: onbUserEmail(), goLive: "", erledigt: {}, hinzu: new Date().toISOString() };
+  await onbSpeichern(); render();
+}
+async function onbKundeEntfernen(custId) {
+  await parameterLaden(false);
+  const o = onbParam(); const c = cache.customers.find(x => x.id == custId);
+  if (!confirm(`«${c ? c.Title : custId}» aus dem Onboarding entfernen? Erledigt-Status geht verloren.`)) return;
+  delete o.kunden[custId]; await onbSpeichern(); render();
+}
+async function onbKundeFeld(custId, feld, wert) {
+  await parameterLaden(false);
+  const k = onbParam().kunden[custId]; if (!k) return;
+  k[feld] = wert; await onbSpeichern(); render();
+}
+async function onbToggle(custId, aufgabeId) {
+  await parameterLaden(false);
+  const k = onbParam().kunden[custId]; if (!k) return;
+  k.erledigt = k.erledigt || {};
+  if (k.erledigt[aufgabeId]) delete k.erledigt[aufgabeId];
+  else k.erledigt[aufgabeId] = { am: new Date().toISOString(), von: onbUserEmail() };
+  await onbSpeichern(); render();
+}
+/* --- Aufgaben (Spalten) --- */
+async function onbAufgabeFeld(id, feld, wert) {
+  await parameterLaden(false);
+  const a = onbParam().aufgaben.find(x => x.id === id); if (!a) return;
+  a[feld] = feld === "tage" ? (parseInt(wert) || 0) : wert;
+  await onbSpeichern(); render();
+}
+async function onbAufgabeNeu() {
+  await parameterLaden(false);
+  const o = onbParam();
+  const id = "a" + Date.now().toString(36);
+  o.aufgaben.push({ id, phase: o.aufgaben.length ? o.aufgaben[o.aufgaben.length - 1].phase : "Neu", titel: "Neue Aufgabe", zustaendig: "Apriko", tage: 0 });
+  await onbSpeichern(); render();
+}
+async function onbAufgabeLoeschen(id) {
+  await parameterLaden(false);
+  const o = onbParam(); const a = o.aufgaben.find(x => x.id === id);
+  if (!a || !confirm(`Aufgabe «${a.titel}» für alle Kunden löschen?`)) return;
+  o.aufgaben = o.aufgaben.filter(x => x.id !== id);
+  Object.values(o.kunden).forEach(k => { if (k.erledigt) delete k.erledigt[id]; });
+  await onbSpeichern(); render();
+}
+async function onbAufgabeVerschieben(id, richtung) {
+  await parameterLaden(false);
+  const o = onbParam(); const i = o.aufgaben.findIndex(x => x.id === id); const j = i + richtung;
+  if (i < 0 || j < 0 || j >= o.aufgaben.length) return;
+  [o.aufgaben[i], o.aufgaben[j]] = [o.aufgaben[j], o.aufgaben[i]];
+  await onbSpeichern(); render();
+}
+async function onbStandardLaden() {
+  await parameterLaden(false);
+  if (!confirm("Aufgabenliste auf den Apriko-Standard zurücksetzen? Eigene Aufgaben gehen verloren, der Erledigt-Status bleibt nur für gleiche IDs erhalten.")) return;
+  onbParam().aufgaben = ONB_STANDARD_AUFGABEN.map((a, i) => ({ id: "a" + (i + 1), phase: a[0], titel: a[1], zustaendig: a[2], tage: a[3] }));
+  await onbSpeichern(); render();
+}
+let onbSpaltenBearbeiten = false;
+function onbToggleBearbeiten() { onbSpaltenBearbeiten = !onbSpaltenBearbeiten; render(); }
+/* --- Ansicht --- */
+async function renderOnboarding(el) {
+  if (!crmParameter) { await parameterLaden(false); }
+  if (crmKundenFlags === null && typeof siteId !== "undefined" && siteId) { crmLoadKundenFlags().then(() => { if (currentView === "onboarding") render(); }); }
+  const o = onbParam();
+  const heute = new Date().toISOString().slice(0, 10);
+  const kundenIds = Object.keys(o.kunden).map(Number);
+  const kunden = kundenIds.map(id => ({ id, c: cache.customers.find(x => x.id === id), k: o.kunden[id] })).filter(x => x.c)
+    .sort((a, b) => (a.k.goLive || "9999").localeCompare(b.k.goLive || "9999") || (a.c.Title || "").localeCompare(b.c.Title || ""));
+  const kandidaten = cache.customers.filter(c => !o.kunden[c.id]).sort((a, b) => (a.Title || "").localeCompare(b.Title || ""));
+  const emails = onbProfileEmails();
+  const phasen = []; o.aufgaben.forEach(a => { const p = phasen[phasen.length - 1]; if (p && p.name === a.phase) p.n++; else phasen.push({ name: a.phase, n: 1 }); });
+  document.getElementById("view-actions").innerHTML = `
+    <select id="onb-add" style="padding:4px 6px;max-width:260px"><option value="">+ Kunde ins Onboarding …</option>${kandidaten.map(c => `<option value="${c.id}">${escape(c.Title)}${c.Segment ? " · " + escape(c.Segment) : ""}</option>`).join("")}</select>
+    <button class="btn btn-sm" onclick="onbKundeHinzu(document.getElementById('onb-add').value)">Hinzufügen</button>
+    <button class="btn btn-sm" onclick="onbToggleBearbeiten()">${onbSpaltenBearbeiten ? "✓ Spalten fertig" : "⚙ Spalten bearbeiten"}</button>`;
+  const zustFarbe = z => z === "Kunde" ? "var(--warn)" : (z === "beide" ? "var(--accent-3)" : "var(--accent)");
+  const kopf = `<thead>
+    <tr><th rowspan="2" style="min-width:180px;position:sticky;left:0;background:var(--bg-card);z-index:2">Kunde</th><th rowspan="2" style="min-width:110px">Typ</th><th rowspan="2" style="min-width:200px">Verantwortlich</th><th rowspan="2" style="min-width:120px">Go-Live</th><th rowspan="2" style="min-width:70px;text-align:right">Stand</th>
+      ${phasen.map(p => `<th colspan="${p.n}" style="text-align:center;border-left:1px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.04em">${escape(p.name)}</th>`).join("")}</tr>
+    <tr>${o.aufgaben.map((a, i) => `<th style="min-width:34px;max-width:120px;font-weight:400;font-size:10px;line-height:1.2;vertical-align:bottom;${i === 0 || o.aufgaben[i - 1].phase !== a.phase ? "border-left:1px solid var(--border);" : ""}" title="${escape(a.titel)} · ${escape(a.zustaendig)} · ${a.tage >= 0 ? "+" : ""}${a.tage} Tage zum Go-Live"><div style="writing-mode:vertical-rl;transform:rotate(180deg);max-height:150px;overflow:hidden;color:${zustFarbe(a.zustaendig)}">${escape(a.titel)}</div></th>`).join("")}</tr>
+  </thead>`;
+  const zeilen = kunden.map(({ id, c, k }) => {
+    const erl = k.erledigt || {}; const n = o.aufgaben.filter(a => erl[a.id]).length;
+    return `<tr>
+      <td style="position:sticky;left:0;background:var(--bg-card);z-index:1"><strong>${escape(c.Title)}</strong> <a href="#" onclick="onbKundeEntfernen(${id});return false;" style="color:var(--text-faint);font-size:10px" title="Aus Onboarding entfernen">✕</a></td>
+      <td style="font-size:11px">${escape(c.Segment || "—")}</td>
+      <td><select onchange="onbKundeFeld(${id},'verantwortlich',this.value)" style="width:100%;padding:3px 4px;font-size:11px"><option value="">—</option>${emails.map(e => `<option value="${escape(e)}" ${e === (k.verantwortlich || "").toLowerCase() ? "selected" : ""}>${escape(e)}</option>`).join("")}</select></td>
+      <td><input type="date" value="${k.goLive || ""}" onchange="onbKundeFeld(${id},'goLive',this.value)" style="padding:3px 4px;font-size:11px"></td>
+      <td style="text-align:right;font-family:var(--font-mono);font-size:11px">${n}/${o.aufgaben.length}</td>
+      ${o.aufgaben.map((a, i) => {
+        const e = erl[a.id]; const faellig = onbFaellig(k.goLive, a.tage); const ueber = !e && faellig && faellig < heute;
+        const tip = e ? `Erledigt ${onbFmtTs(e.am)} · ${e.von || "?"}` : (faellig ? `Fällig ${onbFmtDatum(faellig)}${ueber ? " — überfällig" : ""}` : "Offen") + ` · ${a.zustaendig}`;
+        return `<td style="text-align:center;${i === 0 || o.aufgaben[i - 1].phase !== a.phase ? "border-left:1px solid var(--border);" : ""}${ueber ? "background:rgba(255,80,80,0.12);" : ""}" title="${escape(tip)}"><input type="checkbox" ${e ? "checked" : ""} onchange="onbToggle(${id},'${a.id}')" style="width:auto;margin:0;cursor:pointer"></td>`;
+      }).join("")}
+    </tr>`;
+  }).join("");
+  const bearbeiten = !onbSpaltenBearbeiten ? "" : `
+    <div class="card" style="padding:14px 16px;margin-top:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">Spalten (Aufgaben) — gelten für alle Kunden</h3><span><button class="btn btn-sm" onclick="onbAufgabeNeu()">+ Aufgabe</button> <a href="#" onclick="onbStandardLaden();return false;" style="font-size:11px;color:var(--text-faint);margin-left:8px">Standard laden</a></span></div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">Tage relativ zum Go-Live (negativ = davor). Zuständigkeit färbt den Spaltentitel: Apriko / Kunde / beide.</div>
+      <table style="font-size:12px"><thead><tr><th></th><th>Phase</th><th>Aufgabe</th><th>Zuständig</th><th>Tage</th><th></th></tr></thead><tbody>
+        ${o.aufgaben.map((a, i) => `<tr>
+          <td style="white-space:nowrap"><a href="#" onclick="onbAufgabeVerschieben('${a.id}',-1);return false;" style="color:var(--text-faint)">▲</a> <a href="#" onclick="onbAufgabeVerschieben('${a.id}',1);return false;" style="color:var(--text-faint)">▼</a></td>
+          <td><input type="text" value="${escape(a.phase)}" onchange="onbAufgabeFeld('${a.id}','phase',this.value)" style="width:120px;padding:2px 5px"></td>
+          <td><input type="text" value="${escape(a.titel)}" onchange="onbAufgabeFeld('${a.id}','titel',this.value)" style="width:360px;padding:2px 5px"></td>
+          <td><select onchange="onbAufgabeFeld('${a.id}','zustaendig',this.value)" style="padding:2px 5px">${["Apriko", "Kunde", "beide"].map(z => `<option ${a.zustaendig === z ? "selected" : ""}>${z}</option>`).join("")}</select></td>
+          <td><input type="number" value="${a.tage}" onchange="onbAufgabeFeld('${a.id}','tage',this.value)" style="width:60px;padding:2px 5px"></td>
+          <td><a href="#" onclick="onbAufgabeLoeschen('${a.id}');return false;" style="color:var(--text-faint)">✕</a></td>
+        </tr>`).join("")}
+      </tbody></table>
+    </div>`;
+  el.innerHTML = `
+    <div class="card" style="padding:14px 16px">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">Häkchen setzen = erledigt; beim Überfahren erscheinen Zeitpunkt und Person. Rot hinterlegt = überfällig gemäss Go-Live-Datum. Spaltentitel-Farbe = Zuständigkeit (<span style="color:var(--accent)">Apriko</span> · <span style="color:var(--warn)">Kunde</span> · <span style="color:var(--accent-3)">beide</span>).</div>
+      ${kunden.length ? `<div class="table-wrap" style="overflow-x:auto"><table style="font-size:12px;border-collapse:collapse">${kopf}<tbody>${zeilen}</tbody></table></div>` : `<div class="empty">Noch keine Kunden im Onboarding — oben rechts einen Kunden hinzufügen.</div>`}
+    </div>
+    ${bearbeiten}`;
 }
 
 /* ============ Parameter (Workflows) ============
