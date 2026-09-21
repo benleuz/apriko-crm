@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.272.0"></script>
-<script src="apriko-api.js?v=1.272.0"></script>
-<script src="lohncheck.js?v=1.272.0"></script>
-<script src="personalbudget.js?v=1.272.0"></script>
-<script src="jahresbudget.js?v=1.272.0"></script>
-<script src="budgetpositionen.js?v=1.272.0"></script>
-<script src="lohnchecklistetemp.js?v=1.272.0"></script>
+<script src="apriko-filters.js?v=1.273.0"></script>
+<script src="apriko-api.js?v=1.273.0"></script>
+<script src="lohncheck.js?v=1.273.0"></script>
+<script src="personalbudget.js?v=1.273.0"></script>
+<script src="jahresbudget.js?v=1.273.0"></script>
+<script src="budgetpositionen.js?v=1.273.0"></script>
+<script src="lohnchecklistetemp.js?v=1.273.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -984,7 +984,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.272.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.273.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -5551,50 +5551,17 @@ function computeCustomerStats(cust, range) {
     toY: filters.statsToYear, toM: filters.statsToMonth
   };
   const iter = (cb) => forEachMonthInRange(r0.fromY, r0.fromM, r0.toY, r0.toM, cb);
-
+  // Eine Rechenlogik für alle Ansichten: pro Monat calcRevenue (bei YTD-Kunden ist calc.bpo bereits die
+  // Monatsdifferenz inkl. Mindesthonorar) — Summen = Summe der Monatswerte, identisch mit dem Monatsabschluss.
   const monthly = [];
   let sumSaaS = 0, sumBPO = 0;
-
-  if (cust.BPOYtd && segmentNeedsBPO(cust.Segment)) {
-    iter((y, m) => {
-      const r = findRev(cust.id, y, m);
-      const calc = calcRevenue(r, cust, y, m);
-      const showBPO = calc.ytd ? calc.ytd.thisMonth : calc.bpo;
-      monthly.push({ year: y, month: m, saas: calc.saas, bpo: showBPO, total: calc.saas + showBPO });
-      sumSaaS += calc.saas;
-    });
-
-    const yearsCovered = new Set(monthly.map(x => x.year));
-    let bpoSum = 0;
-    yearsCovered.forEach(y => {
-      const monthsThisYear = monthly.filter(x => x.year === y).map(x => x.month);
-      let lastYtd = 0;
-      for (const m of monthsThisYear) {
-        const r = findRev(cust.id, y, m);
-        const calc = calcRevenue(r, cust, y, m);
-        if (calc.ytd && calc.ytd.ytdHonorar > 0) lastYtd = calc.ytd.ytdHonorar;
-      }
-      const startMonthInYear = Math.min(...monthsThisYear);
-      let priorYtd = 0;
-      if (startMonthInYear > 1) {
-        for (let m = startMonthInYear - 1; m >= 1; m--) {
-          const r = findRev(cust.id, y, m);
-          const calc = calcRevenue(r, cust, y, m);
-          if (calc.ytd && calc.ytd.ytdHonorar > 0) { priorYtd = calc.ytd.ytdHonorar; break; }
-        }
-      }
-      bpoSum += lastYtd - priorYtd;   // auch negative Korrekturen zählen (sonst stimmt SaaS+BPO nicht mit den Monatstotalen überein)
-    });
-    sumBPO = bpoSum;
-  } else {
-    iter((y, m) => {
-      const r = findRev(cust.id, y, m);
-      const calc = calcRevenue(r, cust, y, m);
-      monthly.push({ year: y, month: m, saas: calc.saas, bpo: calc.bpo, total: calc.total });
-      sumSaaS += calc.saas;
-      sumBPO += calc.bpo;
-    });
-  }
+  iter((y, m) => {
+    const r = findRev(cust.id, y, m);
+    const calc = calcRevenue(r, cust, y, m);
+    monthly.push({ year: y, month: m, saas: calc.saas, bpo: calc.bpo, total: calc.saas + calc.bpo });
+    sumSaaS += calc.saas;
+    sumBPO += calc.bpo;
+  });
 
   return { monthly, sumSaaS, sumBPO, sumTotal: sumSaaS + sumBPO };
 }
