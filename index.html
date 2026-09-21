@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.260.0"></script>
-<script src="apriko-api.js?v=1.260.0"></script>
-<script src="lohncheck.js?v=1.260.0"></script>
-<script src="personalbudget.js?v=1.260.0"></script>
-<script src="jahresbudget.js?v=1.260.0"></script>
-<script src="budgetpositionen.js?v=1.260.0"></script>
-<script src="lohnchecklistetemp.js?v=1.260.0"></script>
+<script src="apriko-filters.js?v=1.263.0"></script>
+<script src="apriko-api.js?v=1.263.0"></script>
+<script src="lohncheck.js?v=1.263.0"></script>
+<script src="personalbudget.js?v=1.263.0"></script>
+<script src="jahresbudget.js?v=1.263.0"></script>
+<script src="budgetpositionen.js?v=1.263.0"></script>
+<script src="lohnchecklistetemp.js?v=1.263.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -984,7 +984,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.260.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.263.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -4325,6 +4325,7 @@ function renderDashboard(el) {
         <button class="btn btn-sm" onclick="crmCopyCustomerEmails('alle')" title="E-Mail-Adressen in die Zwischenablage kopieren — danach in Outlook/Gmail ins Bcc-Feld einfügen (Strg+V)">✉ An alle${emailCounts ? " (" + emailCounts.alle + ")" : ""}</button>
         <button class="btn btn-sm" onclick="crmCopyCustomerEmails('entscheid')" title="E-Mail-Adressen in die Zwischenablage kopieren — danach in Outlook/Gmail ins Bcc-Feld einfügen (Strg+V)">✉ An Entscheidungsträger${emailCounts ? " (" + emailCounts.entscheid + ")" : ""}</button>
         <button class="btn btn-sm" onclick="crmCopyCustomerEmails('user')" title="E-Mail-Adressen in die Zwischenablage kopieren — danach in Outlook/Gmail ins Bcc-Feld einfügen (Strg+V)">✉ An User${emailCounts ? " (" + emailCounts.user + ")" : ""}</button>
+        <button class="btn btn-sm" onclick="crmExportCustomerEmails()" title="Excel mit ALLEN Kunden (aktuelle Auswahl) und ihren E-Mails — auch Kunden ohne Adresse, damit Lücken sichtbar sind">⇩ E-Mails exportieren</button>
         <span style="font-size:11px;color:var(--text-faint);margin-left:4px">Kopiert die E-Mail-Adressen der Kunden (Kennzeichnung «Ist Kunde») in die Zwischenablage — danach eine neue Mail öffnen und mit Strg+V ins Bcc-Feld einfügen. Adressen werden pro Firma unter «Firma bearbeiten» gepflegt.</span>
       </div>
     </div>
@@ -7185,11 +7186,11 @@ function tarifartenCsvExport() {
    sind hier editierbar (localStorage aba-settings). Erkennung des Blatts: entweder Monats-
    spalten (Jan…Dez / 01…12 / 2026-08) = Breitformat, oder Spalten Lohnart/Betrag(/Monat) = Langformat. */
 const ABA_DEFAULTS = { client: "99999", division: "0", currency: "CHF", mapId: "AbaDefault", version: "2015", docCode: "B", textPrefix: "Lohn", mwstKonten: "5490:200:I" };
-let abaState = { datei: "", zeilen: [], spalten: [], monat: new Date().getMonth() || 12, jahr: new Date().getFullYear(), overrides: {}, xml: "", kunde: parseInt(localStorage.getItem("aba-kunde") || "0") || 0 };
+let abaState = { datei: "", zeilen: [], spalten: [], monat: new Date().getMonth() || 12, jahr: new Date().getFullYear(), overrides: {}, xml: "", kunde: (localStorage.getItem("aba-kunde") || "0") === "0" ? 0 : localStorage.getItem("aba-kunde") };
 /* Kunden mit FIBU-Monatsabschluss (Kundenflag «fibu») — pro Kunde eigenes Regelwerk + Mandant-Parameter
    in parameter.json (abacusKunden[<id>]); der globale Block «abacus» ist die Vorlage für neue Kunden. */
 function abaFibuKunden() { return cache.customers.filter(c => kundenFlag(c.id, "fibu")).sort((a, b) => (a.Title || "").localeCompare(b.Title || "")); }
-function abaKundeWaehlen(id) { abaState.kunde = parseInt(id) || 0; localStorage.setItem("aba-kunde", String(abaState.kunde)); abaState.xml = ""; render(); }
+function abaKundeWaehlen(id) { abaState.kunde = String(id || "") === "0" ? 0 : (String(id || "").trim() || 0); localStorage.setItem("aba-kunde", String(abaState.kunde)); abaState.xml = ""; render(); }
 function abaSettings() {
   let lokal = {};
   try { lokal = JSON.parse(localStorage.getItem("aba-settings") || "{}"); } catch (e) {}
@@ -7553,7 +7554,7 @@ function abaXmlErzeugen() {
   const blob = new Blob([abaState.xml], { type: "application/xml;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  const kn = abaState.kunde ? ((cache.customers.find(c => c.id === abaState.kunde) || {}).Title || "").replace(/[^\w.-]+/g, "_") + "_" : "";
+  const kn = abaState.kunde ? ((cache.customers.find(c => String(c.id) === String(abaState.kunde)) || {}).Title || "").replace(/[^\w.-]+/g, "_") + "_" : "";
   a.download = `BuBel_Abacus_${kn}${abaState.jahr}${String(abaState.monat).padStart(2, "0")}.xml`;
   a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   render();
@@ -7576,7 +7577,7 @@ function renderAbacus(el) {
       <h3 style="margin:0 0 4px">Abacus-Schnittstelle (FIBU-Import)</h3>
       <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">Lohnkontoblatt hochladen (CSV/XLSX), Monat wählen — die Beträge werden pro Lohnart summiert, Soll/Haben kommen aus dem Lohnartenstamm und werden nach dem Regelwerk (Parameter → Abacus: Umkontierung, Lohnart-Kontierung, Aggregat, Zusatzbuchung, nicht buchen) umgesetzt. Ergebnis als AbaConnect-XML (Sammelbuchung mit einer Einzelbuchung pro Lohnart, Buchungsdatum = Monatsletzter). Fehlende Konten trägst du in der Zeile ein — dauerhaft gemerkt. Negative Beträge werden mit vertauschten Konten gebucht.${(abaParam().standardGeladen) ? ` Regelwerk: <strong>${escape(abaParam().standardGeladen)}</strong> (verifiziert gegen die manuelle Buchungsmaske).` : ""}</div>
       <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
-        <label style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--text-dim)">Kunde (FIBU Monatsabschluss)<select onchange="abaKundeWaehlen(this.value)" style="padding:4px 6px;min-width:220px"><option value="0" ${abaState.kunde ? "" : "selected"}>— Vorlage / kein Kunde —</option>${abaFibuKunden().map(c => `<option value="${c.id}" ${c.id === abaState.kunde ? "selected" : ""}>${escape(c.Title)}</option>`).join("")}</select></label>
+        <label style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--text-dim)">Kunde (FIBU Monatsabschluss)<select onchange="abaKundeWaehlen(this.value)" style="padding:4px 6px;min-width:220px"><option value="0" ${abaState.kunde ? "" : "selected"}>— Vorlage / kein Kunde —</option>${abaFibuKunden().map(c => `<option value="${c.id}" ${String(c.id) === String(abaState.kunde) ? "selected" : ""}>${escape(c.Title)}</option>`).join("")}</select></label>
         <label class="btn btn-sm">⇧ Lohnkontoblatt hochladen<input type="file" accept=".csv,.xlsx,.xls,.txt" style="display:none" onchange="abaUpload(this)"></label>
         <label style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--text-dim)">Monat<select onchange="abaState.monat=parseInt(this.value);abaState.xml='';render()" style="padding:4px 6px">${MONTH_NAMES.map((n, i) => `<option value="${i + 1}" ${i + 1 === abaState.monat ? "selected" : ""}>${n}</option>`).join("")}</select></label>
         <label style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--text-dim)">Jahr<input type="number" value="${abaState.jahr}" onchange="abaState.jahr=parseInt(this.value)||abaState.jahr;abaState.xml='';render()" style="width:70px;padding:4px 6px"></label>
@@ -7670,7 +7671,7 @@ function onbFmtDatum(iso) { return iso ? iso.slice(8, 10) + "." + iso.slice(5, 7
 function onbFaellig(goLive, tage) { if (!goLive) return ""; const d = new Date(goLive + "T00:00:00"); d.setDate(d.getDate() + (parseInt(tage) || 0)); return d.toISOString().slice(0, 10); }
 /* --- Kunden --- */
 async function onbKundeHinzu(custId) {
-  custId = parseInt(custId); if (!custId) return;
+  custId = String(custId || "").trim(); if (!custId) return;
   await parameterLaden(false);
   const o = onbParam();
   if (!o.kunden[custId]) o.kunden[custId] = { verantwortlich: onbUserEmail(), goLive: "", erledigt: {}, hinzu: new Date().toISOString() };
@@ -7678,7 +7679,7 @@ async function onbKundeHinzu(custId) {
 }
 async function onbKundeEntfernen(custId) {
   await parameterLaden(false);
-  const o = onbParam(); const c = cache.customers.find(x => x.id == custId);
+  const o = onbParam(); const c = cache.customers.find(x => String(x.id) === String(custId));
   if (!confirm(`«${c ? c.Title : custId}» aus dem Onboarding entfernen? Erledigt-Status geht verloren.`)) return;
   delete o.kunden[custId]; await onbSpeichern(); render();
 }
@@ -7738,8 +7739,8 @@ async function renderOnboarding(el) {
   if (crmKundenFlags === null && typeof siteId !== "undefined" && siteId) { crmLoadKundenFlags().then(() => { if (currentView === "onboarding") render(); }); }
   const o = onbParam();
   const heute = new Date().toISOString().slice(0, 10);
-  const kundenIds = Object.keys(o.kunden).map(Number);
-  const kunden = kundenIds.map(id => ({ id, c: cache.customers.find(x => x.id === id), k: o.kunden[id] })).filter(x => x.c)
+  const kundenIds = Object.keys(o.kunden);
+  const kunden = kundenIds.map(id => ({ id, c: cache.customers.find(x => String(x.id) === String(id)), k: o.kunden[id] })).filter(x => x.c)
     .sort((a, b) => (a.k.goLive || "9999").localeCompare(b.k.goLive || "9999") || (a.c.Title || "").localeCompare(b.c.Title || ""));
   const kandidaten = cache.customers.filter(c => !o.kunden[c.id]).sort((a, b) => (a.Title || "").localeCompare(b.Title || ""));
   const emails = onbProfileEmails();
@@ -7757,15 +7758,15 @@ async function renderOnboarding(el) {
   const zeilen = kunden.map(({ id, c, k }) => {
     const erl = k.erledigt || {}; const n = o.aufgaben.filter(a => erl[a.id]).length;
     return `<tr>
-      <td style="position:sticky;left:0;background:var(--bg-card);z-index:1"><strong>${escape(c.Title)}</strong> <a href="#" onclick="onbKundeEntfernen(${id});return false;" style="color:var(--text-faint);font-size:10px" title="Aus Onboarding entfernen">✕</a></td>
+      <td style="position:sticky;left:0;background:var(--bg-card);z-index:1"><strong>${escape(c.Title)}</strong> <a href="#" onclick="onbKundeEntfernen('${id}');return false;" style="color:var(--text-faint);font-size:10px" title="Aus Onboarding entfernen">✕</a></td>
       <td style="font-size:11px">${escape(c.Segment || "—")}</td>
-      <td><select onchange="onbKundeFeld(${id},'verantwortlich',this.value)" style="width:100%;padding:3px 4px;font-size:11px"><option value="">—</option>${emails.map(e => `<option value="${escape(e)}" ${e === (k.verantwortlich || "").toLowerCase() ? "selected" : ""}>${escape(e)}</option>`).join("")}</select></td>
-      <td><input type="date" value="${k.goLive || ""}" onchange="onbKundeFeld(${id},'goLive',this.value)" style="padding:3px 4px;font-size:11px"></td>
+      <td><select onchange="onbKundeFeld('${id}','verantwortlich',this.value)" style="width:100%;padding:3px 4px;font-size:11px"><option value="">—</option>${emails.map(e => `<option value="${escape(e)}" ${e === (k.verantwortlich || "").toLowerCase() ? "selected" : ""}>${escape(e)}</option>`).join("")}</select></td>
+      <td><input type="date" value="${k.goLive || ""}" onchange="onbKundeFeld('${id}','goLive',this.value)" style="padding:3px 4px;font-size:11px"></td>
       <td style="text-align:right;font-family:var(--font-mono);font-size:11px">${n}/${o.aufgaben.length}</td>
       ${o.aufgaben.map((a, i) => {
         const e = erl[a.id]; const faellig = onbFaellig(k.goLive, a.tage); const ueber = !e && faellig && faellig < heute;
         const tip = e ? `Erledigt ${onbFmtTs(e.am)} · ${e.von || "?"}` : (faellig ? `Fällig ${onbFmtDatum(faellig)}${ueber ? " — überfällig" : ""}` : "Offen") + ` · ${a.zustaendig}`;
-        return `<td style="text-align:center;${i === 0 || o.aufgaben[i - 1].phase !== a.phase ? "border-left:1px solid var(--border);" : ""}${ueber ? "background:rgba(255,80,80,0.12);" : ""}" title="${escape(tip)}"><input type="checkbox" ${e ? "checked" : ""} onchange="onbToggle(${id},'${a.id}')" style="width:auto;margin:0;cursor:pointer"></td>`;
+        return `<td style="text-align:center;${i === 0 || o.aufgaben[i - 1].phase !== a.phase ? "border-left:1px solid var(--border);" : ""}${ueber ? "background:rgba(255,80,80,0.12);" : ""}" title="${escape(tip)}"><input type="checkbox" ${e ? "checked" : ""} onchange="onbToggle('${id}','${a.id}')" style="width:auto;margin:0;cursor:pointer"></td>`;
       }).join("")}
     </tr>`;
   }).join("");
@@ -7887,7 +7888,7 @@ async function renderParameter(el) {
 /* Parameter → Abacus: Regelwerk sichtbar und editierbar */
 function paramAbacusBlock() {
   const a = abaParam();
-  const kundenSel = `<select onchange="abaKundeWaehlen(this.value)" style="padding:3px 6px"><option value="0" ${abaState.kunde ? "" : "selected"}>Vorlage (für neue Kunden)</option>${abaFibuKunden().map(c => `<option value="${c.id}" ${c.id === abaState.kunde ? "selected" : ""}>${escape(c.Title)}</option>`).join("")}</select>`;
+  const kundenSel = `<select onchange="abaKundeWaehlen(this.value)" style="padding:3px 6px"><option value="0" ${abaState.kunde ? "" : "selected"}>Vorlage (für neue Kunden)</option>${abaFibuKunden().map(c => `<option value="${c.id}" ${String(c.id) === String(abaState.kunde) ? "selected" : ""}>${escape(c.Title)}</option>`).join("")}</select>`;
   const inp = (v, on, w) => `<input type="text" value="${escape(v)}" onchange="${on}" style="width:${w || 60}px;font-family:var(--font-mono);font-size:12px;padding:2px 5px">`;
   const um = Object.keys(a.umkontierung).sort();
   const ko = Object.keys(a.kontierung).sort((x, y) => parseInt(x) - parseInt(y));
@@ -11977,6 +11978,7 @@ function openCustomer(id) {
 
 function newCustomer() { editCustomer(null); }
 function editCustomer(id) {
+  crmLoadStamm();
   const c = id ? cache.customers.find(x => x.id == id) : {};
   // Beim Anlegen: Vorauswahl der Firma falls vorhanden + Firmen, die schon als Kunde markiert sind, bevorzugen
   const companyOptions = cache.companies
@@ -11985,7 +11987,11 @@ function editCustomer(id) {
 
   showModal(id ? "Kunde bearbeiten" : "Neuer Kunde", `
     <input type="hidden" id="f-title" value="${escape(c.Title||"")}">
-    <div class="field"><label>Firma *</label><select id="f-company" onchange="updateCustomerTitle()"><option value="">—</option>${companyOptions}</select></div>
+    <div class="field"><label>Firma *</label><select id="f-company" onchange="updateCustomerTitle();kundeFirmenBlockFuellen()"><option value="">—</option>${companyOptions}</select></div>
+    <details id="kunde-firmenblock" ${id ? "" : "open"} style="margin:6px 0 12px;border:1px solid var(--border);border-radius:6px;padding:8px 12px">
+      <summary style="cursor:pointer;font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em">Firmendaten — identisch mit «Firma» (Adresse, Ansprechpersonen, E-Mails, Notes)</summary>
+      <div id="kunde-firmenfelder" style="margin-top:8px">${firmenFelderHtml(cache.companies.find(x => x.id == c.CompanyId), "fc-")}</div>
+    </details>
     <div class="field-row">
       <div class="field"><label>Segment</label><select id="f-segment" onchange="updateCustomerTitle()">${SEGMENTS.map(s => `<option ${s===(c.Segment||"Nur SaaS")?"selected":""}>${s}</option>`).join("")}</select></div>
       <div class="field"><label>Status</label><select id="f-status">${CUSTOMER_STATUS.map(s => `<option ${s===(c.Status||"Aktiv")?"selected":""}>${s}</option>`).join("")}</select></div>
@@ -12150,6 +12156,11 @@ function togglePriceHistory() {
   if (!isOpen) updatePriceHistoryUI();
 }
 
+function kundeFirmenBlockFuellen() {
+  const compId = parseInt(val("f-company")) || 0;
+  const el = document.getElementById("kunde-firmenfelder");
+  if (el) el.innerHTML = firmenFelderHtml(cache.companies.find(x => x.id === compId), "fc-");
+}
 async function saveCustomer(id) {
   const compId = val("f-company");
   const start = val("f-start");
@@ -12236,6 +12247,8 @@ async function saveCustomer(id) {
         await crmSaveKundenFlags();
       }
     }
+    // Firmendaten (gemeinsamer Block) mitspeichern — identisch mit dem Firmenformular
+    if (compId && document.getElementById("fc-website")) { await firmenFelderSpeichern(parseInt(compId), "fc-"); await reload("Companies"); }
     await reload("Customers");
     closeModal(); render(); toast("Gespeichert");
   } catch (e) { toast(e.message, true); }
@@ -12917,6 +12930,37 @@ function crmCustomerEmailCounts(scope) {
   });
   return { alle: out.alle.size, entscheid: out.entscheid.size, user: out.user.size, firmen: out.firmen };
 }
+/* Excel-Export: alle Kunden der Auswahl mit Entscheidungsträger-/User-Mails, interner Ansprechperson und Owner —
+   Kunden OHNE Adresse bleiben drin und werden mit «FEHLT» markiert (jeder Kunde braucht mindestens eine). */
+async function crmExportCustomerEmails() {
+  if (crmStamm === null) { await crmLoadStamm(); }
+  const scope = filters.dashboardEmailScope || "alle";
+  const custs = cache.companies.filter(c => c.IsCustomer && crmCompanyMatchesScope(c.id, scope)).sort((a, b) => (a.Title || "").localeCompare(b.Title || ""));
+  if (!custs.length) { toast("Keine Kunden in der Auswahl.", true); return; }
+  await lcLoadXlsx();
+  const hdr = ["Firma", "Segment", "Status", "Entscheidungsträger", "User", "Anzahl E-Mails", "Interne Ansprechperson", "Owner", "Kontrolle"];
+  let fehlt = 0;
+  const rows = custs.map(c => {
+    const st = (crmStamm && crmStamm[String(c.id)]) || {};
+    const ent = crmParseEmails(st.entscheid), usr = crmParseEmails(st.user);
+    const kunde = cache.customers.find(k => String(k.CompanyId) === String(c.id));
+    const n = new Set([...ent, ...usr]).size;
+    if (!n) fehlt++;
+    return [c.Title || "", kunde ? (kunde.Segment || "") : "", kunde ? (kunde.Status || "") : "", ent.join(", "), usr.join(", "), n, ansprechEmail(c.id), kunde ? (kunde.Owner || "") : "", n ? "OK" : "FEHLT"];
+  });
+  const ws = window.XLSX.utils.aoa_to_sheet([hdr].concat(rows));
+  ws["!cols"] = [28, 14, 10, 40, 40, 8, 26, 26, 10].map(w => ({ wch: w }));
+  ws["!autofilter"] = { ref: "A1:I" + (rows.length + 1) };
+  const wb = window.XLSX.utils.book_new();
+  window.XLSX.utils.book_append_sheet(wb, ws, "Kunden-E-Mails");
+  // Zweites Blatt: eine Zeile pro Adresse (für Serienmails)
+  const flat = [["E-Mail", "Firma", "Rolle"]];
+  custs.forEach(c => { const st = (crmStamm && crmStamm[String(c.id)]) || {}; crmParseEmails(st.entscheid).forEach(e => flat.push([e, c.Title || "", "Entscheidungsträger"])); crmParseEmails(st.user).forEach(e => flat.push([e, c.Title || "", "User"])); });
+  const ws2 = window.XLSX.utils.aoa_to_sheet(flat); ws2["!cols"] = [34, 28, 20].map(w => ({ wch: w }));
+  window.XLSX.utils.book_append_sheet(wb, ws2, "Adressen");
+  window.XLSX.writeFile(wb, "Kunden-E-Mails_" + new Date().toISOString().slice(0, 10) + ".xlsx");
+  toast(custs.length + " Kunden exportiert" + (fehlt ? " — " + fehlt + " ohne E-Mail (Spalte Kontrolle = FEHLT)" : ", alle mit mindestens einer E-Mail") + ".");
+}
 async function crmCopyCustomerEmails(kind) {
   if (crmStamm === null) { await crmLoadStamm(); }
   const scope = filters.dashboardEmailScope || "alle";
@@ -12951,6 +12995,70 @@ async function crmCopyCustomerEmails(kind) {
   }
 }
 
+/* Firmendaten, die an beiden Orten (Firma und Kunde) identisch bearbeitet werden: Website, Adresse,
+   Aussenumsatz, interne Ansprechperson, Entscheidungsträger, User, Notes. Vertragliches (Segment, Status,
+   Preismodell, Start/Ende …) liegt nur beim Kunden. Feld-IDs mit Präfix, damit sie im Kundenformular
+   nicht mit den Kundenfeldern kollidieren. */
+function firmenFelderHtml(c, pfx) {
+  c = c || {}; pfx = pfx || "f-";
+  const st = (crmStamm && crmStamm[String(c.id)]) || {};
+  return `
+    <div class="field-row">
+      <div class="field"><label>Website</label><input id="${pfx}website" value="${escape(c.Website||"")}"></div>
+      <div class="field"><label>Aussenumsatz (CHF/Jahr)</label><input id="${pfx}extrev" type="number" step="10000" min="0" value="${c.ExternalRevenue||""}" placeholder="z.B. 10000000"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Strasse</label><input id="${pfx}street" value="${escape(st.strasse || "")}" placeholder="Beispielstrasse 12"></div>
+      <div class="field"><label>Ort</label><input id="${pfx}city" value="${escape(c.City||"")}"></div>
+      <div class="field"><label>Land</label><input id="${pfx}country" value="${escape(c.Country||"CH")}"></div>
+    </div>
+    <div class="field"><label>Interne Ansprechperson (E-Mail)</label>
+      <input id="${pfx}ansprech" type="email" list="ansprech-emails" value="${escape(ansprechEmail(c.id || ""))}" placeholder="z.B. beni@apriko.ch">
+      <datalist id="ansprech-emails">
+        ${[...new Set([myEmail(), ...cache.customers.map(x => x.Owner), ...Object.values(crmAnsprech || {})].filter(Boolean).map(e => e.toLowerCase()))].sort().map(e => `<option value="${escape(e)}">`).join("")}
+      </datalist>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Entscheidungsträger (E-Mails, komma-getrennt)</label><textarea id="${pfx}entscheid" rows="2" placeholder="anna@kunde.ch, max@kunde.ch">${escape(st.entscheid || "")}</textarea></div>
+      <div class="field"><label>User (E-Mails, komma-getrennt)</label><textarea id="${pfx}user" rows="2" placeholder="user1@kunde.ch, user2@kunde.ch">${escape(st.user || "")}</textarea></div>
+    </div>
+    <div class="field"><label>Notes (Firma)</label><textarea id="${pfx}fnotes">${escape(c.Notes||"")}</textarea></div>`;
+}
+/* Firmendaten aus dem Formular (Präfix) speichern: Companies-Liste + Ansprech-/Stamm-JSON */
+async function firmenFelderSpeichern(compId, pfx, extraData) {
+  pfx = pfx || "f-";
+  if (compId == null) return;
+  const data = Object.assign({
+    Website: val(pfx + "website"), City: val(pfx + "city"), Country: val(pfx + "country"), Notes: val(pfx + "fnotes"),
+    ExternalRevenue: val(pfx + "extrev") ? parseFloat(val(pfx + "extrev")) : null
+  }, extraData || {});
+  await updateItem("Companies", compId, data);
+  const ansprechNeu = val(pfx + "ansprech").toLowerCase();
+  if (crmAnsprech !== null) {
+    const key = String(compId);
+    if (ansprechNeu !== (crmAnsprech[key] || "")) {
+      if (ansprechNeu) crmAnsprech[key] = ansprechNeu; else delete crmAnsprech[key];
+      await crmSaveAnsprech();
+    }
+  }
+  const strasseNeu = val(pfx + "street");
+  const entscheidNeu = crmNormEmails(val(pfx + "entscheid"));
+  const userNeu = crmNormEmails(val(pfx + "user"));
+  if (crmStamm !== null) {
+    const key = String(compId);
+    const altS = (crmStamm[key] && crmStamm[key].strasse) || "";
+    const altE = (crmStamm[key] && crmStamm[key].entscheid) || "";
+    const altU = (crmStamm[key] && crmStamm[key].user) || "";
+    if (strasseNeu !== altS || entscheidNeu !== altE || userNeu !== altU) {
+      const merged = { ...(crmStamm[key] || {}) };
+      if (strasseNeu) merged.strasse = strasseNeu; else delete merged.strasse;
+      if (entscheidNeu) merged.entscheid = entscheidNeu; else delete merged.entscheid;
+      if (userNeu) merged.user = userNeu; else delete merged.user;
+      if (Object.keys(merged).length) crmStamm[key] = merged; else delete crmStamm[key];
+      await crmSaveStamm();
+    }
+  }
+}
 function editCompany(id) {
   crmLoadStamm();
   const c = id ? cache.companies.find(x => x.id == id) : {};
@@ -12964,25 +13072,8 @@ function editCompany(id) {
           ${c.Industry && !INDUSTRIES.includes(c.Industry) ? `<option value="${escape(c.Industry)}" selected>${escape(c.Industry)} (alt)</option>` : ""}
         </select>
       </div>
-      <div class="field"><label>Website</label><input id="f-website" value="${escape(c.Website||"")}"></div>
     </div>
-    <div class="field-row">
-      <div class="field"><label>Strasse</label><input id="f-street" value="${escape((crmStamm && crmStamm[String(c.id)] && crmStamm[String(c.id)].strasse) || "")}" placeholder="Beispielstrasse 12"></div>
-      <div class="field"><label>Ort</label><input id="f-city" value="${escape(c.City||"")}"></div>
-      <div class="field"><label>Land</label><input id="f-country" value="${escape(c.Country||"CH")}"></div>
-    </div>
-    <div class="field"><label>Aussenumsatz (CHF/Jahr)</label><input id="f-extrev" type="number" step="10000" min="0" value="${c.ExternalRevenue||""}" placeholder="z.B. 10000000"></div>
-    <div class="field"><label>Interne Ansprechperson (E-Mail)</label>
-      <input id="f-ansprech" type="email" list="ansprech-emails" value="${escape(ansprechEmail(c.id || ""))}" placeholder="z.B. beni@apriko.ch">
-      <datalist id="ansprech-emails">
-        ${[...new Set([myEmail(), ...cache.customers.map(x => x.Owner), ...Object.values(crmAnsprech || {})].filter(Boolean).map(e => e.toLowerCase()))].sort().map(e => `<option value="${escape(e)}">`).join("")}
-      </datalist>
-    </div>
-    <div class="field-row">
-      <div class="field"><label>Entscheidungsträger (E-Mails, komma-getrennt)</label><textarea id="f-entscheid" rows="2" placeholder="anna@kunde.ch, max@kunde.ch">${escape((crmStamm && crmStamm[String(c.id)] && crmStamm[String(c.id)].entscheid) || "")}</textarea></div>
-      <div class="field"><label>User (E-Mails, komma-getrennt)</label><textarea id="f-user" rows="2" placeholder="user1@kunde.ch, user2@kunde.ch">${escape((crmStamm && crmStamm[String(c.id)] && crmStamm[String(c.id)].user) || "")}</textarea></div>
-    </div>
-    <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
+    ${firmenFelderHtml(c, "f-")}
     <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-iscustomer" ${c.IsCustomer?"checked":""} style="width:auto;margin:0" onchange="document.getElementById('f-winprob-row').style.display=this.checked?'none':'block'"> Ist Kunde (zahlt monatlich)</label></div>
     <div id="f-winprob-row" class="field" style="display:${c.IsCustomer?'none':'block'}">
       <label>Win-Wahrscheinlichkeit (%)</label>
@@ -12998,42 +13089,18 @@ async function saveCompany(id) {
   const winRaw = val("f-winprob");
   const data = {
     Title: val("f-title"), Industry: val("f-industry"), Website: val("f-website"),
-    City: val("f-city"), Country: val("f-country"), Notes: val("f-notes"),
+    City: val("f-city"), Country: val("f-country"), Notes: val("f-fnotes"),
     IsCustomer: isCust,
     // Bei Kunden Win% nicht relevant — auf null setzen, sonst eingetragener Wert
     WinProbability: (!isCust && winRaw !== "") ? Math.max(0, Math.min(100, parseInt(winRaw))) : null,
     ExternalRevenue: val("f-extrev") ? parseFloat(val("f-extrev")) : null
   };
   if (!data.Title) return toast("Firmenname erforderlich", true);
-  const ansprechNeu = val("f-ansprech").toLowerCase();
   try {
     let compId = id;
-    if (id) await updateItem("Companies", id, data);
-    else { const created = await createItem("Companies", data); compId = created && created.id; }
-    if (compId != null && crmAnsprech !== null) {
-      const key = String(compId);
-      if (ansprechNeu !== (crmAnsprech[key] || "")) {
-        if (ansprechNeu) crmAnsprech[key] = ansprechNeu; else delete crmAnsprech[key];
-        await crmSaveAnsprech();
-      }
-    }
-    const strasseNeu = val("f-street");
-    const entscheidNeu = crmNormEmails(val("f-entscheid"));
-    const userNeu = crmNormEmails(val("f-user"));
-    if (compId != null && crmStamm !== null) {
-      const key = String(compId);
-      const altS = (crmStamm[key] && crmStamm[key].strasse) || "";
-      const altE = (crmStamm[key] && crmStamm[key].entscheid) || "";
-      const altU = (crmStamm[key] && crmStamm[key].user) || "";
-      if (strasseNeu !== altS || entscheidNeu !== altE || userNeu !== altU) {
-        const merged = { ...(crmStamm[key] || {}) };
-        if (strasseNeu) merged.strasse = strasseNeu; else delete merged.strasse;
-        if (entscheidNeu) merged.entscheid = entscheidNeu; else delete merged.entscheid;
-        if (userNeu) merged.user = userNeu; else delete merged.user;
-        if (Object.keys(merged).length) crmStamm[key] = merged; else delete crmStamm[key];
-        await crmSaveStamm();
-      }
-    }
+    if (!id) { const created = await createItem("Companies", data); compId = created && created.id; }
+    // Firmendaten (gemeinsamer Block) + Titel/Branche/Kunde-Flag/Win% speichern
+    await firmenFelderSpeichern(compId, "f-", { Title: data.Title, Industry: data.Industry, IsCustomer: data.IsCustomer, WinProbability: data.WinProbability });
     await reload("Companies");
     closeModal(); render(); toast("Gespeichert");
   } catch (e) { toast(e.message, true); }
