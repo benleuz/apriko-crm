@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.279.0"></script>
-<script src="apriko-api.js?v=1.279.0"></script>
-<script src="lohncheck.js?v=1.279.0"></script>
-<script src="personalbudget.js?v=1.279.0"></script>
-<script src="jahresbudget.js?v=1.279.0"></script>
-<script src="budgetpositionen.js?v=1.279.0"></script>
-<script src="lohnchecklistetemp.js?v=1.279.0"></script>
+<script src="apriko-filters.js?v=1.280.0"></script>
+<script src="apriko-api.js?v=1.280.0"></script>
+<script src="lohncheck.js?v=1.280.0"></script>
+<script src="personalbudget.js?v=1.280.0"></script>
+<script src="jahresbudget.js?v=1.280.0"></script>
+<script src="budgetpositionen.js?v=1.280.0"></script>
+<script src="lohnchecklistetemp.js?v=1.280.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -984,7 +984,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.279.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.280.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -3288,8 +3288,21 @@ async function fbLoadBuchInner(year) {
       if (!f.name || !f.name.startsWith("fb_buch_" + year + "_") || !f.name.endsWith(".json")) continue;
       try {
         const data = await graph(`/sites/${siteId}/drive/items/${f.id}/content`);
-        const ges = data.ges || f.name.replace(/^fb_buch_\d+_/, "").replace(/\.json$/, "").replace(/_/g, " ");
-        Object.entries(data.konten || {}).forEach(([kt, obj]) => { out[ges + "|" + kt] = obj; });
+        let ges = data.ges || f.name.replace(/^fb_buch_\d+_/, "").replace(/\.json$/, "").replace(/_/g, " ");
+        // Gesellschaftsname normalisieren: Dateien, die unter einem verunglückten Namen gespeichert wurden
+        // (z.B. «Apriko AG Kotenblätter Jul 2026, im Excel»), werden der bekannten Gesellschaft zugeordnet
+        // und mit deren Bestand zusammengeführt (Doppelte übersprungen).
+        const bekannt = ["Apriko AG", "maverix ag"];
+        const k = bekannt.find(b => ges.toLowerCase() !== b.toLowerCase() && ges.toLowerCase().startsWith(b.toLowerCase()));
+        if (k) ges = k;
+        const sig = b => (Array.isArray(b) ? b : [b]).map(x => String(x ?? "").trim()).join("|");
+        Object.entries(data.konten || {}).forEach(([kt, obj]) => {
+          const key = ges + "|" + kt;
+          if (!out[key]) { out[key] = { ...obj, buch: (obj.buch || []).slice() }; return; }
+          const have = new Set(out[key].buch.map(sig));
+          (obj.buch || []).forEach(b => { const sg = sig(b); if (!have.has(sg)) { have.add(sg); out[key].buch.push(b); } });
+          if (obj.bez && !out[key].bez) out[key].bez = obj.bez;
+        });
       } catch (e) { /* einzelnes File defekt — überspringen */ }
     }
   } catch (e) { /* Ordner existiert noch nicht → keine Buchungen */ }
