@@ -19,7 +19,7 @@
    budgetRows, budgetChfOf, budgetIsSaaS, budgetErloes, BUDGET_MONTH_FIELDS,
    deleteItem, reload, escape, toast, render, currentView. */
 
-const JB_VERSION = "1.111.0";
+const JB_VERSION = "1.112.0";
 const JB_GES = ["Apriko AG", "Maverix AG"];
 const JB_PERSONAL = new Set(["SW_Lohn", "SW_SV", "SW_UebrPA", "BO_Lohn", "BO_SV", "BO_UebrPA"]);
 const JB_ERTRAG = new Set(["SW_Ertrag", "BO_Ertrag"]);
@@ -96,6 +96,21 @@ function jbBuild(year) {
     const v = (fbY[k] || []).reduce((s, x) => s + x, 0);
     push(k, { key: k, g: JB_PA_GES[k], kt: k.endsWith("Lohn") ? "50xx" : k.endsWith("SV") ? "57xx" : "58xx/59xx", b: "Budget Personalaufwand " + year, ist: null, hoch: v, p: "PA", bud: v, note: "", editable: false, src: "Personalaufwand", months: (fbY[k] || Array(12).fill(0)).map(x => x || 0) });
   });
+  // Automatische Position: Hosting Datenbanken (Anzahl DB pro Monat × CHF pro DB) auf 4400 Apriko AG
+  if (typeof budgetDbProMonat === "function" && typeof hostingProDb === "function") {
+    const dbM = budgetDbProMonat(year), preis = hostingProDb();
+    const m = dbM.map(n => Math.round(n * preis * 100) / 100), total = m.reduce((a, b) => a + b, 0);
+    if (dbM.some(n => n > 0)) {
+      const autoPos = { t: "Hosting Datenbanken (automatisch: " + Math.max(...dbM) + " DB × CHF " + preis + "/Mt.)", n: "aus Kundenstamm «Hat Datenbank» + Ertragsbudget", v: total, f: "x", m, auto: true };
+      let row = null;
+      for (const rows of Object.values(byKey)) { row = rows.find(x => x.editable && x.kt === "4400" && jbSameGes(x.g, "Apriko AG")); if (row) break; }
+      if (row) row.pos = (row.pos || []).concat([autoPos]);
+      else {
+        const key = fbZuordnung("4400", true) || "BL";
+        if (!JB_PERSONAL.has(key) && !JB_ERTRAG.has(key)) push(key, { key, g: "Apriko AG", kt: "4400", b: "Hosting / Cloud", ist: 0, hoch: 0, p: "—", id: null, bud: null, note: "", pos: [autoPos], man: true, editable: true });
+      }
+    }
+  }
   Object.values(byKey).forEach(a => a.sort((x, y) => (x.g + x.kt).localeCompare(y.g + y.kt)));
   // Ist-Basis je Personal-/Ertragskey zur Info (Hochrechnung Basisjahr)
   const istKey = {};
@@ -120,6 +135,8 @@ async function jbSaveRow(r, patch) {
   if (r.pos && r.pos.length) obj.pos = r.pos;
   if (r.man) { obj.man = 1; obj.b = r.b; obj.z = r.key; }
   Object.assign(obj, patch);
+  // Automatische Positionen (z.B. Hosting Datenbanken) werden nie gespeichert — sie entstehen bei jedem Aufbau neu
+  if (Array.isArray(obj.pos)) { obj.pos = obj.pos.filter(p => !p.auto); if (!obj.pos.length) delete obj.pos; }
   if (obj.v === undefined) obj.v = null;
   jbState.busy = true;
   try { await fbSaveItem(obj, r.id); if (!r.id) await reload("Budget"); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }

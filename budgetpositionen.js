@@ -10,7 +10,7 @@
    Abhängigkeiten: jahresbudget.js (jbBuild, jbSaveRow, jbFindRow, jbPos*, jbFmt, jbNum, JB_*),
    index.html (fbSaveItem, reload, escape, toast, render, FB_PLAN, FB_LABELS, FB_SRC). */
 
-const BP_VERSION = "1.111.0";
+const BP_VERSION = "1.112.0";
 const BP_MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 const BP_FAELL = [["m", "monatlich (÷12)"], ["q", "quartalsweise (÷4)"], ["e", "einmalig im Monat"], ["h", "halbjährlich (÷2)"], ["r", "von – bis"]];
 
@@ -25,6 +25,7 @@ function bpToggleBuch(id) { bpState.buch[id] = !bpState.buch[id]; render(); }
 
 /* Monatsverteilung einer Position (Jahresbetrag v) */
 function bpMonths(p) {
+  if (p.auto && Array.isArray(p.m)) return p.m.slice();   // automatische Position mit fixen Monatswerten
   const v = parseFloat(p.v) || 0, f = p.f || "m";
   const sm = Math.min(12, Math.max(1, parseInt(p.sm, 10) || 1)), em = Math.min(12, Math.max(sm, parseInt(p.em, 10) || 12));
   const out = Array(12).fill(0);
@@ -38,6 +39,7 @@ function bpMonths(p) {
   return out;
 }
 function bpFaellText(p) {
+  if (p.auto) return "automatisch";
   const f = p.f || "m", sm = parseInt(p.sm, 10) || 1, em = parseInt(p.em, 10) || 12;
   if (f === "e") return BP_MONATE[sm - 1];
   if (f === "q") return [0, 3, 6, 9].map(o => BP_MONATE[(sm - 1 + o) % 12]).join("/");
@@ -103,7 +105,8 @@ function renderBudgetpositionen(el) {
     <button class="btn btn-sm" onclick="bpState.showEmpty=!bpState.showEmpty;render()" style="${bpState.showEmpty ? "" : "background:var(--accent);color:#fff"}" title="Nur Konten ohne Positionen (noch offen) zeigen">⚠ nur offene</button>
     <button class="btn btn-sm" onclick="bpToggleAll(true)" title="Alle Konten aufklappen">▾ alle</button>
     <button class="btn btn-sm" onclick="bpToggleAll(false)" title="Alle Konten zuklappen">▸ alle</button>
-    <button class="btn btn-sm" onclick="bpExport()">⇩ CSV</button>`;
+    <button class="btn btn-sm" onclick="bpExport()">⇩ CSV</button>
+    <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim);margin-left:8px" title="Hostingkosten pro Datenbank und Monat — gilt für alle Kunden/Leads mit Datenbank (Kundenstamm «Hat Datenbank» bzw. DB-Häkchen im Ertragsbudget); wird als automatische Position auf 4400 Apriko AG budgetiert">Hosting pro DB/Mt. CHF <input type="number" step="10" value="${typeof hostingProDb === "function" ? hostingProDb() : 500}" onchange="hostingProDbSet(this.value)" style="width:70px;padding:3px 6px;font-family:var(--font-mono)"></label>`;
   if (jbState.busy) { el.innerHTML = `<div class="full-loading"><div class="loading"></div></div>`; return; }
   const y = bpState.year, ges = bpState.ges;
   const { rows, model } = bpRows(y, ges);
@@ -144,6 +147,17 @@ function renderBudgetpositionen(el) {
       </tr>`;
     const posRows = (r.pos || []).map((p, i) => {
       const mo = bpMonths(p), f = p.f || "m";
+      if (p.auto) return `
+      <tr style="background:rgba(127,127,127,.05)">
+        <td style="padding:2px 6px 2px 22px;font-size:11.5px;color:var(--accent-2)" title="${escape(p.n || "")}">⚙ ${escape(p.t || "")}</td>
+        <td style="padding:2px 6px;font-size:10.5px;color:var(--text-faint)">${escape(p.n || "")}</td>
+        <td style="padding:2px 4px;font-size:10.5px;color:var(--text-faint)">automatisch</td>
+        <td style="text-align:right;font-family:var(--font-mono);font-size:11.5px;padding:2px 6px">${Math.round(p.v || 0).toLocaleString("de-CH")}</td>
+        <td style="font-size:10px;color:var(--text-faint);padding:2px 4px">nach Monat</td>
+        ${mo.map(v => tdm(v, "color:var(--text-dim)")).join("")}
+        ${tdm(mo.reduce((s, v) => s + v, 0), "color:var(--text-dim)")}
+        <td></td>
+      </tr>`;
       const sel = (field, from, to, val) => `<select style="font-size:10.5px;padding:1px 2px" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'${field}',this.value)">${Array.from({ length: to - from + 1 }, (_, k) => from + k).map(mm => `<option value="${mm}" ${mm === val ? "selected" : ""}>${BP_MONATE[mm - 1]}</option>`).join("")}</select>`;
       return `
       <tr>

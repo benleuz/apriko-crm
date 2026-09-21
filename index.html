@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.274.0"></script>
-<script src="apriko-api.js?v=1.274.0"></script>
-<script src="lohncheck.js?v=1.274.0"></script>
-<script src="personalbudget.js?v=1.274.0"></script>
-<script src="jahresbudget.js?v=1.274.0"></script>
-<script src="budgetpositionen.js?v=1.274.0"></script>
-<script src="lohnchecklistetemp.js?v=1.274.0"></script>
+<script src="apriko-filters.js?v=1.275.0"></script>
+<script src="apriko-api.js?v=1.275.0"></script>
+<script src="lohncheck.js?v=1.275.0"></script>
+<script src="personalbudget.js?v=1.275.0"></script>
+<script src="jahresbudget.js?v=1.275.0"></script>
+<script src="budgetpositionen.js?v=1.275.0"></script>
+<script src="lohnchecklistetemp.js?v=1.275.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -984,7 +984,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.274.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.275.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -2023,7 +2023,7 @@ function budgetParse(item) {
     const d = JSON.parse(item.Title);
     if (d.cfg) return null;   // Config-Items (z.B. Saisonkurve) sind keine Budget-Zeilen
     const b = { id: item.id, BYear: d.y, RefType: d.rt, RefId: d.ri, BType: d.t,
-      RefName: d.rn || "", StartMonth: d.sm || 1,
+      RefName: d.rn || "", StartMonth: d.sm || 1, Db: !!d.db,
       Lic: d.lic || 0, Price: d.pr || 0, ExtRev: d.er || 0, Rate: d.ra || 0 };
     (d.m || []).forEach((v, i) => b[BUDGET_MONTH_FIELDS[i]] = v || 0);
     BUDGET_MONTH_FIELDS.forEach(f => { if (b[f] === undefined) b[f] = 0; });
@@ -2035,6 +2035,7 @@ function budgetSerialize(b) {
     y: b.BYear, rt: b.RefType, ri: b.RefId, t: b.BType,
     ...(b.RefType === "text" ? { rn: String(b.RefName || "").slice(0, 40) } : {}),
     ...(b.StartMonth > 1 ? { sm: b.StartMonth } : {}),
+    ...(b.Db ? { db: 1 } : {}),
     lic: parseFloat(b.Lic) || 0, pr: parseFloat(b.Price) || 0,
     er: parseFloat(b.ExtRev) || 0, ra: parseFloat(b.Rate) || 0,
     m: BUDGET_MONTH_FIELDS.map(f => {
@@ -2343,6 +2344,36 @@ function budgetSuggest(refType, refId, btype) {
   return out;
 }
 
+async function budgetDbToggle(id, on) {
+  const b = budgetRows().find(x => x.id === id); if (!b) return;
+  b.Db = !!on;
+  try { await budgetSave(b); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  render();
+}
+/* Anzahl Datenbanken pro Monat im Planjahr (für Hostingkosten): eine DB pro Kunde/Lead mit DB-Flag
+   (Kundenstamm «Hat Datenbank» oder DB-Häkchen der Budgetzeile), gezählt in den Monaten, in denen die
+   Budgetzeile aktiv ist (ab Startmonat, bis Vertragsende). SaaS- und BPO-Zeile desselben Kunden = eine DB. */
+function budgetDbProMonat(year) {
+  const out = Array(12).fill(0); const seen = Array.from({ length: 12 }, () => new Set());
+  budgetRows().filter(b => b.BYear == year).forEach(b => {
+    const c = b.RefType === "customer" ? cache.customers.find(x => String(x.id) === String(b.RefId)) : null;
+    const hat = (c && kundenFlag(c.id, "hatDb")) || b.Db;
+    if (!hat) return;
+    const key = b.RefType + ":" + (b.RefId || b.RefName);
+    const sm = parseInt(b.StartMonth) || 1;
+    let em = 12;
+    if (c) { const e = budgetEndMonat(c, year); if (e === 0) em = 0; else if (e) em = e; }
+    for (let m = sm; m <= em; m++) { if (!seen[m - 1].has(key)) { seen[m - 1].add(key); out[m - 1]++; } }
+  });
+  return out;
+}
+function hostingProDb() { const v = crmParameter && crmParameter.hostingDb && parseFloat(crmParameter.hostingDb.proDb); return (v || v === 0) ? v : 500; }
+async function hostingProDbSet(v) {
+  await parameterLaden(false);
+  crmParameter.hostingDb = crmParameter.hostingDb || {}; crmParameter.hostingDb.proDb = parseFloat(v) || 0;
+  try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  render();
+}
 /* Vertragsende eines Kunden im Planjahr: null = kein Ende im/vor dem Jahr, 0 = vor dem Jahr beendet, 1..12 = letzter aktiver Monat */
 function budgetEndMonat(c, year) {
   if (!c || !c.EndDate) return null;
@@ -4354,7 +4385,7 @@ function renderBudget(el) {
       <tbody>
         ${rows.map(b => `
           <tr>
-            <td title="${escape(budgetRefName(b))}${b.StartMonth > 1 ? " — ab " + MONTH_NAMES[b.StartMonth-1] : ""}" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escape(budgetRefName(b))}${b.RefType === "company" || b.RefType === "text" ? ` <span style="font-size:9px;color:var(--text-faint)">(Lead)</span>` : ""}${(() => { const c = b.RefType === "customer" ? cache.customers.find(x => x.id == b.RefId) : null; if (!c) return ""; const e = budgetEndMonat(c, year); if (e === 0 || (c.Status || "Aktiv") !== "Aktiv") return ` <span style="font-size:9px;color:var(--danger)" title="Vertrag beendet — Zeile mit «Aktive Kunden übernehmen» oder ✕ entfernen">beendet</span>`; if (e) return ` <span style="font-size:9px;color:var(--warn)" title="Vertragsende ${c.EndDate.slice(0,10)}">bis ${MONTH_NAMES[e-1]}</span>`; return ""; })()}${b.StartMonth > 1 ? ` <span style="font-size:9px;color:var(--accent-2)">ab ${MONTH_NAMES[b.StartMonth-1]}</span>` : ""}</td>
+            <td title="${escape(budgetRefName(b))}${b.StartMonth > 1 ? " — ab " + MONTH_NAMES[b.StartMonth-1] : ""}" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escape(budgetRefName(b))}${b.RefType === "company" || b.RefType === "text" ? ` <span style="font-size:9px;color:var(--text-faint)">(Lead)</span>` : ""}${(() => { const c = b.RefType === "customer" ? cache.customers.find(x => x.id == b.RefId) : null; if (!c) return ""; const e = budgetEndMonat(c, year); if (e === 0 || (c.Status || "Aktiv") !== "Aktiv") return ` <span style="font-size:9px;color:var(--danger)" title="Vertrag beendet — Zeile mit «Aktive Kunden übernehmen» oder ✕ entfernen">beendet</span>`; if (e) return ` <span style="font-size:9px;color:var(--warn)" title="Vertragsende ${c.EndDate.slice(0,10)}">bis ${MONTH_NAMES[e-1]}</span>`; return ""; })()}${b.StartMonth > 1 ? ` <span style="font-size:9px;color:var(--accent-2)">ab ${MONTH_NAMES[b.StartMonth-1]}</span>` : ""}${(() => { const kd = b.RefType === "customer" && kundenFlag(b.RefId, "hatDb"); return ` <label style="font-size:9px;color:var(--text-faint);cursor:pointer;white-space:nowrap" title="${kd ? "Datenbank gemäss Kundenstamm (Hostingkosten)" : "Datenbank → Hostingkosten pro Monat auf Konto 4400 (Budgetpositionen)"}"><input type="checkbox" ${kd || b.Db ? "checked" : ""} ${kd ? "disabled" : ""} onchange="budgetDbToggle(${b.id}, this.checked)" style="width:auto;margin:0;vertical-align:middle"> DB</label>`; })()}</td>
             <td>${typCell(b)}</td>
             <td>${paramCell(b)}</td>
             ${BUDGET_MONTH_FIELDS.map(f => `<td style="text-align:right"><input id="bud-c-${b.id}-${f}" class="bud-in bud-in-m" ${b.BType === "BPOStd" ? `style="color:var(--accent-2)" title="${num(b[f])} h × ${num(b.Rate)} = CHF ${Math.round(budgetChfOf(b, b[f])).toLocaleString("de-CH")}"` : ""} value="${num(b[f])}" onchange="budgetCellChange(${b.id},'${f}',this.value)">${b.BType === "BPOStd" ? `<div style="font-size:8.5px;color:var(--text-faint);text-align:right;padding-right:4px">${Math.round(budgetChfOf(b, b[f])).toLocaleString("de-CH")}</div>` : ""}</td>`).join("")}
@@ -12082,7 +12113,7 @@ function openCustomer(id) {
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Link</dt><dd>${appLinkText(c.id, c.Link) ? `<a href="${escape(appLinkText(c.id, c.Link))}" target="_blank" rel="noopener" style="color:var(--accent-2)">${escape(appLinkText(c.id, c.Link))} ↗</a>` : "—"}</dd>
       ${VERTRAG_ARTEN.map(([art, label]) => `<dt>${label}</dt><dd>${vertragLink(c.id, art) ? `<a href="${escape(vertragLink(c.id, art))}" target="_blank" rel="noopener" style="color:var(--accent-2)">📄 Öffnen ↗</a>` : "—"}</dd>`).join("")}
-      <dt>Workflows</dt><dd>${[kundenFlag(c.id, "intern") ? "Interner Lohn ✓" : "", kundenFlag(c.id, "fibu") ? "FIBU Monatsabschluss ✓" : ""].filter(Boolean).join(" · ") || "—"}</dd>
+      <dt>Workflows</dt><dd>${[kundenFlag(c.id, "intern") ? "Interner Lohn ✓" : "", kundenFlag(c.id, "fibu") ? "FIBU Monatsabschluss ✓" : "", kundenFlag(c.id, "hatDb") ? "Datenbank (Hosting) ✓" : ""].filter(Boolean).join(" · ") || "—"}</dd>
       <dt>Mindesthonorar</dt><dd style="white-space:pre-wrap">${escape(minFeeText(c.id, c.MinFee)||"—")}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
     </dl>
@@ -12183,6 +12214,7 @@ function editCustomer(id) {
     <div class="field-row">
       <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-wf-intern" ${kundenFlag(c.id || "", "intern") ? "checked" : ""} style="width:auto;margin:0"> Interner Lohn</label></div>
       <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-wf-fibu" ${kundenFlag(c.id || "", "fibu") ? "checked" : ""} style="width:auto;margin:0"> FIBU Monatsabschluss</label></div>
+      <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer" title="Eigene Datenbank beim Kunden → löst monatliche Hostingkosten aus (Budgetpositionen, Konto 4400, Betrag pro DB zentral einstellbar)"><input type="checkbox" id="f-wf-hatdb" ${kundenFlag(c.id || "", "hatDb") ? "checked" : ""} style="width:auto;margin:0"> Hat Datenbank (Hostingkosten)</label></div>
     </div>
     <div class="field"><label>Mindesthonorar</label><textarea id="f-minfee" rows="3" placeholder="z.B. CHF 1'500/Monat, gültig ab Q3 2026">${escape(minFeeText(c.id || "", c.MinFee))}</textarea></div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
@@ -12347,6 +12379,7 @@ async function saveCustomer(id) {
       const key = String(custId);
       const neuIntern = document.getElementById("f-wf-intern")?.checked || false;
       const neuFibu = document.getElementById("f-wf-fibu")?.checked || false;
+      const neuHatDb = document.getElementById("f-wf-hatdb")?.checked || false;
       const neuMinfee = val("f-minfee");
       const neuApplink = normalizeUrl(val("f-link")) || "";
       const neuMinSaas = parseFloat(val("f-minsaas")) || 0;
@@ -12354,11 +12387,12 @@ async function saveCustomer(id) {
       const neuZielExt = parseFloat(val("f-zielext")) || 0;
       const neuPctFrom = val("f-saasmodel") === "Prozentual" ? (val("f-saaspctfrom") || "") : "";
       const alt = crmKundenFlags[key] || {};
-      if (neuIntern !== !!alt.intern || neuFibu !== !!alt.fibu || neuMinfee !== (alt.minfee || "") || neuApplink !== (alt.applink || "")
+      if (neuIntern !== !!alt.intern || neuFibu !== !!alt.fibu || neuHatDb !== !!alt.hatDb || neuMinfee !== (alt.minfee || "") || neuApplink !== (alt.applink || "")
           || neuMinSaas !== (parseFloat(alt.minSaas) || 0) || neuMinBpo !== (parseFloat(alt.minBpo) || 0)
           || neuZielExt !== (parseFloat(alt.zielExt) || 0) || neuPctFrom !== (alt.saasPctFrom || "")) {
-        if (neuIntern || neuFibu || neuMinfee || neuApplink || neuMinSaas || neuMinBpo || neuZielExt || neuPctFrom) {
+        if (neuIntern || neuFibu || neuHatDb || neuMinfee || neuApplink || neuMinSaas || neuMinBpo || neuZielExt || neuPctFrom) {
           crmKundenFlags[key] = { intern: neuIntern, fibu: neuFibu, minfee: neuMinfee, applink: neuApplink };
+          if (neuHatDb) crmKundenFlags[key].hatDb = true;
           if (neuMinSaas) crmKundenFlags[key].minSaas = neuMinSaas;
           if (neuMinBpo) crmKundenFlags[key].minBpo = neuMinBpo;
           if (neuZielExt) crmKundenFlags[key].zielExt = neuZielExt;
