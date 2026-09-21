@@ -19,7 +19,7 @@
    budgetRows, budgetChfOf, budgetIsSaaS, budgetErloes, BUDGET_MONTH_FIELDS,
    deleteItem, reload, escape, toast, render, currentView. */
 
-const JB_VERSION = "1.118.0";
+const JB_VERSION = "1.119.0";
 const JB_GES = ["Apriko AG", "Maverix AG"];
 const JB_PERSONAL = new Set(["SW_Lohn", "SW_SV", "SW_UebrPA", "BO_Lohn", "BO_SV", "BO_UebrPA"]);
 const JB_ERTRAG = new Set(["SW_Ertrag", "BO_Ertrag"]);
@@ -56,6 +56,21 @@ function jbPersonalBasis(year) {
   const fbY = {}; cache.budget.forEach(it => { const d = fbParse(it, "fb"); if (d && d.y == year && Array.isArray(d.m)) fbY[d.k] = d.m; });
   JB_PERSONAL.forEach(k => { out[k] = (fbY[k] || []).reduce((s, x) => s + (x || 0), 0); });
   return out;
+}
+/* Teilbeträge eines Personal-Keys je Spalte des Personalbudgets mit dem dort gewählten FIBU-Konto */
+function jbPersonalTeile(year, k) {
+  const g = JB_PA_GES[k], teile = [];
+  if (typeof paSums === "function" && typeof paRows === "function" && typeof paAg === "function") {
+    try {
+      const sg = paSums(paRows(year), paAg(year))[g] || {};
+      const kk = typeof paKonten === "function" ? paKonten(year, g) : {};
+      if (k.endsWith("Lohn")) teile.push({ t: "Jahreslohn", v: sg.jahr || 0, kt: kk.lohn || "" });
+      else if (k.endsWith("SV")) teile.push({ t: "Arbeitgeberbeiträge", v: sg.agB || 0, kt: kk.ag || "" });
+      else { teile.push({ t: "Spesen", v: sg.spesen || 0, kt: kk.spesen || "" }); teile.push({ t: "Weiterbildung", v: sg.wb || 0, kt: kk.wb || "" }); }
+      return teile;
+    } catch (e) {}
+  }
+  return [{ t: "Total", v: (jbPersonalBasis(year)[k] || 0), kt: "" }];
 }
 /* Zusatzpositionen zum Personalaufwand (Monatswerte je Key) — für den Übertrag in den Budgetvergleich */
 function jbPersonalExtras(year) {
@@ -127,21 +142,13 @@ function jbBuild(year) {
   JB_PERSONAL.forEach(k => {
     const v = persBasis[k] || 0;
     const split = Array(12).fill(Math.round(v / 12)); split[11] = Math.round(v) - split.slice(0, 11).reduce((s, x) => s + x, 0);
-    // Übertrag auf die echten Konten des Basisjahrs verteilen (Anteil = Ist-Anteil des Kontos, z.B. 5700 AHV / 5720 BVG / 5730 UVG …);
-    // ohne Ist-Konten bleibt es eine Sammelposition
-    const istKonten = {}; ist.filter(d => d.z === k).forEach(d => { const vv = Math.abs(parseFloat(d.v) || 0); if (vv > 0) { istKonten[d.kt] = istKonten[d.kt] || { kt: d.kt, b: d.b || "", v: 0 }; istKonten[d.kt].v += vv; } });
-    const kl = Object.values(istKonten).sort((a, b) => a.kt.localeCompare(b.kt)); const istSum = kl.reduce((s, x) => s + x.v, 0);
-    let autoPosList;
-    if (kl.length && istSum > 0) {
-      let rest = Math.round(v);
-      autoPosList = kl.map((x, idx) => {
-        const anteil = x.v / istSum; let vv = idx === kl.length - 1 ? rest : Math.round(v * anteil); rest -= vv;
-        const sp = Array(12).fill(Math.round(vv / 12)); sp[11] = vv - sp.slice(0, 11).reduce((s, q) => s + q, 0);
-        return { t: "Übertrag Budget Personalaufwand " + year + " · " + x.kt + (x.b ? " " + x.b : ""), n: "Anteil " + Math.round(anteil * 100) + " % nach Ist " + basis + " (1/12)", v: vv, f: "x", m: sp, kt: x.kt, auto: true };
-      });
-    } else {
-      autoPosList = [{ t: "Übertrag Budget Personalaufwand " + year, n: "aus Menü «Budget Personalaufwand» (1/12)", v, f: "x", m: split, auto: true }];
-    }
+    // Übertrag auf die im Personalbudget je Spalte gewählten FIBU-Konten (Lohn / AG-Beiträge / Spesen / Weiterbildung);
+    // ohne Konto-Wahl bleibt es eine Sammelposition (Konto «?»)
+    const teile = jbPersonalTeile(year, k);   // [{t, v, kt, bez}]
+    const bekannt = typeof bpBekannteKonten === "function" ? Object.fromEntries(bpBekannteKonten(JB_PA_GES[k])) : {};
+    const mk = (t, vv, kt) => { const sp = Array(12).fill(Math.round(vv / 12)); sp[11] = Math.round(vv) - sp.slice(0, 11).reduce((s, q) => s + q, 0); return { t, n: "aus Menü «Budget Personalaufwand» (1/12)" + (kt ? "" : " — Konto dort wählen"), v: Math.round(vv), f: "x", m: sp, kt: kt || undefined, auto: true }; };
+    let autoPosList = teile.filter(x => Math.abs(x.v) > 0.5 || teile.length === 1).map(x => mk("Übertrag Budget Personalaufwand " + year + " · " + x.t + (x.kt ? " → " + x.kt + (bekannt[x.kt] ? " " + bekannt[x.kt] : "") : ""), x.v, x.kt));
+    if (!autoPosList.length) autoPosList = [mk("Übertrag Budget Personalaufwand " + year, v, null)];
     const ex = persExtra[k];
     const extraPos = ex && Array.isArray(ex.pos) ? ex.pos.filter(p => !p.auto) : [];
     let pi = 0, ph = 0, pp = null; ist.filter(d => d.z === k).forEach(d => { const vv = (parseFloat(d.v) || 0) * jbFkt(k); pi += vv; ph += vv * jbHochFaktor(d.p); pp = pp === null ? d.p : (pp === d.p ? pp : "gemischt"); });

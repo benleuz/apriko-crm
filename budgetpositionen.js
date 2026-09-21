@@ -10,7 +10,7 @@
    Abhängigkeiten: jahresbudget.js (jbBuild, jbSaveRow, jbFindRow, jbPos*, jbFmt, jbNum, JB_*),
    index.html (fbSaveItem, reload, escape, toast, render, FB_PLAN, FB_LABELS, FB_SRC). */
 
-const BP_VERSION = "1.118.0";
+const BP_VERSION = "1.120.0";
 const BP_MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 const BP_FAELL = [["m", "monatlich (÷12)"], ["q", "quartalsweise (÷4)"], ["e", "einmalig im Monat"], ["h", "halbjährlich (÷2)"], ["r", "von – bis"]];
 
@@ -49,6 +49,29 @@ function bpBekannteKonten(ges) {
   Object.values(fbBuchYearCache || {}).forEach(y => Object.entries(y || {}).forEach(([k, obj]) => { const [g, kt] = k.split("|"); add(kt, obj && obj.bez, g); }));
   return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0]));
 }
+/* Konto-Vorschlag aus dem Buchungstext vergangener Jahre: Wörter des Positionstexts (≥ 3 Zeichen) gegen die
+   Kontenblatt-Buchungen der Gesellschaft; alle Wörter müssen vorkommen (sonst: mindestens ein Wort ≥ 5 Zeichen).
+   Ergebnis = Konto mit den meisten Treffern; Fallback: Kontobezeichnung enthält ein Wort. */
+function bpKontoVorschlag(ges, text) {
+  const norm = t => String(t || "").toLowerCase().replace(/[^a-z0-9äöüéèàç ]+/g, " ");
+  const woerter = norm(text).split(/\s+/).filter(w => w.length >= 3);
+  if (!woerter.length) return null;
+  const score = {};
+  const zaehle = (kt, b, gewicht) => { const e = score[kt] || (score[kt] = { n: 0, bsp: b, kt }); e.n += gewicht; if (!e.bsp) e.bsp = b; };
+  Object.values(fbBuchYearCache || {}).forEach(y => Object.entries(y || {}).forEach(([k, obj]) => {
+    const [g, kt] = k.split("|"); if (!jbSameGes(g, ges) || !obj || !obj.buch) return;
+    obj.buch.forEach(b => {
+      const t = norm(b[1]); if (!t) return;
+      if (woerter.every(w => t.includes(w))) zaehle(kt, b[1], 3);
+      else if (woerter.some(w => w.length >= 5 && t.includes(w))) zaehle(kt, b[1], 1);
+    });
+  }));
+  let best = Object.values(score).sort((a, b) => b.n - a.n)[0];
+  if (best) return { kt: best.kt, n: best.n, bsp: best.bsp, quelle: "Buchungen" };
+  // Fallback: Kontobezeichnung
+  const hit = bpBekannteKonten(ges).find(([kt, b]) => { const t = norm(b); return woerter.some(w => w.length >= 4 && t.includes(w)); });
+  return hit ? { kt: hit[0], n: 0, bsp: hit[1], quelle: "Kontobezeichnung" } : null;
+}
 function bpFaellText(p) {
   if (p.auto) return "automatisch";
   const f = p.f || "m", sm = parseInt(p.sm, 10) || 1, em = parseInt(p.em, 10) || 12;
@@ -71,9 +94,23 @@ function bpRows(year, ges) {
   return { rows: out, model: m };
 }
 
+async function bpKontoSuchen(g, kt, i) {
+  const r = jbFindRow(g, kt); if (!r || !r.pos || !r.pos[i]) return;
+  const v = bpKontoVorschlag(g, r.pos[i].t);
+  if (!v) { toast("Kein passendes Konto in den Vorjahres-Buchungen gefunden — Text anpassen oder Konto wählen.", true); return; }
+  const pos = r.pos.map(p => ({ ...p })); pos[i].kt = v.kt;
+  const bez = (bpBekannteKonten(g).find(([k]) => k === v.kt) || [])[1] || "";
+  toast("Konto " + v.kt + (bez ? " " + bez : "") + " übernommen" + (v.n ? " (" + v.n + " Treffer, z.B. «" + String(v.bsp || "").slice(0, 40) + "»)" : " (" + v.quelle + ")"));
+  await jbSaveRow(r, { pos });
+}
 async function bpPosSet(g, kt, i, field, value) {
   const r = jbFindRow(g, kt); if (!r || !r.pos || !r.pos[i]) return;
   const pos = r.pos.map(p => ({ ...p }));
+  if (field === "t" && !pos[i].kt && String(value).trim().length >= 3) {
+    // Konto aus den Buchungen der Vorjahre vorschlagen (nur wenn noch keines gesetzt ist)
+    const v = bpKontoVorschlag(g, value);
+    if (v && v.kt !== String(r.kt)) { pos[i].kt = v.kt; const bez = (bpBekannteKonten(g).find(([k]) => k === v.kt) || [])[1] || ""; toast("Konto " + v.kt + (bez ? " " + bez : "") + " vorgeschlagen" + (v.n ? " (" + v.n + " Treffer in " + v.quelle + ", z.B. «" + String(v.bsp || "").slice(0, 40) + "»)" : " (" + v.quelle + ")") + " — im Feld änderbar."); }
+  }
   if (field === "v") pos[i].v = jbNum(value) || 0;
   else if (field === "sm" || field === "em") pos[i][field] = Math.min(12, Math.max(1, parseInt(value, 10) || 1));
   else if (field === "kt") { const k = (String(value).match(/\d{4}/) || [""])[0]; if (k && k.length !== 4) { toast("FIBU-Konto: 4 Ziffern", true); return; } if (k) pos[i].kt = k; else delete pos[i].kt; }
@@ -171,7 +208,7 @@ function renderBudgetpositionen(el) {
       if (p.auto) return `
       <tr style="background:rgba(127,127,127,.05)">
         <td style="padding:2px 6px 2px 22px;font-size:11.5px;color:var(--accent-2)" title="${escape(p.n || "")}">⚙ ${escape(p.t || "")}</td>
-        <td style="padding:2px 6px;font-size:10.5px;color:var(--text-faint)">${(() => { const k = bpPosKonto(r, p) || r.kt; return escape(k + (kontoBez[k] ? " " + kontoBez[k] : "")); })()}</td>
+        <td style="padding:2px 6px;font-size:10.5px;color:${bpPosKonto(r, p) ? "var(--text-faint)" : "var(--danger)"}" title="${bpPosKonto(r, p) ? "" : "Konto im Menü «Budget Personalaufwand» je Spalte wählen"}">${(() => { const k = bpPosKonto(r, p); return k ? escape(k + (kontoBez[k] ? " " + kontoBez[k] : "")) : "Konto? → Personalbudget"; })()}</td>
         <td style="padding:2px 6px;font-size:10.5px;color:var(--text-faint)">${escape(p.n || "")}</td>
         <td style="padding:2px 4px;font-size:10.5px;color:var(--text-faint)">automatisch</td>
         <td style="text-align:right;font-family:var(--font-mono);font-size:11.5px;padding:2px 6px">${Math.round(p.v || 0).toLocaleString("de-CH")}</td>
@@ -184,7 +221,7 @@ function renderBudgetpositionen(el) {
       return `
       <tr>
         <td style="padding:2px 6px 2px 22px"><input data-bp="${escape(r.g + "|" + r.kt)}" value="${escape(p.t || "")}" placeholder="Text (z.B. Google Cloud)" style="width:100%;min-width:180px;font-size:11.5px;padding:2px 6px" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'t',this.value)"></td>
-        <td style="padding:2px 6px"><input list="bp-konten" value="${escape(p.kt ? (p.kt + (kontoBez[p.kt] ? " " + kontoBez[p.kt] : "")) : "")}" placeholder="${/^\d{4}$/.test(String(r.kt)) ? escape(r.kt + (kontoBez[r.kt] ? " " + kontoBez[r.kt] : "")) : "Konto wählen …"}" title="FIBU-Konto dieser Position${/^\d{4}$/.test(String(r.kt)) ? " (leer = " + escape(r.kt) + ")" : " — Pflicht, da die Zeile ein Sammelkonto ist"}${p.kt && kontoBez[p.kt] ? " · " + escape(kontoBez[p.kt]) : ""}" style="width:190px;font-size:11px;padding:2px 6px;${bpPosKonto(r, p) ? "" : "border-color:var(--danger);"}" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'kt',this.value)"></td>
+        <td style="padding:2px 6px"><input list="bp-konten" value="${escape(p.kt ? (p.kt + (kontoBez[p.kt] ? " " + kontoBez[p.kt] : "")) : "")}" placeholder="${/^\d{4}$/.test(String(r.kt)) ? escape(r.kt + (kontoBez[r.kt] ? " " + kontoBez[r.kt] : "")) : "Konto wählen …"}" title="FIBU-Konto dieser Position${/^\d{4}$/.test(String(r.kt)) ? " (leer = " + escape(r.kt) + ")" : " — Pflicht, da die Zeile ein Sammelkonto ist"}${p.kt && kontoBez[p.kt] ? " · " + escape(kontoBez[p.kt]) : ""}" style="width:190px;font-size:11px;padding:2px 6px;${bpPosKonto(r, p) ? "" : "border-color:var(--danger);"}" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'kt',this.value)"> <span style="cursor:pointer;color:var(--text-faint);font-size:11px" title="Konto aus den Buchungen der Vorjahre anhand des Positionstexts vorschlagen" onclick="bpKontoSuchen(${gi(r.g, r.kt)},${i})">🔍</span></td>
         <td style="padding:2px 6px"><input value="${escape(p.n || "")}" placeholder="Notiz …" style="width:100%;min-width:160px;font-size:11px;padding:2px 6px;${p.n ? "" : "color:var(--text-faint)"}" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'n',this.value)"></td>
         <td style="padding:2px 4px;white-space:nowrap"><select style="font-size:10.5px;padding:1px 2px" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'f',this.value)">${BP_FAELL.map(([k, l]) => `<option value="${k}" ${k === f ? "selected" : ""}>${l}</option>`).join("")}</select>
           ${f === "e" || f === "q" || f === "h" ? ` ${sel("sm", 1, 12, parseInt(p.sm, 10) || 1)}` : f === "r" ? ` ${sel("sm", 1, 12, parseInt(p.sm, 10) || 1)}–${sel("em", 1, 12, parseInt(p.em, 10) || 12)}` : ""}</td>
@@ -218,7 +255,7 @@ function renderBudgetpositionen(el) {
       ${model.hasIst ? "" : `<span style="font-size:12px;color:var(--danger)">Keine Ist-Daten ${y - 1} — Konten stammen nur aus manuellen Ergänzungen</span>`}
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
-      <div class="card stat-card"><div class="stat-label">${escape(ges)} · Aufwand ${y}</div><div class="stat-value">${jbFmt(totalJahr)}</div><div style="font-size:11px;color:var(--text-faint)">${shown.length} Konten · ${posCount} Positionen${(() => { const o = rows.filter(r => !jbHasPos(r)).length; return o ? ` · <span style="color:var(--warn)">${o} offen</span>` : " · alle erfasst"; })()}${(() => { const ok = rows.reduce((n, r) => n + (r.pos || []).filter(p => !p.auto && !bpPosKonto(r, p)).length, 0); return ok ? ` · <span style="color:var(--danger)" title="Positionen ohne FIBU-Konto (rot umrandet)">${ok} ohne FIBU-Konto</span>` : ""; })()}</div></div>
+      <div class="card stat-card"><div class="stat-label">${escape(ges)} · Aufwand ${y}</div><div class="stat-value">${jbFmt(totalJahr)}</div><div style="font-size:11px;color:var(--text-faint)">${shown.length} Konten · ${posCount} Positionen${(() => { const o = rows.filter(r => !jbHasPos(r)).length; return o ? ` · <span style="color:var(--warn)">${o} offen</span>` : " · alle erfasst"; })()}${(() => { const ok = rows.reduce((n, r) => n + (r.pos || []).filter(p => !bpPosKonto(r, p)).length, 0); return ok ? ` · <span style="color:var(--danger)" title="Positionen ohne FIBU-Konto (rot umrandet)">${ok} ohne FIBU-Konto</span>` : ""; })()}</div></div>
       <div class="card stat-card"><div class="stat-label">Ø pro Monat</div><div class="stat-value">${jbFmt(totalJahr / 12)}</div><div style="font-size:11px;color:var(--text-faint)">Spitze ${BP_MONATE[totalM.indexOf(Math.max(...totalM))]} ${jbFmt(Math.max(...totalM))}</div></div>
     </div>
     <div class="card" style="padding:12px 14px;overflow-x:auto">

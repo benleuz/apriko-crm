@@ -13,7 +13,7 @@
    Abhängigkeiten aus index.html: cache, fbParse, fbSaveItem, deleteItem,
    reload, escape, toast, render, showModal, closeModal, currentUser. */
 
-const PA_VERSION = "1.112.0";
+const PA_VERSION = "1.113.0";
 const PA_GES = ["Apriko AG", "Maverix AG"];
 /* Budgetvergleich rechnet Personal ÜBER KREUZ (fbZuordnung): Maverix-Löhne = SW_*, Apriko-Löhne = BO_* */
 const PA_FB_KEYS = { "Apriko AG": { lohn: "BO_Lohn", sv: "BO_SV", uebr: "BO_UebrPA" }, "Maverix AG": { lohn: "SW_Lohn", sv: "SW_SV", uebr: "SW_UebrPA" } };
@@ -30,6 +30,15 @@ function paItems(t) { return cache.budget.map(it => fbParse(it, "pa")).filter(d 
 function paRows(year) { return paItems("row").filter(r => r.y == year); }
 function paCfg(year) { return paItems("cfg").find(c => c.y == year) || null; }
 function paAg(year) { const c = paCfg(year); return c && c.ag !== undefined ? parseFloat(c.ag) : 12; }
+/* FIBU-Konten je Spalte und Gesellschaft (cfg.kt = { "Apriko AG": { lohn, ag, spesen, wb }, … }) — Vorgabe leer = Sammelkonto */
+const PA_SPALTEN = [["lohn", "Jahreslohn"], ["ag", "Arbeitgeberbeiträge"], ["spesen", "Spesen"], ["wb", "Weiterbildung"]];
+function paKonten(year, g) { const c = paCfg(year); return (c && c.kt && c.kt[g]) || {}; }
+async function paSetKonto(g, feld, wert) {
+  const c = paCfg(paState.year); const kt = JSON.parse(JSON.stringify((c && c.kt) || {}));
+  const k = (String(wert || "").match(/\d{4}/) || [""])[0];
+  kt[g] = kt[g] || {}; if (k) kt[g][feld] = k; else delete kt[g][feld];
+  await paSave({ cfg: "pa", t: "cfg", y: paState.year, ag: paAg(paState.year), kt }, c ? c.id : null);
+}
 function paPw() { return paItems("pw")[0] || null; }
 function paYears() { const s = new Set([2027, new Date().getFullYear() + 1]); paItems("row").forEach(r => s.add(parseInt(r.y, 10))); paItems("cfg").forEach(c => s.add(parseInt(c.y, 10))); return [...s].filter(Boolean).sort(); }
 function paNum(v) { const n = parseFloat(String(v == null ? "" : v).replace(/['’\s]/g, "").replace(",", ".")); return isNaN(n) ? 0 : n; }
@@ -233,6 +242,11 @@ function renderPersonalBudget(el) {
       <label style="font-size:12px;color:var(--text-dim)">Budgetjahr <select onchange="paSetYear(this.value)" style="padding:4px 6px;font-size:12px;margin-left:4px">${years.map(v => `<option ${v === y ? "selected" : ""}>${v}</option>`).join("")}<option value="${Math.max(...years) + 1}">${Math.max(...years) + 1} (neu)</option></select></label>
       <label style="font-size:12px;color:var(--text-dim)">Arbeitgeberbeiträge <input type="number" step="0.1" value="${ag}" style="width:64px;padding:4px 6px;font-size:12px;margin-left:4px;text-align:right" onchange="paSetAg(this.value)"> % <span style="color:var(--text-faint)">(gilt für alle Mitarbeitenden)</span></label>
       ${!rows.length && years.some(v => v !== y && paRows(v).length) ? `<span style="font-size:12px;color:var(--text-dim)">Leer — <a href="#" onclick="paCopyYear(${years.filter(v => v !== y && paRows(v).length).pop()});return false" style="color:var(--accent)">Zeilen aus ${years.filter(v => v !== y && paRows(v).length).pop()} übernehmen</a></span>` : ""}
+    </div>
+    <div class="card" style="padding:10px 14px;margin-bottom:14px">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">FIBU-Konten je Spalte (Gegenkonto für Budgetpositionen / Jahresbudget / Budgetvergleich) — leer = Sammelkonto</div>
+      <datalist id="pa-konten">${(typeof bpBekannteKonten === "function" ? bpBekannteKonten(null) : []).map(([kt, b]) => `<option value="${kt}${b ? " " + escape(b) : ""}"></option>`).join("")}</datalist>
+      <div style="display:flex;gap:18px;flex-wrap:wrap">${PA_GES.map(g => { const kk = paKonten(y, g); const bez = Object.fromEntries(typeof bpBekannteKonten === "function" ? bpBekannteKonten(null) : []); return `<div><div style="font-size:11px;font-weight:600;margin-bottom:4px">${escape(g)}</div>${PA_SPALTEN.map(([f, l]) => `<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim);margin-bottom:3px"><span style="width:130px">${l}</span><input list="pa-konten" value="${escape(kk[f] ? kk[f] + (bez[kk[f]] ? " " + bez[kk[f]] : "") : "")}" placeholder="Konto wählen …" style="width:210px;font-size:11px;padding:2px 6px;${kk[f] ? "" : "border-color:var(--warn);"}" onchange="paSetKonto('${escape(g)}','${f}',this.value)"></label>`).join("")}</div>`; }).join("")}</div>
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
       ${PA_GES.map(g => `<div class="card stat-card"><div class="stat-label">${escape(g)} · Lohnkosten</div><div class="stat-value">${paFmt(sums[g].total)}</div><div style="font-size:11px;color:var(--text-faint)">${sums[g].n} MA · ${paFmt(sums[g].fte, 2)} FTE</div></div>`).join("")}
