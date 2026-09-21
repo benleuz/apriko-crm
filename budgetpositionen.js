@@ -10,7 +10,7 @@
    Abhängigkeiten: jahresbudget.js (jbBuild, jbSaveRow, jbFindRow, jbPos*, jbFmt, jbNum, JB_*),
    index.html (fbSaveItem, reload, escape, toast, render, FB_PLAN, FB_LABELS, FB_SRC). */
 
-const BP_VERSION = "1.115.0";
+const BP_VERSION = "1.116.0";
 const BP_MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 const BP_FAELL = [["m", "monatlich (÷12)"], ["q", "quartalsweise (÷4)"], ["e", "einmalig im Monat"], ["h", "halbjährlich (÷2)"], ["r", "von – bis"]];
 
@@ -107,6 +107,10 @@ function bpExport() {
 /* ---------- Rendering ---------- */
 function renderBudgetpositionen(el) {
   jbState.year = bpState.year;
+  // Abhängigkeiten der automatischen Positionen (Hosting-DB: Kundenflags + Parameter; Personal: Personalbudget) nachladen,
+  // damit Budgetpositionen/Jahresbudget auch beim Direkteinstieg vollständig sind
+  if (typeof crmKundenFlags !== "undefined" && crmKundenFlags === null && typeof crmLoadKundenFlags === "function" && typeof siteId !== "undefined" && siteId) { crmLoadKundenFlags().then(() => render()).catch(() => {}); }
+  if (typeof crmParameter !== "undefined" && !crmParameter && typeof parameterLaden === "function") { parameterLaden(false).then(() => render()).catch(() => {}); }
   document.getElementById("view-actions").innerHTML = `
     <button class="btn btn-sm" onclick="bpAddKonto()">＋ Konto</button>
     <button class="btn btn-sm" onclick="bpState.showEmpty=!bpState.showEmpty;render()" style="${bpState.showEmpty ? "" : "background:var(--accent);color:#fff"}" title="Nur Konten ohne Positionen (noch offen) zeigen">⚠ nur offene</button>

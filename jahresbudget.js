@@ -19,7 +19,7 @@
    budgetRows, budgetChfOf, budgetIsSaaS, budgetErloes, BUDGET_MONTH_FIELDS,
    deleteItem, reload, escape, toast, render, currentView. */
 
-const JB_VERSION = "1.115.0";
+const JB_VERSION = "1.117.0";
 const JB_GES = ["Apriko AG", "Maverix AG"];
 const JB_PERSONAL = new Set(["SW_Lohn", "SW_SV", "SW_UebrPA", "BO_Lohn", "BO_SV", "BO_UebrPA"]);
 const JB_ERTRAG = new Set(["SW_Ertrag", "BO_Ertrag"]);
@@ -116,9 +116,11 @@ function jbBuild(year) {
     if (!key || JB_PERSONAL.has(key) || JB_ERTRAG.has(key)) return;
     push(key, { key, g: d.g, kt: d.kt, b: d.b || "", ist: 0, hoch: 0, p: "—", id: d.id, bud: d.v !== null && d.v !== undefined ? parseFloat(d.v) : null, note: d.n || "", pos: Array.isArray(d.pos) ? d.pos : [], man: true, editable: true });
   });
-  // Ertrag aus Ertragsbudget (beide Ströme über Apriko AG)
-  push("SW_Ertrag", { key: "SW_Ertrag", g: "Apriko AG", kt: "34xx", b: "Ertragsbudget " + year + " · SaaS/Lizenzen", ist: null, hoch: eb.saas, p: "EB", bud: eb.saas, note: "", editable: false, src: "Ertragsbudget", months: eb.saasM });
-  push("BO_Ertrag", { key: "BO_Ertrag", g: "Apriko AG", kt: "3400", b: "Ertragsbudget " + year + " · BPO", ist: null, hoch: eb.bpo, p: "EB", bud: eb.bpo, note: "", editable: false, src: "Ertragsbudget", months: eb.bpoM });
+  // Ertrag: Ist + Hochrechnung aus den importierten Ertragskonten des Basisjahrs, Budget aus dem Ertragsbudget
+  const istE = k => { let i = 0, h = 0, per = null; ist.filter(d => d.z === k).forEach(d => { const v = (parseFloat(d.v) || 0) * jbFkt(k); i += v; h += v * jbHochFaktor(d.p); per = per === null ? d.p : (per === d.p ? per : "gemischt"); }); return { ist: per === null ? null : i, hoch: h, p: per || "—" }; };
+  const eS = istE("SW_Ertrag"), eB = istE("BO_Ertrag");
+  push("SW_Ertrag", { key: "SW_Ertrag", g: "Apriko AG", kt: "34xx", b: "Ertragsbudget " + year + " · SaaS/Lizenzen", ist: eS.ist, hoch: eS.hoch, p: eS.p, bud: eb.saas, note: "", editable: false, src: "Ertragsbudget", months: eb.saasM });
+  push("BO_Ertrag", { key: "BO_Ertrag", g: "Apriko AG", kt: "3400", b: "Ertragsbudget " + year + " · BPO", ist: eB.ist, hoch: eB.hoch, p: eB.p, bud: eb.bpo, note: "", editable: false, src: "Ertragsbudget", months: eb.bpoM });
   // Personalaufwand: Übertrag aus dem Menüpunkt «Budget Personalaufwand» als automatische Position (1/12),
   // dazu eigene Zusatzpositionen (in Budgetpositionen erfassbar, gespeichert als jb-Item mit z = Personal-Key)
   const persBasis = jbPersonalBasis(year);
@@ -128,7 +130,8 @@ function jbBuild(year) {
     const autoPos = { t: "Übertrag Budget Personalaufwand " + year, n: "aus Menü «Budget Personalaufwand» (1/12)", v, f: "x", m: split, auto: true };
     const ex = persExtra[k];
     const extraPos = ex && Array.isArray(ex.pos) ? ex.pos.filter(p => !p.auto) : [];
-    push(k, { key: k, g: JB_PA_GES[k], kt: k.endsWith("Lohn") ? "50xx" : k.endsWith("SV") ? "57xx" : "58xx/59xx", b: "Personalaufwand " + year + (k.endsWith("Lohn") ? " · Lohnaufwand" : k.endsWith("SV") ? " · Arbeitgeberbeiträge" : " · Übriger PA"), ist: null, hoch: v, p: "PA", id: ex ? ex.id : null, bud: null, note: ex ? (ex.n || "") : "", pos: [autoPos].concat(extraPos), man: true, pers: true, editable: true, src: "Personalaufwand" });
+    let pi = 0, ph = 0, pp = null; ist.filter(d => d.z === k).forEach(d => { const vv = (parseFloat(d.v) || 0) * jbFkt(k); pi += vv; ph += vv * jbHochFaktor(d.p); pp = pp === null ? d.p : (pp === d.p ? pp : "gemischt"); });
+    push(k, { key: k, g: JB_PA_GES[k], kt: k.endsWith("Lohn") ? "50xx" : k.endsWith("SV") ? "57xx" : "58xx/59xx", b: "Personalaufwand " + year + (k.endsWith("Lohn") ? " · Lohnaufwand" : k.endsWith("SV") ? " · Arbeitgeberbeiträge" : " · Übriger PA"), ist: pp === null ? null : pi, hoch: pp === null ? v : ph, p: pp || "PA", id: ex ? ex.id : null, bud: null, note: ex ? (ex.n || "") : "", pos: [autoPos].concat(extraPos), man: true, pers: true, editable: true, src: "Personalaufwand" });
   });
   // Automatische Position: Hosting Datenbanken (Anzahl DB pro Monat × CHF pro DB) auf 4400 Apriko AG
   if (typeof budgetDbProMonat === "function" && typeof hostingProDb === "function") {
@@ -253,6 +256,10 @@ function jbExport() {
 /* ---------- Rendering ---------- */
 function renderJahresbudget(el) {
   const y = jbState.year;
+  // Abhängigkeiten der automatischen Positionen (Hosting-DB: Kundenflags + Parameter; Personal: Personalbudget) nachladen,
+  // damit Budgetpositionen/Jahresbudget auch beim Direkteinstieg vollständig sind
+  if (typeof crmKundenFlags !== "undefined" && crmKundenFlags === null && typeof crmLoadKundenFlags === "function" && typeof siteId !== "undefined" && siteId) { crmLoadKundenFlags().then(() => render()).catch(() => {}); }
+  if (typeof crmParameter !== "undefined" && !crmParameter && typeof parameterLaden === "function") { parameterLaden(false).then(() => render()).catch(() => {}); }
   document.getElementById("view-actions").innerHTML = `
     <button class="btn btn-sm" style="${jbState.view === "jahr" ? "background:var(--accent);color:#fff" : ""}" onclick="jbState.view='jahr';render()">Jahr</button>
     <button class="btn btn-sm" style="${jbState.view === "monate" ? "background:var(--accent);color:#fff" : ""}" onclick="jbState.view='monate';render()">Monate</button>
@@ -356,7 +363,7 @@ function renderJahresbudget(el) {
         <tr style="color:var(--text-dim);font-size:11px">
           <th style="text-align:left;padding:4px 6px">Position · Gesellschaft · Konto</th>
           <th style="text-align:right;padding:4px 6px">Ist ${basis}<br><span style="font-weight:400">wie importiert</span></th>
-          <th style="text-align:right;padding:4px 6px">Hochrechnung<br><span style="font-weight:400">H1 × 2 / Jahr × 1</span></th>
+          <th style="text-align:right;padding:4px 6px">Hochrechnung<br><span style="font-weight:400">${(() => { const n = typeof fbN === "function" ? fbN(basis) : 6; const per = typeof fbPeriodeLabel === "function" ? fbPeriodeLabel(n) : "H1"; return n >= 12 ? "Jahr × 1" : per + " × 12/" + n; })()}</span></th>
           <th style="text-align:right;padding:4px 6px">Budget ${y}</th>
           <th style="text-align:right;padding:4px 6px">Δ zur Hochr.</th>
           <th style="text-align:left;padding:4px 6px;min-width:220px">Positionen ${y}<br><span style="font-weight:400">aus Menü «Budgetpositionen»</span></th>
