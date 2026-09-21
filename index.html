@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.268.0"></script>
-<script src="apriko-api.js?v=1.268.0"></script>
-<script src="lohncheck.js?v=1.268.0"></script>
-<script src="personalbudget.js?v=1.268.0"></script>
-<script src="jahresbudget.js?v=1.268.0"></script>
-<script src="budgetpositionen.js?v=1.268.0"></script>
-<script src="lohnchecklistetemp.js?v=1.268.0"></script>
+<script src="apriko-filters.js?v=1.269.0"></script>
+<script src="apriko-api.js?v=1.269.0"></script>
+<script src="lohncheck.js?v=1.269.0"></script>
+<script src="personalbudget.js?v=1.269.0"></script>
+<script src="jahresbudget.js?v=1.269.0"></script>
+<script src="budgetpositionen.js?v=1.269.0"></script>
+<script src="lohnchecklistetemp.js?v=1.269.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -984,7 +984,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.268.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.269.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -2691,13 +2691,19 @@ function fbBudget(year) {   // key → [12]
   });
   return out;
 }
-function fbIst(year) {      // Liste der Ist-Konten (YTD-Periode)
+function fbIstAlle(year) {  // alle Ist-Zeilen des Jahres (alle importierten Perioden)
   return cache.budget.map(it => fbParse(it, "ist")).filter(d => d && d.y == year);
 }
+function fbIst(year) {      // Ist-Konten der JÜNGSTEN Periode (grösstes N) — ältere YTD-Stände bleiben für den Trend gespeichert
+  const alle = fbIstAlle(year); if (!alle.length) return alle;
+  const maxN = Math.max(...alle.map(d => fbPeriodeMonate(d.p)));
+  return alle.filter(d => fbPeriodeMonate(d.p) === maxN);
+}
+function fbIstMonate(year, n) { return fbIstAlle(year).filter(d => fbPeriodeMonate(d.p) === n); }
 /* Ist-Periode: p = "Jahr" (12), "H1" (6, alt) oder "M<n>" (n Monate YTD, z.B. M7 = Jan–Jul). */
 function fbPeriodeMonate(p) { if (p === "Jahr") return 12; const m = /^M(\d{1,2})$/.exec(p || ""); return m ? parseInt(m[1]) : 6; }
 function fbN(year) {        // abgedeckte Monate des Ist-Jahres (grösste Periode der Ist-Zeilen)
-  const ist = fbIst(year); if (!ist.length) return 6;
+  const ist = fbIstAlle(year); if (!ist.length) return 6;
   return Math.max(...ist.map(d => fbPeriodeMonate(d.p)));
 }
 const FB_MK = ["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
@@ -3455,7 +3461,8 @@ async function fbMultiRun() {
         const erJahr = e.jahr || year;
         const erPeriode = e.periode || "H1";
         const existing = {};
-        cache.budget.forEach(it => { const d = fbParse(it, "ist"); if (d && d.y == erJahr && d.g === ges) existing[d.kt] = d.id; });
+        // Frühere YTD-Stände (z.B. M6) bleiben erhalten — nur dieselbe Periode wird überschrieben (Monats-Trend braucht den Vormonat)
+        cache.budget.forEach(it => { const d = fbParse(it, "ist"); if (d && d.y == erJahr && d.g === ges) existing[d.kt + "|" + (d.p || "H1")] = d.id; });
         let n = 0, leer = 0;
         for (const p of e.rows) {
           const nr = String(p[0] || "").trim();
@@ -3465,7 +3472,7 @@ async function fbMultiRun() {
           const v = parseFloat(rawV);
           if (!rawV || isNaN(v)) { leer++; continue; }
           await fbSaveItem({ cfg: "ist", y: erJahr, p: erPeriode, g: ges, kt: nr, b: bez,
-            v: Math.round(v * 100) / 100, z: fbZuordnung(nr, e.typ === "sw") }, existing[nr]);
+            v: Math.round(v * 100) / 100, z: fbZuordnung(nr, e.typ === "sw") }, existing[nr + "|" + erPeriode]);
           n++;
         }
         meld.push(e.name + " → " + ges + " " + erJahr + "/" + erPeriode + ": " + n + " Konten" + (leer ? " (" + leer + " ohne Saldo)" : ""));
@@ -3608,6 +3615,7 @@ function renderBudgetVergleich(el) {
   if (filters.fbView === "monate") { renderFbMonate(el, { year, bud, ist, G, vals, rowsOut, fkt, N }); return; }
   if (filters.fbView === "mgmt") { renderFbMgmt(el, { year, ist, vals, fkt, N }); return; }
   if (filters.fbView === "vorjahr") { renderFbVorjahr(el, { year, ist, vals, fkt, N }); return; }
+  if (filters.fbView === "aktmonat") { renderFbAktMonat(el, { year, bud, ist, G, vals, rowsOut, fkt, N, budH1, budJahr, istVal }); return; }
 
   const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
@@ -3692,6 +3700,7 @@ function renderBudgetVergleich(el) {
       <div class="bud-tabs">
         <button class="bud-tab active" onclick="filters.fbView='h1';render()">Übersicht ${fbPeriodeLabel(N)}</button>
         <button class="bud-tab" onclick="filters.fbView='monate';render()">Monate</button>
+        <button class="bud-tab" onclick="filters.fbView='aktmonat';render()">Monat + Trend</button>
         <button class="bud-tab" onclick="filters.fbView='mgmt';render()">Management</button>
         <button class="bud-tab" onclick="filters.fbView='vorjahr';render()">Vorjahr</button>
       </div>
@@ -3861,6 +3870,7 @@ function renderFbMgmt(el, ctx) {
       <div class="bud-tabs">
         <button class="bud-tab" onclick="filters.fbView='h1';render()">Übersicht ${fbPeriodeLabel(N)}</button>
         <button class="bud-tab" onclick="filters.fbView='monate';render()">Monate</button>
+        <button class="bud-tab" onclick="filters.fbView='aktmonat';render()">Monat + Trend</button>
         <button class="bud-tab active" onclick="filters.fbView='mgmt';render()">Management</button>
         <button class="bud-tab" onclick="filters.fbView='vorjahr';render()">Vorjahr</button>
       </div>
@@ -3900,6 +3910,79 @@ function renderFbMgmt(el, ctx) {
 /* Vorjahresvergleich: Ist H1 des aktuellen Jahres gegen die Vorperiode.
    Vorjahres-Jahresabschlüsse (p="Jahr") werden auf H1-Basis normalisiert (÷2);
    die Jahr-Spalte zeigt zusätzlich den vollen Abschluss (H1-Daten ×2). */
+/* Aktueller Monat + YTD + Trend: Ist des letzten Monats = YTD(N) − YTD(N−1) (echte Differenz, wenn der
+   vorherige YTD-Stand importiert ist; sonst saisonale Schätzung, gekennzeichnet). Trend = hat der aktuelle
+   Monat die YTD-Abweichung gegenüber Budget verbessert (↗), verschlechtert (↘) oder neutral gelassen (→). */
+function renderFbAktMonat(el, ctx) {
+  const { year, bud, ist, G, vals, rowsOut, fkt, N, budH1, budJahr, istVal } = ctx;
+  const fmt = v => Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH");
+  const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i).map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
+  const srcOf = key => FB_SRC[key] || [key];
+  const prev = N > 1 ? fbIstMonate(year, N - 1) : [];
+  const hatPrev = prev.length > 0;
+  const istPrevVal = k => prev.filter(d => d.z === k).reduce((s, d) => s + (parseFloat(d.v) || 0), 0) * fkt(k);
+  const istNowVal = k => ist.filter(d => d.z === k).reduce((s, d) => s + (parseFloat(d.v) || 0), 0) * fkt(k);
+  const budBis = (k, n) => srcOf(k).reduce((sum, kk) => sum + (bud[kk] || []).slice(0, n).reduce((s, v) => s + v, 0), 0);
+  const budMonat = k => srcOf(k).reduce((sum, kk) => sum + ((bud[kk] || [])[N - 1] || 0), 0);
+  // Ist des Monats: echt (Differenz der YTD-Stände) oder saisonale Schätzung
+  const istMonatVal = k => {
+    if (hatPrev) return istNowVal(k) - istPrevVal(k);
+    const bN = budBis(k, N), bM = budMonat(k);
+    return bN ? istNowVal(k) * bM / bN : istNowVal(k) / N;
+  };
+  const vNow = vals.tot, vPrev = fbCompute(k => hatPrev ? istPrevVal(k) : istNowVal(k) - istMonatVal(k));
+  const bNow = vals.b, bPrev = fbCompute(k => budBis(k, N - 1)), bMon = fbCompute(budMonat), iMon = fbCompute(istMonatVal);
+  const MK = FB_MK;
+  const zeilen = rowsOut.map(row => {
+    const k = row.key;
+    const style = row.art === "s" ? "font-weight:600;border-top:1px solid var(--border);" : (row.art === "c" ? "font-weight:700;background:var(--bg-hover);" : "");
+    const abwM = iMon[k] - bMon[k], abwY = vNow[k] - bNow[k], abwYprev = vPrev[k] - bPrev[k];
+    const delta = abwY - abwYprev;
+    const aufwand = FB_AUFWAND.has(k) || FB_AUFWAND_ZEILEN.has(k);
+    const rel = Math.abs(bNow[k]) > 0 ? Math.abs(delta) / Math.abs(bNow[k]) : (Math.abs(delta) > 500 ? 1 : 0);
+    let pfeil = "→", farbe = "var(--text-faint)", txt = "neutral";
+    if (Math.abs(delta) >= 0.5 && rel >= 0.002) {
+      const besser = aufwand ? delta < 0 : delta > 0;
+      pfeil = besser ? "↗" : "↘"; farbe = besser ? "var(--accent)" : "var(--danger)"; txt = besser ? "verbessert" : "verschlechtert";
+    }
+    const tip = `Abw. YTD vor ${MK[N - 1]}: ${fmt(abwYprev)} → nach ${MK[N - 1]}: ${fmt(abwY)} (${txt} um ${fmt(delta)})${hatPrev ? "" : " · Monatswert geschätzt (saisonal)"}`;
+    const pct = bNow[k] ? (abwY / Math.abs(bNow[k]) * 100) : null;
+    return `<tr>
+      <td style="${style}padding-left:${(row.indent || 0) * 14 + 4}px">${escape(row.label)}</td>
+      <td style="text-align:right;font-family:var(--font-mono);${style}">${fmt(bMon[k])}</td>
+      <td style="text-align:right;font-family:var(--font-mono);${style}${hatPrev ? "" : "font-style:italic;"}">${fmt(iMon[k])}</td>
+      <td style="text-align:right;font-family:var(--font-mono);${style}color:${fbAbwColor(k, abwM, bMon[k])}">${fmt(abwM)}</td>
+      <td style="text-align:right;font-family:var(--font-mono);border-left:2px solid var(--border);${style}">${fmt(bNow[k])}</td>
+      <td style="text-align:right;font-family:var(--font-mono);${style}">${fmt(vNow[k])}</td>
+      <td style="text-align:right;font-family:var(--font-mono);${style}color:${fbAbwColor(k, abwY, bNow[k])}">${fmt(abwY)}</td>
+      <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;${style}color:${fbAbwColor(k, abwY, bNow[k])}">${pct === null ? "—" : (pct > 0 ? "+" : "") + pct.toFixed(1) + " %"}</td>
+      <td style="text-align:center;font-size:15px;color:${farbe};${style}" title="${escape(tip)}">${pfeil}</td>
+      <td style="text-align:right;font-family:var(--font-mono);font-size:10.5px;color:${farbe};${style}">${Math.abs(delta) >= 0.5 ? (delta > 0 ? "+" : "") + fmt(delta) : "—"}</td>
+    </tr>`;
+  }).join("");
+  el.innerHTML = `
+    <div style="display:flex;gap:12px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+      <label style="color:var(--text-dim);font-size:12px">Jahr:</label>
+      <select onchange="filters.budgetYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${yearOpts}</select>
+      <div class="bud-tabs">
+        <button class="bud-tab" onclick="filters.fbView='h1';render()">Übersicht ${fbPeriodeLabel(N)}</button>
+        <button class="bud-tab" onclick="filters.fbView='monate';render()">Monate</button>
+        <button class="bud-tab active" onclick="filters.fbView='aktmonat';render()">Monat + Trend</button>
+        <button class="bud-tab" onclick="filters.fbView='mgmt';render()">Management</button>
+        <button class="bud-tab" onclick="filters.fbView='vorjahr';render()">Vorjahr</button>
+      </div>
+      <span style="font-size:11px;color:var(--text-dim)">${MK[N - 1]} ${year} einzeln · YTD ${fbPeriodeLabel(N)} · Konzern</span>
+    </div>
+    ${hatPrev ? "" : `<div style="font-size:11px;color:var(--warn);margin-bottom:8px">Kein YTD-Stand ${fbPeriodeLabel(N - 1)} gespeichert — der Monatswert ${MK[N - 1]} ist saisonal geschätzt (kursiv). Ab dem nächsten Import bleibt der Vormonat erhalten und der Monat wird exakt gerechnet.</div>`}
+    <div class="table-wrap"><table class="bud-table" style="min-width:1000px">
+      <thead>
+        <tr><th rowspan="2" style="min-width:260px">Position</th><th colspan="3" style="text-align:center">${MK[N - 1]} ${year}</th><th colspan="4" style="text-align:center;border-left:2px solid var(--border)">YTD ${fbPeriodeLabel(N)}</th><th colspan="2" style="text-align:center">Trend durch ${MK[N - 1]}</th></tr>
+        <tr><th style="text-align:right">Budget</th><th style="text-align:right">Ist</th><th style="text-align:right">Δ</th><th style="text-align:right;border-left:2px solid var(--border)">Budget</th><th style="text-align:right">Ist</th><th style="text-align:right">Δ CHF</th><th style="text-align:right">Δ %</th><th style="text-align:center" title="Hat der Monat die YTD-Abweichung verbessert (↗), verschlechtert (↘) oder neutral gelassen (→)?">Trend</th><th style="text-align:right" title="Veränderung der YTD-Abweichung durch diesen Monat">Δ Abw.</th></tr>
+      </thead>
+      <tbody>${zeilen}</tbody>
+    </table></div>
+    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">Monat-Ist = YTD ${fbPeriodeLabel(N)} − YTD ${fbPeriodeLabel(N - 1)} (beide Importe gespeichert). Trend: ↗ Abweichung gegenüber Budget hat sich durch ${MK[N - 1]} verbessert, ↘ verschlechtert, → praktisch unverändert (&lt; 0.2 % des YTD-Budgets). Tooltip auf dem Pfeil zeigt Abweichung vorher/nachher.</div>`;
+}
 function renderFbVorjahr(el, ctx) {
   const { year, ist, vals, fkt, N } = ctx;
   const vy = year - 1;
@@ -3961,6 +4044,7 @@ function renderFbVorjahr(el, ctx) {
       <div class="bud-tabs">
         <button class="bud-tab" onclick="filters.fbView='h1';render()">Übersicht ${fbPeriodeLabel(N)}</button>
         <button class="bud-tab" onclick="filters.fbView='monate';render()">Monate</button>
+        <button class="bud-tab" onclick="filters.fbView='aktmonat';render()">Monat + Trend</button>
         <button class="bud-tab" onclick="filters.fbView='mgmt';render()">Management</button>
         <button class="bud-tab active" onclick="filters.fbView='vorjahr';render()">Vorjahr</button>
       </div>
@@ -4082,6 +4166,7 @@ function renderFbMonate(el, ctx) {
       <div class="bud-tabs">
         <button class="bud-tab" onclick="filters.fbView='h1';render()">Übersicht ${fbPeriodeLabel(N)}</button>
         <button class="bud-tab active" onclick="filters.fbView='monate';render()">Monate</button>
+        <button class="bud-tab" onclick="filters.fbView='aktmonat';render()">Monat + Trend</button>
         <button class="bud-tab" onclick="filters.fbView='mgmt';render()">Management</button>
         <button class="bud-tab" onclick="filters.fbView='vorjahr';render()">Vorjahr</button>
       </div>
