@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.263.0"></script>
-<script src="apriko-api.js?v=1.263.0"></script>
-<script src="lohncheck.js?v=1.263.0"></script>
-<script src="personalbudget.js?v=1.263.0"></script>
-<script src="jahresbudget.js?v=1.263.0"></script>
-<script src="budgetpositionen.js?v=1.263.0"></script>
-<script src="lohnchecklistetemp.js?v=1.263.0"></script>
+<script src="apriko-filters.js?v=1.264.0"></script>
+<script src="apriko-api.js?v=1.264.0"></script>
+<script src="lohncheck.js?v=1.264.0"></script>
+<script src="personalbudget.js?v=1.264.0"></script>
+<script src="jahresbudget.js?v=1.264.0"></script>
+<script src="budgetpositionen.js?v=1.264.0"></script>
+<script src="lohnchecklistetemp.js?v=1.264.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -984,7 +984,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.263.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.264.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -7748,32 +7748,39 @@ async function renderOnboarding(el) {
   document.getElementById("view-actions").innerHTML = `
     <select id="onb-add" style="padding:4px 6px;max-width:260px"><option value="">+ Kunde ins Onboarding …</option>${kandidaten.map(c => `<option value="${c.id}">${escape(c.Title)}${c.Segment ? " · " + escape(c.Segment) : ""}</option>`).join("")}</select>
     <button class="btn btn-sm" onclick="onbKundeHinzu(document.getElementById('onb-add').value)">Hinzufügen</button>
-    <button class="btn btn-sm" onclick="onbToggleBearbeiten()">${onbSpaltenBearbeiten ? "✓ Spalten fertig" : "⚙ Spalten bearbeiten"}</button>`;
+    <button class="btn btn-sm" onclick="onbToggleBearbeiten()">${onbSpaltenBearbeiten ? "✓ Aufgaben fertig" : "⚙ Aufgaben bearbeiten"}</button>`;
   const zustFarbe = z => z === "Kunde" ? "var(--warn)" : (z === "beide" ? "var(--accent-3)" : "var(--accent)");
+  // Lesbarkeit: Aufgaben als ZEILEN (Phasen als Zwischentitel), Kunden als SPALTEN
   const kopf = `<thead>
-    <tr><th rowspan="2" style="min-width:180px;position:sticky;left:0;background:var(--bg-card);z-index:2">Kunde</th><th rowspan="2" style="min-width:110px">Typ</th><th rowspan="2" style="min-width:200px">Verantwortlich</th><th rowspan="2" style="min-width:120px">Go-Live</th><th rowspan="2" style="min-width:70px;text-align:right">Stand</th>
-      ${phasen.map(p => `<th colspan="${p.n}" style="text-align:center;border-left:1px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.04em">${escape(p.name)}</th>`).join("")}</tr>
-    <tr>${o.aufgaben.map((a, i) => `<th style="min-width:34px;max-width:120px;font-weight:400;font-size:10px;line-height:1.2;vertical-align:bottom;${i === 0 || o.aufgaben[i - 1].phase !== a.phase ? "border-left:1px solid var(--border);" : ""}" title="${escape(a.titel)} · ${escape(a.zustaendig)} · ${a.tage >= 0 ? "+" : ""}${a.tage} Tage zum Go-Live"><div style="writing-mode:vertical-rl;transform:rotate(180deg);max-height:150px;overflow:hidden;color:${zustFarbe(a.zustaendig)}">${escape(a.titel)}</div></th>`).join("")}</tr>
+    <tr>
+      <th style="min-width:320px;position:sticky;left:0;background:var(--bg-card);z-index:2">Aufgabe</th>
+      <th style="min-width:70px">Zuständig</th><th style="min-width:60px;text-align:right" title="Tage relativ zum Go-Live">Tage</th>
+      ${kunden.map(({ id, c, k }) => { const erl = k.erledigt || {}; const n = o.aufgaben.filter(a => erl[a.id]).length; return `<th style="min-width:200px;vertical-align:top;border-left:1px solid var(--border);font-weight:400">
+        <div style="font-weight:600;font-size:13px">${escape(c.Title)} <a href="#" onclick="onbKundeEntfernen('${id}');return false;" style="color:var(--text-faint);font-size:10px;font-weight:400" title="Aus Onboarding entfernen">✕</a></div>
+        <div style="font-size:11px;color:var(--text-dim);margin:2px 0 6px">${escape(c.Segment || "—")} · <span style="font-family:var(--font-mono)">${n}/${o.aufgaben.length}</span></div>
+        <select onchange="onbKundeFeld('${id}','verantwortlich',this.value)" style="width:100%;padding:3px 4px;font-size:11px;margin-bottom:4px" title="Hauptverantwortliche/r"><option value="">— verantwortlich —</option>${emails.map(e => `<option value="${escape(e)}" ${e === (k.verantwortlich || "").toLowerCase() ? "selected" : ""}>${escape(e)}</option>`).join("")}</select>
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim)">Go-Live <input type="date" value="${k.goLive || ""}" onchange="onbKundeFeld('${id}','goLive',this.value)" style="padding:3px 4px;font-size:11px;flex:1"></div>
+      </th>`; }).join("")}
+    </tr>
   </thead>`;
-  const zeilen = kunden.map(({ id, c, k }) => {
-    const erl = k.erledigt || {}; const n = o.aufgaben.filter(a => erl[a.id]).length;
-    return `<tr>
-      <td style="position:sticky;left:0;background:var(--bg-card);z-index:1"><strong>${escape(c.Title)}</strong> <a href="#" onclick="onbKundeEntfernen('${id}');return false;" style="color:var(--text-faint);font-size:10px" title="Aus Onboarding entfernen">✕</a></td>
-      <td style="font-size:11px">${escape(c.Segment || "—")}</td>
-      <td><select onchange="onbKundeFeld('${id}','verantwortlich',this.value)" style="width:100%;padding:3px 4px;font-size:11px"><option value="">—</option>${emails.map(e => `<option value="${escape(e)}" ${e === (k.verantwortlich || "").toLowerCase() ? "selected" : ""}>${escape(e)}</option>`).join("")}</select></td>
-      <td><input type="date" value="${k.goLive || ""}" onchange="onbKundeFeld('${id}','goLive',this.value)" style="padding:3px 4px;font-size:11px"></td>
-      <td style="text-align:right;font-family:var(--font-mono);font-size:11px">${n}/${o.aufgaben.length}</td>
-      ${o.aufgaben.map((a, i) => {
-        const e = erl[a.id]; const faellig = onbFaellig(k.goLive, a.tage); const ueber = !e && faellig && faellig < heute;
-        const tip = e ? `Erledigt ${onbFmtTs(e.am)} · ${e.von || "?"}` : (faellig ? `Fällig ${onbFmtDatum(faellig)}${ueber ? " — überfällig" : ""}` : "Offen") + ` · ${a.zustaendig}`;
-        return `<td style="text-align:center;${i === 0 || o.aufgaben[i - 1].phase !== a.phase ? "border-left:1px solid var(--border);" : ""}${ueber ? "background:rgba(255,80,80,0.12);" : ""}" title="${escape(tip)}"><input type="checkbox" ${e ? "checked" : ""} onchange="onbToggle('${id}','${a.id}')" style="width:auto;margin:0;cursor:pointer"></td>`;
+  const zeilen = o.aufgaben.map((a, i) => {
+    const phasenTitel = (i === 0 || o.aufgaben[i - 1].phase !== a.phase) ? `<tr><td colspan="${3 + kunden.length}" style="background:var(--bg);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);padding:8px 8px 4px;position:sticky;left:0">${escape(a.phase)}</td></tr>` : "";
+    return phasenTitel + `<tr>
+      <td style="position:sticky;left:0;background:var(--bg-card);z-index:1">${escape(a.titel)}</td>
+      <td style="font-size:11px;color:${zustFarbe(a.zustaendig)}">${escape(a.zustaendig)}</td>
+      <td style="text-align:right;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${a.tage >= 0 ? "+" : ""}${a.tage}</td>
+      ${kunden.map(({ id, k }) => {
+        const e = (k.erledigt || {})[a.id]; const faellig = onbFaellig(k.goLive, a.tage); const ueber = !e && faellig && faellig < heute;
+        const tip = e ? `Erledigt ${onbFmtTs(e.am)} · ${e.von || "?"}` : (faellig ? `Fällig ${onbFmtDatum(faellig)}${ueber ? " — überfällig" : ""}` : "Offen");
+        return `<td style="border-left:1px solid var(--border);${ueber ? "background:rgba(255,80,80,0.12);" : ""}" title="${escape(tip)}">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:11px;color:${e ? "var(--accent-2)" : (ueber ? "var(--danger)" : "var(--text-faint)")}"><input type="checkbox" ${e ? "checked" : ""} onchange="onbToggle('${id}','${a.id}')" style="width:auto;margin:0;cursor:pointer">${e ? escape(onbFmtTs(e.am).split(",")[0]) + " · " + escape((e.von || "").split("@")[0]) : (faellig ? "bis " + escape(onbFmtDatum(faellig)) : "")}</label></td>`;
       }).join("")}
     </tr>`;
   }).join("");
   const bearbeiten = !onbSpaltenBearbeiten ? "" : `
     <div class="card" style="padding:14px 16px;margin-top:14px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">Spalten (Aufgaben) — gelten für alle Kunden</h3><span><button class="btn btn-sm" onclick="onbAufgabeNeu()">+ Aufgabe</button> <a href="#" onclick="onbStandardLaden();return false;" style="font-size:11px;color:var(--text-faint);margin-left:8px">Standard laden</a></span></div>
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">Tage relativ zum Go-Live (negativ = davor). Zuständigkeit färbt den Spaltentitel: Apriko / Kunde / beide.</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">Aufgaben — gelten für alle Kunden</h3><span><button class="btn btn-sm" onclick="onbAufgabeNeu()">+ Aufgabe</button> <a href="#" onclick="onbStandardLaden();return false;" style="font-size:11px;color:var(--text-faint);margin-left:8px">Standard laden</a></span></div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">Tage relativ zum Go-Live (negativ = davor). Reihenfolge mit ▲▼; die Phase gruppiert die Zeilen.</div>
       <table style="font-size:12px"><thead><tr><th></th><th>Phase</th><th>Aufgabe</th><th>Zuständig</th><th>Tage</th><th></th></tr></thead><tbody>
         ${o.aufgaben.map((a, i) => `<tr>
           <td style="white-space:nowrap"><a href="#" onclick="onbAufgabeVerschieben('${a.id}',-1);return false;" style="color:var(--text-faint)">▲</a> <a href="#" onclick="onbAufgabeVerschieben('${a.id}',1);return false;" style="color:var(--text-faint)">▼</a></td>
@@ -7787,7 +7794,7 @@ async function renderOnboarding(el) {
     </div>`;
   el.innerHTML = `
     <div class="card" style="padding:14px 16px">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">Häkchen setzen = erledigt; beim Überfahren erscheinen Zeitpunkt und Person. Rot hinterlegt = überfällig gemäss Go-Live-Datum. Spaltentitel-Farbe = Zuständigkeit (<span style="color:var(--accent)">Apriko</span> · <span style="color:var(--warn)">Kunde</span> · <span style="color:var(--accent-3)">beide</span>).</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">Häkchen setzen = erledigt (Datum · Person erscheint daneben, Details beim Überfahren). Rot = überfällig gemäss Go-Live-Datum. Zuständigkeit: <span style="color:var(--accent)">Apriko</span> · <span style="color:var(--warn)">Kunde</span> · <span style="color:var(--accent-3)">beide</span>.</div>
       ${kunden.length ? `<div class="table-wrap" style="overflow-x:auto"><table style="font-size:12px;border-collapse:collapse">${kopf}<tbody>${zeilen}</tbody></table></div>` : `<div class="empty">Noch keine Kunden im Onboarding — oben rechts einen Kunden hinzufügen.</div>`}
     </div>
     ${bearbeiten}`;
