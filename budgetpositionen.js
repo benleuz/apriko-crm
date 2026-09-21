@@ -10,7 +10,7 @@
    Abhängigkeiten: jahresbudget.js (jbBuild, jbSaveRow, jbFindRow, jbPos*, jbFmt, jbNum, JB_*),
    index.html (fbSaveItem, reload, escape, toast, render, FB_PLAN, FB_LABELS, FB_SRC). */
 
-const BP_VERSION = "1.116.0";
+const BP_VERSION = "1.118.0";
 const BP_MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 const BP_FAELL = [["m", "monatlich (÷12)"], ["q", "quartalsweise (÷4)"], ["e", "einmalig im Monat"], ["h", "halbjährlich (÷2)"], ["r", "von – bis"]];
 
@@ -41,6 +41,14 @@ function bpMonths(p) {
 /* FIBU-Konto einer Position: eigenes p.kt, sonst das Konto der Zeile, wenn es ein echtes (4-stelliges) Konto ist.
    Zeilen mit Platzhalter-Konto (50xx, 57xx, 58xx/59xx, 34xx) brauchen pro Position ein Konto. */
 function bpPosKonto(r, p) { const eig = String(p.kt || "").trim(); if (/^\d{4}$/.test(eig)) return eig; return /^\d{4}$/.test(String(r.kt || "")) ? String(r.kt) : ""; }
+/* Bekannte FIBU-Konten (Nummer → Bezeichnung) aus allen importierten ER-/Kontenblatt-Daten und Budgetzeilen — für das Konto-Dropdown */
+function bpBekannteKonten(ges) {
+  const map = {};
+  const add = (kt, b, g) => { kt = String(kt || "").trim(); if (!/^\d{4}$/.test(kt)) return; if (g && ges && !jbSameGes(g, ges)) return; if (!map[kt] || (b && !map[kt])) map[kt] = b || map[kt] || ""; };
+  (cache.budget || []).forEach(it => { const d = fbParse(it, "ist"); if (d) add(d.kt, d.b, d.g); const j = fbParse(it, "jb"); if (j) add(j.kt, j.b, j.g); });
+  Object.values(fbBuchYearCache || {}).forEach(y => Object.entries(y || {}).forEach(([k, obj]) => { const [g, kt] = k.split("|"); add(kt, obj && obj.bez, g); }));
+  return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0]));
+}
 function bpFaellText(p) {
   if (p.auto) return "automatisch";
   const f = p.f || "m", sm = parseInt(p.sm, 10) || 1, em = parseInt(p.em, 10) || 12;
@@ -68,7 +76,7 @@ async function bpPosSet(g, kt, i, field, value) {
   const pos = r.pos.map(p => ({ ...p }));
   if (field === "v") pos[i].v = jbNum(value) || 0;
   else if (field === "sm" || field === "em") pos[i][field] = Math.min(12, Math.max(1, parseInt(value, 10) || 1));
-  else if (field === "kt") { const k = String(value).replace(/\D/g, "").slice(0, 4); if (k && k.length !== 4) { toast("FIBU-Konto: 4 Ziffern", true); return; } if (k) pos[i].kt = k; else delete pos[i].kt; }
+  else if (field === "kt") { const k = (String(value).match(/\d{4}/) || [""])[0]; if (k && k.length !== 4) { toast("FIBU-Konto: 4 Ziffern", true); return; } if (k) pos[i].kt = k; else delete pos[i].kt; }
   else pos[i][field] = String(value).trim();
   if (field === "f") { if (!pos[i].sm) pos[i].sm = 1; if (value === "r" && !pos[i].em) pos[i].em = 12; }
   await jbSaveRow(r, { pos });
@@ -134,6 +142,8 @@ function renderBudgetpositionen(el) {
 
   const totalM = Array(12).fill(0);   // Monatssummen über alle Konten (Positionen, sonst Vorschlag/Überschreibung ÷12)
   let totalJahr = 0, posCount = 0;
+  const kontenListe = bpBekannteKonten(ges);
+  const kontoBez = Object.fromEntries(kontenListe);
   let lastPos = null;
   const body = shown.map(r => {
     const kontoM = Array(12).fill(0);
@@ -161,7 +171,7 @@ function renderBudgetpositionen(el) {
       if (p.auto) return `
       <tr style="background:rgba(127,127,127,.05)">
         <td style="padding:2px 6px 2px 22px;font-size:11.5px;color:var(--accent-2)" title="${escape(p.n || "")}">⚙ ${escape(p.t || "")}</td>
-        <td style="padding:2px 6px;font-size:10.5px;color:var(--text-faint);font-family:var(--font-mono)">${escape(bpPosKonto(r, p) || r.kt)}</td>
+        <td style="padding:2px 6px;font-size:10.5px;color:var(--text-faint)">${(() => { const k = bpPosKonto(r, p) || r.kt; return escape(k + (kontoBez[k] ? " " + kontoBez[k] : "")); })()}</td>
         <td style="padding:2px 6px;font-size:10.5px;color:var(--text-faint)">${escape(p.n || "")}</td>
         <td style="padding:2px 4px;font-size:10.5px;color:var(--text-faint)">automatisch</td>
         <td style="text-align:right;font-family:var(--font-mono);font-size:11.5px;padding:2px 6px">${Math.round(p.v || 0).toLocaleString("de-CH")}</td>
@@ -174,7 +184,7 @@ function renderBudgetpositionen(el) {
       return `
       <tr>
         <td style="padding:2px 6px 2px 22px"><input data-bp="${escape(r.g + "|" + r.kt)}" value="${escape(p.t || "")}" placeholder="Text (z.B. Google Cloud)" style="width:100%;min-width:180px;font-size:11.5px;padding:2px 6px" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'t',this.value)"></td>
-        <td style="padding:2px 6px"><input value="${escape(p.kt || "")}" placeholder="${/^\d{4}$/.test(String(r.kt)) ? escape(r.kt) : "Konto?"}" maxlength="4" title="FIBU-Konto dieser Position${/^\d{4}$/.test(String(r.kt)) ? " (leer = " + escape(r.kt) + ")" : " — Pflicht, da die Zeile ein Sammelkonto ist"}" style="width:58px;font-family:var(--font-mono);font-size:11px;padding:2px 6px;${bpPosKonto(r, p) ? "" : "border-color:var(--danger);"}" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'kt',this.value)"></td>
+        <td style="padding:2px 6px"><input list="bp-konten" value="${escape(p.kt ? (p.kt + (kontoBez[p.kt] ? " " + kontoBez[p.kt] : "")) : "")}" placeholder="${/^\d{4}$/.test(String(r.kt)) ? escape(r.kt + (kontoBez[r.kt] ? " " + kontoBez[r.kt] : "")) : "Konto wählen …"}" title="FIBU-Konto dieser Position${/^\d{4}$/.test(String(r.kt)) ? " (leer = " + escape(r.kt) + ")" : " — Pflicht, da die Zeile ein Sammelkonto ist"}${p.kt && kontoBez[p.kt] ? " · " + escape(kontoBez[p.kt]) : ""}" style="width:190px;font-size:11px;padding:2px 6px;${bpPosKonto(r, p) ? "" : "border-color:var(--danger);"}" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'kt',this.value)"></td>
         <td style="padding:2px 6px"><input value="${escape(p.n || "")}" placeholder="Notiz …" style="width:100%;min-width:160px;font-size:11px;padding:2px 6px;${p.n ? "" : "color:var(--text-faint)"}" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'n',this.value)"></td>
         <td style="padding:2px 4px;white-space:nowrap"><select style="font-size:10.5px;padding:1px 2px" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'f',this.value)">${BP_FAELL.map(([k, l]) => `<option value="${k}" ${k === f ? "selected" : ""}>${l}</option>`).join("")}</select>
           ${f === "e" || f === "q" || f === "h" ? ` ${sel("sm", 1, 12, parseInt(p.sm, 10) || 1)}` : f === "r" ? ` ${sel("sm", 1, 12, parseInt(p.sm, 10) || 1)}–${sel("em", 1, 12, parseInt(p.em, 10) || 12)}` : ""}</td>
@@ -200,6 +210,7 @@ function renderBudgetpositionen(el) {
   }).join("");
 
   el.innerHTML = `
+    <datalist id="bp-konten">${kontenListe.map(([kt, b]) => `<option value="${kt}${b ? " " + escape(b) : ""}"></option>`).join("")}</datalist>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
       <div style="display:flex;gap:4px">${JB_GES.map(g => `<button class="btn btn-sm" style="${jbSameGes(g, ges) ? "background:var(--accent);color:#fff" : ""}" onclick="bpSetGes('${g}')">${escape(g)}</button>`).join("")}</div>
       <label style="font-size:12px;color:var(--text-dim)">Budgetjahr <select onchange="bpSetYear(this.value)" style="padding:4px 6px;font-size:12px;margin-left:4px">${years.map(v => `<option ${v === y ? "selected" : ""}>${v}</option>`).join("")}</select></label>
