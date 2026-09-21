@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.270.0"></script>
-<script src="apriko-api.js?v=1.270.0"></script>
-<script src="lohncheck.js?v=1.270.0"></script>
-<script src="personalbudget.js?v=1.270.0"></script>
-<script src="jahresbudget.js?v=1.270.0"></script>
-<script src="budgetpositionen.js?v=1.270.0"></script>
-<script src="lohnchecklistetemp.js?v=1.270.0"></script>
+<script src="apriko-filters.js?v=1.272.0"></script>
+<script src="apriko-api.js?v=1.272.0"></script>
+<script src="lohncheck.js?v=1.272.0"></script>
+<script src="personalbudget.js?v=1.272.0"></script>
+<script src="jahresbudget.js?v=1.272.0"></script>
+<script src="budgetpositionen.js?v=1.272.0"></script>
+<script src="lohnchecklistetemp.js?v=1.272.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -984,7 +984,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.270.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.272.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -4643,11 +4643,20 @@ function setRevMode(mode) {
 }
 
 /* === Modus: Monatsabschluss === */
+/* Einheitliche Kundenauswahl für Monatsumsätze: aktive Kunden PLUS alle anderen, die in diesem Monat
+   Umsatz (auch negativ) haben — damit Monatsabschluss, Statistik und Chart dieselben Zahlen zeigen. */
+function revenueCustomersForMonth(year, month) {
+  return cache.customers.filter(c => {
+    if ((c.Status || "Aktiv") === "Aktiv") return true;
+    const r = findRev(c.id, year, month); if (!r) return false;
+    const calc = calcRevenue(r, c, year, month);
+    return Math.abs(calc.saas) > 0.005 || Math.abs(calc.bpo) > 0.005;
+  }).sort((a,b) => (a.Title||"").localeCompare(b.Title||""));
+}
 function renderRevenueByMonth(el) {
   const year = filters.revenueYear;
   const month = filters.revenueMonth;
-  const activeCust = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv")
-    .sort((a,b) => (a.Title||"").localeCompare(b.Title||""));
+  const activeCust = revenueCustomersForMonth(year, month);
 
   // Summen für diesen Monat
   let sumSaaS = 0, sumBPO = 0, sumLic = 0, sumExt = 0, sumHrs = 0;
@@ -4744,7 +4753,7 @@ function renderRevenueByMonth(el) {
 
           return `<tr data-cust="${c.id}">
             <td>
-              <strong>${escape(c.Title||"")}</strong>
+              <strong>${escape(c.Title||"")}</strong>${(c.Status || "Aktiv") !== "Aktiv" ? ` <span style="font-size:10px;color:var(--warn)" title="Kunde ist ${escape(c.Status)} — mit Umsatz in diesem Monat">${escape(c.Status)}</span>` : ""}
               <div style="color:var(--text-dim);font-size:11px;margin-top:2px">
                 ${subParts.join(" · ")}
               </div>
@@ -4794,11 +4803,16 @@ function renderRevenueByCustomer(el) {
   let custId = filters.revenueCustomerId;
   if (!custId && cache.customers.length) custId = cache.customers[0].id;
 
+  // Pro Kunde: alle Kunden — aktive zuerst, danach gekündigte/inaktive mit Umsatzhistorie (mit Status-Zusatz)
+  const hatUmsatz = c => cache.monthlyrevenue.some(r => String(r.CustomerId) === String(c.id) && ((parseFloat(r.Licenses) || 0) > 0 || (parseFloat(r.ExternalRevenue) || 0) > 0 || (parseFloat(r.Hours) || 0) > 0));
   const activeCust = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv")
+    .sort((a,b) => (a.Title||"").localeCompare(b.Title||""));
+  const sonstige = cache.customers.filter(c => (c.Status || "Aktiv") !== "Aktiv" && hatUmsatz(c))
     .sort((a,b) => (a.Title||"").localeCompare(b.Title||""));
   const cust = cache.customers.find(c => c.id == custId);
 
-  const custOptions = activeCust.map(c => `<option value="${c.id}" ${c.id==custId?"selected":""}>${escape(c.Title||"")}</option>`).join("");
+  const custOptions = activeCust.map(c => `<option value="${c.id}" ${c.id==custId?"selected":""}>${escape(c.Title||"")}</option>`).join("")
+    + (sonstige.length ? `<option disabled>── nicht aktiv ──</option>` + sonstige.map(c => `<option value="${c.id}" ${c.id==custId?"selected":""}>${escape(c.Title||"")} · ${escape(c.Status)}</option>`).join("") : "");
   const yearOptions = [year-1, year, year+1].map(y => `<option ${y===year?"selected":""}>${y}</option>`).join("");
 
   if (!cust) {
@@ -5569,7 +5583,7 @@ function computeCustomerStats(cust, range) {
           if (calc.ytd && calc.ytd.ytdHonorar > 0) { priorYtd = calc.ytd.ytdHonorar; break; }
         }
       }
-      bpoSum += Math.max(0, lastYtd - priorYtd);
+      bpoSum += lastYtd - priorYtd;   // auch negative Korrekturen zählen (sonst stimmt SaaS+BPO nicht mit den Monatstotalen überein)
     });
     sumBPO = bpoSum;
   } else {
@@ -5898,8 +5912,8 @@ function renderStats(el) {
   const custData = [];
   cache.customers.forEach(c => {
     const stats = computeCustomerStats(c);
-    // Nur zeigen wenn irgendwas > 0
-    if (stats.sumTotal > 0) {
+    // Nur zeigen wenn irgendein Monat Umsatz hat (auch negative Korrekturmonate — sonst weichen Monatstotale ab)
+    if (Math.abs(stats.sumTotal) > 0.005 || stats.monthly.some(r => Math.abs(r.total) > 0.005)) {
       custData.push({ customer: c, stats });
     }
   });
@@ -5933,7 +5947,7 @@ function renderStats(el) {
     const s = computeCustomerStats(c, priorRange);
     priorSaaS += s.sumSaaS;
     priorBPO += s.sumBPO;
-    if (s.sumTotal > 0) priorCustCount.add(c.id);
+    if (Math.abs(s.sumTotal) > 0.005) priorCustCount.add(c.id);
   });
 
   const deltaSaaS = pctDelta(gSaaS, priorSaaS);
@@ -6185,7 +6199,7 @@ function exportStatsToExcel() {
   const custData = [];
   cache.customers.forEach(c => {
     const stats = computeCustomerStats(c);
-    if (stats.sumTotal > 0) custData.push({ customer: c, stats });
+    if (Math.abs(stats.sumTotal) > 0.005 || stats.monthly.some(r => Math.abs(r.total) > 0.005)) custData.push({ customer: c, stats });
   });
   custData.sort((a,b) => (a.customer.Title||"").localeCompare(b.customer.Title||""));
 
