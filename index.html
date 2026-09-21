@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.266.0"></script>
-<script src="apriko-api.js?v=1.266.0"></script>
-<script src="lohncheck.js?v=1.266.0"></script>
-<script src="personalbudget.js?v=1.266.0"></script>
-<script src="jahresbudget.js?v=1.266.0"></script>
-<script src="budgetpositionen.js?v=1.266.0"></script>
-<script src="lohnchecklistetemp.js?v=1.266.0"></script>
+<script src="apriko-filters.js?v=1.267.0"></script>
+<script src="apriko-api.js?v=1.267.0"></script>
+<script src="lohncheck.js?v=1.267.0"></script>
+<script src="personalbudget.js?v=1.267.0"></script>
+<script src="jahresbudget.js?v=1.267.0"></script>
+<script src="budgetpositionen.js?v=1.267.0"></script>
+<script src="lohnchecklistetemp.js?v=1.267.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -984,7 +984,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.266.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.267.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -4008,6 +4008,8 @@ function renderFbVorjahr(el, ctx) {
 
 function renderFbMonate(el, ctx) {
   const { year, bud, ist, G, vals, rowsOut, fkt, N } = ctx;
+  // Anzeige nur bis zum letzten importierten Ist-Monat (YTD); Forecast-Monate bleiben weg, Jahr-Hochrechnung bleibt
+  const MKV = FB_MK.slice(0, N);
   const fmt = v => Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH");
   const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
@@ -4061,7 +4063,7 @@ function renderFbMonate(el, ctx) {
         return `
       <tr class="fb-det">
         <td style="padding-left:36px;color:var(--text-faint);font-size:10px">${escape(d.g)} · ${escape(d.kt)} ${escape(d.b || "")}</td>
-        ${MK.map((_, i) => `<td></td><td style="text-align:right;font-family:var(--font-mono);font-size:10px;color:var(--text-faint)${i >= N ? ";font-style:italic" : ""}">${fmt(mv(i))}</td><td></td>`).join("")}
+        ${MKV.map((_, i) => `<td></td><td style="text-align:right;font-family:var(--font-mono);font-size:10px;color:var(--text-faint)">${fmt(mv(i))}</td><td></td>`).join("")}
         <td></td><td style="text-align:right;font-family:var(--font-mono);font-size:10px;color:var(--text-faint);font-style:italic">${fmt(jv)}</td><td></td>
       </tr>`;
       }).join("");
@@ -4083,17 +4085,17 @@ function renderFbMonate(el, ctx) {
         <button class="bud-tab" onclick="filters.fbView='mgmt';render()">Management</button>
         <button class="bud-tab" onclick="filters.fbView='vorjahr';render()">Vorjahr</button>
       </div>
-      <span style="font-size:11px;color:var(--text-dim)">Ist ${fbPeriodeLabel(N)} saisonal nach Budget-Kurve · ${N < 12 ? FB_MK[N] + "–Dez = Hochrechnung" : "komplett Ist"}</span>
+      <span style="font-size:11px;color:var(--text-dim)">Ist ${fbPeriodeLabel(N)} saisonal nach Budget-Kurve · Jahr = Hochrechnung</span>
     </div>
     <div class="table-wrap"><table class="bud-table" style="min-width:2700px">
       <thead>
         <tr>
           <th style="min-width:210px" rowspan="2">Position</th>
-          ${MK.map((m, i) => `<th colspan="3" style="text-align:center;${i % 2 ? "background:var(--bg-hover);" : ""}${i === N ? "border-left:2px solid var(--border);" : ""}">${m}${i >= N ? " ◦" : ""}</th>`).join("")}
+          ${MKV.map((m, i) => `<th colspan="3" style="text-align:center;${i % 2 ? "background:var(--bg-hover);" : ""}">${m}</th>`).join("")}
           <th colspan="3" style="text-align:center;border-left:2px solid var(--border)">Jahr</th>
         </tr>
         <tr>
-          ${MK.map((m, i) => ["B", i < N ? "I" : "F", "Δ"].map(s => `<th style="text-align:right;font-size:9px;${i % 2 ? "background:var(--bg-hover);" : ""}" title="${s === "B" ? "Budget" : s === "I" ? "Ist (saisonal verteilt)" : s === "F" ? "Forecast (hochgerechnet)" : "Abweichung"}">${s}</th>`).join("")).join("")}
+          ${MKV.map((m, i) => ["B", "I", "Δ"].map(s => `<th style="text-align:right;font-size:9px;${i % 2 ? "background:var(--bg-hover);" : ""}" title="${s === "B" ? "Budget" : s === "I" ? "Ist (saisonal verteilt)" : s === "F" ? "Forecast (hochgerechnet)" : "Abweichung"}">${s}</th>`).join("")).join("")}
           ${["Budget", "Hochr.", "Δ"].map((s, j) => `<th style="text-align:right;font-size:9px;${j === 0 ? "border-left:2px solid var(--border)" : ""}">${s}</th>`).join("")}
         </tr>
       </thead>
@@ -4108,7 +4110,7 @@ function renderFbMonate(el, ctx) {
           return `
           <tr class="${rowCls}${hatKonten ? " fb-pos" : ""}" ${hatKonten ? `onclick="fbToggle('${k}')"` : ""}>
             <td style="${style}padding-left:${(row.indent || 0) * 14 + 4}px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px" title="${escape(row.label)}">${hatKonten ? `<span style="color:var(--accent);font-size:9px">${fbExpanded[k] ? "▼" : "▶"}</span> ` : ""}${escape(row.label)}</td>
-            ${MK.map((_, i) => {
+            ${MKV.map((_, i) => {
               const b = budMon[i][k], istV = istMon[i][k], a = istV - b;
               const zebra = (i % 2 && !bold) ? "background:var(--bg-hover);" : "";
               const fc = i >= N ? "font-style:italic;" : "";
@@ -4125,7 +4127,7 @@ function renderFbMonate(el, ctx) {
         }).join("")}
       </tbody>
     </table></div>
-    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">B = Budget · I = Ist (${fbPeriodeLabel(N)}-Saldo saisonal nach der Budget-Monatskurve verteilt) · F ◦ = Forecast ${N < 12 ? FB_MK[N] + "–Dez" : "—"} (Budget-Monat × erreichtes Ist/Budget-Verhältnis ${fbPeriodeLabel(N)}) · Jahr-Hochrechnung = Ist ${fbPeriodeLabel(N)} × Budget-Jahr ÷ Budget-${fbPeriodeLabel(N)}. Positionen ohne Budget-Kurve: lineare Verteilung (÷${N}, Jahr ×12/${N}).</div>
+    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">B = Budget · I = Ist (${fbPeriodeLabel(N)}-Saldo saisonal nach der Budget-Monatskurve verteilt) · Δ = Abweichung · Jahr-Hochrechnung = Ist ${fbPeriodeLabel(N)} × Budget-Jahr ÷ Budget-${fbPeriodeLabel(N)}. Positionen ohne Budget-Kurve: lineare Verteilung (÷${N}, Jahr ×12/${N}). Angezeigt werden nur die importierten Monate (${fbPeriodeLabel(N)}).</div>
   `;
 }
 
