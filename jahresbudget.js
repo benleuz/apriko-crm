@@ -19,7 +19,7 @@
    budgetRows, budgetChfOf, budgetIsSaaS, budgetErloes, BUDGET_MONTH_FIELDS,
    deleteItem, reload, escape, toast, render, currentView. */
 
-const JB_VERSION = "1.117.0";
+const JB_VERSION = "1.118.0";
 const JB_GES = ["Apriko AG", "Maverix AG"];
 const JB_PERSONAL = new Set(["SW_Lohn", "SW_SV", "SW_UebrPA", "BO_Lohn", "BO_SV", "BO_UebrPA"]);
 const JB_ERTRAG = new Set(["SW_Ertrag", "BO_Ertrag"]);
@@ -127,11 +127,25 @@ function jbBuild(year) {
   JB_PERSONAL.forEach(k => {
     const v = persBasis[k] || 0;
     const split = Array(12).fill(Math.round(v / 12)); split[11] = Math.round(v) - split.slice(0, 11).reduce((s, x) => s + x, 0);
-    const autoPos = { t: "Übertrag Budget Personalaufwand " + year, n: "aus Menü «Budget Personalaufwand» (1/12)", v, f: "x", m: split, auto: true };
+    // Übertrag auf die echten Konten des Basisjahrs verteilen (Anteil = Ist-Anteil des Kontos, z.B. 5700 AHV / 5720 BVG / 5730 UVG …);
+    // ohne Ist-Konten bleibt es eine Sammelposition
+    const istKonten = {}; ist.filter(d => d.z === k).forEach(d => { const vv = Math.abs(parseFloat(d.v) || 0); if (vv > 0) { istKonten[d.kt] = istKonten[d.kt] || { kt: d.kt, b: d.b || "", v: 0 }; istKonten[d.kt].v += vv; } });
+    const kl = Object.values(istKonten).sort((a, b) => a.kt.localeCompare(b.kt)); const istSum = kl.reduce((s, x) => s + x.v, 0);
+    let autoPosList;
+    if (kl.length && istSum > 0) {
+      let rest = Math.round(v);
+      autoPosList = kl.map((x, idx) => {
+        const anteil = x.v / istSum; let vv = idx === kl.length - 1 ? rest : Math.round(v * anteil); rest -= vv;
+        const sp = Array(12).fill(Math.round(vv / 12)); sp[11] = vv - sp.slice(0, 11).reduce((s, q) => s + q, 0);
+        return { t: "Übertrag Budget Personalaufwand " + year + " · " + x.kt + (x.b ? " " + x.b : ""), n: "Anteil " + Math.round(anteil * 100) + " % nach Ist " + basis + " (1/12)", v: vv, f: "x", m: sp, kt: x.kt, auto: true };
+      });
+    } else {
+      autoPosList = [{ t: "Übertrag Budget Personalaufwand " + year, n: "aus Menü «Budget Personalaufwand» (1/12)", v, f: "x", m: split, auto: true }];
+    }
     const ex = persExtra[k];
     const extraPos = ex && Array.isArray(ex.pos) ? ex.pos.filter(p => !p.auto) : [];
     let pi = 0, ph = 0, pp = null; ist.filter(d => d.z === k).forEach(d => { const vv = (parseFloat(d.v) || 0) * jbFkt(k); pi += vv; ph += vv * jbHochFaktor(d.p); pp = pp === null ? d.p : (pp === d.p ? pp : "gemischt"); });
-    push(k, { key: k, g: JB_PA_GES[k], kt: k.endsWith("Lohn") ? "50xx" : k.endsWith("SV") ? "57xx" : "58xx/59xx", b: "Personalaufwand " + year + (k.endsWith("Lohn") ? " · Lohnaufwand" : k.endsWith("SV") ? " · Arbeitgeberbeiträge" : " · Übriger PA"), ist: pp === null ? null : pi, hoch: pp === null ? v : ph, p: pp || "PA", id: ex ? ex.id : null, bud: null, note: ex ? (ex.n || "") : "", pos: [autoPos].concat(extraPos), man: true, pers: true, editable: true, src: "Personalaufwand" });
+    push(k, { key: k, g: JB_PA_GES[k], kt: k.endsWith("Lohn") ? "50xx" : k.endsWith("SV") ? "57xx" : "58xx/59xx", b: "Personalaufwand " + year + (k.endsWith("Lohn") ? " · Lohnaufwand" : k.endsWith("SV") ? " · Arbeitgeberbeiträge" : " · Übriger PA"), ist: pp === null ? null : pi, hoch: pp === null ? v : ph, p: pp || "PA", id: ex ? ex.id : null, bud: null, note: ex ? (ex.n || "") : "", pos: autoPosList.concat(extraPos), man: true, pers: true, editable: true, src: "Personalaufwand" });
   });
   // Automatische Position: Hosting Datenbanken (Anzahl DB pro Monat × CHF pro DB) auf 4400 Apriko AG
   if (typeof budgetDbProMonat === "function" && typeof hostingProDb === "function") {
