@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.312.0"></script>
-<script src="apriko-api.js?v=1.312.0"></script>
-<script src="lohncheck.js?v=1.312.0"></script>
-<script src="personalbudget.js?v=1.312.0"></script>
-<script src="jahresbudget.js?v=1.312.0"></script>
-<script src="budgetpositionen.js?v=1.312.0"></script>
-<script src="lohnchecklistetemp.js?v=1.312.0"></script>
+<script src="apriko-filters.js?v=1.314.0"></script>
+<script src="apriko-api.js?v=1.314.0"></script>
+<script src="lohncheck.js?v=1.314.0"></script>
+<script src="personalbudget.js?v=1.314.0"></script>
+<script src="jahresbudget.js?v=1.314.0"></script>
+<script src="budgetpositionen.js?v=1.314.0"></script>
+<script src="lohnchecklistetemp.js?v=1.314.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -986,6 +986,7 @@
           <button data-view="apipoc"><span class="ic">🔌</span> Apriko API (POC)</button>
           <button data-view="abacus"><span class="ic">🧮</span> Abacus Schnittstelle</button>
           <button data-view="uzcheck"><span class="ic">⏱</span> Überzeit-Check</button>
+          <button data-view="grad360"><span class="ic">◔</span> 360 Grad</button>
         </div>
       </div>
       <div class="nav-group" data-group="admin">
@@ -1001,7 +1002,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.312.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.314.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1492,7 +1493,7 @@ let currentView = DEMO_ANON ? "einsatzdash" : "dashboard";
    Berechtigungssystem
    =========================================================== */
 const SUPER_ADMIN_EMAIL = "benjamin@apriko.com";  // hat immer volle Rechte
-const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","onboarding","onbparam","lohncheck","parameter","apipoc","abacus","uzcheck","profiles"];
+const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","onboarding","onbparam","lohncheck","parameter","apipoc","abacus","uzcheck","grad360","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
@@ -1505,7 +1506,7 @@ const VIEW_TITLES = {
   lohnartenstamm: "Lohnartenstamm",
   tarifarten: "Tarifarten",
   rapport: "Rapport", einsatzdash: "Kundendashboard", konzern: "Konzernanalyse",
-  onboarding: "Onboarding-Checkliste", onbparam: "Parametrierung (Fragebogen für Neukunden)", lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)", abacus: "Abacus Schnittstelle", uzcheck: "Überzeit-Check",
+  onboarding: "Onboarding-Checkliste", onbparam: "Parametrierung (Fragebogen für Neukunden)", lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)", abacus: "Abacus Schnittstelle", uzcheck: "Überzeit-Check", grad360: "360 Grad — Ökosystem statt nur Software",
   profiles: "Profile"
 };
 
@@ -1986,6 +1987,7 @@ function render() {
   else if (currentView === "onbparam") renderOnbParam(content);
   else if (currentView === "abacus") renderAbacus(content);
   else if (currentView === "uzcheck") renderUeberzeitCheck(content);
+  else if (currentView === "grad360") render360(content);
   else if (currentView === "personalbudget") renderPersonalBudget(content);
   else if (currentView === "jahresbudget") renderJahresbudget(content);
   else if (currentView === "budgetpos") renderBudgetpositionen(content);
@@ -8140,6 +8142,89 @@ async function renderOnboarding(el) {
       ${kunden.length ? `<div class="table-wrap" style="overflow-x:auto"><table style="font-size:12px;border-collapse:collapse">${kopf}<tbody>${zeilen}</tbody></table></div>` : `<div class="empty">Noch keine Kunden im Onboarding — oben rechts einen Kunden hinzufügen.</div>`}
     </div>
     ${bearbeiten}`;
+}
+
+/* ============ Spielwiese → 360 Grad ============
+   Konzept: Software allein wird durch KI billiger — Apriko bietet das ganze Ökosystem rund um den Personaldienstleister
+   (Versicherungen, Treuhand, Inkasso, Recruiting-Tools, …) über Partner und verdient daran eine Provision.
+   Kuchen: jedes Stück = Bereich mit Anteil am Gesamtbudget des Kunden (%) und Apriko-Provision (%) darauf.
+   Persistenz: parameter.json → grad360 { stuecke:[{id,name,anteil,provision,farbe,partner,notiz,eigen}], volumen } */
+const G360_FARBEN = ["#7cb342", "#4fc3f7", "#ffb74d", "#ba68c8", "#4db6ac", "#f06292", "#a1887f", "#90a4ae", "#dce775", "#ff8a65", "#9575cd", "#81c784"];
+function g360Param() {
+  if (!crmParameter) return { stuecke: [], volumen: 0 };
+  if (!crmParameter.grad360) crmParameter.grad360 = { volumen: 1000000, stuecke: [
+    { id: "sw", name: "Apriko Software (SaaS)", anteil: 25, provision: 100, eigen: true, partner: "Apriko", notiz: "eigener Umsatz" },
+    { id: "bpo", name: "BPO / Lohn & Fakturierung", anteil: 25, provision: 100, eigen: true, partner: "Apriko", notiz: "eigener Umsatz" },
+    { id: "vers", name: "Versicherungslösungen", anteil: 10, ertrag: 50, provision: 10, partner: "", notiz: "Broker verdient z.B. 50 % Courtage auf dem Volumen — Apriko 10 % davon" },
+    { id: "treu", name: "Treuhand / Buchhaltung", anteil: 10, ertrag: 100, provision: 10, partner: "", notiz: "Honorar = Partnerertrag" },
+    { id: "rec", name: "Recruiting & Jobportale", anteil: 10, ertrag: 100, provision: 10, partner: "", notiz: "" }
+  ] };
+  const g = crmParameter.grad360; g.stuecke = g.stuecke || []; return g;
+}
+async function g360Speichern() { try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); } }
+async function g360Feld(id, feld, wert) {
+  await parameterLaden(false); const st = g360Param().stuecke.find(x => x.id === id); if (!st) return;
+  if (feld === "anteil" || feld === "provision" || feld === "ertrag") st[feld] = Math.max(0, Math.min(100, parseFloat(String(wert).replace(",", ".")) || 0)); else st[feld] = String(wert || "");
+  await g360Speichern(); render();
+}
+async function g360Volumen(v) { await parameterLaden(false); g360Param().volumen = Math.max(0, parseFloat(String(v).replace(/['’\s]/g, "")) || 0); await g360Speichern(); render(); }
+async function g360Neu() { await parameterLaden(false); const g = g360Param(); const rest = Math.max(0, 100 - g.stuecke.reduce((s, x) => s + (x.anteil || 0), 0)); g.stuecke.push({ id: "s" + Date.now().toString(36), name: "Neuer Bereich", anteil: Math.min(10, rest), ertrag: 100, provision: 10, partner: "", notiz: "" }); await g360Speichern(); render(); }
+async function g360Loeschen(id) { await parameterLaden(false); const g = g360Param(); const st = g.stuecke.find(x => x.id === id); if (!st || !confirm("«" + st.name + "» entfernen?")) return; g.stuecke = g.stuecke.filter(x => x.id !== id); await g360Speichern(); render(); }
+function g360Pie(stuecke, total) {
+  const R = 120, cx = 150, cy = 150; let a0 = -Math.PI / 2; const teile = [];
+  stuecke.forEach((st, i) => {
+    const frac = Math.max(0, (st.anteil || 0)) / 100; if (frac <= 0) return;
+    const a1 = a0 + frac * 2 * Math.PI; const gross = frac > 0.5 ? 1 : 0;
+    const x0 = cx + R * Math.cos(a0), y0 = cy + R * Math.sin(a0), x1 = cx + R * Math.cos(a1), y1 = cy + R * Math.sin(a1);
+    const d = frac >= 0.9999 ? `M ${cx - R} ${cy} A ${R} ${R} 0 1 1 ${cx + R} ${cy} A ${R} ${R} 0 1 1 ${cx - R} ${cy}` : `M ${cx} ${cy} L ${x0} ${y0} A ${R} ${R} 0 ${gross} 1 ${x1} ${y1} Z`;
+    const am = (a0 + a1) / 2, lx = cx + R * 0.62 * Math.cos(am), ly = cy + R * 0.62 * Math.sin(am);
+    teile.push(`<path d="${d}" fill="${st.farbe || G360_FARBEN[i % G360_FARBEN.length]}" stroke="var(--bg-card)" stroke-width="2" opacity="${st.eigen ? 1 : 0.85}"><title>${escape(st.name)}: ${st.anteil} % · Provision ${st.provision} %</title></path>` + (frac >= 0.04 ? `<text x="${lx}" y="${ly}" text-anchor="middle" dominant-baseline="middle" font-size="11" fill="#111" style="pointer-events:none">${Math.round(st.anteil)}%</text>` : ""));
+    a0 = a1;
+  });
+  if (total < 100) { const frac = (100 - total) / 100; const a1 = a0 + frac * 2 * Math.PI; const gross = frac > 0.5 ? 1 : 0; teile.push(`<path d="M ${cx} ${cy} L ${cx + R * Math.cos(a0)} ${cy + R * Math.sin(a0)} A ${R} ${R} 0 ${gross} 1 ${cx + R * Math.cos(a1)} ${cy + R * Math.sin(a1)} Z" fill="none" stroke="var(--text-faint)" stroke-dasharray="4 3"><title>noch nicht belegt: ${Math.round(100 - total)} %</title></path>`); }
+  return `<svg viewBox="0 0 300 300" style="width:300px;height:300px">${teile.join("")}</svg>`;
+}
+async function render360(el) {
+  if (!crmParameter) { try { await parameterLaden(false); } catch (e) {} }
+  const g = g360Param(); const vol = g.volumen || 0;
+  const total = g.stuecke.reduce((s, x) => s + (x.anteil || 0), 0);
+  // Partnerertrag: Anteil des Bereichsvolumens, der beim Partner als Ertrag ankommt (Broker: Courtage, nicht die Prämie); eigene Leistung = 100 %
+  const pe = st => st.eigen ? 100 : (st.ertrag === undefined ? 100 : (st.ertrag || 0));
+  const partnerErtrag = st => vol * (st.anteil || 0) / 100 * pe(st) / 100;
+  const ertrag = st => partnerErtrag(st) * (st.provision || 0) / 100;
+  const eigen = g.stuecke.filter(x => x.eigen).reduce((s, x) => s + ertrag(x), 0), partner = g.stuecke.filter(x => !x.eigen).reduce((s, x) => s + ertrag(x), 0);
+  const fmt = v => Math.round(v).toLocaleString("de-CH");
+  document.getElementById("view-actions").innerHTML = `<button class="btn btn-sm" onclick="g360Neu()">+ Kuchenstück</button>`;
+  el.innerHTML = `
+    <div class="card" style="padding:14px 16px;margin-bottom:12px">
+      <div style="font-size:12px;color:var(--text-dim);line-height:1.5"><strong style="color:var(--text)">These:</strong> Software wird durch KI billiger und austauschbar — der Preisdruck auf SaaS kommt. Apriko bietet darum nicht nur Software, sondern das ganze 360-Grad-Ökosystem rund um den Personaldienstleister, mit Partnern, und verdient an jedem Stück eine Provision. Der Kuchen zeigt, wo der Kunde sein Geld ausgibt und was davon bei Apriko landet.</div>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:10px;font-size:12px"><label>Jährliches Ausgabenvolumen eines typischen Kunden für dieses Ökosystem: CHF <input value="${fmt(vol)}" onchange="g360Volumen(this.value)" style="width:120px;font-family:var(--font-mono);padding:3px 6px"></label></div>
+    </div>
+    <div style="display:grid;grid-template-columns:320px 1fr;gap:14px;align-items:start">
+      <div class="card" style="padding:10px;text-align:center">${g360Pie(g.stuecke, total)}
+        <div style="font-size:11px;color:${Math.abs(total - 100) < 0.01 ? "var(--text-dim)" : "var(--warn)"}">belegt ${Math.round(total)} % ${total > 100 ? "— über 100 %!" : total < 100 ? "— " + Math.round(100 - total) + " % noch frei" : "✓"}</div>
+      </div>
+      <div class="card" style="padding:12px 14px">
+        <div class="table-wrap"><table style="font-size:12px">
+          <thead><tr><th></th><th>Bereich</th><th style="text-align:right" title="Anteil am Ausgabenvolumen des Kunden">Kuchen %</th><th style="text-align:right" title="Wie viel vom Bereichsvolumen beim Partner als Ertrag ankommt (Broker: Courtage ≠ Prämie); eigene Leistung = 100 %">Partnerertrag %</th><th style="text-align:right" title="Anteil des Partnerertrags, der bei Apriko landet">Provision %</th><th>Partner</th><th style="text-align:right" title="Ausgaben des Kunden in diesem Bereich">Volumen CHF</th><th style="text-align:right" title="Ertrag des Partners aus diesem Bereich">Partner CHF</th><th style="text-align:right">Apriko CHF</th><th>Notiz</th><th></th></tr></thead>
+          <tbody>${g.stuecke.map((st, i) => `<tr>
+            <td><span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:${st.farbe || G360_FARBEN[i % G360_FARBEN.length]}"></span></td>
+            <td><input value="${escape(st.name)}" onchange="g360Feld('${st.id}','name',this.value)" style="width:220px;padding:2px 5px;${st.eigen ? "font-weight:600" : ""}"></td>
+            <td style="text-align:right"><input value="${st.anteil}" onchange="g360Feld('${st.id}','anteil',this.value)" style="width:56px;text-align:right;font-family:var(--font-mono);padding:2px 5px"></td>
+            <td style="text-align:right">${st.eigen ? `<span style="font-family:var(--font-mono);color:var(--text-dim)">100</span>` : `<input value="${pe(st)}" onchange="g360Feld('${st.id}','ertrag',this.value)" style="width:56px;text-align:right;font-family:var(--font-mono);padding:2px 5px">`}</td>
+            <td style="text-align:right"><input value="${st.provision}" onchange="g360Feld('${st.id}','provision',this.value)" style="width:56px;text-align:right;font-family:var(--font-mono);padding:2px 5px"></td>
+            <td><input value="${escape(st.partner || "")}" placeholder="${st.eigen ? "Apriko" : "Partner …"}" onchange="g360Feld('${st.id}','partner',this.value)" style="width:150px;padding:2px 5px"></td>
+            <td style="text-align:right;font-family:var(--font-mono);color:var(--text-dim)">${fmt(vol * (st.anteil || 0) / 100)}</td>
+            <td style="text-align:right;font-family:var(--font-mono);color:var(--text-dim)">${fmt(partnerErtrag(st))}</td>
+            <td style="text-align:right;font-family:var(--font-mono);font-weight:600;color:${st.eigen ? "var(--accent)" : "var(--accent-2)"}">${fmt(ertrag(st))}</td>
+            <td><input value="${escape(st.notiz || "")}" placeholder="Notiz" onchange="g360Feld('${st.id}','notiz',this.value)" style="width:180px;padding:2px 5px;color:var(--text-dim)"></td>
+            <td>${st.eigen ? "" : `<a href="#" onclick="g360Loeschen('${st.id}');return false;" style="color:var(--text-faint)">✕</a>`}</td>
+          </tr>`).join("")}</tbody>
+          <tfoot><tr style="font-weight:600;border-top:1px solid var(--border)"><td></td><td>Total</td><td style="text-align:right;font-family:var(--font-mono)">${Math.round(total)} %</td><td></td><td></td><td></td><td style="text-align:right;font-family:var(--font-mono)">${fmt(vol * total / 100)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(g.stuecke.reduce((s, x) => s + partnerErtrag(x), 0))}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(eigen + partner)}</td><td colspan="2" style="font-size:11px;color:var(--text-dim)">eigen ${fmt(eigen)} · via Partner ${fmt(partner)} (${eigen + partner ? Math.round(partner / (eigen + partner) * 100) : 0} % des Apriko-Ertrags)</td></tr></tfoot>
+        </table></div>
+        <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">Apriko CHF = Volumen × Kuchen % × Partnerertrag % × Provision %. Beispiel Versicherung: Kunde zahlt 100'000 Prämien, der Broker verdient daran 50 % = 50'000 Courtage, Apriko bekommt 10 % davon = 5'000. Eigene Leistungen (Software, BPO) stehen auf 100 % / 100 %. Alles wird sofort gespeichert.</div>
+      </div>
+    </div>`;
 }
 
 /* ============ Onboarding → Parametrierung ============
