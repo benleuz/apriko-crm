@@ -10,7 +10,7 @@
    Abhängigkeiten: jahresbudget.js (jbBuild, jbSaveRow, jbFindRow, jbPos*, jbFmt, jbNum, JB_*),
    index.html (fbSaveItem, reload, escape, toast, render, FB_PLAN, FB_LABELS, FB_SRC). */
 
-const BP_VERSION = "1.123.0";
+const BP_VERSION = "1.124.0";
 const BP_MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 const BP_FAELL = [["m", "monatlich (÷12)"], ["q", "quartalsweise (÷4)"], ["e", "einmalig im Monat"], ["h", "halbjährlich (÷2)"], ["r", "von – bis"]];
 
@@ -139,22 +139,28 @@ async function bpAddKonto() {
    Export: eine Zeile je manuelle Position (automatische ⚙-Positionen ausgenommen; Ertrag/Personal-Übertrag kommt
    aus den anderen Menüs, deren manuelle Zusatzzeilen sind aber dabei). Import: gleiche Spalten; Schlüssel = Ges + Konto + Text.
    Vorhandene Positionen werden aktualisiert, unbekannte neu angelegt (fehlende Konten werden erstellt). Es wird nichts gelöscht. */
-const BP_XLS_HDR = ["Ges", "Konto", "Bezeichnung", "FIBU-Konto", "Text", "Notiz", "Fälligkeit", "Von", "Bis", "Jahresbetrag", ...BP_MONATE];
+const BP_XLS_HDR = ["Ges", "Konto", "Bezeichnung", "Text", "Notiz", "Fälligkeit", "Von", "Bis", "Jahresbetrag", ...BP_MONATE];
+/* Tabelle der manuellen Positionen (beide Gesellschaften): EINE Konto-Spalte = effektives FIBU-Konto der Position
+   (bei Sammelzeilen wie 50xx das gewählte Konto, sonst das Konto der Zeile); ⚙-Positionen ausgenommen. */
+function bpPositionenTabelle(y) {
+  const zeilen = [];
+  JB_GES.forEach(g => { const bez = Object.fromEntries(bpBekannteKonten(g)); bpRows(y, g).rows.forEach(r => (r.pos || []).filter(p => !p.auto).forEach(p => {
+    const kt = bpPosKonto(r, p) || String(r.kt); const mo = bpMonths(p);
+    zeilen.push([bpGesKurz(r.g), kt, bez[kt] || r.b || "", p.t || "", p.n || "", p.f || "m", parseInt(p.sm, 10) || 1, parseInt(p.em, 10) || 12, Math.round(p.v || 0), ...mo.map(x => Math.round(x))]);
+  })); });
+  return { hdr: BP_XLS_HDR, zeilen };
+}
 function bpGesKurz(g) { return jbSameGes(g, "Apriko AG") ? "A" : (jbSameGes(g, "maverix ag") ? "M" : String(g || "")); }
 function bpGesVoll(k) { const t = String(k || "").trim().toUpperCase(); if (t === "A" || /apriko/i.test(t)) return "Apriko AG"; if (t === "M" || /maverix/i.test(t)) return "maverix ag"; return String(k || "").trim(); }
 async function bpExportExcel() {
   await lcLoadXlsx();
-  const y = bpState.year, zeilen = [];
-  JB_GES.forEach(g => bpRows(y, g).rows.forEach(r => (r.pos || []).filter(p => !p.auto).forEach(p => {
-    const mo = bpMonths(p);
-    zeilen.push([bpGesKurz(r.g), String(r.kt), r.b || "", bpPosKonto(r, p), p.t || "", p.n || "", p.f || "m", parseInt(p.sm, 10) || 1, parseInt(p.em, 10) || 12, Math.round(p.v || 0), ...mo.map(x => Math.round(x))]);
-  })));
+  const y = bpState.year; const { zeilen } = bpPositionenTabelle(y);
   if (!zeilen.length) { toast("Keine manuellen Positionen im Jahr " + y + ".", true); return; }
   const ws = window.XLSX.utils.aoa_to_sheet([BP_XLS_HDR].concat(zeilen));
-  ws["!cols"] = [5, 8, 26, 11, 34, 26, 10, 5, 5, 12, ...BP_MONATE.map(() => 9)].map(w => ({ wch: w }));
+  ws["!cols"] = [5, 8, 26, 34, 26, 10, 5, 5, 12, ...BP_MONATE.map(() => 9)].map(w => ({ wch: w }));
   ws["!autofilter"] = { ref: "A1:" + window.XLSX.utils.encode_col(BP_XLS_HDR.length - 1) + (zeilen.length + 1) };
   const wb = window.XLSX.utils.book_new(); window.XLSX.utils.book_append_sheet(wb, ws, "Positionen " + y);
-  const info = window.XLSX.utils.aoa_to_sheet([["Spalte", "Bedeutung"], ["Ges", "A = Apriko AG, M = maverix ag"], ["Konto", "Konto der Zeile (Sammelkonten wie 50xx/57xx/58xx/59xx möglich)"], ["FIBU-Konto", "4-stelliges Konto der Position (leer = Konto der Zeile)"], ["Fälligkeit", "m = monatlich, q = quartalsweise, h = halbjährlich, e = einmalig im Monat «Von», r = von–bis"], ["Von/Bis", "Monat 1–12 (Von bei e/q/h = Startmonat; Bis nur bei r)"], ["Jahresbetrag", "wird beim Import verwendet — die Monatsspalten sind nur Anzeige"], ["Import", "Schlüssel = Ges + Konto + Text: vorhanden → aktualisiert, sonst neu. Nichts wird gelöscht."]]);
+  const info = window.XLSX.utils.aoa_to_sheet([["Spalte", "Bedeutung"], ["Ges", "A = Apriko AG, M = maverix ag"], ["Konto", "4-stelliges FIBU-Konto der Position; Personalkonten (50xx/57xx/58xx/59xx) landen automatisch als Zusatzzeile bei der passenden Personal-Sammelzeile"], ["Fälligkeit", "m = monatlich, q = quartalsweise, h = halbjährlich, e = einmalig im Monat «Von», r = von–bis"], ["Von/Bis", "Monat 1–12 (Von bei e/q/h = Startmonat; Bis nur bei r)"], ["Jahresbetrag", "wird beim Import verwendet — die Monatsspalten sind nur Anzeige"], ["Import", "Schlüssel = Ges + Konto + Text: vorhanden → aktualisiert, sonst neu. Nichts wird gelöscht."]]);
   info["!cols"] = [14, 90].map(w => ({ wch: w })); window.XLSX.utils.book_append_sheet(wb, info, "Anleitung");
   window.XLSX.writeFile(wb, "Budgetpositionen_" + y + ".xlsx");
   toast(zeilen.length + " Positionen exportiert.");
@@ -171,13 +177,16 @@ async function bpImportExcel(input) {
   const gruppen = {};
   let fehler = [];
   rows.forEach((r, i) => {
-    const g = bpGesVoll(r.Ges), kt = norm(r.Konto), t = norm(r.Text);
-    if (!g || !kt) { fehler.push("Zeile " + (i + 2) + ": Ges/Konto fehlt"); return; }
+    const g = bpGesVoll(r.Ges), fk = norm(r.Konto || r["FIBU-Konto"]), t = norm(r.Text);
+    if (!g || !fk) { fehler.push("Zeile " + (i + 2) + ": Ges/Konto fehlt"); return; }
     if (!t && !(parseFloat(r.Jahresbetrag) || 0)) return;   // leere Zeile
     const f = norm(r["Fälligkeit"]).toLowerCase() || "m";
     const pos = { t, v: Math.round((parseFloat(String(r.Jahresbetrag).replace(/['’\s]/g, "")) || 0) * 100) / 100, n: norm(r.Notiz), f: ["m", "q", "h", "e", "r"].includes(f) ? f : "m", sm: Math.min(12, Math.max(1, parseInt(r.Von, 10) || 1)) };
     if (pos.f === "r") pos.em = Math.min(12, Math.max(pos.sm, parseInt(r.Bis, 10) || 12));
-    const fk = norm(r["FIBU-Konto"]); if (/^\d{4}$/.test(fk) && fk !== kt) pos.kt = fk;
+    // Zeile bestimmen: Personalkonto → Sammelzeile (50xx/57xx/58xx/59xx) mit Konto an der Position; sonst Zeile = Konto
+    const key = fbZuordnung(fk, jbSameGes(g, "Apriko AG"));
+    let kt = fk;
+    if (key && JB_PERSONAL.has(key)) { kt = key.endsWith("Lohn") ? "50xx" : key.endsWith("SV") ? "57xx" : "58xx/59xx"; pos.kt = fk; }
     (gruppen[g + "|" + kt] = gruppen[g + "|" + kt] || { g, kt, b: norm(r.Bezeichnung), pos: [] }).pos.push(pos);
   });
   const anz = Object.values(gruppen).reduce((s, x) => s + x.pos.length, 0);
@@ -215,11 +224,11 @@ function bpToggleAll(open) { bpState.open = {}; if (open) bpRows(bpState.year, b
 function bpSetGes(g) { bpState.ges = g; bpState.open = {}; render(); }
 function bpSetYear(y) { bpState.year = parseInt(y, 10); jbState.year = bpState.year; render(); }
 function bpExport() {
-  const { rows } = bpRows(bpState.year, bpState.ges);
+  const { hdr, zeilen } = bpPositionenTabelle(bpState.year);
+  if (!zeilen.length) { toast("Keine manuellen Positionen im Jahr " + bpState.year + ".", true); return; }
   const q = v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
-  const lines = [["Gesellschaft", "Position", "Konto", "Bezeichnung", "FIBU-Konto", "Text", "Fälligkeit", "Jahresbetrag", ...BP_MONATE, "Notiz"].map(q).join(";")];
-  rows.forEach(r => (r.pos || []).forEach(p => { const mo = bpMonths(p); lines.push([r.g, r.posLabel, r.kt, r.b, bpPosKonto(r, p), p.t || "", bpFaellText(p), Math.round(p.v || 0), ...mo.map(x => Math.round(x)), p.n || ""].map(q).join(";")); }));
-  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" })); a.download = "budgetpositionen-" + bpState.year + "-" + bpState.ges.replace(/\s+/g, "_") + ".csv"; a.click();
+  const csv = "\uFEFF" + [hdr.map(q).join(";")].concat(zeilen.map(z => z.map(q).join(";"))).join("\r\n");
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); a.download = "Budgetpositionen_" + bpState.year + ".csv"; a.click();
 }
 
 /* ---------- Rendering ---------- */
