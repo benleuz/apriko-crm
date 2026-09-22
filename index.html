@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.298.0"></script>
-<script src="apriko-api.js?v=1.298.0"></script>
-<script src="lohncheck.js?v=1.298.0"></script>
-<script src="personalbudget.js?v=1.298.0"></script>
-<script src="jahresbudget.js?v=1.298.0"></script>
-<script src="budgetpositionen.js?v=1.298.0"></script>
-<script src="lohnchecklistetemp.js?v=1.298.0"></script>
+<script src="apriko-filters.js?v=1.300.0"></script>
+<script src="apriko-api.js?v=1.300.0"></script>
+<script src="lohncheck.js?v=1.300.0"></script>
+<script src="personalbudget.js?v=1.300.0"></script>
+<script src="jahresbudget.js?v=1.300.0"></script>
+<script src="budgetpositionen.js?v=1.300.0"></script>
+<script src="lohnchecklistetemp.js?v=1.300.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1001,7 +1001,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.298.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.300.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -14547,17 +14547,24 @@ var ROSTER_KEY = 'rp-api-roster-v1';
 var rpRoster = null;               // { loadedAt, mitarbeiter:{id:{firstName,lastName,placements:[]}}, kunden:{id:{businessName}} }
 var rpRosterLoading = null;        // laufendes Promise, damit nicht doppelt geladen wird
 
+/* Cache gilt nur für dieselbe Verbindung (Gateway + Instanz): nach einem Wechsel z.B. von staff.ch auf worknet
+   darf keine alte Einsatzliste wiederverwendet werden. Leere Listen (0 Einsätze) werden nicht gecacht. */
+function rpRosterVerbindung(){
+  try { var c = (typeof rpDbCfg === 'function') ? rpDbCfg() : {}; return String(c.gateway || '') + '|' + String(c.target || ''); } catch(e){ return ''; }
+}
 function rpRosterFromStorage(){
   try {
     var raw = localStorage.getItem(ROSTER_KEY);
     if(!raw) return null;
     var d = JSON.parse(raw);
     if(!d || !d.loadedAt || (Date.now() - d.loadedAt) > ROSTER_TTL_MIN * 60000) return null;
+    if((d.verbindung || '') !== rpRosterVerbindung()) return null;
+    if(!(d.mitarbeiter || []).length && !(d.kunden || []).length) return null;   // leere Liste (z.B. Fehlversuch) nie wiederverwenden
     return d;
   } catch(e){ return null; }
 }
 function rpRosterToStorage(r){
-  try { localStorage.setItem(ROSTER_KEY, JSON.stringify(r)); } catch(e){ /* localStorage evtl. voll — Cache bleibt nur im Speicher */ }
+  try { if(r) r.verbindung = rpRosterVerbindung(); localStorage.setItem(ROSTER_KEY, JSON.stringify(r)); } catch(e){ /* localStorage evtl. voll — Cache bleibt nur im Speicher */ }
 }
 
 /* Schreibt eine Fortschrittsmeldung sowohl in den rpApiBox()-Kasten (Rapport-Seite) als auch
@@ -14639,7 +14646,7 @@ async function rpApiLoadRoster(force){
   // automatisch nochmal zu versuchen (z.B. weil der Codespace beim ersten Versuch noch am
   // Aufwachen war).
   if(!force){
-    if(rpRoster && !rpRoster.ladeFehler) return rpRoster;
+    if(rpRoster && !rpRoster.ladeFehler && (rpRoster.verbindung || '') === rpRosterVerbindung() && ((rpRoster.mitarbeiter || []).length || (rpRoster.kunden || []).length)) return rpRoster;
     var cached = rpRosterFromStorage();
     if(cached && !cached.ladeFehler){ rpRoster = cached; return rpRoster; }
   }
@@ -17054,22 +17061,27 @@ window.__rpLightbox = function(src){
   document.body.appendChild(box);
 };
 
+/* PLZ des Einsatzorts aus dem gewählten Apriko-Einsatz (WorkLocationAddress) holen — leise, ohne Dialog.
+   Rückgabe: PLZ oder '' */
+async function rpPlzAusEinsatz(){
+  try {
+    var st = (typeof rpApiState !== 'undefined') ? rpApiState : null; if(!st) return '';
+    var sel = (st.einsaetze || []).filter(function(x){ return String(x.e.id) === String(st.einsatzId); })[0] || (st.einsaetze || [])[0];
+    if(!sel || !sel.e || !sel.e.workLocationId) return '';
+    var wl = await AprikoApi.staffing.getWorkLocationAddress(sel.e.workLocationId);
+    return (wl && wl.zipCode) ? String(wl.zipCode) : '';
+  } catch(e){ return ''; }
+}
 function loadGav(){
   var b=$('rpLoad'); b.disabled=true; b.textContent='Wird abgefragt …';
-  setTimeout(function(){
+  // Keine PLZ erfasst → zuerst still aus dem gewählten Einsatz übernehmen (kein Bestätigungsdialog mehr)
+  var plzNow = String($('rpPlz').value || '').trim();
+  var vorab = plzNow ? Promise.resolve(plzNow) : rpPlzAusEinsatz().then(function(p){ if(p){ $('rpPlz').value = p; toast && toast('PLZ Einsatzort aus Einsatz übernommen: ' + p); } return p; });
+  vorab.then(function(){ setTimeout(function(){
     gav = GAV[$('rpBranche').value];
     var plz = String($('rpPlz').value || '').trim();
-
-    // Wenn keine PLZ eingegeben wurde: dezent darauf hinweisen, aber
-    // trotzdem den GAV laden (Kanton-abhängige Regeln greifen dann nicht).
-    if(!plz){
-      b.disabled = false;
-      b.textContent = 'GAV-Eckwerte laden';
-      if(!confirm('Keine PLZ eingegeben. Ohne PLZ kann der Kanton nicht bestimmt werden und Kanton-abhängige Regeln greifen nicht (z.B. LMV Bauhauptgewerbe Gültigkeit, Quellensteuer). Trotzdem fortfahren?')){
-        $('rpPlz').focus();
-        return;
-      }
-    }
+    // Ohne PLZ wird trotzdem geladen; Kanton-abhängige Regeln greifen dann nicht (Hinweis im Ergebnis).
+    if(!plz && typeof toast === 'function') toast('Keine PLZ bekannt — Kanton-abhängige Regeln (LMV-Gültigkeit, Quellensteuer) werden nicht angewendet.');
 
     var kanton = (typeof plzToKanton === 'function') ? plzToKanton(plz) : null;
 
@@ -17104,7 +17116,7 @@ function loadGav(){
     // Ersten Beleg automatisch anzeigen
     if(zeilen.length > 0 && zeilen[0].beleg) showBeleg(zeilen[0].beleg);
     unlock($('rpS3')); $('rpS3').scrollIntoView({behavior:'smooth',block:'start'});
-  },700);
+  },700); });
 }
 
 function sollOf(){ return gav.sollTag!==null ? gav.sollTag : gav.normal/5; }
