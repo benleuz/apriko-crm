@@ -10,7 +10,7 @@
    Abhängigkeiten: jahresbudget.js (jbBuild, jbSaveRow, jbFindRow, jbPos*, jbFmt, jbNum, JB_*),
    index.html (fbSaveItem, reload, escape, toast, render, FB_PLAN, FB_LABELS, FB_SRC). */
 
-const BP_VERSION = "1.122.0";
+const BP_VERSION = "1.123.0";
 const BP_MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 const BP_FAELL = [["m", "monatlich (÷12)"], ["q", "quartalsweise (÷4)"], ["e", "einmalig im Monat"], ["h", "halbjährlich (÷2)"], ["r", "von – bis"]];
 
@@ -135,6 +135,80 @@ async function bpAddKonto() {
   catch (e) { toast(e.message, true); }
   render();
 }
+/* ---------- Excel-Export / -Import der manuellen Positionen (beide Gesellschaften, Planjahr) ----------
+   Export: eine Zeile je manuelle Position (automatische ⚙-Positionen ausgenommen; Ertrag/Personal-Übertrag kommt
+   aus den anderen Menüs, deren manuelle Zusatzzeilen sind aber dabei). Import: gleiche Spalten; Schlüssel = Ges + Konto + Text.
+   Vorhandene Positionen werden aktualisiert, unbekannte neu angelegt (fehlende Konten werden erstellt). Es wird nichts gelöscht. */
+const BP_XLS_HDR = ["Ges", "Konto", "Bezeichnung", "FIBU-Konto", "Text", "Notiz", "Fälligkeit", "Von", "Bis", "Jahresbetrag", ...BP_MONATE];
+function bpGesKurz(g) { return jbSameGes(g, "Apriko AG") ? "A" : (jbSameGes(g, "maverix ag") ? "M" : String(g || "")); }
+function bpGesVoll(k) { const t = String(k || "").trim().toUpperCase(); if (t === "A" || /apriko/i.test(t)) return "Apriko AG"; if (t === "M" || /maverix/i.test(t)) return "maverix ag"; return String(k || "").trim(); }
+async function bpExportExcel() {
+  await lcLoadXlsx();
+  const y = bpState.year, zeilen = [];
+  JB_GES.forEach(g => bpRows(y, g).rows.forEach(r => (r.pos || []).filter(p => !p.auto).forEach(p => {
+    const mo = bpMonths(p);
+    zeilen.push([bpGesKurz(r.g), String(r.kt), r.b || "", bpPosKonto(r, p), p.t || "", p.n || "", p.f || "m", parseInt(p.sm, 10) || 1, parseInt(p.em, 10) || 12, Math.round(p.v || 0), ...mo.map(x => Math.round(x))]);
+  })));
+  if (!zeilen.length) { toast("Keine manuellen Positionen im Jahr " + y + ".", true); return; }
+  const ws = window.XLSX.utils.aoa_to_sheet([BP_XLS_HDR].concat(zeilen));
+  ws["!cols"] = [5, 8, 26, 11, 34, 26, 10, 5, 5, 12, ...BP_MONATE.map(() => 9)].map(w => ({ wch: w }));
+  ws["!autofilter"] = { ref: "A1:" + window.XLSX.utils.encode_col(BP_XLS_HDR.length - 1) + (zeilen.length + 1) };
+  const wb = window.XLSX.utils.book_new(); window.XLSX.utils.book_append_sheet(wb, ws, "Positionen " + y);
+  const info = window.XLSX.utils.aoa_to_sheet([["Spalte", "Bedeutung"], ["Ges", "A = Apriko AG, M = maverix ag"], ["Konto", "Konto der Zeile (Sammelkonten wie 50xx/57xx/58xx/59xx möglich)"], ["FIBU-Konto", "4-stelliges Konto der Position (leer = Konto der Zeile)"], ["Fälligkeit", "m = monatlich, q = quartalsweise, h = halbjährlich, e = einmalig im Monat «Von», r = von–bis"], ["Von/Bis", "Monat 1–12 (Von bei e/q/h = Startmonat; Bis nur bei r)"], ["Jahresbetrag", "wird beim Import verwendet — die Monatsspalten sind nur Anzeige"], ["Import", "Schlüssel = Ges + Konto + Text: vorhanden → aktualisiert, sonst neu. Nichts wird gelöscht."]]);
+  info["!cols"] = [14, 90].map(w => ({ wch: w })); window.XLSX.utils.book_append_sheet(wb, info, "Anleitung");
+  window.XLSX.writeFile(wb, "Budgetpositionen_" + y + ".xlsx");
+  toast(zeilen.length + " Positionen exportiert.");
+}
+async function bpImportExcel(input) {
+  const file = input.files && input.files[0]; input.value = ""; if (!file) return;
+  await lcLoadXlsx();
+  const wb = window.XLSX.read(await file.arrayBuffer(), { type: "array" });
+  const ws = wb.Sheets[wb.SheetNames.find(n => /position/i.test(n)) || wb.SheetNames[0]];
+  const rows = window.XLSX.utils.sheet_to_json(ws, { defval: "" });
+  if (!rows.length) { toast("Keine Zeilen gefunden.", true); return; }
+  const y = bpState.year;
+  const norm = t => String(t == null ? "" : t).trim();
+  const gruppen = {};
+  let fehler = [];
+  rows.forEach((r, i) => {
+    const g = bpGesVoll(r.Ges), kt = norm(r.Konto), t = norm(r.Text);
+    if (!g || !kt) { fehler.push("Zeile " + (i + 2) + ": Ges/Konto fehlt"); return; }
+    if (!t && !(parseFloat(r.Jahresbetrag) || 0)) return;   // leere Zeile
+    const f = norm(r["Fälligkeit"]).toLowerCase() || "m";
+    const pos = { t, v: Math.round((parseFloat(String(r.Jahresbetrag).replace(/['’\s]/g, "")) || 0) * 100) / 100, n: norm(r.Notiz), f: ["m", "q", "h", "e", "r"].includes(f) ? f : "m", sm: Math.min(12, Math.max(1, parseInt(r.Von, 10) || 1)) };
+    if (pos.f === "r") pos.em = Math.min(12, Math.max(pos.sm, parseInt(r.Bis, 10) || 12));
+    const fk = norm(r["FIBU-Konto"]); if (/^\d{4}$/.test(fk) && fk !== kt) pos.kt = fk;
+    (gruppen[g + "|" + kt] = gruppen[g + "|" + kt] || { g, kt, b: norm(r.Bezeichnung), pos: [] }).pos.push(pos);
+  });
+  const anz = Object.values(gruppen).reduce((s, x) => s + x.pos.length, 0);
+  if (!anz) { toast("Keine verwertbaren Positionen." + (fehler.length ? " " + fehler[0] : ""), true); return; }
+  if (!confirm(anz + " Positionen auf " + Object.keys(gruppen).length + " Konten ins Budget " + y + " übernehmen?\nVorhandene (gleicher Text am gleichen Konto) werden aktualisiert, neue angelegt, nichts gelöscht." + (fehler.length ? "\n\nÜbersprungen: " + fehler.slice(0, 5).join("; ") : ""))) return;
+  jbState.year = y;
+  let neu = 0, upd = 0, konten = 0;
+  try {
+    for (const grp of Object.values(gruppen)) {
+      let r = jbFindRow(grp.g, grp.kt);
+      if (!r) {
+        const key = fbZuordnung(grp.kt, jbSameGes(grp.g, "Apriko AG"));
+        if (!key || JB_ERTRAG.has(key)) { fehler.push(grp.g + " " + grp.kt + ": Ertragskonto — nicht manuell budgetierbar"); continue; }
+        const istG = fbIst(y - 1).map(d => d.g).find(x => jbSameGes(x, grp.g)) || grp.g;
+        await fbSaveItem({ cfg: "jb", y, g: istG, kt: grp.kt, b: grp.b, z: key, man: 1, v: 0, n: "", pos: [] });
+        await reload("Budget"); konten++;
+        r = jbFindRow(grp.g, grp.kt);
+        if (!r) { fehler.push(grp.g + " " + grp.kt + ": Konto konnte nicht angelegt werden"); continue; }
+      }
+      const pos = (r.pos || []).filter(p => !p.auto).map(p => ({ ...p }));
+      grp.pos.forEach(np => {
+        const idx = pos.findIndex(p => norm(p.t).toLowerCase() === np.t.toLowerCase());
+        if (idx >= 0) { pos[idx] = { ...pos[idx], ...np }; if (!np.kt) delete pos[idx].kt; upd++; } else { pos.push(np); neu++; }
+      });
+      await jbSaveRow(r, { pos });
+    }
+    await reload("Budget");
+  } catch (e) { toast("Import abgebrochen: " + e.message, true); render(); return; }
+  toast(neu + " neu, " + upd + " aktualisiert" + (konten ? ", " + konten + " Konten angelegt" : "") + (fehler.length ? " · " + fehler.length + " übersprungen" : "") + ".");
+  render();
+}
 /* Links (▶ vor dem Konto) klappt die erfassten Positionen auf, rechts (▶ n Buchungen) die Vorjahres-Buchungen — unabhängig. */
 function bpToggle(id) { bpState.open[id] = !bpState.open[id]; render(); }
 function bpToggleAll(open) { bpState.open = {}; if (open) bpRows(bpState.year, bpState.ges).rows.forEach(r => { bpState.open[r.g + "|" + r.kt] = true; }); render(); }
@@ -161,6 +235,8 @@ function renderBudgetpositionen(el) {
     <button class="btn btn-sm" onclick="bpToggleAll(true)" title="Alle Konten aufklappen">▾ alle</button>
     <button class="btn btn-sm" onclick="bpToggleAll(false)" title="Alle Konten zuklappen">▸ alle</button>
     <button class="btn btn-sm" onclick="bpExport()">⇩ CSV</button>
+    <button class="btn btn-sm" onclick="bpExportExcel()" title="Alle manuellen Positionen beider Gesellschaften als Excel (zur Kontrolle / Bearbeitung)">⇩ Excel</button>
+    <label class="btn btn-sm" title="Excel im gleichen Format wieder einlesen: vorhandene Positionen aktualisieren, neue anlegen">⇧ Excel<input type="file" accept=".xlsx,.xls" style="display:none" onchange="bpImportExcel(this)"></label>
     <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim);margin-left:8px" title="Hostingkosten pro Datenbank und Monat — gilt für alle Kunden/Leads mit Datenbank (Kundenstamm «Hat Datenbank» bzw. DB-Häkchen im Ertragsbudget); wird als automatische Position auf 4400 Apriko AG budgetiert">Hosting pro DB/Mt. CHF <input type="number" step="10" value="${typeof hostingProDb === "function" ? hostingProDb() : 500}" onchange="hostingProDbSet(this.value)" style="width:70px;padding:3px 6px;font-family:var(--font-mono)"></label>`;
   if (jbState.busy) { el.innerHTML = `<div class="full-loading"><div class="loading"></div></div>`; return; }
   const y = bpState.year, ges = bpState.ges;

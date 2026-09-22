@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.300.0"></script>
-<script src="apriko-api.js?v=1.300.0"></script>
-<script src="lohncheck.js?v=1.300.0"></script>
-<script src="personalbudget.js?v=1.300.0"></script>
-<script src="jahresbudget.js?v=1.300.0"></script>
-<script src="budgetpositionen.js?v=1.300.0"></script>
-<script src="lohnchecklistetemp.js?v=1.300.0"></script>
+<script src="apriko-filters.js?v=1.302.0"></script>
+<script src="apriko-api.js?v=1.302.0"></script>
+<script src="lohncheck.js?v=1.302.0"></script>
+<script src="personalbudget.js?v=1.302.0"></script>
+<script src="jahresbudget.js?v=1.302.0"></script>
+<script src="budgetpositionen.js?v=1.302.0"></script>
+<script src="lohnchecklistetemp.js?v=1.302.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1001,7 +1001,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.300.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.302.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -14772,12 +14772,16 @@ async function rpApiLoadRoster(force){
     var mitarbeiter = {};
     var kunden = {};
     var RP_KONKURRENZ = 8;
-    async function rpParallel(ids, worker){
+    // Diagnose: warum bleiben Mitarbeitende/Kunden leer? (fehlende IDs in den Einsätzen vs. Fehler beim Auflösen)
+    var aufloeseFehler = { ma: 0, ku: 0, erster: '' };
+    var ohneIds = imFenster.filter(function(p){ return !p.employeeId && !p.customerId; }).length;
+    var beispielFelder = imFenster.length ? Object.keys(imFenster[0]).slice(0, 40).join(', ') : '';
+    async function rpParallel(ids, worker, art){
       var pos = 0;
       async function arbeiter(){
         while(pos < ids.length){
           var idx = pos++; var id = ids[idx];
-          try { await worker(id); } catch(e){ /* einzelnes Element übersprungen */ }
+          try { await worker(id); } catch(e){ aufloeseFehler[art]++; if(!aufloeseFehler.erster) aufloeseFehler.erster = String((e && e.message) || e).slice(0, 200); }
         }
       }
       var arbeiterListe = [];
@@ -14788,12 +14792,15 @@ async function rpApiLoadRoster(force){
       rpParallel(maIds, async function(id){
         var per = await AprikoApi.people.getIndividual(id);
         if(per) mitarbeiter[id] = { firstName: per.firstName, lastName: per.lastName, personNumber: per.personNumber, placements: byMa[id] };
-      }),
+        else { aufloeseFehler.ma++; if(!aufloeseFehler.erster) aufloeseFehler.erster = 'getIndividual(' + id + ') lieferte nichts'; }
+      }, 'ma'),
       rpParallel(kuIds, async function(id){
         var kr2 = await rpApiResolveKunde(id);
         if(kr2.name) kunden[id] = { businessName: kr2.name };
-      })
+        else { aufloeseFehler.ku++; if(!aufloeseFehler.erster) aufloeseFehler.erster = 'Kunde ' + id + ': ' + String((kr2 && kr2.fehler) || 'kein Name'); }
+      }, 'ku')
     ]);
+    if(aufloeseFehler.ma || aufloeseFehler.ku || ohneIds) aktivDiagnose += ' · Auflösung: ' + maIds.length + ' Mitarbeiter-IDs / ' + kuIds.length + ' Kunden-IDs in den Einsätzen' + (ohneIds ? ' (' + ohneIds + ' Einsätze ohne employeeId/customerId — Felder: ' + beispielFelder + ')' : '') + (aufloeseFehler.ma || aufloeseFehler.ku ? '; Fehler beim Auflösen: ' + aufloeseFehler.ma + ' Mitarbeitende, ' + aufloeseFehler.ku + ' Kunden — erster: ' + aufloeseFehler.erster : '');
     var aufloeseSekunden = Math.round((Date.now() - aufloeseStart) / 1000);
     rpApiProgress('🔌 <b>Einsatzliste fertig geladen</b> — ' + Object.keys(mitarbeiter).length + ' Mitarbeitende, ' + Object.keys(kunden).length + ' Kunden.<br>' +
       '<span style="color:var(--rp-grey);font-size:11px">Zeit: ' + ladeSekundenGesamt + 's Liste laden (' + placements.length + ' Einsätze, Methode: ' + (ladeMethode === 'aktiv-filter' ? 'gezielter Aktiv-Filter' : 'komplette Liste paginiert') + ') + ' + aufloeseSekunden + 's Namen auflösen.</span>' +
