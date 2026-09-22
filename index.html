@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.293.0"></script>
-<script src="apriko-api.js?v=1.293.0"></script>
-<script src="lohncheck.js?v=1.293.0"></script>
-<script src="personalbudget.js?v=1.293.0"></script>
-<script src="jahresbudget.js?v=1.293.0"></script>
-<script src="budgetpositionen.js?v=1.293.0"></script>
-<script src="lohnchecklistetemp.js?v=1.293.0"></script>
+<script src="apriko-filters.js?v=1.296.0"></script>
+<script src="apriko-api.js?v=1.296.0"></script>
+<script src="lohncheck.js?v=1.296.0"></script>
+<script src="personalbudget.js?v=1.296.0"></script>
+<script src="jahresbudget.js?v=1.296.0"></script>
+<script src="budgetpositionen.js?v=1.296.0"></script>
+<script src="lohnchecklistetemp.js?v=1.296.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -114,6 +114,17 @@
 
   /* === App layout === */
   #app { display: none; height: 100vh; grid-template-columns: 220px 1fr; }
+  @media print {
+    body { background: #fff !important; color: #000 !important; }
+    #app { display: block !important; height: auto !important; }
+    aside, .topbar .actions, .no-print { display: none !important; }
+    main { overflow: visible !important; }
+    .card { border: 1px solid #ccc !important; background: #fff !important; box-shadow: none !important; break-inside: avoid; }
+    table { font-size: 10px !important; } th, td { color: #000 !important; }
+    input[type="checkbox"] { accent-color: #000; }
+    .print-only { display: block !important; }
+  }
+  .print-only { display: none; }
   #app.ready { display: grid; }
 
   /* Sidebar */
@@ -955,9 +966,15 @@
           <button data-view="lct"><span class="ic">☑</span> Checkliste Lohn Temp 2.0</button>
           <button data-view="lohnartenstamm"><span class="ic">📋</span> Lohnartenstamm</button>
           <button data-view="tarifarten"><span class="ic">🏷️</span> Tarifarten</button>
-          <button data-view="onboarding"><span class="ic">🚀</span> Onboarding</button>
           <button data-view="lohncheck"><span class="ic">🧾</span> Ultimativer Check</button>
           <button data-view="parameter"><span class="ic">⚙</span> Parameter</button>
+        </div>
+      </div>
+      <div class="nav-group" data-group="onboarding">
+        <div class="nav-group-h" onclick="toggleNavGroup('onboarding')">Onboarding <span class="nav-caret">▾</span></div>
+        <div class="nav-group-items">
+          <button data-view="onboarding"><span class="ic">✅</span> Checkliste</button>
+          <button data-view="onbparam"><span class="ic">📝</span> Parametrierung</button>
         </div>
       </div>
       <div class="nav-group" data-group="spielwiese">
@@ -984,7 +1001,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.293.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.296.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1475,7 +1492,7 @@ let currentView = DEMO_ANON ? "einsatzdash" : "dashboard";
    Berechtigungssystem
    =========================================================== */
 const SUPER_ADMIN_EMAIL = "benjamin@apriko.com";  // hat immer volle Rechte
-const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","onboarding","lohncheck","parameter","apipoc","abacus","uzcheck","profiles"];
+const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","onboarding","onbparam","lohncheck","parameter","apipoc","abacus","uzcheck","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
@@ -1488,7 +1505,7 @@ const VIEW_TITLES = {
   lohnartenstamm: "Lohnartenstamm",
   tarifarten: "Tarifarten",
   rapport: "Rapport", einsatzdash: "Kundendashboard", konzern: "Konzernanalyse",
-  onboarding: "Onboarding", lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)", abacus: "Abacus Schnittstelle", uzcheck: "Überzeit-Check",
+  onboarding: "Onboarding-Checkliste", onbparam: "Parametrierung (Fragebogen für Neukunden)", lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)", abacus: "Abacus Schnittstelle", uzcheck: "Überzeit-Check",
   profiles: "Profile"
 };
 
@@ -1878,12 +1895,16 @@ function toggleNavGroup(name) {
   } catch (e) {}
 }
 function restoreNavGroups() {
+  // Standard: alle Gruppen eingeklappt (Menü ist gross geworden); explizit geöffnete bleiben offen (localStorage)
   try {
     const st = JSON.parse(localStorage.getItem("navCollapsed") || "{}");
-    Object.keys(st).forEach(name => {
-      if (st[name]) document.querySelector(`.nav-group[data-group="${name}"]`)?.classList.add("collapsed");
-    });
+    document.querySelectorAll(".nav-group").forEach(g => { const name = g.dataset.group; if (st[name] === false) g.classList.remove("collapsed"); else g.classList.add("collapsed"); });
   } catch (e) {}
+}
+/* Gruppe der aktiven Ansicht aufklappen (ohne die Nutzerwahl zu überschreiben) */
+function openNavGroupFor(view) {
+  const b = document.querySelector(`nav button[data-view="${view}"]`); const g = b && b.closest(".nav-group");
+  if (g) g.classList.remove("collapsed");
 }
 restoreNavGroups();
 
@@ -1961,6 +1982,7 @@ function render() {
   else if (currentView === "tarifarten") renderTarifarten(content);
   else if (currentView === "parameter") renderParameter(content);
   else if (currentView === "onboarding") renderOnboarding(content);
+  else if (currentView === "onbparam") renderOnbParam(content);
   else if (currentView === "abacus") renderAbacus(content);
   else if (currentView === "uzcheck") renderUeberzeitCheck(content);
   else if (currentView === "personalbudget") renderPersonalBudget(content);
@@ -1971,6 +1993,7 @@ function render() {
   else if (currentView === "contacts") renderContacts(content);
   else if (currentView === "tasks") renderTasks(content);
   else if (currentView === "profiles") renderProfiles(content);
+  openNavGroupFor(currentView);
 }
 
 /* ===========================================================
@@ -7808,28 +7831,28 @@ const ONB_STANDARD_AUFGABEN = [
   ["Parametrierung", "Parametrierungsbogen vom Kunden ausgefüllt", "Kunde", -70],
   ["Parametrierung", "Instanz erstellt, Mandant & Filialen angelegt", "Apriko", -65],
   ["Parametrierung", "Lohnarten, GAV & Zuschläge parametriert", "Apriko", -55],
-  ["Parametrierung", "Sozialversicherungen (AHV/ALV/UVG/KTG/BVG/QST) erfasst", "Apriko", -55],
+  ["Parametrierung", "Sozialversicherungen (AHV/ALV/UVG/KTG/BVG/QST) erfasst", "Apriko", -55, "bpo"],
   ["Parametrierung", "Vorlagen (Verträge, Rapporte, Rechnungen) eingerichtet", "Apriko", -50],
   ["Daten", "Stammdaten-Export aus Altsystem geliefert", "Kunde", -50],
   ["Daten", "Kunden-, Kandidaten- und Mitarbeitendendaten importiert", "Apriko", -40],
-  ["Daten", "Lohnhistorie / offene Salden übernommen", "Apriko", -35],
-  ["Schnittstellen", "FIBU-Schnittstelle konfiguriert & getestet", "Apriko", -30],
-  ["Schnittstellen", "Zahlungsverkehr (pain.001) getestet", "beide", -30],
-  ["Schnittstellen", "Swissdec / ELM-Übermittlung eingerichtet", "Apriko", -28],
+  ["Daten", "Lohnhistorie / offene Salden übernommen", "Apriko", -35, "bpo"],
+  ["Schnittstellen", "FIBU-Schnittstelle konfiguriert & getestet", "Apriko", -30, "bpo"],
+  ["Schnittstellen", "Zahlungsverkehr (pain.001) getestet", "beide", -30, "bpo"],
+  ["Schnittstellen", "Swissdec / ELM-Übermittlung eingerichtet", "Apriko", -28, "bpo"],
   ["Schulung", "Schulung Disposition & Vermittlung", "Apriko", -25],
-  ["Schulung", "Schulung Lohn & Fakturierung", "Apriko", -20],
-  ["Test", "Testlauf Lohn (Parallelabrechnung) durchgeführt", "beide", -15],
+  ["Schulung", "Schulung Lohn & Fakturierung", "Apriko", -20, "bpo"],
+  ["Test", "Testlauf Lohn (Parallelabrechnung) durchgeführt", "beide", -15, "bpo"],
   ["Test", "Testlauf Fakturierung durchgeführt", "beide", -15],
   ["Test", "Abnahme durch Kunden", "Kunde", -7],
   ["Go-Live", "Produktivstart", "beide", 0],
-  ["Go-Live", "Erster produktiver Lohnlauf begleitet", "Apriko", 30],
+  ["Go-Live", "Erster produktiver Lohnlauf begleitet", "Apriko", 30, "bpo"],
   ["Nachbetreuung", "Review-Meeting nach 1 Monat", "Apriko", 30],
   ["Nachbetreuung", "Übergabe an Support / Projektabschluss", "Apriko", 60]
 ];
 function onbParam() {
   if (!crmParameter) return { aufgaben: [], kunden: {} };
   if (!crmParameter.onboarding) {
-    crmParameter.onboarding = { aufgaben: ONB_STANDARD_AUFGABEN.map((a, i) => ({ id: "a" + (i + 1), phase: a[0], titel: a[1], zustaendig: a[2], tage: a[3] })), kunden: {} };
+    crmParameter.onboarding = { aufgaben: ONB_STANDARD_AUFGABEN.map((a, i) => ({ id: "a" + (i + 1), phase: a[0], titel: a[1], zustaendig: a[2], tage: a[3], gilt: a[4] || "alle" })), kunden: {} };
   }
   const o = crmParameter.onboarding; o.aufgaben = o.aufgaben || []; o.kunden = o.kunden || {};
   return o;
@@ -7903,11 +7926,54 @@ async function onbAufgabeVerschieben(id, richtung) {
 async function onbStandardLaden() {
   await parameterLaden(false);
   if (!confirm("Aufgabenliste auf den Apriko-Standard zurücksetzen? Eigene Aufgaben gehen verloren, der Erledigt-Status bleibt nur für gleiche IDs erhalten.")) return;
-  onbParam().aufgaben = ONB_STANDARD_AUFGABEN.map((a, i) => ({ id: "a" + (i + 1), phase: a[0], titel: a[1], zustaendig: a[2], tage: a[3] }));
+  onbParam().aufgaben = ONB_STANDARD_AUFGABEN.map((a, i) => ({ id: "a" + (i + 1), phase: a[0], titel: a[1], zustaendig: a[2], tage: a[3], gilt: a[4] || "alle" }));
   await onbSpeichern(); render();
 }
 let onbSpaltenBearbeiten = false;
 function onbToggleBearbeiten() { onbSpaltenBearbeiten = !onbSpaltenBearbeiten; render(); }
+let onbModus = "matrix", onbKundeSel = "";
+function onbSetModus(m) { onbModus = m; render(); }
+function onbSetKunde(id) { onbKundeSel = String(id || ""); render(); }
+/* Gilt die Aufgabe für diesen Kunden? a.gilt: "alle" (Standard) | "bpo" (nur Kunden mit BPO) | "saas" (nur Kunden mit SaaS) */
+function onbGilt(a, c) {
+  const seg = String((c && c.Segment) || "").toLowerCase();
+  if (a.gilt === "bpo") return seg.includes("bpo");
+  if (a.gilt === "saas") return seg.includes("saas") || !seg.includes("bpo");
+  return true;
+}
+async function onbNotiz(custId, aufgabeId, text) {
+  await parameterLaden(false);
+  const k = onbParam().kunden[custId]; if (!k) return;
+  k.notizen = k.notizen || {};
+  if (text && text.trim()) k.notizen[aufgabeId] = text.trim(); else delete k.notizen[aufgabeId];
+  await onbSpeichern();
+}
+/* Interaktive Checkliste eines Kunden (auch zum Ausdrucken / an den Kunden abgeben) */
+function onbKundeChecklisteHtml(id, c, k, o, heute, print) {
+  const erl = k.erledigt || {}, notizen = k.notizen || {};
+  const aufg = o.aufgaben.filter(a => onbGilt(a, c));
+  const n = aufg.filter(a => erl[a.id]).length;
+  const zust = z => z === "Kunde" ? "var(--warn)" : (z === "beide" ? "var(--accent-3)" : "var(--accent)");
+  let html = `<div class="card" style="padding:16px 18px;margin-bottom:14px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
+      <div><span style="font-size:16px;font-weight:600">${escape(c.Title)}</span> <span style="color:var(--text-dim);font-size:12px">· ${escape(c.Segment || "—")}${k.verantwortlich ? " · verantwortlich " + escape(k.verantwortlich) : ""}${k.goLive ? " · Go-Live " + onbFmtDatum(k.goLive) : ""}</span></div>
+      <div style="font-family:var(--font-mono);font-size:12px">${n}/${aufg.length} erledigt</div>
+    </div>
+    <div style="height:6px;background:var(--bg);border-radius:3px;margin:8px 0 12px;overflow:hidden"><div style="height:100%;width:${aufg.length ? Math.round(n / aufg.length * 100) : 0}%;background:var(--accent)"></div></div>`;
+  let phase = null;
+  aufg.forEach(a => {
+    if (a.phase !== phase) { phase = a.phase; html += `<div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);margin:12px 0 4px">${escape(phase)}</div>`; }
+    const e = erl[a.id]; const faellig = onbFaellig(k.goLive, a.tage); const ueber = !e && faellig && faellig < heute;
+    const cid = "onb-" + String(id).replace(/\W/g, "") + "-" + a.id;
+    html += `<div style="display:flex;gap:10px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border)">
+      <input type="checkbox" id="${cid}" ${e ? "checked" : ""} onchange="onbToggle('${id}','${a.id}')" style="width:16px;height:16px;margin-top:2px;accent-color:var(--accent);cursor:pointer;flex-shrink:0">
+      <div style="flex:1">
+        <label for="${cid}" style="display:block;cursor:pointer;${e ? "color:var(--text-dim)" : ""}">${escape(a.titel)} <span style="font-size:10px;color:${zust(a.zustaendig)}">${escape(a.zustaendig)}</span>${faellig ? ` <span style="font-size:10px;color:${ueber ? "var(--danger)" : "var(--text-faint)"}">· fällig ${onbFmtDatum(faellig)}${ueber ? " (überfällig)" : ""}</span>` : ""}${e ? ` <span style="font-size:10px;color:var(--text-faint)">· erledigt ${onbFmtTs(e.am)} ${escape((e.von || "").split("@")[0])}</span>` : ""}</label>
+        ${print ? (notizen[a.id] ? `<div style="font-size:10.5px;color:var(--text-dim)">${escape(notizen[a.id])}</div>` : "") : `<input value="${escape(notizen[a.id] || "")}" placeholder="Bemerkung (optional)" onblur="onbNotiz('${id}','${a.id}',this.value)" style="width:100%;margin-top:3px;background:transparent;border:1px solid ${notizen[a.id] ? "var(--border)" : "transparent"};border-bottom:1px dashed var(--border);color:var(--text-dim);padding:2px 6px;border-radius:3px;font-family:inherit;font-size:10.5px">`}
+      </div></div>`;
+  });
+  return html + `</div>`;
+}
 /* --- Ansicht --- */
 async function renderOnboarding(el) {
   if (!crmParameter) { await parameterLaden(false); }
@@ -7920,9 +7986,13 @@ async function renderOnboarding(el) {
   const kandidaten = cache.customers.filter(c => !o.kunden[c.id]).sort((a, b) => (a.Title || "").localeCompare(b.Title || ""));
   const emails = onbProfileEmails();
   const phasen = []; o.aufgaben.forEach(a => { const p = phasen[phasen.length - 1]; if (p && p.name === a.phase) p.n++; else phasen.push({ name: a.phase, n: 1 }); });
+  if (!onbKundeSel && kunden.length) onbKundeSel = String(kunden[0].id);
   document.getElementById("view-actions").innerHTML = `
-    <select id="onb-add" style="padding:4px 6px;max-width:260px"><option value="">+ Kunde ins Onboarding …</option>${kandidaten.map(c => `<option value="${c.id}">${escape(c.Title)}${c.Segment ? " · " + escape(c.Segment) : ""}</option>`).join("")}</select>
+    <div class="bud-tabs"><button class="bud-tab ${onbModus === "matrix" ? "active" : ""}" onclick="onbSetModus('matrix')">Übersicht</button><button class="bud-tab ${onbModus === "kunde" ? "active" : ""}" onclick="onbSetModus('kunde')">Pro Kunde</button></div>
+    ${onbModus === "kunde" ? `<select onchange="onbSetKunde(this.value)" style="padding:4px 6px;max-width:220px">${kunden.map(({ id, c }) => `<option value="${id}" ${String(id) === onbKundeSel ? "selected" : ""}>${escape(c.Title)}</option>`).join("")}</select>` : ""}
+    <select id="onb-add" style="padding:4px 6px;max-width:220px"><option value="">+ Kunde ins Onboarding …</option>${kandidaten.map(c => `<option value="${c.id}">${escape(c.Title)}${c.Segment ? " · " + escape(c.Segment) : ""}</option>`).join("")}</select>
     <button class="btn btn-sm" onclick="onbKundeHinzu(document.getElementById('onb-add').value)">Hinzufügen</button>
+    <button class="btn btn-sm" onclick="window.print()" title="${onbModus === "kunde" ? "Checkliste dieses Kunden drucken (auch zur Abgabe an den Kunden)" : "Übersicht aller Kunden drucken"}">🖨 Drucken</button>
     <button class="btn btn-sm" onclick="onbToggleBearbeiten()">${onbSpaltenBearbeiten ? "✓ Aufgaben fertig" : "⚙ Aufgaben bearbeiten"}</button>`;
   const zustFarbe = z => z === "Kunde" ? "var(--warn)" : (z === "beide" ? "var(--accent-3)" : "var(--accent)");
   // Lesbarkeit: Aufgaben als ZEILEN (Phasen als Zwischentitel), Kunden als SPALTEN
@@ -7930,12 +8000,12 @@ async function renderOnboarding(el) {
     <tr>
       <th style="min-width:240px;position:sticky;left:0;background:var(--bg-card);z-index:2">Aufgabe</th>
       <th style="min-width:56px;font-size:10px">Zust.</th><th style="min-width:40px;text-align:right;font-size:10px" title="Tage relativ zum Go-Live">Tage</th>
-      ${kunden.map(({ id, c, k }) => { const erl = k.erledigt || {}; const n = o.aufgaben.filter(a => erl[a.id]).length;
+      ${kunden.map(({ id, c, k }) => { const erl = k.erledigt || {}; const gilt = o.aufgaben.filter(a => onbGilt(a, c)); const n = gilt.filter(a => erl[a.id]).length;
         const name = String(c.Title || "").replace(/\s*[-–·]\s*(Nur SaaS|SaaS und BPO|Nur BPO|BPO inkl\. SaaS)\s*$/i, "");
         const typ = ({ "Nur SaaS": "SaaS", "SaaS und BPO": "SaaS+BPO", "Nur BPO": "BPO", "BPO inkl. SaaS": "BPO inkl. SaaS" })[c.Segment] || c.Segment || "—";
         return `<th style="min-width:128px;max-width:160px;vertical-align:top;border-left:1px solid var(--border);font-weight:400;padding:6px 6px">
         <div style="font-weight:600;font-size:12px;white-space:normal;line-height:1.2" title="${escape(c.Title)}">${escape(name)} <a href="#" onclick="onbKundeEntfernen('${id}');return false;" style="color:var(--text-faint);font-size:10px;font-weight:400" title="Aus Onboarding entfernen">✕</a></div>
-        <div style="font-size:10px;color:var(--text-dim);margin:2px 0 4px">${escape(typ)} · <span style="font-family:var(--font-mono)">${n}/${o.aufgaben.length}</span></div>
+        <div style="font-size:10px;color:var(--text-dim);margin:2px 0 4px">${escape(typ)} · <span style="font-family:var(--font-mono)">${n}/${gilt.length}</span></div>
         <select onchange="onbKundeFeld('${id}','verantwortlich',this.value)" style="width:100%;padding:2px 2px;font-size:10px;margin-bottom:3px" title="Hauptverantwortliche/r${k.verantwortlich ? ": " + escape(k.verantwortlich) : ""}"><option value="">— verantw. —</option>${emails.map(e => `<option value="${escape(e)}" ${e === (k.verantwortlich || "").toLowerCase() ? "selected" : ""}>${escape(e.split("@")[0])}</option>`).join("")}</select>
         <input type="date" value="${k.goLive || ""}" onchange="onbKundeFeld('${id}','goLive',this.value)" style="width:100%;padding:2px 2px;font-size:10px" title="Go-Live-Datum">
       </th>`; }).join("")}
@@ -7947,7 +8017,8 @@ async function renderOnboarding(el) {
       <td style="position:sticky;left:0;background:var(--bg-card);z-index:1;font-size:12px">${escape(a.titel)}</td>
       <td style="font-size:10px;color:${zustFarbe(a.zustaendig)}">${escape(a.zustaendig)}</td>
       <td style="text-align:right;font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">${a.tage >= 0 ? "+" : ""}${a.tage}</td>
-      ${kunden.map(({ id, k }) => {
+      ${kunden.map(({ id, c, k }) => {
+        if (!onbGilt(a, c)) return `<td style="border-left:1px solid var(--border);text-align:center;color:var(--text-faint);font-size:10px" title="gilt nicht für ${escape(c.Segment || "diesen Kunden")}">—</td>`;
         const e = (k.erledigt || {})[a.id]; const faellig = onbFaellig(k.goLive, a.tage); const ueber = !e && faellig && faellig < heute;
         const tip = e ? `Erledigt ${onbFmtTs(e.am)} · ${e.von || "?"}` : (faellig ? `Fällig ${onbFmtDatum(faellig)}${ueber ? " — überfällig" : ""}` : "Offen");
         const kurz = d => d ? d.slice(8, 10) + "." + d.slice(5, 7) + "." : "";
@@ -7960,23 +8031,91 @@ async function renderOnboarding(el) {
     <div class="card" style="padding:14px 16px;margin-top:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">Aufgaben — gelten für alle Kunden</h3><span><button class="btn btn-sm" onclick="onbAufgabeNeu()">+ Aufgabe</button> <a href="#" onclick="onbStandardLaden();return false;" style="font-size:11px;color:var(--text-faint);margin-left:8px">Standard laden</a></span></div>
       <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">Tage relativ zum Go-Live (negativ = davor). Reihenfolge mit ▲▼; die Phase gruppiert die Zeilen.</div>
-      <table style="font-size:12px"><thead><tr><th></th><th>Phase</th><th>Aufgabe</th><th>Zuständig</th><th>Tage</th><th></th></tr></thead><tbody>
+      <table style="font-size:12px"><thead><tr><th></th><th>Phase</th><th>Aufgabe</th><th>Zuständig</th><th>Tage</th><th title="Für welche Kunden gilt die Aufgabe (nach Segment)">Gilt für</th><th></th></tr></thead><tbody>
         ${o.aufgaben.map((a, i) => `<tr>
           <td style="white-space:nowrap"><a href="#" onclick="onbAufgabeVerschieben('${a.id}',-1);return false;" style="color:var(--text-faint)">▲</a> <a href="#" onclick="onbAufgabeVerschieben('${a.id}',1);return false;" style="color:var(--text-faint)">▼</a></td>
           <td><input type="text" value="${escape(a.phase)}" onchange="onbAufgabeFeld('${a.id}','phase',this.value)" style="width:120px;padding:2px 5px"></td>
           <td><input type="text" value="${escape(a.titel)}" onchange="onbAufgabeFeld('${a.id}','titel',this.value)" style="width:360px;padding:2px 5px"></td>
           <td><select onchange="onbAufgabeFeld('${a.id}','zustaendig',this.value)" style="padding:2px 5px">${["Apriko", "Kunde", "beide"].map(z => `<option ${a.zustaendig === z ? "selected" : ""}>${z}</option>`).join("")}</select></td>
           <td><input type="number" value="${a.tage}" onchange="onbAufgabeFeld('${a.id}','tage',this.value)" style="width:60px;padding:2px 5px"></td>
+          <td><select onchange="onbAufgabeFeld('${a.id}','gilt',this.value)" style="padding:2px 5px">${[["alle", "alle Kunden"], ["bpo", "nur mit BPO"], ["saas", "nur SaaS"]].map(([v, l]) => `<option value="${v}" ${(a.gilt || "alle") === v ? "selected" : ""}>${l}</option>`).join("")}</select></td>
           <td><a href="#" onclick="onbAufgabeLoeschen('${a.id}');return false;" style="color:var(--text-faint)">✕</a></td>
         </tr>`).join("")}
       </tbody></table>
     </div>`;
+  if (onbModus === "kunde" && !onbSpaltenBearbeiten) {
+    const sel = kunden.find(x => String(x.id) === onbKundeSel);
+    el.innerHTML = `<div class="print-only" style="font-size:11px;color:#666;margin-bottom:8px">Apriko AG · Onboarding-Checkliste · Stand ${new Date().toLocaleDateString("de-CH")}</div>` + (sel ? onbKundeChecklisteHtml(sel.id, sel.c, sel.k, o, heute, false) : `<div class="empty">Kunde wählen.</div>`);
+    return;
+  }
   el.innerHTML = `
+    <div class="print-only" style="font-size:11px;color:#666;margin-bottom:8px">Apriko AG · Onboarding-Übersicht · Stand ${new Date().toLocaleDateString("de-CH")}</div>
     <div class="card" style="padding:14px 16px">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">Häkchen setzen = erledigt (Datum · Person erscheint daneben, Details beim Überfahren). Rot = überfällig gemäss Go-Live-Datum. Zuständigkeit: <span style="color:var(--accent)">Apriko</span> · <span style="color:var(--warn)">Kunde</span> · <span style="color:var(--accent-3)">beide</span>.</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px" class="no-print">Häkchen setzen = erledigt (Datum · Person erscheint daneben, Details beim Überfahren). Rot = überfällig gemäss Go-Live-Datum. «—» = Aufgabe gilt nicht für diesen Kundentyp. Zuständigkeit: <span style="color:var(--accent)">Apriko</span> · <span style="color:var(--warn)">Kunde</span> · <span style="color:var(--accent-3)">beide</span>.</div>
       ${kunden.length ? `<div class="table-wrap" style="overflow-x:auto"><table style="font-size:12px;border-collapse:collapse">${kopf}<tbody>${zeilen}</tbody></table></div>` : `<div class="empty">Noch keine Kunden im Onboarding — oben rechts einen Kunden hinzufügen.</div>`}
     </div>
     ${bearbeiten}`;
+}
+
+/* ============ Onboarding → Parametrierung ============
+   Parametrierungs-Fragebogen (eigenständige HTML-Dateien im Repo-Ordner parametrierung/: mit-bpo.html, ohne-bpo.html)
+   pro Kunde erzeugen: Vorlage laden, Platzhalter ersetzen ({{KUNDE}}, {{DATUM}}, {{SEGMENT}}, {{ANSPRECHPERSON}}),
+   Vorschau, Download (zum Versand an den Kunden). Variante folgt dem Segment (BPO → mit BPO), manuell umschaltbar. */
+const ONBP_VORLAGEN = { bpo: { datei: "parametrierung/mit-bpo.html", titel: "mit BPO (SaaS + Lohn/BPO)" }, saas: { datei: "parametrierung/ohne-bpo.html", titel: "ohne BPO (nur SaaS)" } };
+let onbpState = { kunde: "", variante: "", html: "", lade: false, fehler: "" };
+function onbpVarianteFuer(c) { return String((c && c.Segment) || "").toLowerCase().includes("bpo") ? "bpo" : "saas"; }
+async function onbpLaden() {
+  const c = cache.customers.find(x => String(x.id) === String(onbpState.kunde)); if (!c) return;
+  const v = ONBP_VORLAGEN[onbpState.variante || onbpVarianteFuer(c)];
+  onbpState.lade = true; onbpState.fehler = ""; onbpState.html = ""; render();
+  try {
+    const res = await fetch(v.datei + "?v=" + Date.now());
+    if (!res.ok) throw new Error("Vorlage nicht gefunden: " + v.datei + " (HTTP " + res.status + ")");
+    let html = await res.text();
+    const comp = cache.companies.find(x => String(x.id) === String(c.CompanyId)) || {};
+    if (crmStamm === null) { try { await crmLoadStamm(); } catch (e) {} }
+    const st = (crmStamm && crmStamm[String(comp.id)]) || {};
+    const kundeName = String(comp.Title || c.Title || "").replace(/\s*[-–·]\s*(Nur SaaS|SaaS und BPO|Nur BPO|BPO inkl\. SaaS)\s*$/i, "");
+    // Vorbefüllung des Fragebogens (Format des Formulars: keys / radios / lic / branches / contacts)
+    const entscheid = crmParseEmails(st.entscheid || []);
+    const saved = { keys: { "unternehmen.firma": kundeName, "unternehmen.strasse": st.strasse || "", "unternehmen.plzOrt": comp.City || "", "unternehmen.webseite": comp.Website || "", "unternehmen.email": entscheid[0] || "" },
+      radios: {}, lic: [], branches: [], contacts: entscheid.map(e => ({ name: "", funktion: "", telefon: "", mobile: "", email: e, lohn: "", zeich: "" })), kunde: kundeName, saved: new Date().toISOString(), quelle: "Apriko CRM" };
+    const ersatz = { KUNDE: kundeName, DATUM: new Date().toLocaleDateString("de-CH"), SEGMENT: c.Segment || "", ANSPRECHPERSON: (comp.id && ansprechEmail(comp.id)) || c.Owner || "", GOLIVE: (onbParam().kunden[c.id] || {}).goLive ? onbFmtDatum(onbParam().kunden[c.id].goLive) : "" };
+    Object.entries(ersatz).forEach(([k, val]) => { html = html.split("{{" + k + "}}").join(escape(val)); });
+    html = html.split("{{SAVEDDATA}}").join(JSON.stringify(saved).replace(/</g, "\\u003c"));
+    onbpState.html = html;
+  } catch (e) { onbpState.fehler = e.message; }
+  onbpState.lade = false; render();
+}
+function onbpDownload() {
+  const c = cache.customers.find(x => String(x.id) === String(onbpState.kunde)); if (!c || !onbpState.html) return;
+  const v = onbpState.variante || onbpVarianteFuer(c);
+  const blob = new Blob([onbpState.html], { type: "text/html;charset=utf-8" }); const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "Parametrierung_" + String(c.Title || "Kunde").replace(/[^\w.-]+/g, "_") + "_" + (v === "bpo" ? "mit_BPO" : "ohne_BPO") + ".html"; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+function onbpKunde(id) { onbpState.kunde = String(id || ""); const c = cache.customers.find(x => String(x.id) === onbpState.kunde); onbpState.variante = c ? onbpVarianteFuer(c) : ""; onbpState.html = ""; onbpState.fehler = ""; if (c) onbpLaden(); else render(); }
+function onbpVariante(v) { onbpState.variante = v; onbpState.html = ""; onbpLaden(); }
+async function renderOnbParam(el) {
+  if (!crmParameter) { try { await parameterLaden(false); } catch (e) {} }
+  const o = onbParam();
+  const imOnb = cache.customers.filter(c => o.kunden[c.id]).sort((a, b) => (a.Title || "").localeCompare(b.Title || ""));
+  const andere = cache.customers.filter(c => !o.kunden[c.id]).sort((a, b) => (a.Title || "").localeCompare(b.Title || ""));
+  const opt = c => `<option value="${c.id}" ${String(c.id) === onbpState.kunde ? "selected" : ""}>${escape(c.Title)}${c.Segment ? " · " + escape(c.Segment) : ""}</option>`;
+  const c = cache.customers.find(x => String(x.id) === onbpState.kunde);
+  const v = onbpState.variante || (c ? onbpVarianteFuer(c) : "");
+  document.getElementById("view-actions").innerHTML = `
+    <select onchange="onbpKunde(this.value)" style="padding:4px 6px;max-width:260px"><option value="">Kunde wählen …</option>${imOnb.length ? `<optgroup label="Im Onboarding">${imOnb.map(opt).join("")}</optgroup>` : ""}<optgroup label="Alle Kunden">${andere.map(opt).join("")}</optgroup></select>
+    ${c ? `<div class="bud-tabs"><button class="bud-tab ${v === "bpo" ? "active" : ""}" onclick="onbpVariante('bpo')">mit BPO</button><button class="bud-tab ${v === "saas" ? "active" : ""}" onclick="onbpVariante('saas')">ohne BPO</button></div>
+    <button class="btn btn-sm" onclick="onbpDownload()" ${onbpState.html ? "" : "disabled"} title="Ausgefüllte Vorlage als HTML-Datei herunterladen und dem Kunden senden">⇩ Download</button>` : ""}`;
+  el.innerHTML = `
+    <div class="card" style="padding:14px 16px;margin-bottom:12px">
+      <div style="font-size:11px;color:var(--text-dim)">Fragebogen zur Parametrierung für Neukunden. Die Variante folgt dem Segment des Kunden (${c ? escape(c.Segment || "—") + " → " + (v === "bpo" ? "mit BPO" : "ohne BPO") : "BPO im Segment → mit BPO"}), oben umschaltbar. Vorlagen liegen im Repo unter <code>parametrierung/mit-bpo.html</code> und <code>parametrierung/ohne-bpo.html</code>. Firma, Strasse, Ort, Webseite und E-Mail/Kontakte (Entscheidungsträger) werden aus dem Kundenstamm vorbefüllt; der Kunde füllt den Rest aus, speichert und sendet XML/PDF an admin@apriko.com.</div>
+    </div>
+    ${!c ? `<div class="empty">Kunde wählen, dann wird die Vorlage geladen.</div>` :
+      onbpState.lade ? `<div class="empty">Vorlage wird geladen …</div>` :
+      onbpState.fehler ? `<div class="card" style="padding:14px 16px;color:var(--danger)">${escape(onbpState.fehler)}<div style="font-size:11px;color:var(--text-dim);margin-top:6px">Die Vorlagendatei fehlt im Repo oder ist noch nicht deployt.</div></div>` :
+      `<div class="card" style="padding:0;overflow:hidden"><iframe srcdoc="${escape(onbpState.html)}" style="width:100%;height:calc(100vh - 220px);border:0;background:#fff" title="Vorschau Parametrierung"></iframe></div>`}`;
 }
 
 /* ============ Parameter (Workflows) ============
