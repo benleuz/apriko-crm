@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.303.0"></script>
-<script src="apriko-api.js?v=1.303.0"></script>
-<script src="lohncheck.js?v=1.303.0"></script>
-<script src="personalbudget.js?v=1.303.0"></script>
-<script src="jahresbudget.js?v=1.303.0"></script>
-<script src="budgetpositionen.js?v=1.303.0"></script>
-<script src="lohnchecklistetemp.js?v=1.303.0"></script>
+<script src="apriko-filters.js?v=1.305.0"></script>
+<script src="apriko-api.js?v=1.305.0"></script>
+<script src="lohncheck.js?v=1.305.0"></script>
+<script src="personalbudget.js?v=1.305.0"></script>
+<script src="jahresbudget.js?v=1.305.0"></script>
+<script src="budgetpositionen.js?v=1.305.0"></script>
+<script src="lohnchecklistetemp.js?v=1.305.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1001,7 +1001,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.303.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.305.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -2737,9 +2737,31 @@ function fbZuordnung(nr, istApriko) {
     "65":"G_VerwIT","66":"G_Werbung","68":"G_Abschr","69":"G_Finanz","89":"G_Steuern" };
   return map[m2] || "G_Sonstig";
 }
+/* Budget-Items liegen als JSON im Title (SharePoint: max. 255 Zeichen). Längere Objekte (z.B. Konten mit vielen
+   Positionen) stehen im mehrzeiligen Feld «Data»; der Title enthält dann nur einen Stub {…, big:1}. */
 function fbParse(item, want) {
   if (!item || !item.Title || item.Title[0] !== "{") return null;
-  try { const d = JSON.parse(item.Title); return d.cfg === want ? { id: item.id, ...d } : null; } catch (e) { return null; }
+  try {
+    let d = JSON.parse(item.Title);
+    if (d.big && item.Data && String(item.Data)[0] === "{") { try { d = JSON.parse(item.Data); } catch (e2) {} }
+    return d.cfg === want ? { id: item.id, ...d } : null;
+  } catch (e) { return null; }
+}
+let fbDataColumnOk = null;
+async function fbEnsureDataColumn() {
+  if (fbDataColumnOk) return true;
+  try {
+    const cols = await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/columns?$select=name`);
+    if ((cols.value || []).some(c => c.name === "Data")) { fbDataColumnOk = true; return true; }
+    await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/columns`, { method: "POST", body: JSON.stringify({ name: "Data", displayName: "Data", text: { allowMultipleLines: true, textType: "plain", maxLength: 100000 } }) });
+    fbDataColumnOk = true; return true;
+  } catch (e) { console.warn("Data-Spalte:", e.message); return false; }
+}
+function fbSplitFields(obj) {
+  const title = JSON.stringify(obj);
+  if (title.length <= 250) return { Title: title, Data: "" };
+  const stub = { cfg: obj.cfg, y: obj.y, big: 1 }; ["k", "g", "kt", "t", "z", "n"].forEach(k => { if (obj[k] !== undefined && k !== "n") stub[k] = obj[k]; });
+  return { Title: JSON.stringify(stub).slice(0, 250), Data: title };
 }
 function fbBudget(year) {   // key → [12]
   const out = {};
@@ -2807,15 +2829,18 @@ window.addEventListener("error", ev => {
 
 /* ---------- Budget vs. Ist: Ansicht ---------- */
 async function fbSaveItem(obj, existingId) {
-  const title = JSON.stringify(obj);
+  let fields = fbSplitFields(obj);
+  const raw = existingId ? cache.budget.find(x => x.id == existingId) : null;
+  const braucht = fields.Data || (raw && raw.Data);   // Data nur anfassen, wenn nötig (Spalte evtl. noch nicht vorhanden)
+  if (braucht) { if (!(await fbEnsureDataColumn())) throw new Error("Eintrag zu lang für den Title (255 Zeichen) und die Spalte «Data» in der Liste Budget konnte nicht angelegt werden."); }
+  else delete fields.Data;
   if (existingId) {
-    const raw = cache.budget.find(x => x.id == existingId);
-    const alt = raw ? raw.Title : null;
-    if (raw) raw.Title = title;   // optimistisch — Renderer sehen sofort den neuen Stand
-    try { await updateItem("Budget", existingId, { Title: title }); }
-    catch (e) { if (raw && alt !== null) raw.Title = alt; throw e; }
+    const alt = raw ? { Title: raw.Title, Data: raw.Data } : null;
+    if (raw) { raw.Title = fields.Title; if (fields.Data !== undefined) raw.Data = fields.Data; }   // optimistisch
+    try { await updateItem("Budget", existingId, fields); }
+    catch (e) { if (raw && alt) { raw.Title = alt.Title; raw.Data = alt.Data; } throw e; }
   } else {
-    await createItem("Budget", { Title: title });
+    await createItem("Budget", fields);
   }
 }
 
