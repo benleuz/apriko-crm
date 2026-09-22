@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.311.0"></script>
-<script src="apriko-api.js?v=1.311.0"></script>
-<script src="lohncheck.js?v=1.311.0"></script>
-<script src="personalbudget.js?v=1.311.0"></script>
-<script src="jahresbudget.js?v=1.311.0"></script>
-<script src="budgetpositionen.js?v=1.311.0"></script>
-<script src="lohnchecklistetemp.js?v=1.311.0"></script>
+<script src="apriko-filters.js?v=1.312.0"></script>
+<script src="apriko-api.js?v=1.312.0"></script>
+<script src="lohncheck.js?v=1.312.0"></script>
+<script src="personalbudget.js?v=1.312.0"></script>
+<script src="jahresbudget.js?v=1.312.0"></script>
+<script src="budgetpositionen.js?v=1.312.0"></script>
+<script src="lohnchecklistetemp.js?v=1.312.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1001,7 +1001,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.311.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.312.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -3382,6 +3382,7 @@ async function fbLieferantenExcel(year) {
   const agg = {}, detail = {};
   Object.entries(buch).forEach(([id, obj]) => {
     const [g, kt] = id.split("|");
+    if (!/^[4-8]\d{3}$/.test(kt)) return;   // nur Aufwandskonten (4xxx–8xxx); Bilanz- und Ertragskonten bleiben draussen
     (obj.buch || []).forEach(b => {
       const { key, anzeige } = fbLieferantKey(b[1]); if (!key) return;
       const betrag = parseFloat(b[2]) || 0;
@@ -3803,7 +3804,7 @@ function renderBudgetVergleich(el) {
   if (filters.fbView === "vorjahr") { renderFbVorjahr(el, { year, ist, vals, fkt, N }); return; }
   if (filters.fbView === "aktmonat") { renderFbAktMonat(el, { year, bud, ist, G, vals, rowsOut, fkt, N, budH1, budJahr, istVal }); return; }
 
-  const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
+  const yearOpts = fbJahrOptionen(year)
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
   const fmt = v => Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH");
   const abw = key => vals.tot[key] - vals.b[key];
@@ -3905,7 +3906,7 @@ function renderBudgetVergleich(el) {
           style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;width:220px;font-size:11px">
         <label class="btn btn-sm" title="Konzern-Budget, bexio-ERs und Buchungsdetails (XLSX oder CSV) — mehrere Dateien aufs Mal, Typ wird automatisch erkannt">⇪ Dateien importieren
           <input type="file" accept=".csv,.txt,.xlsx" multiple style="display:none" onchange="fbMultiSelect(this)"></label>
-        <button class="btn btn-sm" onclick="fbLieferantenExcel(${year})" title="Alle Lieferanten/Kostenpunkte aus den Buchungen ${year} zusammengefasst (Visa/Twint/… ignoriert) mit FIBU-Konto und Total — als Excel">⇩ Lieferanten</button>
+        <button class="btn btn-sm" onclick="fbLieferantenExcel(${year})" title="Lieferanten/Kostenpunkte aus den Aufwandsbuchungen ${year} (Konten 4xxx–8xxx) zusammengefasst — Visa/Twint/… ignoriert — mit FIBU-Konto und Total, als Excel">⇩ Lieferanten</button>
         <button class="btn btn-sm" onclick="fbDatenbestand()" title="Zeigt pro Jahr, was gespeichert ist — mit gezieltem Löschen einzelner Gruppen">ⓘ Datenbestand</button>
         <button class="btn btn-sm" onclick="fbClearAll()" title="Alle Budgetvergleich-Daten löschen (Budget, Ist aller Jahre, Buchungen, Notizen) — für einen sauberen Neuimport" style="color:var(--danger);border-color:var(--danger)">🗑 Leeren</button>
       </div>
@@ -3991,6 +3992,13 @@ function fbSearchResultsHtml(year) {
       </div>` : `<div style="font-size:11px;color:var(--text-faint)">Keine Treffer.</div>`}
     </div>`;
 }
+/* Jahr-Dropdown: alle Jahre mit Daten (Ist/Budget/Buchungen) plus Vorjahr, gewähltes und Folgejahr */
+function fbJahrOptionen(year) {
+  const set = new Set([year - 1, year, year + 1, ...fbVorhandeneJahre()]);
+  (cache.budget || []).forEach(it => { try { const d = JSON.parse(it.Title || "{}"); if (d.y) set.add(parseInt(d.y, 10)); } catch (e) {} });
+  Object.keys(fbBuchYearCache || {}).forEach(y => set.add(parseInt(y, 10)));
+  return [...set].filter(Number.isFinite).sort((a, b) => a - b);
+}
 function fbVorhandeneJahre() {
   const jahre = new Set([filters.budgetYear]);
   cache.budget.forEach(it => {
@@ -4023,7 +4031,7 @@ function fbSearchRender() {
 function renderFbMgmt(el, ctx) {
   const { year, ist, vals, fkt, N } = ctx;
   const fmt = v => Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH");
-  const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
+  const yearOpts = fbJahrOptionen(year)
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
   // Zwei Erlösströme: Software = Lizenzen, Backoffice = BPO (je mit eigenem Budget)
   const b = vals.b, t = vals.tot;
@@ -4101,7 +4109,7 @@ function renderFbMgmt(el, ctx) {
 function renderFbAktMonat(el, ctx) {
   const { year, bud, ist, G, vals, rowsOut, fkt, N, budH1, budJahr, istVal } = ctx;
   const fmt = v => Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH");
-  const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i).map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
+  const yearOpts = fbJahrOptionen(year).map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
   const srcOf = key => FB_SRC[key] || [key];
   const prev = N > 1 ? fbIstMonate(year, N - 1) : [];
   const hatPrev = prev.length > 0;
@@ -4173,7 +4181,7 @@ function renderFbVorjahr(el, ctx) {
   const vy = year - 1;
   const vjIst = fbIst(vy);
   const fmt = v => Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH");
-  const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
+  const yearOpts = fbJahrOptionen(year)
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
   const srcOf = key => FB_SRC[key] || [key];
   // Basiswerte je Key: Jahr und H1-Äquivalent (÷2 bei Jahresabschluss, ×2 umgekehrt)
@@ -4280,7 +4288,7 @@ function renderFbMonate(el, ctx) {
   // Anzeige nur bis zum letzten importierten Ist-Monat (YTD); Forecast-Monate bleiben weg, Jahr-Hochrechnung bleibt
   const MKV = FB_MK.slice(0, N);
   const fmt = v => Math.round(v) === 0 ? "—" : Math.round(v).toLocaleString("de-CH");
-  const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
+  const yearOpts = fbJahrOptionen(year)
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
   const MK = ["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
   const srcOf = key => FB_SRC[key] || [key];
@@ -4431,7 +4439,7 @@ function renderBudget(el) {
   const sumErloes = erloes.reduce((s,v) => s + v, 0);
   const monthSums = BUDGET_MONTH_FIELDS.map((f, i) => monthSumsSaaS[i] + monthSumsBPO[i] - erloes[i]);
 
-  const yearOpts = [year-1, year, year+1].filter((v,i,a) => a.indexOf(v) === i)
+  const yearOpts = fbJahrOptionen(year)
     .map(y => `<option ${y === year ? "selected" : ""}>${y}</option>`).join("");
 
   /* Kein programmatischer value-Tausch in onfocus/onblur — das unterdrückte
