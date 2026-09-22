@@ -19,7 +19,7 @@
    budgetRows, budgetChfOf, budgetIsSaaS, budgetErloes, BUDGET_MONTH_FIELDS,
    deleteItem, reload, escape, toast, render, currentView. */
 
-const JB_VERSION = "1.120.0";
+const JB_VERSION = "1.121.0";
 const JB_GES = ["Apriko AG", "Maverix AG"];
 const JB_PERSONAL = new Set(["SW_Lohn", "SW_SV", "SW_UebrPA", "BO_Lohn", "BO_SV", "BO_UebrPA"]);
 const JB_ERTRAG = new Set(["SW_Ertrag", "BO_Ertrag"]);
@@ -373,7 +373,7 @@ function renderJahresbudget(el) {
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
       <label style="font-size:12px;color:var(--text-dim)">Budgetjahr <select onchange="jbSetYear(this.value)" style="padding:4px 6px;font-size:12px;margin-left:4px">${years.map(v => `<option ${v === y ? "selected" : ""}>${v}</option>`).join("")}<option value="${Math.max(...years) + 1}">${Math.max(...years) + 1} (neu)</option></select></label>
       <span style="font-size:12px;color:var(--text-dim)">Basis: Ist ${basis}${m.hasIst ? "" : ` <span style="color:var(--danger)">— keine Ist-Daten ${basis} im Budgetvergleich importiert</span>`}</span>
-      <input type="search" placeholder="Suche Konto, Bezeichnung, Notiz …" value="${escape(jbState.q)}" style="font-size:12px;padding:4px 8px;width:240px" oninput="jbState.q=this.value;render()">
+      <input type="search" id="jb-suche" placeholder="Suche Konto, Bezeichnung, Notiz …" value="${escape(jbState.q)}" style="font-size:12px;padding:4px 8px;width:240px" oninput="bpSucheTippen(this, jbState, 'q')">
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
       <div class="card stat-card"><div class="stat-label">Ertrag netto ${y}</div><div class="stat-value">${jbFmt(vb.DLTOT)}</div><div style="font-size:11px;color:var(--text-faint)">Ertragsbudget: SaaS ${jbFmt(m.eb.saas)} · BPO ${jbFmt(m.eb.bpo)}${m.eb.erloes ? ` · Erlösmind. dort ${jbFmt(m.eb.erloes)}` : ""}</div></div>
@@ -428,7 +428,7 @@ function renderJahresbudgetMonate(el, ctx) {
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
       <label style="font-size:12px;color:var(--text-dim)">Budgetjahr <select onchange="jbSetYear(this.value)" style="padding:4px 6px;font-size:12px;margin-left:4px">${years.map(v => `<option ${v === y ? "selected" : ""}>${v}</option>`).join("")}</select></label>
       <div style="display:flex;gap:4px">${[["all", "Total"], ...JB_GES.map(g => [g, g])].map(([id, l]) => `<button class="btn btn-sm" style="${jbState.mGes === id ? "background:var(--accent);color:#fff" : ""}" onclick="jbState.mGes='${id}';render()">${escape(l)}</button>`).join("")}</div>
-      <input type="search" placeholder="Suche Konto, Bezeichnung, Notiz …" value="${escape(jbState.q)}" style="font-size:12px;padding:4px 8px;width:240px" oninput="jbState.q=this.value;render()">
+      <input type="search" id="jb-suche" placeholder="Suche Konto, Bezeichnung, Notiz …" value="${escape(jbState.q)}" style="font-size:12px;padding:4px 8px;width:240px" oninput="bpSucheTippen(this, jbState, 'q')">
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
       <div class="card stat-card"><div class="stat-label">EBITDA ${y}${jbState.mGes !== "all" ? " · " + escape(jbState.mGes) : ""}</div><div class="stat-value" style="color:${yearVal.EBITDA < 0 ? "var(--danger)" : "inherit"}">${jbFmt(yearVal.EBITDA)}</div><div style="font-size:11px;color:var(--text-faint)">Bester Monat ${JB_MONATE[perMonth.map(p => p.EBITDA).indexOf(Math.max(...perMonth.map(p => p.EBITDA)))]} · schwächster ${JB_MONATE[perMonth.map(p => p.EBITDA).indexOf(Math.min(...perMonth.map(p => p.EBITDA)))]}</div></div>

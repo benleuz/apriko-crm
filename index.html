@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.305.0"></script>
-<script src="apriko-api.js?v=1.305.0"></script>
-<script src="lohncheck.js?v=1.305.0"></script>
-<script src="personalbudget.js?v=1.305.0"></script>
-<script src="jahresbudget.js?v=1.305.0"></script>
-<script src="budgetpositionen.js?v=1.305.0"></script>
-<script src="lohnchecklistetemp.js?v=1.305.0"></script>
+<script src="apriko-filters.js?v=1.308.0"></script>
+<script src="apriko-api.js?v=1.308.0"></script>
+<script src="lohncheck.js?v=1.308.0"></script>
+<script src="personalbudget.js?v=1.308.0"></script>
+<script src="jahresbudget.js?v=1.308.0"></script>
+<script src="budgetpositionen.js?v=1.308.0"></script>
+<script src="lohnchecklistetemp.js?v=1.308.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -962,7 +962,7 @@
         <div class="nav-group-items">
           <button data-view="bpocheck"><span class="ic">☑</span> Lohn Checkliste Temp</button>
           <button data-view="clintern"><span class="ic">☑</span> Lohn Checkliste intern</button>
-          <button data-view="clfibu"><span class="ic">☑</span> FIBU Monatsabschluss</button>
+          <button data-view="clfibu"><span class="ic">☑</span> FIBU Checkliste Monatsabschluss</button>
           <button data-view="lct"><span class="ic">☑</span> Checkliste Lohn Temp 2.0</button>
           <button data-view="lohnartenstamm"><span class="ic">📋</span> Lohnartenstamm</button>
           <button data-view="tarifarten"><span class="ic">🏷️</span> Tarifarten</button>
@@ -1001,7 +1001,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.305.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.308.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1500,7 +1500,7 @@ const VIEW_TITLES = {
   dashboard: "Dashboard", pipeline: "Pipeline",
   customers: "Kunden", companies: "Firmen", contacts: "Kontakte", tasks: "Aufgaben",
   revenue: "Umsätze", stats: "Statistik", budget: "Ertragsbudget", budgetvgl: "Budgetvergleich", personalbudget: "Budget Personalaufwand", jahresbudget: "Jahresbudget", budgetpos: "Budgetpositionen (Erfassung & Jahresübersicht)",
-  bpocheck: "Lohn Checkliste Temp", clintern: "Lohn Checkliste intern", clfibu: "FIBU Monatsabschluss",
+  bpocheck: "Lohn Checkliste Temp", clintern: "Lohn Checkliste intern", clfibu: "FIBU Checkliste Monatsabschluss",
   lct: "Checkliste Lohn Temp 2.0",
   lohnartenstamm: "Lohnartenstamm",
   tarifarten: "Tarifarten",
@@ -2747,15 +2747,18 @@ function fbParse(item, want) {
     return d.cfg === want ? { id: item.id, ...d } : null;
   } catch (e) { return null; }
 }
-let fbDataColumnOk = null;
+let fbDataColumnOk = null, fbDataColumnFehler = "";
 async function fbEnsureDataColumn() {
   if (fbDataColumnOk) return true;
   try {
-    const cols = await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/columns?$select=name`);
-    if ((cols.value || []).some(c => c.name === "Data")) { fbDataColumnOk = true; return true; }
-    await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/columns`, { method: "POST", body: JSON.stringify({ name: "Data", displayName: "Data", text: { allowMultipleLines: true, textType: "plain", maxLength: 100000 } }) });
+    const cols = await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/columns?$select=name,displayName`);
+    if ((cols.value || []).some(c => c.name === "Data" || c.displayName === "Data")) { fbDataColumnOk = true; return true; }
+  } catch (e) { fbDataColumnFehler = "Spalten lesen: " + e.message; }
+  try {
+    // Anlegen braucht Sites.Manage.All — ohne dieses Recht schlägt es fehl (dann Spalte manuell anlegen, siehe Fehlermeldung)
+    await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/columns`, { method: "POST", body: JSON.stringify({ name: "Data", displayName: "Data", text: { allowMultipleLines: true, textType: "plain" } }) });
     fbDataColumnOk = true; return true;
-  } catch (e) { console.warn("Data-Spalte:", e.message); return false; }
+  } catch (e) { fbDataColumnFehler = "Spalte anlegen: " + e.message; console.warn("Data-Spalte:", e.message); return false; }
 }
 function fbSplitFields(obj) {
   const title = JSON.stringify(obj);
@@ -2832,7 +2835,7 @@ async function fbSaveItem(obj, existingId) {
   let fields = fbSplitFields(obj);
   const raw = existingId ? cache.budget.find(x => x.id == existingId) : null;
   const braucht = fields.Data || (raw && raw.Data);   // Data nur anfassen, wenn nötig (Spalte evtl. noch nicht vorhanden)
-  if (braucht) { if (!(await fbEnsureDataColumn())) throw new Error("Eintrag zu lang für den Title (255 Zeichen) und die Spalte «Data» in der Liste Budget konnte nicht angelegt werden."); }
+  if (braucht) { if (!(await fbEnsureDataColumn())) throw new Error("Eintrag zu lang für den Title (255 Zeichen). Bitte in SharePoint in der Liste «Budget» einmalig eine Spalte «Data» anlegen (Typ: Mehrere Textzeilen, Nur-Text) — danach klappt es automatisch. Details: " + fbDataColumnFehler); }
   else delete fields.Data;
   if (existingId) {
     const alt = raw ? { Title: raw.Title, Data: raw.Data } : null;
@@ -8886,8 +8889,14 @@ function renderCheckliste(el, typ) {
   }
   // Kunden: aktive, bei intern/fibu nur mit entsprechendem Workflow-Flag
   const flagName = typ === "intern" ? "intern" : typ === "fibu" ? "fibu" : null;
-  const kunden = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv")
+  // Start-/Enddatum des Kunden: erscheint nur in Monaten ab dem Startmonat und bis zum Vertragsende
+  const imMonat = c => {
+    const st = c.StartDate ? String(c.StartDate).slice(0, 7) : "", en = c.EndDate ? String(c.EndDate).slice(0, 7) : "";
+    return (!st || st <= monat) && (!en || en >= monat);
+  };
+  const kunden = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv" || (c.EndDate && String(c.EndDate).slice(0, 7) >= monat))
     .filter(c => !flagName || kundenFlag(c.id, flagName))
+    .filter(imMonat)
     .map(c => {
       const comp = cache.companies.find(x => x.id == c.CompanyId);
       return { id: String(c.id), name: comp ? comp.Title : (c.Title || "Kunde " + c.id) };
@@ -8912,7 +8921,9 @@ function renderCheckliste(el, typ) {
   let locked = false, lockBanner = "";
   if (typ === "intern") {
     const vm = wfVormonat(monat);
-    if (vm >= WF_START_MONAT) {
+    const selCust = cache.customers.find(c => String(c.id) === sel);
+    const startMonat = selCust && selCust.StartDate ? String(selCust.StartDate).slice(0, 7) : "";
+    if (vm >= WF_START_MONAT && (!startMonat || vm >= startMonat)) {
       const keyVor = wfCheckFileKey(typ, vm);
       if (!(keyVor in wfCheckCache)) {
         if (typeof siteId !== "undefined" && siteId) wfCheckLoad(typ, vm).then(() => render());

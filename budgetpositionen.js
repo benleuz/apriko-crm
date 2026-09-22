@@ -10,7 +10,10 @@
    Abhängigkeiten: jahresbudget.js (jbBuild, jbSaveRow, jbFindRow, jbPos*, jbFmt, jbNum, JB_*),
    index.html (fbSaveItem, reload, escape, toast, render, FB_PLAN, FB_LABELS, FB_SRC). */
 
-const BP_VERSION = "1.124.0";
+const BP_VERSION = "1.125.0";
+/* Suche: nach jedem Tastendruck wird neu gezeichnet — Fokus und Cursor ins Suchfeld zurückholen */
+function bpSucheTippen(el, state, key) { state[key] = el.value; const pos = el.selectionStart; render(); const n = document.getElementById(el.id); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} } }
+
 const BP_MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 const BP_FAELL = [["m", "monatlich (÷12)"], ["q", "quartalsweise (÷4)"], ["e", "einmalig im Monat"], ["h", "halbjährlich (÷2)"], ["r", "von – bis"]];
 
@@ -335,7 +338,7 @@ function renderBudgetpositionen(el) {
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
       <div style="display:flex;gap:4px">${JB_GES.map(g => `<button class="btn btn-sm" style="${jbSameGes(g, ges) ? "background:var(--accent);color:#fff" : ""}" onclick="bpSetGes('${g}')">${escape(g)}</button>`).join("")}</div>
       <label style="font-size:12px;color:var(--text-dim)">Budgetjahr <select onchange="bpSetYear(this.value)" style="padding:4px 6px;font-size:12px;margin-left:4px">${years.map(v => `<option ${v === y ? "selected" : ""}>${v}</option>`).join("")}</select></label>
-      <input type="search" placeholder="Suche Konto, Text, Notiz …" value="${escape(bpState.q)}" style="font-size:12px;padding:4px 8px;width:220px" oninput="bpState.q=this.value;render()">
+      <input type="search" id="bp-suche" placeholder="Suche Konto, Text, Notiz …" value="${escape(bpState.q)}" style="font-size:12px;padding:4px 8px;width:220px" oninput="bpSucheTippen(this, bpState, 'q')">
       ${model.hasIst ? "" : `<span style="font-size:12px;color:var(--danger)">Keine Ist-Daten ${y - 1} — Konten stammen nur aus manuellen Ergänzungen</span>`}
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
