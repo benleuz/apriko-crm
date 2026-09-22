@@ -19,7 +19,7 @@
    budgetRows, budgetChfOf, budgetIsSaaS, budgetErloes, BUDGET_MONTH_FIELDS,
    deleteItem, reload, escape, toast, render, currentView. */
 
-const JB_VERSION = "1.119.0";
+const JB_VERSION = "1.120.0";
 const JB_GES = ["Apriko AG", "Maverix AG"];
 const JB_PERSONAL = new Set(["SW_Lohn", "SW_SV", "SW_UebrPA", "BO_Lohn", "BO_SV", "BO_UebrPA"]);
 const JB_ERTRAG = new Set(["SW_Ertrag", "BO_Ertrag"]);
@@ -307,7 +307,9 @@ function renderJahresbudget(el) {
 
   if (jbState.view === "monate") { renderJahresbudgetMonate(el, { y, basis, m, years, visible }); return; }
   const td = (h, extra) => `<td style="text-align:right;font-family:var(--font-mono);white-space:nowrap;${extra || ""}">${h}</td>`;
-  const delta = (b, h) => { const d = b - h; return Math.round(d) === 0 ? "" : `<span style="color:${d > 0 ? "var(--danger)" : "var(--ok, #3a3)"}">${d > 0 ? "+" : ""}${jbFmt(d)}</span>`; };
+  // Δ-Färbung: bei Ertrags-/Ergebniszeilen ist mehr Budget als Hochrechnung gut (grün), bei Aufwand schlecht (rot)
+  const positivGut = key => JB_ERTRAG.has(key) || ["ERTRAG_BRUTTO", "DLTOT", "BETOT", "EBITDA", "RESULT", "EBIT"].includes(key);
+  const delta = (b, h, key) => { const d = b - h; if (Math.round(d) === 0) return ""; const gut = positivGut(key) ? d > 0 : d < 0; return `<span style="color:${gut ? "var(--ok, #3a3)" : "var(--danger)"}">${d > 0 ? "+" : ""}${jbFmt(d)}</span>`; };
   const detailRows = key => (m.byKey[key] || []).filter(visible).map(r => {
     const bid = r.g + "|" + r.kt;
     const buch = buchMap[bid] && buchMap[bid].buch && buchMap[bid].buch.length ? buchMap[bid].buch : null;
@@ -324,7 +326,7 @@ function renderJahresbudget(el) {
           ? hasPos ? `<span style="font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--accent)" title="Summe der ${r.pos.length} Positionen (erfasst im Menü Budgetpositionen)">${jbFmt(jbPosSum(r))}</span>`
             : `<span style="font-size:11px;color:var(--warn)" title="Noch keine Positionen im Menü Budgetpositionen erfasst — zählt mit 0">⚠ offen</span>${r.man ? `<span style="cursor:pointer;color:var(--text-faint);margin-left:4px" title="Konto entfernen" onclick="jbResetRow(${gi(r.g, r.kt)})">✕</span>` : ""}`
           : `<span style="font-family:var(--font-mono);font-size:12px">${jbFmt(r.bud)}</span>`}</td>
-        ${td(r.editable ? delta(jbRowBudget(r), r.hoch) : "", "font-size:11px")}
+        ${td(r.editable ? delta(jbRowBudget(r), r.hoch, r.key) : "", "font-size:11px")}
         <td style="padding:3px 6px;vertical-align:top;font-size:11px">${hasPos ? `
           <span style="cursor:pointer;color:var(--accent)" onclick="jbTogglePos('${escape(bid).replace(/'/g, "\\'")}')" title="Details ${jbState.pos[bid] ? "zuklappen" : "anzeigen"}">${jbState.pos[bid] ? "▾" : "▸"} ${r.pos.length} Position${r.pos.length > 1 ? "en" : ""}</span>
           ${jbState.pos[bid] ? `<div style="display:grid;grid-template-columns:minmax(140px,1fr) 80px minmax(100px,1fr);gap:1px 8px;margin-top:3px;color:var(--text-dim)">${r.pos.map(p => `<span>${escape(p.t || "—")}</span><span style="text-align:right;font-family:var(--font-mono)">${jbFmt(p.v || 0)}</span><span style="color:var(--text-faint)">${escape(p.n || "")}</span>`).join("")}</div>` : ""}`
@@ -348,7 +350,7 @@ function renderJahresbudget(el) {
         ${td(`<span style="color:var(--text-faint)">${jbFmt(keys.reduce((s, k) => s + (m.byKey[k] || []).reduce((a, r) => a + (r.ist || 0), 0), 0))}</span>`, "font-size:11.5px")}
         ${td(`<span style="color:var(--text-dim)">${jbFmt(vh[key] * sg)}</span>`)}
         ${td(`<b>${jbFmt(vb[key] * sg)}</b>`)}
-        ${td(delta(vb[key] * sg, vh[key] * sg), "font-size:11px")}
+        ${td(delta(vb[key] * sg, vh[key] * sg, key), "font-size:11px")}
         <td></td>
         <td style="font-size:10.5px;color:var(--text-faint)">${JB_GES.map(g => `${g.split(" ")[0]} ${jbFmt(vg[g][key] * sg)}`).join(" · ")}</td>
       </tr>
@@ -357,12 +359,12 @@ function renderJahresbudget(el) {
   const calcRow = (key, label, strong) => `
       <tr style="border-top:2px solid var(--border);${strong ? "font-weight:700" : "font-weight:600"};background:var(--bg-elev)">
         <td style="padding:6px">${escape(label)}</td><td></td>
-        ${td(`<span style="color:var(--text-dim)">${jbFmt(vh[key])}</span>`)}${td(jbFmt(vb[key]))}${td(delta(vb[key], vh[key]), "font-size:11px")}
+        ${td(`<span style="color:var(--text-dim)">${jbFmt(vh[key])}</span>`)}${td(jbFmt(vb[key]))}${td(delta(vb[key], vh[key], key), "font-size:11px")}
         <td></td><td style="font-size:10.5px;color:var(--text-faint)">${JB_GES.map(g => `${g.split(" ")[0]} ${jbFmt(vg[g][key])}`).join(" · ")}</td></tr>`;
   const body = FB_PLAN.map(row => {
     if (row[0] === "d") return posRow(row[1], FB_LABELS[row[1]] || row[1], row[2] ? 22 : 6, false);
     if (row[0] === "d2") return posRow(row[1], row[2], 22, false, row[3]);
-    if (row[0] === "g") return `<tr style="border-top:1px solid var(--border);font-weight:600"><td style="padding:6px">${escape(row[2])}</td><td></td>${td(`<span style="color:var(--text-dim)">${jbFmt(vh[row[1]])}</span>`)}${td(jbFmt(vb[row[1]]))}${td(delta(vb[row[1]], vh[row[1]]), "font-size:11px")}<td></td><td style="font-size:10.5px;color:var(--text-faint)">${JB_GES.map(g => `${g.split(" ")[0]} ${jbFmt(vg[g][row[1]])}`).join(" · ")}</td></tr>`;
+    if (row[0] === "g") return `<tr style="border-top:1px solid var(--border);font-weight:600"><td style="padding:6px">${escape(row[2])}</td><td></td>${td(`<span style="color:var(--text-dim)">${jbFmt(vh[row[1]])}</span>`)}${td(jbFmt(vb[row[1]]))}${td(delta(vb[row[1]], vh[row[1]], row[1]), "font-size:11px")}<td></td><td style="font-size:10.5px;color:var(--text-faint)">${JB_GES.map(g => `${g.split(" ")[0]} ${jbFmt(vg[g][row[1]])}`).join(" · ")}</td></tr>`;
     if (row[0] === "c") return calcRow(row[1], row[1] === "RESULT" ? "Jahresgewinn / (-verlust)" : row[2], ["EBITDA", "RESULT"].includes(row[1]));
     return "";
   }).join("");
