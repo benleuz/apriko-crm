@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.308.0"></script>
-<script src="apriko-api.js?v=1.308.0"></script>
-<script src="lohncheck.js?v=1.308.0"></script>
-<script src="personalbudget.js?v=1.308.0"></script>
-<script src="jahresbudget.js?v=1.308.0"></script>
-<script src="budgetpositionen.js?v=1.308.0"></script>
-<script src="lohnchecklistetemp.js?v=1.308.0"></script>
+<script src="apriko-filters.js?v=1.309.0"></script>
+<script src="apriko-api.js?v=1.309.0"></script>
+<script src="lohncheck.js?v=1.309.0"></script>
+<script src="personalbudget.js?v=1.309.0"></script>
+<script src="jahresbudget.js?v=1.309.0"></script>
+<script src="budgetpositionen.js?v=1.309.0"></script>
+<script src="lohnchecklistetemp.js?v=1.309.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1001,7 +1001,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.308.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.309.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -3348,9 +3348,10 @@ async function fbLoadBuchInner(year) {
         const k = bekannt.find(b => ges.toLowerCase() !== b.toLowerCase() && ges.toLowerCase().startsWith(b.toLowerCase()));
         if (k) ges = k;
         const sig = b => (Array.isArray(b) ? b : [b]).map(x => String(x ?? "").trim()).join("|");
-        Object.entries(data.konten || {}).forEach(([kt, obj]) => {
+        Object.entries(data.konten || {}).forEach(([kt, objRoh]) => {
           const key = ges + "|" + kt;
-          if (!out[key]) { out[key] = { ...obj, buch: (obj.buch || []).slice() }; return; }
+          const obj = { ...objRoh, buch: (objRoh.buch || []).filter(b => { const bj = fbBuchJahr(b); return bj === null || bj === parseInt(year, 10); }) };
+          if (!out[key]) { out[key] = obj; return; }
           const have = new Set(out[key].buch.map(sig));
           (obj.buch || []).forEach(b => { const sg = sig(b); if (!have.has(sg)) { have.add(sg); out[key].buch.push(b); } });
           if (obj.bez && !out[key].bez) out[key].bez = obj.bez;
@@ -3360,6 +3361,8 @@ async function fbLoadBuchInner(year) {
   } catch (e) { /* Ordner existiert noch nicht → keine Buchungen */ }
   fbBuchYearCache[year] = out;
 }
+/* Jahr einer Buchung aus dem Datum «dd.mm.yy» / «dd.mm.yyyy» (null, wenn nicht lesbar) */
+function fbBuchJahr(b) { const m = /^\s*(\d{1,2})\.(\d{1,2})\.(\d{2,4})/.exec(String((b && b[0]) || "")); if (!m) return null; return m[3].length === 2 ? 2000 + parseInt(m[3], 10) : parseInt(m[3], 10); }
 function fbBuchAll(year) {
   if (!fbBuchYearCache[year]) {
     if (typeof siteId !== "undefined" && siteId) {
@@ -3577,12 +3580,15 @@ async function fbMultiRun() {
         Object.entries(cacheY).forEach(([k, obj]) => { if (k.startsWith(ges + "|")) merged[k.slice(ges.length + 1)] = { ...obj, buch: (obj.buch || []).slice() }; });
         const sig = b => (Array.isArray(b) ? b : [b]).map(x => String(x ?? "").trim()).join("|");
         const dkey = b => { const m = /^\s*(\d{1,2})\.(\d{1,2})\.(\d{2,4})/.exec(String(b[0] || "")); return m ? (m[3].length === 2 ? "20" + m[3] : m[3]) + m[2].padStart(2, "0") + m[1].padStart(2, "0") : "99999999"; };
-        let neu = 0, dup = 0;
+        let neu = 0, dup = 0, fremdJahr = 0;
         Object.entries(e.parsedBuch).forEach(([kt, obj]) => {
           const m = merged[kt] || (merged[kt] = { ...obj, buch: [] });
           Object.keys(obj).forEach(k => { if (k !== "buch") m[k] = obj[k]; });
           const have = new Set(m.buch.map(sig));
-          (obj.buch || []).forEach(b => { const sg = sig(b); if (have.has(sg)) { dup++; return; } have.add(sg); m.buch.push(b); neu++; });
+          (obj.buch || []).forEach(b => {
+            const bj = fbBuchJahr(b); if (bj !== null && bj !== parseInt(year, 10)) { fremdJahr++; return; }   // Kontenblatt enthält Vorjahre → nicht ins Zieljahr
+            const sg = sig(b); if (have.has(sg)) { dup++; return; } have.add(sg); m.buch.push(b); neu++;
+          });
           m.buch.sort((a, b) => dkey(a).localeCompare(dkey(b)));
         });
         await fbSaveBuchFile(year, ges, merged);
@@ -3590,7 +3596,7 @@ async function fbMultiRun() {
         Object.entries(merged).forEach(([kt, obj]) => { fbBuchYearCache[year][ges + "|" + kt] = obj; });
         const kn = Object.keys(e.parsedBuch).length;
         const bn = Object.values(merged).reduce((s, k) => s + k.buch.length, 0);
-        meld.push(e.name + " → " + ges + ": " + neu + " neue Buchungen" + (dup ? " (" + dup + " bereits vorhanden, übersprungen)" : "") + " · Bestand " + year + ": " + bn + " Buchungen in " + Object.keys(merged).length + " Konten (" + kn + " in dieser Datei)");
+        meld.push(e.name + " → " + ges + ": " + neu + " neue Buchungen" + (dup ? " (" + dup + " bereits vorhanden, übersprungen)" : "") + (fremdJahr ? " (" + fremdJahr + " Buchungen anderer Jahre ignoriert)" : "") + " · Bestand " + year + ": " + bn + " Buchungen in " + Object.keys(merged).length + " Konten (" + kn + " in dieser Datei)");
       } else if (e.art === "er") {
         const ges = (e.ges || "").trim();
         if (!ges) { meld.push(e.name + ": übersprungen (keine Gesellschaft)"); continue; }
