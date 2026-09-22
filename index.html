@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.296.0"></script>
-<script src="apriko-api.js?v=1.296.0"></script>
-<script src="lohncheck.js?v=1.296.0"></script>
-<script src="personalbudget.js?v=1.296.0"></script>
-<script src="jahresbudget.js?v=1.296.0"></script>
-<script src="budgetpositionen.js?v=1.296.0"></script>
-<script src="lohnchecklistetemp.js?v=1.296.0"></script>
+<script src="apriko-filters.js?v=1.298.0"></script>
+<script src="apriko-api.js?v=1.298.0"></script>
+<script src="lohncheck.js?v=1.298.0"></script>
+<script src="personalbudget.js?v=1.298.0"></script>
+<script src="jahresbudget.js?v=1.298.0"></script>
+<script src="budgetpositionen.js?v=1.298.0"></script>
+<script src="lohnchecklistetemp.js?v=1.298.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1001,7 +1001,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.296.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.298.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1889,15 +1889,16 @@ function toggleNavGroup(name) {
   if (!g) return;
   g.classList.toggle("collapsed");
   try {
-    const st = JSON.parse(localStorage.getItem("navCollapsed") || "{}");
+    const st = JSON.parse(localStorage.getItem("navCollapsed2") || "{}");
     st[name] = g.classList.contains("collapsed");
-    localStorage.setItem("navCollapsed", JSON.stringify(st));
+    localStorage.setItem("navCollapsed2", JSON.stringify(st));
   } catch (e) {}
 }
 function restoreNavGroups() {
   // Standard: alle Gruppen eingeklappt (Menü ist gross geworden); explizit geöffnete bleiben offen (localStorage)
   try {
-    const st = JSON.parse(localStorage.getItem("navCollapsed") || "{}");
+    // neuer Schlüssel (navCollapsed2): alte gespeicherte «alles offen»-Zustände werden ignoriert
+    const st = JSON.parse(localStorage.getItem("navCollapsed2") || "{}");
     document.querySelectorAll(".nav-group").forEach(g => { const name = g.dataset.group; if (st[name] === false) g.classList.remove("collapsed"); else g.classList.add("collapsed"); });
   } catch (e) {}
 }
@@ -8069,8 +8070,11 @@ async function onbpLaden() {
   const v = ONBP_VORLAGEN[onbpState.variante || onbpVarianteFuer(c)];
   onbpState.lade = true; onbpState.fehler = ""; onbpState.html = ""; render();
   try {
-    const res = await fetch(v.datei + "?v=" + Date.now());
-    if (!res.ok) throw new Error("Vorlage nicht gefunden: " + v.datei + " (HTTP " + res.status + ")");
+    // Vorlage im Ordner parametrierung/ oder direkt im Repo-Root
+    const kandidaten = [v.datei, v.datei.replace(/^parametrierung\//, "")];
+    let res = null;
+    for (const pfad of kandidaten) { res = await fetch(pfad + "?v=" + Date.now()); if (res.ok) break; }
+    if (!res || !res.ok) throw new Error("Vorlage nicht gefunden: " + kandidaten.join(" oder ") + " (HTTP " + (res ? res.status : "?") + ")");
     let html = await res.text();
     const comp = cache.companies.find(x => String(x.id) === String(c.CompanyId)) || {};
     if (crmStamm === null) { try { await crmLoadStamm(); } catch (e) {} }
