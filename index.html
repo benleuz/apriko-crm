@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.309.0"></script>
-<script src="apriko-api.js?v=1.309.0"></script>
-<script src="lohncheck.js?v=1.309.0"></script>
-<script src="personalbudget.js?v=1.309.0"></script>
-<script src="jahresbudget.js?v=1.309.0"></script>
-<script src="budgetpositionen.js?v=1.309.0"></script>
-<script src="lohnchecklistetemp.js?v=1.309.0"></script>
+<script src="apriko-filters.js?v=1.311.0"></script>
+<script src="apriko-api.js?v=1.311.0"></script>
+<script src="lohncheck.js?v=1.311.0"></script>
+<script src="personalbudget.js?v=1.311.0"></script>
+<script src="jahresbudget.js?v=1.311.0"></script>
+<script src="budgetpositionen.js?v=1.311.0"></script>
+<script src="lohnchecklistetemp.js?v=1.311.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1001,7 +1001,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.309.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.311.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -3361,6 +3361,50 @@ async function fbLoadBuchInner(year) {
   } catch (e) { /* Ordner existiert noch nicht → keine Buchungen */ }
   fbBuchYearCache[year] = out;
 }
+/* ---------- Lieferanten-Auswertung aus den Buchungstexten ----------
+   Buchungstext → Lieferant: Zahlungsart-Wörter (VISA, DEB, TWINT, LSV, E-Banking …), Belegnummern, Daten, Beträge
+   und Sonderzeichen werden entfernt; das erste verbleibende Wort ist der Schlüssel («GOOGLE»), angezeigt wird die
+   häufigste bereinigte Schreibweise. So werden «VISA DEB GOOGLE» und «Visa Google Cloud» zu einer Position. */
+const FB_LIEF_STOP = new Set(["visa","deb","debit","kreditkarte","credit","card","mastercard","twint","lsv","dauerauftrag","e-banking","ebanking","zahlung","zahlungseingang","überweisung","ueberweisung","vergütung","verguetung","belastung","gutschrift","rechnung","re","rg","inv","invoice","nr","no","ref","chf","eur","usd","www","com","ch","ag","gmbh","sa","sarl","ltd","inc","llc","the","und","and","für","fuer","von","der","die","das","kartenzahlung","abbuchung","bezug","einzahlung","auszahlung","monat","tp","ta","aj","ej","jan","feb","mär","mar","apr","mai","jun","jul","aug","sep","okt","oct","nov","dez","dec"]);
+function fbLieferantKey(text) {
+  let t = String(text || "").toLowerCase().replace(/\d{1,2}\.\d{1,2}\.\d{2,4}/g, " ").replace(/[0-9]+([.,'’][0-9]+)*/g, " ").replace(/[*_/\\|,;:()\[\]"'+#&%]+/g, " ").replace(/\s+/g, " ").trim();
+  const w = t.split(" ").filter(x => x.length >= 2 && !FB_LIEF_STOP.has(x));
+  if (!w.length) return { key: "", anzeige: "" };
+  // Schlüssel = erstes Wort; zweites Wort dazu, wenn das erste sehr kurz/generisch ist (z.B. «swiss»)
+  const key = w[0].length <= 4 && w[1] ? w[0] + " " + w[1] : w[0];
+  return { key, anzeige: w.slice(0, 3).join(" ") };
+}
+async function fbLieferantenExcel(year) {
+  const buch = fbBuchAll(year);
+  if (!Object.keys(buch).length) { toast("Keine Buchungen für " + year + " geladen — Kontenblätter importieren.", true); return; }
+  await lcLoadXlsx();
+  const bez = {}; Object.entries(buch).forEach(([id, obj]) => { const kt = id.split("|")[1]; if (obj && obj.bez && !bez[kt]) bez[kt] = obj.bez; });
+  const agg = {}, detail = {};
+  Object.entries(buch).forEach(([id, obj]) => {
+    const [g, kt] = id.split("|");
+    (obj.buch || []).forEach(b => {
+      const { key, anzeige } = fbLieferantKey(b[1]); if (!key) return;
+      const betrag = parseFloat(b[2]) || 0;
+      const a = agg[key] || (agg[key] = { key, n: 0, total: 0, namen: {}, konten: new Set(), ges: new Set() });
+      a.n++; a.total += betrag; a.namen[anzeige] = (a.namen[anzeige] || 0) + 1; a.konten.add(kt); a.ges.add(g);
+      const dk = key + "|" + g + "|" + kt; const d = detail[dk] || (detail[dk] = { key, g, kt, n: 0, total: 0 }); d.n++; d.total += betrag;
+    });
+  });
+  const name = a => Object.entries(a.namen).sort((x, y) => y[1] - x[1])[0][0].replace(/\b\w/g, c => c.toUpperCase());
+  const gesKurz = g => /apriko/i.test(g) ? "A" : (/maverix/i.test(g) ? "M" : g);
+  const liste = Object.values(agg).sort((x, y) => Math.abs(y.total) - Math.abs(x.total));
+  const r1 = [["Lieferant / Kostenpunkt", "Ges", "FIBU-Konto", "Bezeichnung", "Buchungen", "Total " + year, "Ø pro Buchung"]];
+  liste.forEach(a => r1.push([name(a), [...a.ges].map(gesKurz).sort().join("+"), [...a.konten].sort().join(", "), [...a.konten].sort().map(k => bez[k] || "").filter(Boolean).join(" / "), a.n, Math.round(a.total * 100) / 100, Math.round(a.total / a.n * 100) / 100]));
+  const r2 = [["Lieferant / Kostenpunkt", "Ges", "FIBU-Konto", "Bezeichnung", "Buchungen", "Total " + year]];
+  Object.values(detail).sort((x, y) => x.key.localeCompare(y.key) || x.g.localeCompare(y.g) || x.kt.localeCompare(y.kt)).forEach(d => r2.push([name(agg[d.key]), gesKurz(d.g), d.kt, bez[d.kt] || "", d.n, Math.round(d.total * 100) / 100]));
+  const wb = window.XLSX.utils.book_new();
+  const ws1 = window.XLSX.utils.aoa_to_sheet(r1); ws1["!cols"] = [32, 6, 14, 30, 10, 14, 12].map(w => ({ wch: w })); ws1["!autofilter"] = { ref: "A1:G" + r1.length };
+  const ws2 = window.XLSX.utils.aoa_to_sheet(r2); ws2["!cols"] = [32, 6, 10, 30, 10, 14].map(w => ({ wch: w })); ws2["!autofilter"] = { ref: "A1:F" + r2.length };
+  window.XLSX.utils.book_append_sheet(wb, ws1, "Lieferanten " + year);
+  window.XLSX.utils.book_append_sheet(wb, ws2, "Nach Konto");
+  window.XLSX.writeFile(wb, "Lieferanten_" + year + ".xlsx");
+  toast(liste.length + " Lieferanten/Kostenpunkte aus " + Object.values(agg).reduce((s, a) => s + a.n, 0) + " Buchungen exportiert.");
+}
 /* Jahr einer Buchung aus dem Datum «dd.mm.yy» / «dd.mm.yyyy» (null, wenn nicht lesbar) */
 function fbBuchJahr(b) { const m = /^\s*(\d{1,2})\.(\d{1,2})\.(\d{2,4})/.exec(String((b && b[0]) || "")); if (!m) return null; return m[3].length === 2 ? 2000 + parseInt(m[3], 10) : parseInt(m[3], 10); }
 function fbBuchAll(year) {
@@ -3849,10 +3893,7 @@ function renderBudgetVergleich(el) {
       </div>
       <span style="font-size:11px;color:var(--text-dim)">Ist ${fbPeriodeLabel(N)} (${N} Mte) ÷ ${N} = Ø-Monat</span>
       <div style="margin-left:auto;display:flex;gap:8px;align-items:center;font-size:11px">
-        <select onchange="filters.fbSearchYear=this.value;fbSearchYearChanged()" title="Suche auf ein Geschäftsjahr eingrenzen"
-          style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:4px;font-size:11px">
-          ${fbVorhandeneJahre().map(y => `<option value="${y}" ${String(fbSearchJahr()) === String(y) ? "selected" : ""}>GJ ${y}</option>`).join("")}
-        </select>
+        <span style="color:var(--text-dim)" title="Die Buchungssuche folgt dem Jahr links">Buchungen ${year}</span>
         <select onchange="filters.fbSearchGes=this.value;fbSearchRender()" title="Suche auf eine Gesellschaft eingrenzen"
           style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:4px;font-size:11px">
           <option value="">Alle Gesellschaften</option>
@@ -3864,6 +3905,7 @@ function renderBudgetVergleich(el) {
           style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;width:220px;font-size:11px">
         <label class="btn btn-sm" title="Konzern-Budget, bexio-ERs und Buchungsdetails (XLSX oder CSV) — mehrere Dateien aufs Mal, Typ wird automatisch erkannt">⇪ Dateien importieren
           <input type="file" accept=".csv,.txt,.xlsx" multiple style="display:none" onchange="fbMultiSelect(this)"></label>
+        <button class="btn btn-sm" onclick="fbLieferantenExcel(${year})" title="Alle Lieferanten/Kostenpunkte aus den Buchungen ${year} zusammengefasst (Visa/Twint/… ignoriert) mit FIBU-Konto und Total — als Excel">⇩ Lieferanten</button>
         <button class="btn btn-sm" onclick="fbDatenbestand()" title="Zeigt pro Jahr, was gespeichert ist — mit gezieltem Löschen einzelner Gruppen">ⓘ Datenbestand</button>
         <button class="btn btn-sm" onclick="fbClearAll()" title="Alle Budgetvergleich-Daten löschen (Budget, Ist aller Jahre, Buchungen, Notizen) — für einen sauberen Neuimport" style="color:var(--danger);border-color:var(--danger)">🗑 Leeren</button>
       </div>
@@ -3934,7 +3976,7 @@ function fbSearchResultsHtml(year) {
   const sum = hits.reduce((s, h) => s + h.v, 0);
   return `
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:14px">
-      <div style="font-size:12px;margin-bottom:8px"><strong>${hits.length}</strong> Buchung(en) zu «${escape(filters.fbSearch)}»${gesFilter ? ` · nur ${escape(gesFilter)}` : ""}
+      <div style="font-size:12px;margin-bottom:8px"><strong>${hits.length}</strong> Buchung(en) ${year} zu «${escape(filters.fbSearch)}»${gesFilter ? ` · nur ${escape(gesFilter)}` : ""}
         · Summe <span style="font-family:var(--font-mono)">${sum.toLocaleString("de-CH", { minimumFractionDigits: 2 })}</span></div>
       ${hits.length ? `<div style="max-height:260px;overflow:auto">
         ${hits.slice(0, 200).map(h => `
@@ -3957,7 +3999,7 @@ function fbVorhandeneJahre() {
   return [...jahre].sort((a, b) => b - a);
 }
 function fbSearchJahr() {
-  return parseInt(filters.fbSearchYear) || filters.budgetYear;
+  return filters.budgetYear;   // ein Jahr für alles: Übersicht und Buchungssuche folgen dem Jahr-Dropdown links
 }
 function fbSearchYearChanged() {
   const y = fbSearchJahr();
