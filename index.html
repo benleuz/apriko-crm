@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.292.0"></script>
-<script src="apriko-api.js?v=1.292.0"></script>
-<script src="lohncheck.js?v=1.292.0"></script>
-<script src="personalbudget.js?v=1.292.0"></script>
-<script src="jahresbudget.js?v=1.292.0"></script>
-<script src="budgetpositionen.js?v=1.292.0"></script>
-<script src="lohnchecklistetemp.js?v=1.292.0"></script>
+<script src="apriko-filters.js?v=1.293.0"></script>
+<script src="apriko-api.js?v=1.293.0"></script>
+<script src="lohncheck.js?v=1.293.0"></script>
+<script src="personalbudget.js?v=1.293.0"></script>
+<script src="jahresbudget.js?v=1.293.0"></script>
+<script src="budgetpositionen.js?v=1.293.0"></script>
+<script src="lohnchecklistetemp.js?v=1.293.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -984,7 +984,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.292.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.293.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -8795,11 +8795,10 @@ function renderCheckliste(el, typ) {
           const done = e && e.w;
           return `
           <div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--border)">
-            <input type="checkbox" ${done ? "checked" : ""} ${locked ? "disabled" : ""} onchange="wfCheckToggle('${typ}','${sel}','${ik}')"
+            <input type="checkbox" id="wf-${escape(typ)}-${ik.replace(".", "-")}" ${done ? "checked" : ""} ${locked ? "disabled" : ""} onchange="wfCheckToggle('${typ}','${sel}','${ik}')"
               style="width:16px;height:16px;margin-top:2px;accent-color:var(--accent);cursor:${locked ? "not-allowed" : "pointer"};flex-shrink:0">
             <div style="flex:1">
-              <div style="${done ? "color:var(--text-dim)" : ""}">${escape(it[0])}</div>
-              ${it[1] ? `<div style="font-size:10.5px;color:var(--text-faint)">${escape(it[1])}</div>` : ""}
+              <label for="wf-${escape(typ)}-${ik.replace(".", "-")}" style="display:block;cursor:${locked ? "not-allowed" : "pointer"};${done ? "color:var(--text-dim)" : ""}" title="Klicken = abhaken">${escape(it[0])}${it[1] ? `<div style="font-size:10.5px;color:var(--text-faint)">${escape(it[1])}</div>` : ""}</label>
               <input value="${escape((e && e.n) || "")}" placeholder="Bemerkung (optional)"
                 onblur="wfItemNote('${typ}','${sel}','${ik}',this.value)"
                 style="width:100%;margin-top:4px;background:transparent;border:1px solid ${e && e.n ? "var(--border)" : "transparent"};border-bottom:1px dashed var(--border);color:var(--text-dim);padding:2px 6px;border-radius:3px;font-family:inherit;font-size:10.5px">
