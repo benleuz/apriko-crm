@@ -10,7 +10,7 @@
    Abhängigkeiten: jahresbudget.js (jbBuild, jbSaveRow, jbFindRow, jbPos*, jbFmt, jbNum, JB_*),
    index.html (fbSaveItem, reload, escape, toast, render, FB_PLAN, FB_LABELS, FB_SRC). */
 
-const BP_VERSION = "1.121.0";
+const BP_VERSION = "1.122.0";
 const BP_MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 const BP_FAELL = [["m", "monatlich (÷12)"], ["q", "quartalsweise (÷4)"], ["e", "einmalig im Monat"], ["h", "halbjährlich (÷2)"], ["r", "von – bis"]];
 
@@ -220,7 +220,7 @@ function renderBudgetpositionen(el) {
       return `
       <tr>
         <td style="padding:2px 6px 2px 22px"><input data-bp="${escape(r.g + "|" + r.kt)}" value="${escape(p.t || "")}" placeholder="Text (z.B. Google Cloud)" style="width:100%;min-width:180px;font-size:11.5px;padding:2px 6px" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'t',this.value)"></td>
-        <td style="padding:2px 6px"><input list="bp-konten" value="${escape(p.kt ? (p.kt + (kontoBez[p.kt] ? " " + kontoBez[p.kt] : "")) : "")}" placeholder="${/^\d{4}$/.test(String(r.kt)) ? escape(r.kt + (kontoBez[r.kt] ? " " + kontoBez[r.kt] : "")) : "Konto wählen …"}" title="FIBU-Konto dieser Position${/^\d{4}$/.test(String(r.kt)) ? " (leer = " + escape(r.kt) + ")" : " — Pflicht, da die Zeile ein Sammelkonto ist"}${p.kt && kontoBez[p.kt] ? " · " + escape(kontoBez[p.kt]) : ""}" style="width:190px;font-size:11px;padding:2px 6px;${bpPosKonto(r, p) ? "" : "border-color:var(--danger);"}" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'kt',this.value)"> <span style="cursor:pointer;color:var(--text-faint);font-size:11px" title="Konto aus den Buchungen der Vorjahre anhand des Positionstexts vorschlagen" onclick="bpKontoSuchen(${gi(r.g, r.kt)},${i})">🔍</span></td>
+        <td style="padding:2px 6px;white-space:nowrap"><input list="bp-konten" value="${escape(p.kt ? (p.kt + (kontoBez[p.kt] ? " " + kontoBez[p.kt] : "")) : "")}" placeholder="${/^\d{4}$/.test(String(r.kt)) ? escape(r.kt + (kontoBez[r.kt] ? " " + kontoBez[r.kt] : "")) : "Konto wählen …"}" title="FIBU-Konto dieser Position${/^\d{4}$/.test(String(r.kt)) ? " (leer = " + escape(r.kt) + ")" : " — Pflicht, da die Zeile ein Sammelkonto ist"}${p.kt && kontoBez[p.kt] ? " · " + escape(kontoBez[p.kt]) : ""}" style="width:170px;font-size:11px;padding:2px 6px;vertical-align:middle;${bpPosKonto(r, p) ? "" : "border-color:var(--danger);"}" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'kt',this.value)"><span style="cursor:pointer;color:var(--text-faint);font-size:11px;margin-left:4px;vertical-align:middle" title="Konto aus den Buchungen der Vorjahre anhand des Positionstexts vorschlagen" onclick="bpKontoSuchen(${gi(r.g, r.kt)},${i})">🔍</span></td>
         <td style="padding:2px 6px"><input value="${escape(p.n || "")}" placeholder="Notiz …" style="width:100%;min-width:160px;font-size:11px;padding:2px 6px;${p.n ? "" : "color:var(--text-faint)"}" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'n',this.value)"></td>
         <td style="padding:2px 4px;white-space:nowrap"><select style="font-size:10.5px;padding:1px 2px" onchange="bpPosSet(${gi(r.g, r.kt)},${i},'f',this.value)">${BP_FAELL.map(([k, l]) => `<option value="${k}" ${k === f ? "selected" : ""}>${l}</option>`).join("")}</select>
           ${f === "e" || f === "q" || f === "h" ? ` ${sel("sm", 1, 12, parseInt(p.sm, 10) || 1)}` : f === "r" ? ` ${sel("sm", 1, 12, parseInt(p.sm, 10) || 1)}–${sel("em", 1, 12, parseInt(p.em, 10) || 12)}` : ""}</td>
