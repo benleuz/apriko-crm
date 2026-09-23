@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.322.0"></script>
-<script src="apriko-api.js?v=1.322.0"></script>
-<script src="lohncheck.js?v=1.322.0"></script>
-<script src="personalbudget.js?v=1.322.0"></script>
-<script src="jahresbudget.js?v=1.322.0"></script>
-<script src="budgetpositionen.js?v=1.322.0"></script>
-<script src="lohnchecklistetemp.js?v=1.322.0"></script>
+<script src="apriko-filters.js?v=1.323.0"></script>
+<script src="apriko-api.js?v=1.323.0"></script>
+<script src="lohncheck.js?v=1.323.0"></script>
+<script src="personalbudget.js?v=1.323.0"></script>
+<script src="jahresbudget.js?v=1.323.0"></script>
+<script src="budgetpositionen.js?v=1.323.0"></script>
+<script src="lohnchecklistetemp.js?v=1.323.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1002,7 +1002,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.322.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.323.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -8550,10 +8550,14 @@ async function renderLohnartenstamm(el) {
 async function lohnartenstammNeuLaden() { await lcLoadLohnartenliste(true); render(); }
 function apSort(col) { const s = apState.sort; if (s.col === col) s.dir = -s.dir; else { s.col = col; s.dir = 1; } render(); }
 function apFilter(col, inp) { apState.filters[col] = inp.value; apState._restoreFocus = { id: inp.id, pos: inp.selectionStart }; render(); }
+/* Rücklauf zuerst aus dem Signed-Feld (Dokument hinterlegt = retour); Bypass nur als Zusatz, weil er in dieser
+   Instanz bei praktisch allen Einsätzen gesetzt ist und sonst alles verdeckt. */
 function apVertragText(r, signedFeld, bypassFeld) {
-  if (r[bypassFeld] === true) return "⤳ umgangen";
-  if (r[signedFeld] === undefined) return r.missingSignedDocuments === undefined ? "" : (r.missingSignedDocuments ? "✗ fehlt" : "✓ retour");
-  return (r[signedFeld] !== null && String(r[signedFeld]).trim() !== "") ? "✓ retour" : "✗ fehlt";
+  const bypass = r[bypassFeld] === true ? " (Prüfung umgangen)" : "";
+  const v = r[signedFeld];
+  if (v !== undefined && v !== null && String(v).trim() !== "") return "✓ retour" + bypass;
+  if (v === undefined && r.missingSignedDocuments === undefined) return bypass ? "– offen" + bypass : "";
+  return "✗ fehlt" + bypass;
 }
 function apFmtDate(s) { if (!s) return ""; const d = new Date(s); return isNaN(d) ? String(s).slice(0, 10) : d.toLocaleDateString("de-CH"); }
 const AP_COLS = {
@@ -15237,9 +15241,11 @@ async function rpApiSelectPerson(idx, ocrName){
    Anzeige: ✓ retour · ✗ fehlt · ⤳ Prüfung umgangen · – Feld nicht im Datensatz */
 function rpFeldCI(p, name){ if(!p) return undefined; var k = Object.keys(p).find(function(x){ return x.toLowerCase() === name.toLowerCase(); }); return k ? p[k] : undefined; }
 function rpVertragStatus(p, signedFeld, bypassFeld, label){
-  var bypass = rpFeldCI(p, bypassFeld);
-  if(bypass === true) return { code: 'bypass', text: '⤳', tip: label + ': Prüfung des unterschriebenen Dokuments umgangen (' + bypassFeld + ')' };
+  var bypass = rpFeldCI(p, bypassFeld) === true ? ' · Prüfung umgangen' : '';
   var signed = rpFeldCI(p, signedFeld);
+  if(signed !== undefined && signed !== null && String(signed).trim() !== '') return { code: 'ok', text: '✓', tip: label + ' unterzeichnet retour (' + signedFeld + ')' + bypass };
+  if(signed === undefined && rpFeldCI(p, 'missingSignedDocuments') === undefined) return { code: 'unbekannt', text: '–', tip: label + ': kein Dokument hinterlegt' + bypass };
+  if(signed !== undefined) return { code: 'fehlt', text: '✗', tip: label + ' fehlt noch (' + signedFeld + ' leer)' + bypass };
   if(signed === undefined){
     var missing = rpFeldCI(p, 'missingSignedDocuments');
     if(missing === undefined) return { code: 'unbekannt', text: '–', tip: 'Felder ' + signedFeld + ' / missingSignedDocuments nicht im Einsatz enthalten' };
