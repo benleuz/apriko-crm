@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.325.0"></script>
-<script src="apriko-api.js?v=1.325.0"></script>
-<script src="lohncheck.js?v=1.325.0"></script>
-<script src="personalbudget.js?v=1.325.0"></script>
-<script src="jahresbudget.js?v=1.325.0"></script>
-<script src="budgetpositionen.js?v=1.325.0"></script>
-<script src="lohnchecklistetemp.js?v=1.325.0"></script>
+<script src="apriko-filters.js?v=1.327.0"></script>
+<script src="apriko-api.js?v=1.327.0"></script>
+<script src="lohncheck.js?v=1.327.0"></script>
+<script src="personalbudget.js?v=1.327.0"></script>
+<script src="jahresbudget.js?v=1.327.0"></script>
+<script src="budgetpositionen.js?v=1.327.0"></script>
+<script src="lohnchecklistetemp.js?v=1.327.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1002,7 +1002,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.325.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.327.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -7229,6 +7229,22 @@ async function apLoadMore(tab) {
   } catch (e) { apShowError(e); }
   apState.loading = false; render();
 }
+/* Kandidat (Mitarbeiter) und Kunde für die aktuell sichtbaren (gefilterten) Einsätze nachladen — gezielt, in Achtergruppen */
+async function apNamenNachladen() {
+  const sicht = apState._sichtbar || apState.rows.placements;
+  const indIds = [...new Set(sicht.flatMap(r => [r.employeeId, r.primaryRecruiterId]).filter(id => id && !(id in apState.recruiter && apState.recruiter[id] !== "…" && apState.recruiter[id] !== "?")))];
+  const legIds = [...new Set(sicht.map(r => r.customerId).filter(id => id && !(id in apState.legal && apState.legal[id] !== "…" && apState.legal[id] !== "?")))];
+  const total = indIds.length + legIds.length;
+  if (!total) { toast("Alle Namen der sichtbaren Einsätze sind bereits geladen."); return; }
+  apState.loading = true; render();
+  let n = 0;
+  const jobs = indIds.map(id => async () => { try { const p = await AprikoApi.people.getIndividual(id); apState.recruiter[id] = [p.firstName, p.lastName].filter(Boolean).join(" ") || p.displayName || id; } catch (e) { apState.recruiter[id] = "?"; } })
+    .concat(legIds.map(id => async () => { try { const c = await AprikoApi.people.getLegal(id); apState.legal[id] = c.businessName || c.displayName || id; } catch (e) { apState.legal[id] = "?"; } }));
+  let pos = 0;
+  await Promise.all(Array.from({ length: 8 }, async () => { while (pos < jobs.length) { const j = jobs[pos++]; await j(); n++; if (n % 20 === 0) toast(n + "/" + total + " Namen geladen …"); } }));
+  apState.loading = false; render();
+  toast(indIds.length + " Personen und " + legIds.length + " Kunden nachgeladen.");
+}
 /* Einsätze: nur aktive laden — gleiche Methode wie der Rapport-Scan (6 Einzelabfragen je Zustand über models.query,
    serverseitig gefiltert, dedupliziert). Ersetzt die paginierte Gesamtliste im Tab. */
 const AP_AKTIVE_STATES = ["Placed", "Active", "TerminatedPlaced", "TerminatedActive", "LockedPlaced", "LockedActive"];
@@ -8708,7 +8724,11 @@ function renderApiPoc(el) {
   const cols = AP_COLS[tab];
   document.getElementById("view-actions").innerHTML = `
     <button class="btn btn-sm" onclick="apTest()" ${apState.loading ? "disabled" : ""}>🔗 Verbindung testen</button>
-    ${tab === "placements" ? `<button class="btn btn-sm" onclick="apLadeAktiveEinsaetze()" ${apState.loading ? "disabled" : ""} title="Nur aktuell aktive/platzierte Einsätze — gleiche gezielte Abfrage wie der Rapport-Scan, statt die ganze Historie zu paginieren">⚡ Nur aktive Einsätze${apState.nurAktive ? " ✓" : ""}</button>` : ""}
+    ${tab === "placements" ? `<button class="btn btn-sm" onclick="apLadeAktiveEinsaetze()" ${apState.loading ? "disabled" : ""} title="Nur aktuell aktive/platzierte Einsätze — gleiche gezielte Abfrage wie der Rapport-Scan, statt die ganze Historie zu paginieren">⚡ Nur aktive Einsätze${apState.nurAktive ? " ✓" : ""}</button>
+    <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim)" title="Einsätze, die in diesem Zeitraum laufen (Eintritt ≤ Bis und Austritt ≥ Von bzw. laufend)">Von <input type="date" value="${escape(apState.von || "")}" onchange="apState.von=this.value;render()" style="padding:3px 5px;font-size:11px"></label>
+    <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim)">Bis <input type="date" value="${escape(apState.bis || "")}" onchange="apState.bis=this.value;render()" style="padding:3px 5px;font-size:11px"></label>
+    ${apState.von || apState.bis ? `<button class="btn btn-sm" onclick="apState.von='';apState.bis='';render()" title="Zeitraum zurücksetzen">✕</button>` : ""}
+    <button class="btn btn-sm" onclick="apNamenNachladen()" ${apState.loading ? "disabled" : ""} title="Kandidat/Mitarbeiter und Kunde für die aktuell gefilterten Einsätze nachladen">👤 Namen nachladen (${(apState._sichtbar || []).length})</button>` : ""}
     ${tab === "salarytypes"
       ? `<button class="btn btn-sm" onclick="apLadeSalarytypesKomplett(true)" ${apState.loading ? "disabled" : ""}>🔄 Lohnarten jetzt neu laden</button>`
       : tab === "tarifarten"
@@ -8721,6 +8741,12 @@ function renderApiPoc(el) {
   let rows = apState.rows[tab].map((r, i) => ({ r, i, v: Object.fromEntries(cols.map(c => [c[0], c[2](r)])) }));
   const fl = apState.filters;
   rows = rows.filter(x => cols.every(c => { const q = (fl[c[0]] || "").trim().toLowerCase(); return !q || String(x.v[c[0]] === undefined || x.v[c[0]] === null ? "" : x.v[c[0]]).toLowerCase().includes(q); }));
+  if (tab === "placements" && (apState.von || apState.bis)) {
+    // Zeitraum: Einsatz überschneidet sich mit [Von, Bis] — Eintritt ≤ Bis und (Austritt ≥ Von oder laufend)
+    const von = apState.von || "0000-01-01", bis = apState.bis || "9999-12-31";
+    rows = rows.filter(x => { const e = String(x.r.entryDate || "").slice(0, 10), a = String(x.r.withdrawalDate || "").slice(0, 10); return (!e || e <= bis) && (!a || a >= von); });
+  }
+  apState._sichtbar = rows.map(x => x.r);   // für «Namen nachladen» (nur die gefilterten Einsätze)
   if (apState.sort.col) {
     const sc = apState.sort.col, d = apState.sort.dir;
     rows.sort((a, b) => { const va = a.v[sc], vb = b.v[sc]; if (typeof va === "number" && typeof vb === "number") return (va - vb) * d; return String(va ?? "").localeCompare(String(vb ?? ""), "de-CH", { numeric: true }) * d; });
