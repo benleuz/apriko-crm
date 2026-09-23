@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.324.0"></script>
-<script src="apriko-api.js?v=1.324.0"></script>
-<script src="lohncheck.js?v=1.324.0"></script>
-<script src="personalbudget.js?v=1.324.0"></script>
-<script src="jahresbudget.js?v=1.324.0"></script>
-<script src="budgetpositionen.js?v=1.324.0"></script>
-<script src="lohnchecklistetemp.js?v=1.324.0"></script>
+<script src="apriko-filters.js?v=1.325.0"></script>
+<script src="apriko-api.js?v=1.325.0"></script>
+<script src="lohncheck.js?v=1.325.0"></script>
+<script src="personalbudget.js?v=1.325.0"></script>
+<script src="jahresbudget.js?v=1.325.0"></script>
+<script src="budgetpositionen.js?v=1.325.0"></script>
+<script src="lohnchecklistetemp.js?v=1.325.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1002,7 +1002,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.324.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.325.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -7229,7 +7229,24 @@ async function apLoadMore(tab) {
   } catch (e) { apShowError(e); }
   apState.loading = false; render();
 }
+/* Einsätze: nur aktive laden — gleiche Methode wie der Rapport-Scan (6 Einzelabfragen je Zustand über models.query,
+   serverseitig gefiltert, dedupliziert). Ersetzt die paginierte Gesamtliste im Tab. */
+const AP_AKTIVE_STATES = ["Placed", "Active", "TerminatedPlaced", "TerminatedActive", "LockedPlaced", "LockedActive"];
+async function apLadeAktiveEinsaetze() {
+  if (apState.loading) return;
+  apState.loading = true; apState.error = null; render();
+  try {
+    rpApiUse();
+    const teile = await Promise.all(AP_AKTIVE_STATES.map(st => AprikoApi.models.query({ entityTypes: "StaffLeasePlacement", pageIndex: 0, pageSize: 100, resolveReferences: false, filters: "state|=|" + JSON.stringify(st) + '|text|false|false|["G1"]' })
+      .then(r => ((r && r.results) || []).map(AprikoApi.models.hitData)).catch(() => [])));
+    const gesehen = {}; const rows = [].concat(...teile).filter(p => AP_AKTIVE_STATES.includes(p.state) && !gesehen[p.id] && (gesehen[p.id] = true));
+    apState.rows.placements = rows; apState.page.placements = 0; apState.done.placements = true; apState.nurAktive = true;
+    toast(rows.length + " aktive Einsätze geladen (" + AP_AKTIVE_STATES.join(", ") + ").");
+  } catch (e) { apShowError(e); }
+  apState.loading = false; render();
+}
 function apReset() {
+  apState.nurAktive = false;
   apState.rows = { people: [], companies: [], placements: [], salarytypes: [], tarifarten: [] }; apState.page = { people: 0, companies: 0, placements: 0, salarytypes: 0, tarifarten: 0 };
   apState.done = { people: false, companies: false, placements: false, salarytypes: false, tarifarten: false }; apState.error = null; render();
 }
@@ -8691,6 +8708,7 @@ function renderApiPoc(el) {
   const cols = AP_COLS[tab];
   document.getElementById("view-actions").innerHTML = `
     <button class="btn btn-sm" onclick="apTest()" ${apState.loading ? "disabled" : ""}>🔗 Verbindung testen</button>
+    ${tab === "placements" ? `<button class="btn btn-sm" onclick="apLadeAktiveEinsaetze()" ${apState.loading ? "disabled" : ""} title="Nur aktuell aktive/platzierte Einsätze — gleiche gezielte Abfrage wie der Rapport-Scan, statt die ganze Historie zu paginieren">⚡ Nur aktive Einsätze${apState.nurAktive ? " ✓" : ""}</button>` : ""}
     ${tab === "salarytypes"
       ? `<button class="btn btn-sm" onclick="apLadeSalarytypesKomplett(true)" ${apState.loading ? "disabled" : ""}>🔄 Lohnarten jetzt neu laden</button>`
       : tab === "tarifarten"
