@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.317.0"></script>
-<script src="apriko-api.js?v=1.317.0"></script>
-<script src="lohncheck.js?v=1.317.0"></script>
-<script src="personalbudget.js?v=1.317.0"></script>
-<script src="jahresbudget.js?v=1.317.0"></script>
-<script src="budgetpositionen.js?v=1.317.0"></script>
-<script src="lohnchecklistetemp.js?v=1.317.0"></script>
+<script src="apriko-filters.js?v=1.322.0"></script>
+<script src="apriko-api.js?v=1.322.0"></script>
+<script src="lohncheck.js?v=1.322.0"></script>
+<script src="personalbudget.js?v=1.322.0"></script>
+<script src="jahresbudget.js?v=1.322.0"></script>
+<script src="budgetpositionen.js?v=1.322.0"></script>
+<script src="lohnchecklistetemp.js?v=1.322.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1002,7 +1002,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.317.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.322.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -8550,6 +8550,11 @@ async function renderLohnartenstamm(el) {
 async function lohnartenstammNeuLaden() { await lcLoadLohnartenliste(true); render(); }
 function apSort(col) { const s = apState.sort; if (s.col === col) s.dir = -s.dir; else { s.col = col; s.dir = 1; } render(); }
 function apFilter(col, inp) { apState.filters[col] = inp.value; apState._restoreFocus = { id: inp.id, pos: inp.selectionStart }; render(); }
+function apVertragText(r, signedFeld, bypassFeld) {
+  if (r[bypassFeld] === true) return "⤳ umgangen";
+  if (r[signedFeld] === undefined) return r.missingSignedDocuments === undefined ? "" : (r.missingSignedDocuments ? "✗ fehlt" : "✓ retour");
+  return (r[signedFeld] !== null && String(r[signedFeld]).trim() !== "") ? "✓ retour" : "✗ fehlt";
+}
 function apFmtDate(s) { if (!s) return ""; const d = new Date(s); return isNaN(d) ? String(s).slice(0, 10) : d.toLocaleDateString("de-CH"); }
 const AP_COLS = {
   people: [
@@ -8575,7 +8580,11 @@ const AP_COLS = {
     ["status", "Status", r => r.state === "None" ? "" : r.state],
     ["margep", "Marge %", r => typeof r.marginPercentage === "number" ? Math.round(r.marginPercentage * 10) / 10 : ""],
     ["kanton", "Kt", r => r.workLocationCanton === "None" ? "" : r.workLocationCanton],
-    ["recruiter", "Recruiter", r => r.primaryRecruiterId ? (apState.recruiter[r.primaryRecruiterId] || "…") : ""]
+    ["recruiter", "Recruiter", r => r.primaryRecruiterId ? (apState.recruiter[r.primaryRecruiterId] || "…") : ""],
+    // Vertragsrücklauf gemäss OpenAPI StaffLeasePlacement: signedAssignmentContract / signedLeaseContract (leer = fehlt),
+    // bypass…AttachmentCheck (Prüfung umgangen). Textwerte, damit Sortieren und Filtern funktionieren.
+    ["ev", "EV retour", r => apVertragText(r, "signedAssignmentContract", "bypassSignedAssignmentContractAttachmentCheck")],
+    ["vv", "VV retour", r => apVertragText(r, "signedLeaseContract", "bypassSignedLeaseContractAttachmentCheck")]
   ],
   companies: [
     ["personNumber", "Nr", r => r.personNumber],
@@ -15221,6 +15230,28 @@ async function rpApiSelectPerson(idx, ocrName){
 /* Zeigt die aufbereitete Einsatzliste (Roster-Cache) in einem Modal — gruppiert nach Mitarbeiter,
    mit Kunde/Zeitraum je Einsatz, durchsuchbar nach Name/Firma. Reiner Lese-/Kontroll-Zweck, damit
    nachvollziehbar ist, was das Tool beim automatischen Abgleich zur Verfügung hat. */
+/* Vertragsrücklauf am Einsatz — gemäss OpenAPI-Schema StaffLeasePlacement (services/staffing.json):
+   signedAssignmentContract / signedLeaseContract (string, readOnly: Referenz auf das abgelegte unterschriebene Dokument;
+   leer = nicht zurück), missingSignedDocuments (boolean: irgendein unterschriebenes Dokument fehlt),
+   bypassSignedAssignmentContractAttachmentCheck / bypassSignedLeaseContractAttachmentCheck (boolean: Prüfung bewusst umgangen).
+   Anzeige: ✓ retour · ✗ fehlt · ⤳ Prüfung umgangen · – Feld nicht im Datensatz */
+function rpFeldCI(p, name){ if(!p) return undefined; var k = Object.keys(p).find(function(x){ return x.toLowerCase() === name.toLowerCase(); }); return k ? p[k] : undefined; }
+function rpVertragStatus(p, signedFeld, bypassFeld, label){
+  var bypass = rpFeldCI(p, bypassFeld);
+  if(bypass === true) return { code: 'bypass', text: '⤳', tip: label + ': Prüfung des unterschriebenen Dokuments umgangen (' + bypassFeld + ')' };
+  var signed = rpFeldCI(p, signedFeld);
+  if(signed === undefined){
+    var missing = rpFeldCI(p, 'missingSignedDocuments');
+    if(missing === undefined) return { code: 'unbekannt', text: '–', tip: 'Felder ' + signedFeld + ' / missingSignedDocuments nicht im Einsatz enthalten' };
+    return missing ? { code: 'fehlt', text: '✗', tip: 'missingSignedDocuments = true (mindestens ein unterschriebenes Dokument fehlt)' } : { code: 'ok', text: '✓', tip: 'missingSignedDocuments = false' };
+  }
+  var da = signed !== null && String(signed).trim() !== '';
+  return da ? { code: 'ok', text: '✓', tip: label + ' unterzeichnet retour (' + signedFeld + ' = ' + String(signed).slice(0, 40) + ')' } : { code: 'fehlt', text: '✗', tip: label + ' fehlt noch (' + signedFeld + ' leer)' };
+}
+function rpVertragAnzeige(st){
+  var farbe = st.code === 'ok' ? 'var(--rp-green,#2e7d32)' : st.code === 'fehlt' ? '#c62828' : 'var(--rp-grey)';
+  return '<span style="color:' + farbe + ';font-weight:' + (st.code === 'fehlt' ? '700' : '400') + '">' + st.text + '</span>';
+}
 function rpApiShowRoster(){
   var body;
   if(!rpRoster){
@@ -15246,6 +15277,8 @@ function rpApiShowRoster(){
         von: p.entryDate ? new Date(p.entryDate).toLocaleDateString('de-CH') : '?',
         bis: p.withdrawalDate ? new Date(p.withdrawalDate).toLocaleDateString('de-CH') : 'laufend',
         einsatzNr: p.placementNumber || p.id, gav: p.tempDataLabourStaffingAgreementName || '',
+        ev: rpVertragStatus(p, 'signedAssignmentContract', 'bypassSignedAssignmentContractAttachmentCheck', 'Einsatzvertrag'),
+        vv: rpVertragStatus(p, 'signedLeaseContract', 'bypassSignedLeaseContractAttachmentCheck', 'Verleihvertrag'),
         suchtext: (name + ' ' + kn).toLowerCase()
       });
     });
@@ -15258,6 +15291,8 @@ function rpApiShowRoster(){
       '<td>Nr ' + esc(String(z.einsatzNr)) + '</td>' +
       '<td>' + esc(z.von) + ' – ' + esc(z.bis) + '</td>' +
       '<td style="font-size:11.5px;color:var(--rp-grey)">' + esc(z.gav) + '</td>' +
+      '<td style="text-align:center" title="' + esc(z.ev.tip) + '">' + rpVertragAnzeige(z.ev) + '</td>' +
+      '<td style="text-align:center" title="' + esc(z.vv.tip) + '">' + rpVertragAnzeige(z.vv) + '</td>' +
     '</tr>';
   }).join('');
   body = fehlerBanner + '<div style="margin-bottom:8px;font-size:12.5px;color:var(--rp-grey)">' +
@@ -15272,8 +15307,8 @@ function rpApiShowRoster(){
     '<div style="max-height:55vh;overflow:auto">' +
     '<table style="width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap" id="rpRosterTabelle">' +
       '<thead><tr style="text-align:left;border-bottom:1px solid var(--rp-border,#ddd)">' +
-        '<th style="padding:4px 10px 4px 6px">Mitarbeiter</th><th style="padding:4px 10px">Kunde</th><th style="padding:4px 10px">Einsatz</th><th style="padding:4px 10px">Zeitraum</th><th style="padding:4px 6px">GAV</th>' +
-      '</tr></thead><tbody>' + (rowsHtml || '<tr><td colspan="5" style="color:var(--rp-grey);padding:10px 6px">Keine Einsätze im Fenster gefunden.</td></tr>') + '</tbody>' +
+        '<th style="padding:4px 10px 4px 6px">Mitarbeiter</th><th style="padding:4px 10px">Kunde</th><th style="padding:4px 10px">Einsatz</th><th style="padding:4px 10px">Zeitraum</th><th style="padding:4px 6px">GAV</th><th style="padding:4px 6px;text-align:center" title="Einsatzvertrag unterzeichnet retour (signedAssignmentContract): ✓ retour · ✗ fehlt · ⤳ Prüfung umgangen">EV retour</th><th style="padding:4px 6px;text-align:center" title="Verleihvertrag retour (signedLeaseContract): ✓ retour · ✗ fehlt · ⤳ Prüfung umgangen">VV retour</th>' +
+      '</tr></thead><tbody>' + (rowsHtml || '<tr><td colspan="7" style="color:var(--rp-grey);padding:10px 6px">Keine Einsätze im Fenster gefunden.</td></tr>') + '</tbody>' +
     '</table></div>';
   showModal('Einsatzliste (letzte ' + (rpRoster.tage || ROSTER_TAGE) + ' Tage)', body);
   var mbW = document.querySelector('#modal .modal');
