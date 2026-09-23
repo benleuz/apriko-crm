@@ -35,24 +35,24 @@
    Abhängigkeiten: index.html (graph, siteId, escape, toast, render, val,
    showModal, closeModal, cache.companies, getToken). */
 
-const LCT_VERSION = "1.150.0";
+const LCT_VERSION = "1.151.0";
 const LCT_DIR = "CRM-Budgetdaten";
 const LCT_DOC_DIR = "LCT-Dokumente";
 
 /* Standard-Kontrollpunkte — Gruppen 1–10, insgesamt 11 Checkboxen (Gruppe 9 hat zwei).
    id ist stabil und wird referenziert (nie umbenennen — stattdessen text bearbeiten). */
 const LCT_STANDARD_BASIS = [
-  { id: "zl1", gruppe: "1. Zahlungslisten", text: "Zahlungslisten alle auf «ausgeführt» stellen, bevor Lohn gerechnet wird" },
-  { id: "rap1", gruppe: "2. Rapporterfassung", text: "Alle Rapporte sind erfasst" },
-  { id: "ldm1", gruppe: "3. Lohndatenmeldungen", text: "Sämtliche Lohndatenmeldungen im Ticketsystem überprüfen, erfassen und kontrollieren" },
-  { id: "gf1", gruppe: "4. Guthaben / Ferien / 13. Gehalt", text: "Guthaben, Ferien und 13. Gehalt gemäss Lohnmeldungen des Kunden auszahlen bzw. verarbeiten" },
-  { id: "bp1", gruppe: "5. Betreibungen / Lohnpfändungen", text: "Betreibungen und Lohnpfändungen kontrollieren" },
-  { id: "uc1", gruppe: "6. Ultimativ Check", text: "Ultimativ Check durchführen", hinweis: "Ferienguthaben (Minusbeträge kontrollieren), 13. Gehalt, BVG, Sozialversicherungsabzüge, Quellensteuer (QST), Vorschussgebühren etc." },
-  { id: "uc2", gruppe: "7. Ultimativ Check berücksichtigt", text: "Sämtliche Meldungen von Ultimativ Check wurden kontrolliert und bereinigt", hinweis: "Ebenso der Entwicklung melden" },
-  { id: "la1", gruppe: "8. Lohnabrechnung zur Kontrolle", text: "Lohnabrechnungen an den Kunden zur Kontrolle versenden" },
-  { id: "za1", gruppe: "9. Zahlungsauftrag nach Kundenfreigabe", text: "Nach OK / Freigabe des Kunden Zahlungsauftrag auf die Bank stellen" },
-  { id: "za2", gruppe: "9. Zahlungsauftrag nach Kundenfreigabe", text: "Dem Kunden die Auszahlungsliste senden" },
-  { id: "zg1", gruppe: "10. Zahlung ausgeführt", text: "Sobald die Zahlung auf der Bank ausgeführt wurde, Zahlungsauftrag im System auf «ausgeführt» stellen" }
+  { id: "zl1", gruppe: "Zahlungslisten", text: "Zahlungslisten alle auf «ausgeführt» stellen, bevor Lohn gerechnet wird" },
+  { id: "rap1", gruppe: "Rapporterfassung", text: "Alle Rapporte sind erfasst" },
+  { id: "ldm1", gruppe: "Lohndatenmeldungen", text: "Sämtliche Lohndatenmeldungen im Ticketsystem überprüfen, erfassen und kontrollieren" },
+  { id: "gf1", gruppe: "Guthaben / Ferien / 13. Gehalt", text: "Guthaben, Ferien und 13. Gehalt gemäss Lohnmeldungen des Kunden auszahlen bzw. verarbeiten" },
+  { id: "bp1", gruppe: "Betreibungen / Lohnpfändungen", text: "Betreibungen und Lohnpfändungen kontrollieren" },
+  { id: "uc1", gruppe: "Ultimativ Check", text: "Ultimativ Check durchführen", hinweis: "Ferienguthaben (Minusbeträge kontrollieren), 13. Gehalt, BVG, Sozialversicherungsabzüge, Quellensteuer (QST), Vorschussgebühren etc." },
+  { id: "uc2", gruppe: "Ultimativ Check berücksichtigt", text: "Sämtliche Meldungen von Ultimativ Check wurden kontrolliert und bereinigt", hinweis: "Ebenso der Entwicklung melden" },
+  { id: "la1", gruppe: "Lohnabrechnung zur Kontrolle", text: "Lohnabrechnungen an den Kunden zur Kontrolle versenden" },
+  { id: "za1", gruppe: "Zahlungsauftrag nach Kundenfreigabe", text: "Nach OK / Freigabe des Kunden Zahlungsauftrag auf die Bank stellen" },
+  { id: "za2", gruppe: "Zahlungsauftrag nach Kundenfreigabe", text: "Dem Kunden die Auszahlungsliste senden" },
+  { id: "zg1", gruppe: "Zahlung ausgeführt", text: "Sobald die Zahlung auf der Bank ausgeführt wurde, Zahlungsauftrag im System auf «ausgeführt» stellen" }
 ];
 
 /* ---------- Laufender Zustand ---------- */
@@ -84,7 +84,7 @@ function lctMonatVorher(ym) {
 }
 
 function lctLeer() {
-  return { customExtra: [], customOverrides: {}, customRemoved: [], periods: {}, documents: [] };
+  return { customExtra: [], customOverrides: {}, customRemoved: [], customOrder: {}, periods: {}, documents: [] };
 }
 function lctNeueLohnperiode(hinweisVorbelegt) {
   return { laeufe: [lctNeuerLaufObjekt()], bemerkungPeriode: "", hinweisFolgemonat: hinweisVorbelegt || "",
@@ -170,6 +170,7 @@ async function lctLoadKunde(companyId, force) {
     data.periods = data.periods || {};
     data.documents = data.documents || [];
     Object.keys(data.periods).forEach(ym => { data.periods[ym] = lctMigrierePeriode(data.periods[ym]); });
+    data.customOrder = data.customOrder || {};
     // order-Feld für Alt-Zusatzpunkte ohne order ergänzen (ans Ende, in Erstellungsreihenfolge)
     data.customExtra.forEach((it, i) => { if (typeof it.order !== "number") it.order = 1000 + i; });
     data.__id = companyId;
@@ -201,14 +202,25 @@ async function lctSaveKunde() {
    Zusatzpunkte tragen ein eigenes order (float) und werden anhand dessen
    zwischen die Standard-Items einsortiert — so lässt sich ein Zusatzpunkt
    frei zwischen zwei beliebige Kontrollpunkte schieben (siehe lctVerschieben). */
+/* Gruppenname ohne führende Nummer (alte Daten hatten «6. Ultimativ Check» fest im Text) */
+function lctGruppeName(g) { return String(g || "").replace(/^\s*\d+\.\s*/, "").trim() || "Weitere"; }
 function lctEffektiveItems() {
   const std = (lctState.standard && lctState.standard.items) || LCT_STANDARD_BASIS;
   const k = lctState.kunde || lctLeer();
+  const ord = k.customOrder || {};   // kundenspezifische Position eines Standardpunkts (Bruchzahl)
   const basis = std
     .filter(it => k.customRemoved.indexOf(it.id) < 0)
-    .map((it, i) => Object.assign({ order: i }, it, k.customOverrides[it.id] ? { text: k.customOverrides[it.id] } : {}));
-  const extra = (k.customExtra || []).map(it => Object.assign({ kundenspezifisch: true }, it));
-  return basis.concat(extra).sort((a, b) => a.order - b.order);
+    .map((it, i) => {
+      const ov = k.customOverrides[it.id];
+      const o = typeof ov === "string" ? { text: ov } : (ov || {});
+      return Object.assign({ order: ord[it.id] !== undefined ? ord[it.id] : i }, it, { gruppe: lctGruppeName(o.gruppe || it.gruppe) }, o.text ? { text: o.text } : {}, o.hinweis !== undefined ? { hinweis: o.hinweis } : {});
+    });
+  const extra = (k.customExtra || []).map(it => Object.assign({ kundenspezifisch: true }, it, { gruppe: lctGruppeName(it.gruppe) }));
+  const liste = basis.concat(extra).sort((a, b) => a.order - b.order);
+  // Nummerierung: Position bestimmt die Nummer — aufeinanderfolgende Punkte derselben Überschrift teilen sich eine Nummer
+  let nr = 0, letzte = null;
+  liste.forEach(it => { if (it.gruppe !== letzte) { nr++; letzte = it.gruppe; } it.nr = nr; });
+  return liste;
 }
 
 /* ---------- Periode / Lohnläufe sicherstellen (inkl. dauerhafter Monat-für-Monat-
@@ -274,8 +286,8 @@ function lctRenderBody(el) {
   // Gruppieren nach .gruppe für die Darstellung
   const gruppen = [];
   items.forEach(it => {
-    let g = gruppen.find(x => x.name === (it.gruppe || "Weitere"));
-    if (!g) { g = { name: it.gruppe || "Weitere", items: [] }; gruppen.push(g); }
+    let g = gruppen[gruppen.length - 1];
+    if (!g || g.nr !== it.nr) { g = { nr: it.nr, name: it.nr + ". " + (it.gruppe || "Weitere"), items: [] }; gruppen.push(g); }
     g.items.push(it);
   });
 
@@ -313,17 +325,16 @@ function lctRenderBody(el) {
                 const st = lauf.items[it.id] || { checked: false, bemerkung: "" };
                 return `
                 <div id="lct-row-${it.id}" class="lct-row"
-                  ${it.kundenspezifisch ? `draggable="true" ondragstart="lctDragStart(event,'${it.id}')" ondragend="lctDragEnd(event)"` : ""}
+                  draggable="true" ondragstart="lctDragStart(event,'${it.id}')" ondragend="lctDragEnd(event)"
                   ondragover="lctDragOver(event)" ondragleave="lctDragLeave(event)" ondrop="lctDrop(event,'${it.id}')"
                   style="padding:8px 0;border-bottom:1px solid var(--border);border-top:2px solid transparent">
                   <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
-                    ${it.kundenspezifisch ? `<span style="cursor:grab;color:var(--text-faint);margin-top:2px;user-select:none" title="Zum Verschieben ziehen">⠿</span>` : ""}
+                    <span style="cursor:grab;color:var(--text-faint);margin-top:2px;user-select:none" title="Zum Verschieben ziehen">⠿</span>
                     <input type="checkbox" ${st.checked ? "checked" : ""} onchange="lctToggle('${it.id}',this.checked)" style="margin-top:3px;width:auto">
                     <span style="flex:1">${escape(it.text)}${it.kundenspezifisch ? ` <span style="font-size:10px;color:var(--accent,#5ad275)">· kundenspezifisch</span>` : ""}</span>
                     <span style="display:flex;gap:4px">
-                      ${it.kundenspezifisch ? `
                       <button class="btn btn-sm" onclick="lctVerschieben('${it.id}',-1)" title="Nach oben verschieben">↑</button>
-                      <button class="btn btn-sm" onclick="lctVerschieben('${it.id}',1)" title="Nach unten verschieben">↓</button>` : ""}
+                      <button class="btn btn-sm" onclick="lctVerschieben('${it.id}',1)" title="Nach unten verschieben">↓</button>
                       <button class="btn btn-sm" onclick="lctBearbeiten('${it.id}')" title="Text bearbeiten">✎</button>
                       <button class="btn btn-sm" onclick="lctEntfernen('${it.id}')" title="Entfernen">✕</button>
                     </span>
@@ -338,10 +349,8 @@ function lctRenderBody(el) {
           `).join("")}
 
           <div style="display:flex;gap:8px;margin:14px 0 4px">
-            <input type="text" id="lct-neu-text" placeholder="Neuer Kontrollpunkt für diesen Kunden …" value="${escape(lctState.neuerPunktText)}"
-              oninput="lctState.neuerPunktText=this.value"
-              style="flex:1;font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:3px;background:var(--bg-card);color:var(--text)">
             <button class="btn btn-sm" onclick="lctHinzufuegen()">＋ Kontrollpunkt hinzufügen</button>
+            <span style="font-size:11px;color:var(--text-faint);align-self:center">Überschrift, Checkbox-Text und Beschreibung — Nummer ergibt sich aus der Position (↑↓ oder ziehen).</span>
           </div>
 
           <div class="field" style="margin-top:16px">
@@ -474,63 +483,65 @@ function lctFrageGlobal(beschreibung, weiterFn) {
   ]);
 }
 
+function lctPunktDialog(titel, werte, weiterFn) {
+  showModal(titel, `
+    <div class="field"><label>Überschrift / Titel</label><input id="lct-d-gruppe" value="${escape(werte.gruppe || "")}" placeholder="z.B. KONTROLLE AUSZAHLUNGSLISTE"></div>
+    <div class="field"><label>Kontrollpunkt (Checkbox-Text)</label><textarea id="lct-d-text" rows="2">${escape(werte.text || "")}</textarea></div>
+    <div class="field"><label>Beschreibung / Erklärung (optional)</label><textarea id="lct-d-hinweis" rows="2">${escape(werte.hinweis || "")}</textarea></div>
+  `, [
+    `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
+    `<button class="btn btn-primary" onclick="window.__lctDialogWeiter()">Weiter</button>`
+  ]);
+  window.__lctDialogWeiter = () => { const w = { gruppe: val("lct-d-gruppe").trim(), text: val("lct-d-text").trim(), hinweis: val("lct-d-hinweis").trim() }; if (!w.text) { toast("Checkbox-Text fehlt.", true); return; } closeModal(); weiterFn(w); };
+}
 function lctHinzufuegen() {
-  const text = (lctState.neuerPunktText || "").trim();
-  if (!text) return;
-  window.__lctPendingAdd = text;
-  lctFrageGlobal(`Neuer Kontrollpunkt: «${text}»`, lctHinzufuegenAusfuehren);
+  lctPunktDialog("Neuer Kontrollpunkt", {}, w => { window.__lctPendingAdd = w; lctFrageGlobal(`Neuer Kontrollpunkt «${w.gruppe || w.text}»`, lctHinzufuegenAusfuehren); });
 }
 async function lctHinzufuegenAusfuehren(global) {
-  const text = window.__lctPendingAdd; window.__lctPendingAdd = null;
-  if (!text) return;
+  const w = window.__lctPendingAdd; window.__lctPendingAdd = null;
+  if (!w) return;
   const id = "u" + Date.now().toString(36);
+  const gruppe = w.gruppe || w.text;
   if (global) {
     await lctLoadStandard(false);
-    lctState.standard.items.push({ id, gruppe: "Zusätzlich", text });
+    lctState.standard.items.push({ id, gruppe, text: w.text, hinweis: w.hinweis || "" });
     try { await lctSaveStandard(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
   } else {
     const maxOrder = Math.max(999, ...lctEffektiveItems().map(x => x.order));
-    lctState.kunde.customExtra.push({ id, gruppe: "Zusätzlich (kundenspezifisch)", text, order: maxOrder + 1 });
+    lctState.kunde.customExtra.push({ id, gruppe, text: w.text, hinweis: w.hinweis || "", order: maxOrder + 1 });
     try { await lctSaveKunde(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
   }
-  lctState.neuerPunktText = "";
   render();
+  toast("Kontrollpunkt am Ende angefügt — mit ↑↓ oder Ziehen an die gewünschte Position setzen.");
 }
 
 function lctBearbeiten(itemId) {
   const items = lctEffektiveItems();
   const it = items.find(x => x.id === itemId);
   if (!it) return;
-  showModal("Kontrollpunkt bearbeiten", `
-    <div class="field"><label>Text</label><textarea id="lct-edit-text" rows="2">${escape(it.text)}</textarea></div>
-  `, [
-    `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
-    `<button class="btn btn-primary" onclick="lctBearbeitenSpeichern('${itemId}')">Weiter</button>`
-  ]);
-}
-function lctBearbeitenSpeichern(itemId) {
-  const text = val("lct-edit-text");
-  if (!text) return;
-  closeModal();
-  window.__lctPendingEdit = { id: itemId, text };
-  lctFrageGlobal(`Text ändern zu: «${text}»`, lctBearbeitenAusfuehren);
+  lctPunktDialog("Kontrollpunkt bearbeiten", it, w => {
+    window.__lctPendingEdit = Object.assign({ id: itemId }, w);
+    if ((lctState.kunde.customExtra || []).some(x => x.id === itemId)) lctBearbeitenAusfuehren(false);
+    else lctFrageGlobal(`Kontrollpunkt «${w.gruppe || w.text}» ändern`, lctBearbeitenAusfuehren);
+  });
 }
 async function lctBearbeitenAusfuehren(global) {
   const p = window.__lctPendingEdit; window.__lctPendingEdit = null;
   if (!p) return;
   const isExtra = (lctState.kunde.customExtra || []).some(x => x.id === p.id);
+  const felder = { gruppe: p.gruppe || p.text, text: p.text, hinweis: p.hinweis || "" };
   if (isExtra) {
-    // kundenspezifischer Zusatzpunkt: Text direkt in customExtra ändern (kein globaler Bezug möglich)
     const e = lctState.kunde.customExtra.find(x => x.id === p.id);
-    if (e) e.text = p.text;
+    if (e) Object.assign(e, felder);
     try { await lctSaveKunde(); } catch (e2) { toast("Speichern fehlgeschlagen: " + e2.message, true); }
   } else if (global) {
     await lctLoadStandard(false);
     const it = lctState.standard.items.find(x => x.id === p.id);
-    if (it) it.text = p.text;
-    try { await lctSaveStandard(); } catch (e2) { toast("Speichern fehlgeschlagen: " + e2.message, true); }
+    if (it) Object.assign(it, felder);
+    delete lctState.kunde.customOverrides[p.id];   // globale Fassung gilt wieder
+    try { await lctSaveStandard(); await lctSaveKunde(); } catch (e2) { toast("Speichern fehlgeschlagen: " + e2.message, true); }
   } else {
-    lctState.kunde.customOverrides[p.id] = p.text;
+    lctState.kunde.customOverrides[p.id] = felder;
     try { await lctSaveKunde(); } catch (e2) { toast("Speichern fehlgeschlagen: " + e2.message, true); }
   }
   render();
@@ -565,27 +576,47 @@ async function lctEntfernenAusfuehren(global) {
    Verschiebt NUR den bewegten Zusatzpunkt (fractional/midpoint-Einordnung) — Standard-Items
    und andere Zusatzpunkte bleiben unverändert. So kann ein Zusatzpunkt frei zwischen zwei
    beliebige Kontrollpunkte geschoben werden, auch zwischen zwei Standard-Punkte. */
+/* Zielposition (Bruchzahl zwischen Nachbarn) für ein Item, das vor/nach einem Ziel-Index landen soll */
+function lctZielOrder(merged, zielIdx, oben) {
+  if (oben) { const o = merged[zielIdx].order; const u = zielIdx > 0 ? merged[zielIdx - 1].order : o - 2; return (o + u) / 2; }
+  const u = merged[zielIdx].order; const o = zielIdx < merged.length - 1 ? merged[zielIdx + 1].order : u + 2; return (u + o) / 2;
+}
+/* Verschieben eines beliebigen Punkts an eine Zielposition. Standardpunkte: Frage «für alle Kunden?» —
+   JA = Reihenfolge der globalen Vorlage ändern (Nummerierung bei allen Kunden neu), NEIN = nur bei diesem Kunden. */
+async function lctPositionSetzen(itemId, neueOrder, zielIdx, oben) {
+  const extra = lctState.kunde.customExtra.find(x => x.id === itemId);
+  if (extra) { extra.order = neueOrder; render(); try { await lctSaveKunde(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); } return; }
+  window.__lctPendingMove = { itemId, neueOrder, zielIdx, oben };
+  lctFrageGlobal("Kontrollpunkt verschieben.", lctVerschiebenAusfuehren);
+}
+async function lctVerschiebenAusfuehren(global) {
+  const p = window.__lctPendingMove; window.__lctPendingMove = null; if (!p) return;
+  if (global) {
+    await lctLoadStandard(false);
+    const items = lctState.standard.items; const i = items.findIndex(x => x.id === p.itemId); if (i < 0) return;
+    // Ziel in der globalen Liste: der Standardpunkt, vor/nach dem der Punkt beim Kunden landen soll
+    const merged = lctEffektiveItems().filter(x => !x.kundenspezifisch && x.id !== p.itemId);
+    const nachbar = merged.filter(x => p.oben ? x.order >= p.neueOrder : x.order <= p.neueOrder);
+    const zielId = p.oben ? (nachbar[0] || {}).id : (nachbar[nachbar.length - 1] || {}).id;
+    const [it] = items.splice(i, 1);
+    let j = zielId ? items.findIndex(x => x.id === zielId) : (p.oben ? 0 : items.length);
+    if (zielId && !p.oben) j += 1;
+    items.splice(Math.max(0, Math.min(items.length, j)), 0, it);
+    delete (lctState.kunde.customOrder || {})[p.itemId];
+    try { await lctSaveStandard(); await lctSaveKunde(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  } else {
+    lctState.kunde.customOrder = lctState.kunde.customOrder || {};
+    lctState.kunde.customOrder[p.itemId] = p.neueOrder;
+    try { await lctSaveKunde(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  }
+  render();
+}
 async function lctVerschieben(itemId, richtung) {
   const merged = lctEffektiveItems();
-  const idx = merged.findIndex(x => x.id === itemId);
-  if (idx < 0) return;
-  const neuIdx = idx + richtung;
-  if (neuIdx < 0 || neuIdx >= merged.length) return;
-  const extra = lctState.kunde.customExtra.find(x => x.id === itemId);
-  if (!extra) return;   // Standard-Items werden hier nicht verschoben
-  let neueOrder;
-  if (richtung < 0) {
-    const oberGrenze = merged[neuIdx].order;
-    const untereGrenze = neuIdx > 0 ? merged[neuIdx - 1].order : oberGrenze - 2;
-    neueOrder = (oberGrenze + untereGrenze) / 2;
-  } else {
-    const untereGrenze = merged[neuIdx].order;
-    const obereGrenze = neuIdx < merged.length - 1 ? merged[neuIdx + 1].order : untereGrenze + 2;
-    neueOrder = (untereGrenze + obereGrenze) / 2;
-  }
-  extra.order = neueOrder;
-  render();
-  try { await lctSaveKunde(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  const idx = merged.findIndex(x => x.id === itemId); if (idx < 0) return;
+  const neuIdx = idx + richtung; if (neuIdx < 0 || neuIdx >= merged.length) return;
+  const oben = richtung < 0;
+  await lctPositionSetzen(itemId, lctZielOrder(merged, neuIdx, oben), neuIdx, oben);
 }
 
 /* ---------- Drag & Drop (Alternative zu ↑/↓, direktes Ansteuern der Zielposition) ----------
@@ -624,26 +655,12 @@ async function lctDrop(ev, zielId) {
   ev.currentTarget.style.borderTopColor = "transparent";
   ev.currentTarget.style.borderBottomColor = "transparent";
   if (!itemId || itemId === zielId) return;
-  const extra = lctState.kunde.customExtra.find(x => x.id === itemId);
-  if (!extra) return;   // nur kundenspezifische Punkte lassen sich verschieben
   const rect = ev.currentTarget.getBoundingClientRect();
   const oben = (ev.clientY - rect.top) < rect.height / 2;
   const merged = lctEffektiveItems();
   const zielIdx = merged.findIndex(x => x.id === zielId);
   if (zielIdx < 0) return;
-  let neueOrder;
-  if (oben) {
-    const obereGrenze = merged[zielIdx].order;
-    const untereGrenze = zielIdx > 0 ? merged[zielIdx - 1].order : obereGrenze - 2;
-    neueOrder = (obereGrenze + untereGrenze) / 2;
-  } else {
-    const untereGrenze = merged[zielIdx].order;
-    const obereGrenze = zielIdx < merged.length - 1 ? merged[zielIdx + 1].order : untereGrenze + 2;
-    neueOrder = (untereGrenze + obereGrenze) / 2;
-  }
-  extra.order = neueOrder;
-  render();
-  try { await lctSaveKunde(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  await lctPositionSetzen(itemId, lctZielOrder(merged, zielIdx, oben), zielIdx, oben);
 }
 
 /* ---------- Dokumente: dauerhaft (Kunde) ---------- */

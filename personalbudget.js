@@ -13,7 +13,7 @@
    Abhängigkeiten aus index.html: cache, fbParse, fbSaveItem, deleteItem,
    reload, escape, toast, render, showModal, closeModal, currentUser. */
 
-const PA_VERSION = "1.113.0";
+const PA_VERSION = "1.114.0";
 const PA_GES = ["Apriko AG", "Maverix AG"];
 /* Budgetvergleich rechnet Personal ÜBER KREUZ (fbZuordnung): Maverix-Löhne = SW_*, Apriko-Löhne = BO_* */
 const PA_FB_KEYS = { "Apriko AG": { lohn: "BO_Lohn", sv: "BO_SV", uebr: "BO_UebrPA" }, "Maverix AG": { lohn: "SW_Lohn", sv: "SW_SV", uebr: "SW_UebrPA" } };
@@ -75,12 +75,12 @@ async function paDeleteRow(id) {
   try { await deleteItem("Budget", id); await reload("Budget"); } catch (e) { toast("Löschen fehlgeschlagen: " + e.message, true); }
   paState.busy = false; render();
 }
-async function paSetAg(v) { const c = paCfg(paState.year); await paSave({ cfg: "pa", t: "cfg", y: paState.year, ag: paNum(v) }, c ? c.id : null); }
+async function paSetAg(v) { const c = paCfg(paState.year); await paSave({ cfg: "pa", t: "cfg", y: paState.year, ag: paNum(v), ...(c && c.kt ? { kt: c.kt } : {}) }, c ? c.id : null); }   // Konten-Zuordnung mitnehmen
 function paSetYear(y) { paState.year = parseInt(y, 10); paState.order = null; render(); }
 async function paCopyYear(from) {
   if (paRows(paState.year).length && !confirm("Jahr " + paState.year + " hat bereits Zeilen. Zeilen aus " + from + " zusätzlich kopieren?")) return;
   paState.busy = true; render();
-  try { for (const r of paRows(from)) await fbSaveItem({ cfg: "pa", t: "row", y: paState.year, n: r.n, g: r.g, l: r.l, p: r.p, s: r.s, w: r.w }); if (!paCfg(paState.year)) await fbSaveItem({ cfg: "pa", t: "cfg", y: paState.year, ag: paAg(from) }); await reload("Budget"); toast(paRows(paState.year).length + " Zeilen in " + paState.year); }
+  try { for (const r of paRows(from)) await fbSaveItem({ cfg: "pa", t: "row", y: paState.year, n: r.n, g: r.g, l: r.l, p: r.p, s: r.s, w: r.w }); if (!paCfg(paState.year)) { const cf = paCfg(from); await fbSaveItem({ cfg: "pa", t: "cfg", y: paState.year, ag: paAg(from), ...(cf && cf.kt ? { kt: cf.kt } : {}) }); } await reload("Budget"); toast(paRows(paState.year).length + " Zeilen in " + paState.year); }
   catch (e) { toast("Kopieren fehlgeschlagen: " + e.message, true); }
   paState.busy = false; render();
 }

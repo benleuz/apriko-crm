@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.135.0";
+const LC_VERSION = "1.136.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -32,7 +32,8 @@ const lcState = {
   kontrolllistenLoading: null,
   kundenregeln: null,     // { hinweise:[...], __kunde } — siehe lcLoadKundenregeln (Punkt 8)
   lohnartenliste: null,   // { dateiname, spalten, spaltenMap, zeilen } — zentral, siehe lcLoadLohnartenliste (Punkte 11/12)
-  auszahlungsliste: null  // { dateiname, spalten, spaltenMap, zeilen } — Punkte 17-19, nicht persistiert (Session-Check)
+  auszahlungsliste: null, // { dateiname, spalten, spaltenMap, zeilen } — Punkte 17-19, nicht persistiert (Session-Check)
+  auszahlungErwartet: ""  // optionale manuelle Liste zusätzlich erwarteter Namen (eine pro Zeile)
 };
 
 /* ---------- Referenzwerte (Stand 2026, anpassbar) ---------- */
@@ -1258,11 +1259,11 @@ function lcFindeZeileFuerSlip(zeilen, spaltenMap, slip) {
         return slipWoerter.length && slipWoerter.every(w => zWoerter.includes(w));
       });
       if (kandidaten.length === 1) return { zeile: kandidaten[0], ueber: "Name" };
-      if (kandidaten.length > 1 && spaltenMap.geburtsdatum) {
-        // mehrdeutig über den Namen allein — mit Geburtsdatum weiter eingrenzen, falls am Slip bekannt
-        // (Slips haben aktuell kein erkanntes Geburtsdatum — Platzhalter für künftige Erweiterung)
-        return { zeile: kandidaten[0], ueber: "Name (mehrdeutig, erste Übereinstimmung)" };
-      }
+      if (kandidaten.length > 1) return { zeile: kandidaten[0], ueber: "Name (mehrdeutig)", mehrdeutig: true, anzahl: kandidaten.length };
+      // Teiltreffer: nur Nachname stimmt (Schreibweise des Vornamens abweichend) → «unklar», nicht «fehlt»
+      const slipW = String(slip.name || "").toLowerCase().split(/\s+/).map(lcNormText).filter(w => w.length >= 3);
+      const teil = zeilen.filter(z => { const zW = (String(z[spaltenMap.name] || "") + " " + String(spaltenMap.vorname ? z[spaltenMap.vorname] || "" : "")).toLowerCase().split(/\s+/).map(lcNormText); return slipW.some(w => zW.includes(w)); });
+      if (teil.length) return { zeile: teil[0], ueber: "nur Teil des Namens", unklar: true, anzahl: teil.length };
     }
   }
   return null;
@@ -1660,11 +1661,22 @@ function lcAuszahlungslisteAbgleich() {
   if (!al) return null;
   const ergebnisse = [];
   lcState.slips.forEach(s => {
-    if (s.auszahlung === null || s.auszahlung <= 0) return;   // Minuslohn/0/unbekannt — nicht erwartet, siehe Punkt 19
-    const treffer = lcFindeZeileFuerSlip(al.zeilen, al.spaltenMap, s);
-    ergebnisse.push({ slip: s, gefunden: !!treffer });
+    if (s.auszahlung === null || s.auszahlung <= 0) return;   // 0 oder Minuslohn: keine Auszahlung erwartet, keine Warnung
+    const t = lcFindeZeileFuerSlip(al.zeilen, al.spaltenMap, s);
+    // Status: ok (AHV oder eindeutiger Name) · unklar (mehrdeutig / Teiltreffer → manuell prüfen) · fehlt
+    const status = !t ? "fehlt" : (t.mehrdeutig || t.unklar ? "unklar" : "ok");
+    ergebnisse.push({ slip: s, gefunden: status === "ok", status, ueber: t ? t.ueber : "", anzahl: t ? t.anzahl : 0 });
   });
   return ergebnisse;
+}
+/* Optional: manuell eingegebene Namen, die zwingend auf der Liste erwartet werden (eine Person pro Zeile) */
+function lcAuszahlungManuellAbgleich() {
+  const al = lcState.auszahlungsliste; const txt = lcState.auszahlungErwartet || "";
+  if (!al || !al.spaltenMap.name || !txt.trim()) return [];
+  return txt.split(/\n+/).map(x => x.trim()).filter(Boolean).map(name => {
+    const t = lcFindeZeileFuerSlip(al.zeilen, al.spaltenMap, { name, ahv: "" });
+    return { name, status: !t ? "fehlt" : (t.mehrdeutig || t.unklar ? "unklar" : "ok"), ueber: t ? t.ueber : "" };
+  });
 }
 
 function lcRenderKontrolllistenPanel() {
@@ -1908,19 +1920,28 @@ async function renderLohncheck(el) {
     </div>`;
     if (al && (al.spaltenMap.ahv || al.spaltenMap.name)) {
       const ergebnisse = lcAuszahlungslisteAbgleich();
-      const fehlend = ergebnisse.filter(e => !e.gefunden);
-      body += `<div class="panel">
-        <div class="panel-h">Ergebnis — ${ergebnisse.length} Abrechnung(en) mit positiver Auszahlung geprüft, ${fehlend.length} fehlen auf der Liste</div>
-        <div style="padding:12px 16px">
-          ${fehlend.length ? `<table style="width:100%;font-size:12px;border-collapse:collapse">
-            <tr style="color:var(--text-dim)"><th style="text-align:left">Mitarbeiter</th><th style="text-align:left">Periode</th><th style="text-align:right">Auszahlung</th></tr>
-            ${fehlend.map(e => `<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="lcDetail(${e.slip.id})">
+      const fehlend = ergebnisse.filter(e => e.status === "fehlt"), unklar = ergebnisse.filter(e => e.status === "unklar"), ok = ergebnisse.filter(e => e.status === "ok");
+      const ohne = lcState.slips.filter(s => s.auszahlung === null || s.auszahlung <= 0).length;
+      const zeile = e => `<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="lcDetail(${e.slip.id})">
               <td style="padding:5px 8px 5px 0">${escape(e.slip.anzeige)}</td>
+              <td style="padding:5px 8px;font-family:var(--font-mono);color:var(--text-dim)">${escape(e.slip.ahv || "")}</td>
               <td style="padding:5px 8px;color:var(--text-dim)">${escape(e.slip.periode)}</td>
-              <td style="padding:5px 8px;text-align:right;font-family:var(--font-mono)">${lcFmt(e.slip.auszahlung)}</td></tr>`).join("")}
-            </table>
-            <div style="font-size:11px;color:var(--text-faint);margin-top:8px">Mitarbeiter auf Lohnabrechnung mit positivem Auszahlungsguthaben vorhanden, jedoch nicht auf Auszahlungsliste gefunden. Bitte überprüfen.</div>`
-            : `<div class="empty">Alle Mitarbeitenden mit positiver Auszahlung sind auf der Liste vorhanden ✓</div>`}
+              <td style="padding:5px 8px;text-align:right;font-family:var(--font-mono)">${lcFmt(e.slip.auszahlung)}</td>
+              <td style="padding:5px 8px;font-size:11px">${e.status === "fehlt" ? "Nicht auf Auszahlungsliste gefunden" : e.status === "unklar" ? "Nicht eindeutig zuordenbar (" + escape(e.ueber) + (e.anzahl > 1 ? ", " + e.anzahl + " Kandidaten" : "") + ") — bitte manuell prüfen" : "gefunden über " + escape(e.ueber)}</td></tr>`;
+      const kopf = `<tr style="color:var(--text-dim)"><th style="text-align:left">Mitarbeiter</th><th style="text-align:left">AHV-Nr</th><th style="text-align:left">Periode</th><th style="text-align:right">Auszahlung gemäss Lohnabrechnung</th><th style="text-align:left">Status</th></tr>`;
+      const manuell = lcAuszahlungManuellAbgleich();
+      body += `<div class="panel">
+        <div class="panel-h">Ergebnis — ${ergebnisse.length} Abrechnung(en) mit positivem Auszahlungsguthaben geprüft · <span style="color:${fehlend.length ? "#c62828" : "var(--accent)"}">${fehlend.length} fehlen</span> · <span style="color:${unklar.length ? "#b26a00" : "inherit"}">${unklar.length} unklar</span> · ${ok.length} gefunden${ohne ? ` · ${ohne} ohne Auszahlung (0 / Minuslohn, nicht erwartet)` : ""}</div>
+        <div style="padding:12px 16px">
+          ${!fehlend.length && !unklar.length ? `<div style="padding:10px 12px;background:rgba(90,210,117,.12);border-left:4px solid var(--accent);border-radius:4px;font-size:12px;margin-bottom:10px"><b>Kontrolle erfolgreich:</b> Alle Mitarbeitenden mit positivem Auszahlungsguthaben wurden auf der Auszahlungsliste gefunden.</div>` : ""}
+          ${fehlend.length ? `<div style="font-size:12px;font-weight:700;color:#c62828;margin:4px 0 6px">Fehlende Auszahlungen</div><table style="width:100%;font-size:12px;border-collapse:collapse">${kopf}${fehlend.map(zeile).join("")}</table>` : ""}
+          ${unklar.length ? `<div style="font-size:12px;font-weight:700;color:#b26a00;margin:12px 0 6px">Nicht eindeutig zuordenbar — manuell prüfen</div><table style="width:100%;font-size:12px;border-collapse:collapse">${kopf}${unklar.map(zeile).join("")}</table>` : ""}
+          <details style="margin-top:12px"><summary style="font-size:11px;color:var(--text-dim);cursor:pointer">${ok.length} gefunden (Details)</summary><table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:6px">${kopf}${ok.map(zeile).join("")}</table></details>
+          <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+            <div style="font-size:12px;font-weight:600;margin-bottom:4px">Optional: zusätzlich erwartete Mitarbeitende <span style="font-weight:400;color:var(--text-faint);font-size:11px">— eine Person pro Zeile; wird ebenfalls gegen die Auszahlungsliste geprüft</span></div>
+            <textarea rows="3" placeholder="Max Muster&#10;Anna Beispiel" onchange="lcState.auszahlungErwartet=this.value;render()" style="width:100%;font-size:12px">${escape(lcState.auszahlungErwartet || "")}</textarea>
+            ${manuell.length ? `<table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:6px"><tr style="color:var(--text-dim)"><th style="text-align:left">Name</th><th style="text-align:left">Status</th></tr>${manuell.map(m => `<tr style="border-top:1px solid var(--border)"><td style="padding:4px 8px 4px 0">${escape(m.name)}</td><td style="padding:4px 8px;color:${m.status === "fehlt" ? "#c62828" : m.status === "unklar" ? "#b26a00" : "var(--accent)"}">${m.status === "fehlt" ? "Nicht auf Auszahlungsliste gefunden" : m.status === "unklar" ? "Nicht eindeutig (" + escape(m.ueber) + ") — manuell prüfen" : "gefunden"}</td></tr>`).join("")}</table>` : ""}
+          </div>
         </div>
       </div>`;
     }

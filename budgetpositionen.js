@@ -10,7 +10,7 @@
    Abhängigkeiten: jahresbudget.js (jbBuild, jbSaveRow, jbFindRow, jbPos*, jbFmt, jbNum, JB_*),
    index.html (fbSaveItem, reload, escape, toast, render, FB_PLAN, FB_LABELS, FB_SRC). */
 
-const BP_VERSION = "1.126.0";
+const BP_VERSION = "1.127.0";
 /* Suche: nach jedem Tastendruck wird neu gezeichnet — Fokus und Cursor ins Suchfeld zurückholen */
 function bpSucheTippen(el, state, key) { state[key] = el.value; const pos = el.selectionStart; render(); const n = document.getElementById(el.id); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} } }
 
@@ -265,8 +265,26 @@ function bpExport() {
 }
 
 /* ---------- Rendering ---------- */
+let bpAufraeumenLaeuft = false;
+async function bpPositionenAufraeumen() {
+  if (bpAufraeumenLaeuft) return; bpAufraeumenLaeuft = true;
+  try {
+    for (const g of JB_GES) {
+      const rows = bpRows(bpState.year, g).rows;
+      for (const r of rows) {
+        if (!/^\d{4}$/.test(String(r.kt))) continue;   // Sammelzeilen (50xx …) tragen das Konto an der Position — richtig so
+        const idx = (r.pos || []).findIndex(p => !p.auto && /^\d{4}$/.test(String(p.kt || "")) && String(p.kt) !== String(r.kt));
+        if (idx < 0) continue;
+        const rr = jbFindRow(g, r.kt); if (!rr) continue;
+        const ok = await bpPosZuKonto(rr, idx, String(rr.pos[idx].kt));
+        if (ok) { bpAufraeumenLaeuft = false; return; }   // render() wurde ausgelöst — nächste Runde prüft weiter
+      }
+    }
+  } finally { bpAufraeumenLaeuft = false; }
+}
 function renderBudgetpositionen(el) {
   jbState.year = bpState.year;
+  setTimeout(bpPositionenAufraeumen, 0);
   // Abhängigkeiten der automatischen Positionen (Hosting-DB: Kundenflags + Parameter; Personal: Personalbudget) nachladen,
   // damit Budgetpositionen/Jahresbudget auch beim Direkteinstieg vollständig sind
   if (typeof crmKundenFlags !== "undefined" && crmKundenFlags === null && typeof crmLoadKundenFlags === "function" && typeof siteId !== "undefined" && siteId) { crmLoadKundenFlags().then(() => render()).catch(() => {}); }
