@@ -10,7 +10,7 @@
    Abhängigkeiten: jahresbudget.js (jbBuild, jbSaveRow, jbFindRow, jbPos*, jbFmt, jbNum, JB_*),
    index.html (fbSaveItem, reload, escape, toast, render, FB_PLAN, FB_LABELS, FB_SRC). */
 
-const BP_VERSION = "1.125.0";
+const BP_VERSION = "1.126.0";
 /* Suche: nach jedem Tastendruck wird neu gezeichnet — Fokus und Cursor ins Suchfeld zurückholen */
 function bpSucheTippen(el, state, key) { state[key] = el.value; const pos = el.selectionStart; render(); const n = document.getElementById(el.id); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} } }
 
@@ -116,10 +116,40 @@ async function bpPosSet(g, kt, i, field, value) {
   }
   if (field === "v") pos[i].v = jbNum(value) || 0;
   else if (field === "sm" || field === "em") pos[i][field] = Math.min(12, Math.max(1, parseInt(value, 10) || 1));
-  else if (field === "kt") { const k = (String(value).match(/\d{4}/) || [""])[0]; if (k && k.length !== 4) { toast("FIBU-Konto: 4 Ziffern", true); return; } if (k) pos[i].kt = k; else delete pos[i].kt; }
+  else if (field === "kt") {
+    const k = (String(value).match(/\d{4}/) || [""])[0]; if (k && k.length !== 4) { toast("FIBU-Konto: 4 Ziffern", true); return; }
+    // Anderes Konto gewählt → Position gehört unter dieses Konto: an die richtige Zeile verschieben
+    if (k && k !== String(r.kt)) { const ok = await bpPosZuKonto(r, i, k); if (ok) return; }
+    if (k) pos[i].kt = k; else delete pos[i].kt;
+  }
   else pos[i][field] = String(value).trim();
   if (field === "f") { if (!pos[i].sm) pos[i].sm = 1; if (value === "r" && !pos[i].em) pos[i].em = 12; }
   await jbSaveRow(r, { pos });
+}
+/* Position unter ein anderes Konto verschieben. Aufwandskonto → eigene Kontozeile (wird bei Bedarf angelegt);
+   Personalkonto → passende Sammelzeile (50xx/57xx/58xx/59xx) mit Konto an der Position. Rückgabe: true = verschoben. */
+async function bpPosZuKonto(r, i, k) {
+  const g = r.g, p = { ...r.pos[i] };
+  const key = fbZuordnung(k, jbSameGes(g, "Apriko AG"));
+  if (!key || JB_ERTRAG.has(key)) { toast("Konto " + k + " ist ein Ertragskonto — dort wird nicht manuell budgetiert.", true); return false; }
+  let zielKt = k;
+  if (JB_PERSONAL.has(key)) { zielKt = key.endsWith("Lohn") ? "50xx" : key.endsWith("SV") ? "57xx" : "58xx/59xx"; p.kt = k; } else delete p.kt;
+  if (zielKt === String(r.kt)) return false;
+  let ziel = jbFindRow(g, zielKt);
+  if (!ziel) {
+    const istG = fbIst(jbState.year - 1).map(d => d.g).find(x => jbSameGes(x, g)) || g;
+    const bez = (bpBekannteKonten(g).find(([x]) => x === k) || [])[1] || "";
+    try { await fbSaveItem({ cfg: "jb", y: jbState.year, g: istG, kt: zielKt, b: bez, z: key, man: 1, v: 0, n: "", pos: [] }); await reload("Budget"); }
+    catch (e) { toast("Konto " + k + " konnte nicht angelegt werden: " + e.message, true); return false; }
+    ziel = jbFindRow(g, zielKt); if (!ziel) return false;
+  }
+  await jbSaveRow(ziel, { pos: (ziel.pos || []).filter(x => !x.auto).concat([p]) });
+  const rest = r.pos.filter((x, idx) => idx !== i);
+  await jbSaveRow(jbFindRow(g, r.kt) || r, { pos: rest.filter(x => !x.auto) });
+  bpState.open[g + "|" + zielKt] = true;
+  toast("«" + (p.t || "Position") + "» nach Konto " + k + " verschoben.");
+  render();
+  return true;
 }
 async function bpPosAdd(g, kt) {
   const r = jbFindRow(g, kt); if (!r) return;
