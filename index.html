@@ -23,13 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.327.0"></script>
-<script src="apriko-api.js?v=1.327.0"></script>
-<script src="lohncheck.js?v=1.327.0"></script>
-<script src="personalbudget.js?v=1.327.0"></script>
-<script src="jahresbudget.js?v=1.327.0"></script>
-<script src="budgetpositionen.js?v=1.327.0"></script>
-<script src="lohnchecklistetemp.js?v=1.327.0"></script>
+<script src="apriko-filters.js?v=1.331.0"></script>
+<script src="apriko-api.js?v=1.331.0"></script>
+<script src="lohncheck.js?v=1.331.0"></script>
+<script src="personalbudget.js?v=1.331.0"></script>
+<script src="jahresbudget.js?v=1.331.0"></script>
+<script src="budgetpositionen.js?v=1.331.0"></script>
+<script src="lohnchecklistetemp.js?v=1.331.0"></script>
+<script src="apriko-endpunkte.js?v=1.331.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1002,7 +1003,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.327.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.331.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -7229,6 +7230,22 @@ async function apLoadMore(tab) {
   } catch (e) { apShowError(e); }
   apState.loading = false; render();
 }
+/* Excel-Export der sichtbaren (gefilterten, sortierten) Tabelle des aktuellen Tabs — Spalten wie angezeigt, plus IDs */
+async function apExportExcel() {
+  const tab = apState.tab, cols = AP_COLS[tab];
+  const rows = apState._sichtbarSortiert || apState._sichtbar || apState.rows[tab];
+  if (!rows || !rows.length) { toast("Nichts zu exportieren.", true); return; }
+  await lcLoadXlsx();
+  const hdr = cols.map(c => c[1]).concat(["ID"]);
+  const data = rows.map(r => cols.map(c => { const v = c[2](r); return v === undefined || v === null ? "" : v; }).concat([r.id || ""]));
+  const ws = window.XLSX.utils.aoa_to_sheet([hdr].concat(data));
+  ws["!cols"] = hdr.map(h => ({ wch: Math.min(40, Math.max(10, h.length + 4)) }));
+  ws["!autofilter"] = { ref: "A1:" + window.XLSX.utils.encode_col(hdr.length - 1) + (data.length + 1) };
+  const wb = window.XLSX.utils.book_new(); window.XLSX.utils.book_append_sheet(wb, ws, tab.slice(0, 30));
+  const name = tab === "placements" ? "Einsaetze" + (apState.jahrGeladen ? "_" + apState.jahrGeladen : (apState.nurAktive ? "_aktiv" : "")) : tab;
+  window.XLSX.writeFile(wb, "Apriko_" + name + "_" + new Date().toISOString().slice(0, 10) + ".xlsx");
+  toast(data.length + " Zeilen exportiert.");
+}
 /* Kandidat (Mitarbeiter) und Kunde für die aktuell sichtbaren (gefilterten) Einsätze nachladen — gezielt, in Achtergruppen */
 async function apNamenNachladen() {
   const sicht = apState._sichtbar || apState.rows.placements;
@@ -7248,6 +7265,40 @@ async function apNamenNachladen() {
 /* Einsätze: nur aktive laden — gleiche Methode wie der Rapport-Scan (6 Einzelabfragen je Zustand über models.query,
    serverseitig gefiltert, dedupliziert). Ersetzt die paginierte Gesamtliste im Tab. */
 const AP_AKTIVE_STATES = ["Placed", "Active", "TerminatedPlaced", "TerminatedActive", "LockedPlaced", "LockedActive"];
+// Alle «echten» Einsätze eines Jahres: zusätzlich beendete/inaktive; ausgeschlossen Draft, Published, Revoked, Canceled, None (PlacementState-Enum)
+const AP_JAHR_STATES = ["Placed", "Active", "Inactive", "Archived", "TerminatedPlaced", "TerminatedActive", "TerminatedInactive", "LockedPlaced", "LockedActive", "LockedInactive"];
+async function apQueryAlleSeiten(state) {
+  const out = []; for (let page = 0; page < 50; page++) {
+    const r = await AprikoApi.models.query({ entityTypes: "StaffLeasePlacement", pageIndex: page, pageSize: 100, resolveReferences: false, filters: "state|=|" + JSON.stringify(state) + '|text|false|false|["G1"]' }).catch(() => null);
+    const hits = ((r && r.results) || []).map(AprikoApi.models.hitData); out.push(...hits); if (hits.length < 100) break;
+  }
+  return out;
+}
+/* Jahresliste: alle Einsätze, die im Jahr laufen (Eintritt ≤ 31.12., Austritt ≥ 1.1. oder laufend), ohne Storno/Widerruf/Entwurf,
+   mit vollen Details und Namen — das Endziel «alle Einsätze 2026 mit Namen» in einem Klick. */
+async function apLadeJahresEinsaetze(jahr) {
+  if (apState.loading) return;
+  jahr = parseInt(jahr, 10) || new Date().getFullYear();
+  apState.loading = true; apState.error = null; render();
+  try {
+    rpApiUse();
+    toast("Suche Einsätze " + jahr + " (" + AP_JAHR_STATES.length + " Zustände, seitenweise) …");
+    const teile = await Promise.all(AP_JAHR_STATES.map(apQueryAlleSeiten));
+    const gesehen = {}; let rows = [].concat(...teile).filter(p => AP_JAHR_STATES.includes(p.state) && !p.canceledAt && !p.revokedAt && !gesehen[p.id] && (gesehen[p.id] = true));
+    const von = jahr + "-01-01", bis = jahr + "-12-31";
+    rows = rows.filter(p => { const e = String(p.entryDate || "").slice(0, 10), a = String(p.withdrawalDate || "").slice(0, 10); return (!e || e <= bis) && (!a || a >= von); });
+    toast(rows.length + " Einsätze " + jahr + " gefunden — lade Details …");
+    let pos = 0; const voll = new Array(rows.length);
+    await Promise.all(Array.from({ length: 8 }, async () => { while (pos < rows.length) { const i = pos++; try { voll[i] = await AprikoApi.staffing.getStaffLease(rows[i].id); } catch (e) { voll[i] = rows[i]; } if (pos % 25 === 0) toast(pos + "/" + rows.length + " Details …"); } }));
+    rows = voll.map(v => (v && v.data) ? v.data : v).filter(p => !p.canceledAt && !p.revokedAt);
+    apState.rows.placements = rows; apState.page.placements = 0; apState.done.placements = true; apState.nurAktive = false; apState.jahrGeladen = jahr;
+    apState.von = von; apState.bis = bis;
+    apState.loading = false; render();
+    await apNamenNachladen();
+    return;
+  } catch (e) { apShowError(e); }
+  apState.loading = false; render();
+}
 async function apLadeAktiveEinsaetze() {
   if (apState.loading) return;
   apState.loading = true; apState.error = null; render();
@@ -7255,9 +7306,15 @@ async function apLadeAktiveEinsaetze() {
     rpApiUse();
     const teile = await Promise.all(AP_AKTIVE_STATES.map(st => AprikoApi.models.query({ entityTypes: "StaffLeasePlacement", pageIndex: 0, pageSize: 100, resolveReferences: false, filters: "state|=|" + JSON.stringify(st) + '|text|false|false|["G1"]' })
       .then(r => ((r && r.results) || []).map(AprikoApi.models.hitData)).catch(() => [])));
-    const gesehen = {}; const rows = [].concat(...teile).filter(p => AP_AKTIVE_STATES.includes(p.state) && !gesehen[p.id] && (gesehen[p.id] = true));
+    const gesehen = {}; let rows = [].concat(...teile).filter(p => AP_AKTIVE_STATES.includes(p.state) && !gesehen[p.id] && (gesehen[p.id] = true));
+    // Suchtreffer (document.data) enthalten nicht alle Felder des Einsatzes (z.B. employeeId/customerId fehlen) —
+    // deshalb jeden Einsatz einmal voll nachladen (8 parallel); erst damit sind Mitarbeiter/Kunde/Verträge auflösbar.
+    toast(rows.length + " aktive Einsätze gefunden — lade Details …");
+    let pos = 0; const voll = new Array(rows.length);
+    await Promise.all(Array.from({ length: 8 }, async () => { while (pos < rows.length) { const i = pos++; try { voll[i] = await AprikoApi.staffing.getStaffLease(rows[i].id); } catch (e) { voll[i] = rows[i]; } } }));
+    rows = voll.map(v => (v && v.data) ? v.data : v);
     apState.rows.placements = rows; apState.page.placements = 0; apState.done.placements = true; apState.nurAktive = true;
-    toast(rows.length + " aktive Einsätze geladen (" + AP_AKTIVE_STATES.join(", ") + ").");
+    toast(rows.length + " aktive Einsätze geladen (" + AP_AKTIVE_STATES.join(", ") + ") — Details vollständig.");
   } catch (e) { apShowError(e); }
   apState.loading = false; render();
 }
@@ -7265,6 +7322,86 @@ function apReset() {
   apState.nurAktive = false;
   apState.rows = { people: [], companies: [], placements: [], salarytypes: [], tarifarten: [] }; apState.page = { people: 0, companies: 0, placements: 0, salarytypes: 0, tarifarten: 0 };
   apState.done = { people: false, companies: false, placements: false, salarytypes: false, tarifarten: false }; apState.error = null; render();
+}
+/* ---------- API-Explorer: alle GET-Endpunkte aus den OpenAPI-Dateien ausführen (read-only) ---------- */
+let apxState = { q: "", svc: "", sel: null, params: {}, result: null, raw: false, fehler: "", loading: false };
+function apxAlle() { return typeof APRIKO_ENDPUNKTE !== "undefined" ? APRIKO_ENDPUNKTE : []; }
+function apxListe() {
+  const q = apxState.q.trim().toLowerCase();
+  return apxAlle().filter(e => (!apxState.svc || e.s === apxState.svc) && (!q || (e.p + " " + e.sum + " " + e.tag + " " + e.res).toLowerCase().includes(q)));
+}
+function apxWaehlen(idx) { apxState.sel = apxAlle()[idx]; apxState.params = {}; apxState.result = null; apxState.fehler = ""; (apxState.sel.prm || []).forEach(pr => { if (pr.n === "pageSize") apxState.params.pageSize = 50; if (pr.n === "pageIndex") apxState.params.pageIndex = 0; }); render(); }
+async function apxAusfuehren() {
+  const e = apxState.sel; if (!e) return;
+  let path = e.p; const query = {};
+  for (const pr of (e.prm || [])) {
+    const v = apxState.params[pr.n];
+    if (pr.in === "path") { if (v === undefined || v === "") { toast("Pfad-Parameter «" + pr.n + "» fehlt.", true); return; } path = path.replace("{" + pr.n + "}", encodeURIComponent(v)); }
+    else if (pr.in === "query" && v !== undefined && v !== "") query[pr.n] = v;
+  }
+  apxState.loading = true; apxState.fehler = ""; apxState.result = null; render();
+  try { rpApiUse(); const t0 = Date.now(); const res = await AprikoApi.request(e.s, path, { query }); apxState.result = { data: res, ms: Date.now() - t0, url: e.s + path }; }
+  catch (err) { apxState.fehler = (err && err.message) || String(err); }
+  apxState.loading = false; render();
+}
+function apxArray(d) { return Array.isArray(d) ? d : (d && Array.isArray(d.results) ? d.results.map(h => (h.document && h.document.data) || h) : (d && Array.isArray(d.items) ? d.items : null)); }
+function apxErgebnisHtml(r) {
+  const d = r.data; const fmt = v => v === null || v === undefined ? "" : (typeof v === "object" ? JSON.stringify(v) : String(v));
+  if (apxState.raw) return `<pre style="font-size:11px;white-space:pre-wrap;max-height:60vh;overflow:auto">${escape(JSON.stringify(d, null, 2))}</pre>`;
+  const arr = apxArray(d);
+  if (arr) {
+    if (!arr.length) return `<div class="empty">Leere Liste.</div>`;
+    const keys = [...new Set(arr.slice(0, 100).flatMap(o => Object.keys(o || {})))].slice(0, 40);
+    return `<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">${arr.length} Einträge · ${keys.length} Felder (max. 40 gezeigt, im Excel alle)</div>
+      <div class="table-wrap" style="max-height:60vh;overflow:auto"><table style="font-size:11px"><thead><tr>${keys.map(k => `<th>${escape(k)}</th>`).join("")}</tr></thead>
+      <tbody>${arr.slice(0, 500).map(o => `<tr>${keys.map(k => `<td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escape(fmt((o || {})[k]))}">${escape(fmt((o || {})[k])).slice(0, 80)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+  }
+  if (d && typeof d === "object") return `<table style="font-size:12px">${Object.entries(d).map(([k, v]) => `<tr><td style="color:var(--text-dim);padding:3px 10px 3px 0;vertical-align:top">${escape(k)}</td><td style="font-family:var(--font-mono);word-break:break-all">${escape(fmt(v)).slice(0, 400)}</td></tr>`).join("")}</table>`;
+  return `<pre style="font-size:11px">${escape(fmt(d))}</pre>`;
+}
+async function apxExportExcel() {
+  const r = apxState.result; if (!r) return;
+  const arr = apxArray(r.data) || [r.data];
+  await lcLoadXlsx();
+  const keys = [...new Set(arr.flatMap(o => Object.keys(o || {})))];
+  const ws = window.XLSX.utils.aoa_to_sheet([keys].concat(arr.map(o => keys.map(k => { const v = (o || {})[k]; return v === null || v === undefined ? "" : (typeof v === "object" ? JSON.stringify(v) : v); }))));
+  ws["!autofilter"] = { ref: "A1:" + window.XLSX.utils.encode_col(Math.max(0, keys.length - 1)) + (arr.length + 1) };
+  const wb = window.XLSX.utils.book_new(); window.XLSX.utils.book_append_sheet(wb, ws, "Ergebnis");
+  window.XLSX.writeFile(wb, "Apriko_" + (apxState.sel ? apxState.sel.sum : "api") + ".xlsx");
+}
+function apxHtml() {
+  const alle = apxAlle(); const svcs = [...new Set(alle.map(e => e.s))].sort();
+  const liste = apxListe(); const e = apxState.sel;
+  const svcOpts = svcs.map(x => '<option value="' + x + '"' + (apxState.svc === x ? ' selected' : '') + '>' + x + '</option>').join('');
+  const listeHtml = liste.slice(0, 400).map(x => {
+    const i = alle.indexOf(x);
+    return '<div onclick="apxWaehlen(' + i + ')" style="padding:4px 6px;border-bottom:1px solid var(--border);cursor:pointer;' + (e === x ? 'background:var(--bg-hover);' : '') + '">' +
+      '<span style="color:var(--accent-2);font-size:10px">' + escape(x.s) + '</span> <span style="font-family:var(--font-mono)">' + escape(x.p) + '</span>' +
+      '<div style="color:var(--text-faint);font-size:10.5px">' + escape(x.sum) + (x.res ? ' → ' + escape(x.res) : '') + '</div></div>';
+  }).join('') + (liste.length > 400 ? '<div style="padding:6px;color:var(--text-faint)">… ' + (liste.length - 400) + ' weitere — Suche eingrenzen</div>' : '');
+  let rechts = '<div class="empty">Endpunkt links wählen.</div>';
+  if (e) {
+    const prmHtml = (e.prm || []).map(pr => {
+      const cur = apxState.params[pr.n] === undefined ? '' : apxState.params[pr.n];
+      const feld = pr.e
+        ? '<select onchange="apxState.params[\'' + escape(pr.n) + '\']=this.value" style="padding:3px 6px"><option value="">—</option>' + pr.e.map(v => '<option' + (cur === v ? ' selected' : '') + '>' + escape(v) + '</option>').join('') + '</select>'
+        : '<input value="' + escape(cur) + '" placeholder="' + escape(pr.d || '') + '" onchange="apxState.params[\'' + escape(pr.n) + '\']=this.value" style="width:' + (pr.in === 'path' ? 340 : 160) + 'px;padding:3px 6px;font-size:12px;' + (pr.r ? 'border-color:var(--warn);' : '') + '">';
+      return '<label style="font-size:11px;color:var(--text-dim);display:flex;flex-direction:column;gap:2px"><span>' + escape(pr.n) + ' <span style="color:var(--text-faint)">(' + pr.in + (pr.r ? ', Pflicht' : '') + (pr.t ? ', ' + pr.t : '') + ')</span></span>' + feld + '</label>';
+    }).join('');
+    rechts = '<div style="font-family:var(--font-mono);font-size:13px">GET ' + escape(e.s) + escape(e.p) + '</div>' +
+      '<div style="font-size:11px;color:var(--text-dim);margin:2px 0 10px">' + escape(e.sum) + (e.tag ? ' · ' + escape(e.tag) : '') + (e.res ? ' · liefert ' + escape(e.res) : '') + '</div>' +
+      (prmHtml ? '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">' + prmHtml + '</div>' : '<div style="font-size:11px;color:var(--text-faint);margin-bottom:10px">keine Parameter</div>') +
+      '<div style="display:flex;gap:8px;align-items:center"><button class="btn btn-primary btn-sm" onclick="apxAusfuehren()"' + (apxState.loading ? ' disabled' : '') + '>' + (apxState.loading ? 'Läuft …' : '▶ Ausführen') + '</button>' +
+      (apxState.result ? '<button class="btn btn-sm" onclick="apxState.raw=!apxState.raw;render()">' + (apxState.raw ? 'Tabelle' : 'Roh-JSON') + '</button><button class="btn btn-sm" onclick="apxExportExcel()">⇩ Excel</button><span style="font-size:11px;color:var(--text-faint)">' + apxState.result.ms + ' ms</span>' : '') + '</div>' +
+      (apxState.fehler ? '<div style="margin-top:10px;color:var(--danger);font-size:12px">' + escape(apxState.fehler) + '</div>' : '') +
+      (apxState.result ? '<div style="margin-top:12px">' + apxErgebnisHtml(apxState.result) + '</div>' : '');
+  }
+  return '<div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">API-Explorer: ' + alle.length + ' lesende Endpunkte (GET) aus den OpenAPI-Dateien der ' + svcs.length + ' Services — links wählen, rechts Parameter setzen und ausführen. Es wird nichts geschrieben.</div>' +
+    '<div style="display:grid;grid-template-columns:380px 1fr;gap:12px;align-items:start">' +
+    '<div style="border:1px solid var(--border);border-radius:6px;padding:10px"><div style="display:flex;gap:6px;margin-bottom:8px"><select onchange="apxState.svc=this.value;render()" style="padding:4px 6px"><option value="">alle Services</option>' + svcOpts + '</select>' +
+    '<input type="search" id="apx-q" value="' + escape(apxState.q) + '" placeholder="Suche Pfad, Name, Typ …" oninput="bpSucheTippen(this, apxState, \'q\')" style="flex:1;padding:4px 8px;font-size:12px"></div>' +
+    '<div style="max-height:65vh;overflow:auto;font-size:11.5px">' + listeHtml + '</div></div>' +
+    '<div style="border:1px solid var(--border);border-radius:6px;padding:12px 14px;min-height:200px">' + rechts + '</div></div>';
 }
 function apTab(t) {
   apState.tab = t; apState.filters = {};
@@ -8721,10 +8858,14 @@ function renderApiPoc(el) {
   // zu pflegen.
   const verbunden = !!(rc.gateway && (rc.token || (rc.user && rc.pass)));
   const tab = apState.tab;
-  const cols = AP_COLS[tab];
+  const cols = AP_COLS[tab] || [];
+  if (!apState.rows[tab]) apState.rows[tab] = [];
   document.getElementById("view-actions").innerHTML = `
     <button class="btn btn-sm" onclick="apTest()" ${apState.loading ? "disabled" : ""}>🔗 Verbindung testen</button>
+    <button class="btn btn-sm" onclick="apExportExcel()" title="Sichtbare Tabelle (gefiltert und sortiert) als Excel">⇩ Excel</button>
     ${tab === "placements" ? `<button class="btn btn-sm" onclick="apLadeAktiveEinsaetze()" ${apState.loading ? "disabled" : ""} title="Nur aktuell aktive/platzierte Einsätze — gleiche gezielte Abfrage wie der Rapport-Scan, statt die ganze Historie zu paginieren">⚡ Nur aktive Einsätze${apState.nurAktive ? " ✓" : ""}</button>
+    <button class="btn btn-sm" onclick="apLadeJahresEinsaetze(document.getElementById('ap-jahr').value)" ${apState.loading ? "disabled" : ""} title="Alle Einsätze, die im Jahr laufen (auch beendete), ohne Storno/Widerruf/Entwurf — mit Details und Namen">📅 Alle Einsätze Jahr${apState.jahrGeladen ? " " + apState.jahrGeladen + " ✓" : ""}</button>
+    <input id="ap-jahr" type="number" value="${apState.jahrGeladen || new Date().getFullYear()}" style="width:64px;padding:3px 5px;font-size:11px;font-family:var(--font-mono)">
     <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim)" title="Einsätze, die in diesem Zeitraum laufen (Eintritt ≤ Bis und Austritt ≥ Von bzw. laufend)">Von <input type="date" value="${escape(apState.von || "")}" onchange="apState.von=this.value;render()" style="padding:3px 5px;font-size:11px"></label>
     <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim)">Bis <input type="date" value="${escape(apState.bis || "")}" onchange="apState.bis=this.value;render()" style="padding:3px 5px;font-size:11px"></label>
     ${apState.von || apState.bis ? `<button class="btn btn-sm" onclick="apState.von='';apState.bis='';render()" title="Zeitraum zurücksetzen">✕</button>` : ""}
@@ -8751,6 +8892,7 @@ function renderApiPoc(el) {
     const sc = apState.sort.col, d = apState.sort.dir;
     rows.sort((a, b) => { const va = a.v[sc], vb = b.v[sc]; if (typeof va === "number" && typeof vb === "number") return (va - vb) * d; return String(va ?? "").localeCompare(String(vb ?? ""), "de-CH", { numeric: true }) * d; });
   }
+  apState._sichtbarSortiert = rows.map(x => x.r);
   const th = c => { const a = apState.sort.col === c[0]; return `<th onclick="apSort('${c[0]}')" style="cursor:pointer;user-select:none;white-space:nowrap${a ? ";color:var(--accent)" : ""}${c[3] ? ";" + c[3] : ""}">${c[1]}${a ? (apState.sort.dir === 1 ? " ▲" : " ▼") : ""}</th>`; };
   const fth = c => `<th style="padding:2px 4px"><input id="ap-f-${c[0]}" value="${escape(fl[c[0]] || "")}" placeholder="Filter …" oninput="apFilter('${c[0]}',this)" style="width:100%;min-width:60px;box-sizing:border-box;background:var(--bg-input, var(--bg-hover));border:1px solid ${fl[c[0]] ? "var(--accent)" : "var(--border)"};color:var(--text);padding:3px 6px;border-radius:3px;font-size:10.5px;font-weight:400"></th>`;
   const total = apState.rows[tab].length;
@@ -8783,10 +8925,11 @@ function renderApiPoc(el) {
         <button class="btn btn-sm" onclick="apTab('placements')" style="${tab === "placements" ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">👷 Einsätze</button>
         <button class="btn btn-sm" onclick="apTab('salarytypes')" style="${tab === "salarytypes" ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">💰 Lohnarten</button>
         <button class="btn btn-sm" onclick="apTab('tarifarten')" style="${tab === "tarifarten" ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">🏷️ Tarifarten</button>
+        <button class="btn btn-sm" onclick="apTab('explorer')" style="${tab === "explorer" ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}" title="Alle lesenden Endpunkte der API ausprobieren">🧭 Explorer (${apxAlle().length})</button>
         <span style="font-size:11px;color:var(--text-dim);margin-left:auto">${total} geladen${rows.length !== total ? " · " + rows.length + " nach Filter" : ""}${apState.done[tab] ? " · alle" : ""}${tab === "salarytypes" && apState.salarytypesCacheDatum ? ` · aus Cache vom ${new Date(apState.salarytypesCacheDatum).toLocaleString("de-CH", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : ""}</span>
         <button class="btn btn-sm" onclick="apLoadMore('${tab}')" ${apState.loading || apState.done[tab] || !(verbunden || cfg.token) ? "disabled" : ""}>${apState.loading ? "Lädt …" : (total ? "+ " + AP_PAGE_SIZE + " weitere" : "▶ Laden")}</button>
       </div>
-      ${total ? `<div class="table-wrap"><table>
+      ${tab === "explorer" ? apxHtml() : total ? `<div class="table-wrap"><table>
         <thead><tr>${cols.map(th).join("")}</tr><tr>${cols.map(fth).join("")}</tr></thead>
         <tbody>${rows.map(x => `<tr style="cursor:pointer" onclick="apOpenDetail('${tab}',${x.i})">${cols.map(c => `<td style="${typeof x.v[c[0]] === "number" ? "text-align:right;font-family:var(--font-mono)" : ""}${c[3] ? ";" + c[3] : ""}">${escape(String(x.v[c[0]] ?? ""))}</td>`).join("")}</tr>`).join("")}</tbody>
       </table></div>` : `<div class="empty">${verbunden || cfg.token ? "Noch nichts geladen — «▶ Laden» klicken." : "Zuerst im Rapport-Modul die Apriko-Verbindung einrichten, dann «Verbindung testen»."}</div>`}
