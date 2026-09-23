@@ -23,13 +23,13 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.323.0"></script>
-<script src="apriko-api.js?v=1.323.0"></script>
-<script src="lohncheck.js?v=1.323.0"></script>
-<script src="personalbudget.js?v=1.323.0"></script>
-<script src="jahresbudget.js?v=1.323.0"></script>
-<script src="budgetpositionen.js?v=1.323.0"></script>
-<script src="lohnchecklistetemp.js?v=1.323.0"></script>
+<script src="apriko-filters.js?v=1.324.0"></script>
+<script src="apriko-api.js?v=1.324.0"></script>
+<script src="lohncheck.js?v=1.324.0"></script>
+<script src="personalbudget.js?v=1.324.0"></script>
+<script src="jahresbudget.js?v=1.324.0"></script>
+<script src="budgetpositionen.js?v=1.324.0"></script>
+<script src="lohnchecklistetemp.js?v=1.324.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1002,7 +1002,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.323.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.324.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -7184,6 +7184,20 @@ async function apLogin() {
     st.innerHTML = `<span style="color:var(--danger)">Netzwerk/CORS beim Token-Endpunkt: ${escape(e.message)} — läuft der Proxy? (Er muss /connect/* und /.well-known/* durchlassen, siehe Worker v2.)</span>`;
   }
 }
+/* Verbindungsdaten hier speichern — gleicher Speicher (apriko-rapport-db) wie im Rapport-Modul */
+async function apDbSpeichernTesten() {
+  const alt = (typeof rpDbCfg === "function") ? rpDbCfg() : {};
+  const v = id => (document.getElementById(id) || {}).value || "";
+  const cfg = { gateway: v("apDbGateway").trim().replace(/\/+$/, ""), target: v("apDbTarget").trim().replace(/\/+$/, ""), user: v("apDbUser").trim(), pass: v("apDbPass"), token: alt.token || "", tokenUrl: alt.tokenUrl || "", tokenExp: alt.tokenExp || 0 };
+  if (cfg.gateway && !/^https?:\/\//i.test(cfg.gateway)) cfg.gateway = "https://" + cfg.gateway;
+  if (cfg.target && !/^https?:\/\//i.test(cfg.target)) cfg.target = "https://" + cfg.target;
+  const idFix = /^(https?:\/\/)([a-z0-9-]+)\.id\.apriko\.app$/i.exec(cfg.target || "");
+  if (idFix) { cfg.target = idFix[1] + idFix[2] + ".apriko.app"; toast("Instanz korrigiert zu " + cfg.target + " — «…id.apriko.app» ist nur der Token-Host."); }
+  if (cfg.user !== (alt.user || "") || cfg.pass !== (alt.pass || "") || cfg.target !== (alt.target || "")) { cfg.token = ""; cfg.tokenExp = 0; }   // Token neu holen
+  localStorage.setItem("apriko-rapport-db", JSON.stringify(cfg));
+  if (typeof rpRoster !== "undefined") rpRoster = null;   // Einsatzliste des Rapport-Moduls neu laden lassen
+  await apTest();
+}
 async function apTest() {
   apState.error = null; apState.info = null; apState.selfTest = null; apState.loading = true; render();
   rpApiUse();   // eigene Rapport-Verbindung geht vor, falls konfiguriert (siehe rpApiUse-Kommentar)
@@ -8698,9 +8712,16 @@ function renderApiPoc(el) {
   const total = apState.rows[tab].length;
   el.innerHTML = `
     <div class="card" style="padding:14px 16px;margin-bottom:14px">
-      <div style="font-weight:600;margin-bottom:8px">Verbindung zur Apriko-Datenbank</div>
+      <div style="font-weight:600;margin-bottom:8px">Verbindung zur Apriko-Datenbank <span style="font-weight:400;font-size:11px;color:var(--text-dim)">— dieselben Einstellungen wie im Rapport-Modul (ein Speicher, beide Orte)</span></div>
+      <div style="display:grid;grid-template-columns:1.2fr 1.2fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px">
+        <div><label style="font-size:10.5px;color:var(--text-dim)">Gateway-/Proxy-URL</label><input id="apDbGateway" value="${escape(rc.gateway || "")}" placeholder="https://…-8787.app.github.dev" style="width:100%"></div>
+        <div><label style="font-size:10.5px;color:var(--text-dim)">Instanz (Ziel-Datenbank)</label><input id="apDbTarget" value="${escape(rc.target || "")}" placeholder="https://kunde.apriko.app" style="width:100%"></div>
+        <div><label style="font-size:10.5px;color:var(--text-dim)">Client-ID</label><input id="apDbUser" value="${escape(rc.user || "")}" autocomplete="off" style="width:100%"></div>
+        <div><label style="font-size:10.5px;color:var(--text-dim)">Client-Secret</label><input id="apDbPass" type="password" value="${escape(rc.pass || "")}" autocomplete="new-password" style="width:100%"></div>
+        <button class="btn btn-sm" onclick="apDbSpeichernTesten()" ${apState.loading ? "disabled" : ""}>Speichern & testen</button>
+      </div>
       <div style="font-size:12px;${verbunden ? "color:var(--accent)" : "color:var(--text-dim)"}">
-        ${verbunden ? `✓ Verbunden über die Rapport-Verbindung${rc.target ? " → " + escape(rc.target.replace(/^https?:\/\//, "")) : ""}` : `⚠ Keine Verbindung aktiv — im Rapport-Modul unter «🔌 Apriko-Datenbank für den Einsatz-Abgleich» einrichten, wird hier automatisch mitverwendet (keine doppelte Konfiguration nötig).`}
+        ${verbunden ? `✓ Verbunden${rc.target ? " → " + escape(rc.target.replace(/^https?:\/\//, "")) : ""}` : `⚠ Keine Verbindung aktiv — oben Gateway, Instanz und Zugangsdaten eintragen und «Speichern & testen».`}
       </div>
       ${apState.selfTest ? `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11px">${[["Gateway (Proxy)", apState.selfTest.gateway], ["Apriko-Instanz", apState.selfTest.upstream], ["Token", apState.selfTest.token]].map(([lbl, z]) => `
         <div style="border:1px solid ${z.status === "ok" ? "var(--accent)" : z.status === "fail" ? "var(--danger)" : "var(--border)"};border-radius:4px;padding:6px 10px;min-width:150px">
