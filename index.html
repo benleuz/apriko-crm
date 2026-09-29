@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.338.0"></script>
-<script src="apriko-api.js?v=1.338.0"></script>
-<script src="lohncheck.js?v=1.338.0"></script>
-<script src="personalbudget.js?v=1.338.0"></script>
-<script src="jahresbudget.js?v=1.338.0"></script>
-<script src="budgetpositionen.js?v=1.338.0"></script>
-<script src="lohnchecklistetemp.js?v=1.338.0"></script>
-<script src="apriko-endpunkte.js?v=1.338.0"></script>
+<script src="apriko-filters.js?v=1.339.0"></script>
+<script src="apriko-api.js?v=1.339.0"></script>
+<script src="lohncheck.js?v=1.339.0"></script>
+<script src="personalbudget.js?v=1.339.0"></script>
+<script src="jahresbudget.js?v=1.339.0"></script>
+<script src="budgetpositionen.js?v=1.339.0"></script>
+<script src="lohnchecklistetemp.js?v=1.339.0"></script>
+<script src="apriko-endpunkte.js?v=1.339.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1003,7 +1003,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.338.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.339.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -7967,6 +7967,7 @@ function abaXmlBauen(buchungen) {
       <CollectiveInformation mode="SAVE">
         <EntryLevel>A</EntryLevel>
         <EntryType>S</EntryType>
+        <Type>Normal</Type>
         <DebitCredit>D</DebitCredit>
         <Client>${abaEsc(s.client)}</Client>
         <Division>${abaEsc(s.division)}</Division>
@@ -7983,6 +7984,7 @@ function abaXmlBauen(buchungen) {
 ${s.docCode ? "        <DocumentCode>" + abaEsc(s.docCode) + "</DocumentCode>\n" : ""}        <SingleCount>1</SingleCount>
       </CollectiveInformation>
       <SingleInformation mode="SAVE">
+        <Type>Normal</Type>
         <DebitCredit>C</DebitCredit>
         <EntryDate>${datum}</EntryDate>
         <ValueDate>${datum}</ValueDate>
