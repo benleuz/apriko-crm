@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.331.0"></script>
-<script src="apriko-api.js?v=1.331.0"></script>
-<script src="lohncheck.js?v=1.331.0"></script>
-<script src="personalbudget.js?v=1.331.0"></script>
-<script src="jahresbudget.js?v=1.331.0"></script>
-<script src="budgetpositionen.js?v=1.331.0"></script>
-<script src="lohnchecklistetemp.js?v=1.331.0"></script>
-<script src="apriko-endpunkte.js?v=1.331.0"></script>
+<script src="apriko-filters.js?v=1.333.0"></script>
+<script src="apriko-api.js?v=1.333.0"></script>
+<script src="lohncheck.js?v=1.333.0"></script>
+<script src="personalbudget.js?v=1.333.0"></script>
+<script src="jahresbudget.js?v=1.333.0"></script>
+<script src="budgetpositionen.js?v=1.333.0"></script>
+<script src="lohnchecklistetemp.js?v=1.333.0"></script>
+<script src="apriko-endpunkte.js?v=1.333.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1003,7 +1003,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.331.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.333.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -7328,7 +7328,7 @@ let apxState = { q: "", svc: "", sel: null, params: {}, result: null, raw: false
 function apxAlle() { return typeof APRIKO_ENDPUNKTE !== "undefined" ? APRIKO_ENDPUNKTE : []; }
 function apxListe() {
   const q = apxState.q.trim().toLowerCase();
-  return apxAlle().filter(e => (!apxState.svc || e.s === apxState.svc) && (!q || (e.p + " " + e.sum + " " + e.tag + " " + e.res).toLowerCase().includes(q)));
+  return apxAlle().filter(e => (!apxState.svc || e.s === apxState.svc) && (!q || (e.p + " " + e.sum + " " + e.tag + " " + e.res + " " + (e.de || "") + " " + (e.sde || "")).toLowerCase().includes(q)));
 }
 function apxWaehlen(idx) { apxState.sel = apxAlle()[idx]; apxState.params = {}; apxState.result = null; apxState.fehler = ""; (apxState.sel.prm || []).forEach(pr => { if (pr.n === "pageSize") apxState.params.pageSize = 50; if (pr.n === "pageIndex") apxState.params.pageIndex = 0; }); render(); }
 async function apxAusfuehren() {
@@ -7372,12 +7372,13 @@ async function apxExportExcel() {
 function apxHtml() {
   const alle = apxAlle(); const svcs = [...new Set(alle.map(e => e.s))].sort();
   const liste = apxListe(); const e = apxState.sel;
-  const svcOpts = svcs.map(x => '<option value="' + x + '"' + (apxState.svc === x ? ' selected' : '') + '>' + x + '</option>').join('');
+  const sde = x => { const e0 = alle.find(e => e.s === x); return e0 && e0.sde ? e0.sde : x; };
+  const svcOpts = svcs.map(x => '<option value="' + x + '"' + (apxState.svc === x ? ' selected' : '') + '>' + escape(sde(x)) + ' (' + x + ')</option>').join('');
   const listeHtml = liste.slice(0, 400).map(x => {
     const i = alle.indexOf(x);
     return '<div onclick="apxWaehlen(' + i + ')" style="padding:4px 6px;border-bottom:1px solid var(--border);cursor:pointer;' + (e === x ? 'background:var(--bg-hover);' : '') + '">' +
-      '<span style="color:var(--accent-2);font-size:10px">' + escape(x.s) + '</span> <span style="font-family:var(--font-mono)">' + escape(x.p) + '</span>' +
-      '<div style="color:var(--text-faint);font-size:10.5px">' + escape(x.sum) + (x.res ? ' → ' + escape(x.res) : '') + '</div></div>';
+      '<span style="color:var(--accent-2);font-size:10px">' + escape(x.sde || x.s) + '</span> <span style="font-weight:600">' + escape(x.de || x.sum) + '</span>' +
+      '<div style="color:var(--text-faint);font-size:10.5px;font-family:var(--font-mono)">' + escape(x.p) + ' · ' + escape(x.sum) + (x.res ? ' → ' + escape(x.res) : '') + '</div></div>';
   }).join('') + (liste.length > 400 ? '<div style="padding:6px;color:var(--text-faint)">… ' + (liste.length - 400) + ' weitere — Suche eingrenzen</div>' : '');
   let rechts = '<div class="empty">Endpunkt links wählen.</div>';
   if (e) {
@@ -7388,7 +7389,8 @@ function apxHtml() {
         : '<input value="' + escape(cur) + '" placeholder="' + escape(pr.d || '') + '" onchange="apxState.params[\'' + escape(pr.n) + '\']=this.value" style="width:' + (pr.in === 'path' ? 340 : 160) + 'px;padding:3px 6px;font-size:12px;' + (pr.r ? 'border-color:var(--warn);' : '') + '">';
       return '<label style="font-size:11px;color:var(--text-dim);display:flex;flex-direction:column;gap:2px"><span>' + escape(pr.n) + ' <span style="color:var(--text-faint)">(' + pr.in + (pr.r ? ', Pflicht' : '') + (pr.t ? ', ' + pr.t : '') + ')</span></span>' + feld + '</label>';
     }).join('');
-    rechts = '<div style="font-family:var(--font-mono);font-size:13px">GET ' + escape(e.s) + escape(e.p) + '</div>' +
+    rechts = '<div style="font-size:14px;font-weight:600">' + escape(e.de || e.sum) + ' <span style="font-weight:400;color:var(--text-dim);font-size:12px">— ' + escape(e.sde || e.s) + '</span></div>' +
+      '<div style="font-family:var(--font-mono);font-size:12px;margin-top:2px">GET ' + escape(e.s) + escape(e.p) + '</div>' +
       '<div style="font-size:11px;color:var(--text-dim);margin:2px 0 10px">' + escape(e.sum) + (e.tag ? ' · ' + escape(e.tag) : '') + (e.res ? ' · liefert ' + escape(e.res) : '') + '</div>' +
       (prmHtml ? '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">' + prmHtml + '</div>' : '<div style="font-size:11px;color:var(--text-faint);margin-bottom:10px">keine Parameter</div>') +
       '<div style="display:flex;gap:8px;align-items:center"><button class="btn btn-primary btn-sm" onclick="apxAusfuehren()"' + (apxState.loading ? ' disabled' : '') + '>' + (apxState.loading ? 'Läuft …' : '▶ Ausführen') + '</button>' +
@@ -7396,7 +7398,7 @@ function apxHtml() {
       (apxState.fehler ? '<div style="margin-top:10px;color:var(--danger);font-size:12px">' + escape(apxState.fehler) + '</div>' : '') +
       (apxState.result ? '<div style="margin-top:12px">' + apxErgebnisHtml(apxState.result) + '</div>' : '');
   }
-  return '<div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">API-Explorer: ' + alle.length + ' lesende Endpunkte (GET) aus den OpenAPI-Dateien der ' + svcs.length + ' Services — links wählen, rechts Parameter setzen und ausführen. Es wird nichts geschrieben.</div>' +
+  return '<div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">API-Explorer: ' + alle.length + ' lesende Endpunkte (GET) aus den OpenAPI-Dateien der ' + svcs.length + ' Services — links wählen, rechts Parameter setzen und ausführen. Es wird nichts geschrieben. Deutsche Bezeichnungen sind automatisch aus den Originalnamen übersetzt; das Original steht jeweils daneben.</div>' +
     '<div style="display:grid;grid-template-columns:380px 1fr;gap:12px;align-items:start">' +
     '<div style="border:1px solid var(--border);border-radius:6px;padding:10px"><div style="display:flex;gap:6px;margin-bottom:8px"><select onchange="apxState.svc=this.value;render()" style="padding:4px 6px"><option value="">alle Services</option>' + svcOpts + '</select>' +
     '<input type="search" id="apx-q" value="' + escape(apxState.q) + '" placeholder="Suche Pfad, Name, Typ …" oninput="bpSucheTippen(this, apxState, \'q\')" style="flex:1;padding:4px 8px;font-size:12px"></div>' +
@@ -7973,7 +7975,6 @@ function abaXmlBauen(buchungen) {
         </AmountData>
         <KeyAmount>${amt}</KeyAmount>
         <Account>${abaEsc(soll)}</Account>
-        <IntercompanyNumber>0</IntercompanyNumber>
         <Text1>${text}</Text1>${taxData(soll)}
         <DocumentCode>${abaEsc(s.docCode)}</DocumentCode>
         <SingleCount>1</SingleCount>
@@ -7992,7 +7993,6 @@ function abaXmlBauen(buchungen) {
         </AmountData>
         <KeyAmount>${amt}</KeyAmount>
         <Account>${abaEsc(haben)}</Account>
-        <IntercompanyNumber>0</IntercompanyNumber>
         <Text1>${text}</Text1>${taxData(haben)}
         <DocumentCode>${abaEsc(s.docCode)}</DocumentCode>
         <Number>${i + 1}</Number>
