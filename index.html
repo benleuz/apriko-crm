@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.334.0"></script>
-<script src="apriko-api.js?v=1.334.0"></script>
-<script src="lohncheck.js?v=1.334.0"></script>
-<script src="personalbudget.js?v=1.334.0"></script>
-<script src="jahresbudget.js?v=1.334.0"></script>
-<script src="budgetpositionen.js?v=1.334.0"></script>
-<script src="lohnchecklistetemp.js?v=1.334.0"></script>
-<script src="apriko-endpunkte.js?v=1.334.0"></script>
+<script src="apriko-filters.js?v=1.336.0"></script>
+<script src="apriko-api.js?v=1.336.0"></script>
+<script src="lohncheck.js?v=1.336.0"></script>
+<script src="personalbudget.js?v=1.336.0"></script>
+<script src="jahresbudget.js?v=1.336.0"></script>
+<script src="budgetpositionen.js?v=1.336.0"></script>
+<script src="lohnchecklistetemp.js?v=1.336.0"></script>
+<script src="apriko-endpunkte.js?v=1.336.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1003,7 +1003,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.334.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.336.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -7981,7 +7981,6 @@ function abaXmlBauen(buchungen) {
         <Account>${abaEsc(soll)}</Account>
         <Text1>${text}</Text1>${taxData(soll)}
 ${s.docCode ? "        <DocumentCode>" + abaEsc(s.docCode) + "</DocumentCode>\n" : ""}        <SingleCount>1</SingleCount>
-        <Number>${i + 1}</Number>
       </CollectiveInformation>
       <SingleInformation mode="SAVE">
         <DebitCredit>C</DebitCredit>
@@ -7997,8 +7996,7 @@ ${s.docCode ? "        <DocumentCode>" + abaEsc(s.docCode) + "</DocumentCode>\n"
         <KeyAmount>${amt}</KeyAmount>
         <Account>${abaEsc(haben)}</Account>
         <Text1>${text}</Text1>${taxData(haben)}
-${s.docCode ? "        <DocumentCode>" + abaEsc(s.docCode) + "</DocumentCode>\n" : ""}        <Number>${i + 1}</Number>
-      </SingleInformation>
+${s.docCode ? "        <DocumentCode>" + abaEsc(s.docCode) + "</DocumentCode>\n" : ""}      </SingleInformation>
     </Entry>`;
   });
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -8036,6 +8034,9 @@ function renderAbacus(el) {
     lcLoadLohnartenliste(false).then(() => { if (currentView === "abacus") render(); }).catch(() => {});
   }
   if (!crmParameter) { parameterLaden(false).then(() => { if (currentView === "abacus") render(); }).catch(() => {}); }
+  // Direkteinstieg: Kundenflags (fibu) und Kundenliste nachladen, sonst bleibt das Kunden-Dropdown leer
+  if (crmKundenFlags === null && typeof crmLoadKundenFlags === "function" && siteId) { crmLoadKundenFlags().then(() => { if (currentView === "abacus") render(); }).catch(() => {}); }
+  if (!cache.customers.length && siteId && !abaState.kundenLaden) { abaState.kundenLaden = true; reload("Customers").then(() => { if (currentView === "abacus") render(); }).catch(() => {}); }
   const s = abaSettings();
   const sp = abaState.spalten.length ? abaSpaltenErkennen(abaState.spalten) : null;
   const buchungen = abaState.zeilen.length ? abaBuchungen() : [];
