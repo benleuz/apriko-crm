@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.339.0"></script>
-<script src="apriko-api.js?v=1.339.0"></script>
-<script src="lohncheck.js?v=1.339.0"></script>
-<script src="personalbudget.js?v=1.339.0"></script>
-<script src="jahresbudget.js?v=1.339.0"></script>
-<script src="budgetpositionen.js?v=1.339.0"></script>
-<script src="lohnchecklistetemp.js?v=1.339.0"></script>
-<script src="apriko-endpunkte.js?v=1.339.0"></script>
+<script src="apriko-filters.js?v=1.342.0"></script>
+<script src="apriko-api.js?v=1.342.0"></script>
+<script src="lohncheck.js?v=1.342.0"></script>
+<script src="personalbudget.js?v=1.342.0"></script>
+<script src="jahresbudget.js?v=1.342.0"></script>
+<script src="budgetpositionen.js?v=1.342.0"></script>
+<script src="lohnchecklistetemp.js?v=1.342.0"></script>
+<script src="apriko-endpunkte.js?v=1.342.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1003,7 +1003,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.339.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.342.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -7656,10 +7656,55 @@ function tarifartenCsvExport() {
    SingleInformation — gleiches Muster wie die Lohnschnittstelle Helva). Mandant-Konstanten
    sind hier editierbar (localStorage aba-settings). Erkennung des Blatts: entweder Monats-
    spalten (Jan…Dez / 01…12 / 2026-08) = Breitformat, oder Spalten Lohnart/Betrag(/Monat) = Langformat. */
-const ABA_DEFAULTS = { client: "99999", division: "0", currency: "CHF", mapId: "AbaDefault", version: "2015", docCode: "", textPrefix: "Lohn", mwstKonten: "5490:200:I" };
+const ABA_DEFAULTS = { client: "99999", division: "0", currency: "CHF", mapId: "AbaDefault", version: "2015", docCode: "", textPrefix: "Lohn", textVorlage: "Lohnjournal TMA {MM}/{JJ}", nurAnzeigen: "1020", mwstKonten: "5490:200:I" };
 let abaState = { datei: "", zeilen: [], spalten: [], monat: new Date().getMonth() || 12, jahr: new Date().getFullYear(), overrides: {}, xml: "", kunde: (localStorage.getItem("aba-kunde") || "0") === "0" ? 0 : localStorage.getItem("aba-kunde") };
 /* Kunden mit FIBU-Monatsabschluss (Kundenflag «fibu») — pro Kunde eigenes Regelwerk + Mandant-Parameter
    in parameter.json (abacusKunden[<id>]); der globale Block «abacus» ist die Vorlage für neue Kunden. */
+/* Konten, deren Buchungen in der Oberfläche/Abstimmung bleiben, aber NICHT ins AbaConnect-XML gehen
+   (Standard 1020 Bank: die Zahlung wird im Bankjournal gebucht, nicht via Lohnjournal). Pro Kunde im Mandant-Parameter. */
+function abaAnzeigeNurKonten() { const s = abaSettings(); return String(s.nurAnzeigen === undefined ? "1020" : s.nurAnzeigen).split(/[,\s;]+/).map(x => x.trim()).filter(Boolean); }
+function abaNurAnzeige(b) { const k = abaAnzeigeNurKonten(); return k.includes(String(b.soll)) || k.includes(String(b.haben)); }
+/* Export der Übersicht: Excel (Buchungen, Abstimmung, nicht gebucht) und PDF (Druckansicht) */
+function abaExportDaten() {
+  const buchungen = abaState.zeilen.length ? abaBuchungen() : [];
+  const kunde = abaState.kunde ? (cache.customers.find(c => String(c.id) === String(abaState.kunde)) || {}).Title || "" : "";
+  const periode = String(abaState.monat).padStart(2, "0") + "." + abaState.jahr;
+  const ku = abaKontenUebersicht(buchungen); const d = abaDurchlaufCheck(buchungen);
+  return { buchungen, kunde, periode, ku, d, ausgelassen: abaState.ausgelassen || [] };
+}
+async function abaExportExcel() {
+  const { buchungen, kunde, periode, ku, d, ausgelassen } = abaExportDaten();
+  if (!buchungen.length) { toast("Zuerst ein Lohnkontoblatt laden.", true); return; }
+  await lcLoadXlsx();
+  const r2 = v => Math.round(v * 100) / 100;
+  const wb = window.XLSX.utils.book_new();
+  const b1 = [["Lohnart", "Bezeichnung", "Betrag", "Soll", "Haben", "Regel", "Status"]].concat(buchungen.map(b => [b.code, b.bezeichnung, r2(b.betrag), b.soll, b.haben, b.grund || "", !b.ok ? "Konto fehlt" : (abaNurAnzeige(b) ? "nur Anzeige (nicht im XML)" : "gebucht")]));
+  const ws1 = window.XLSX.utils.aoa_to_sheet([["Abacus-Schnittstelle — " + kunde + " — " + periode], []].concat(b1)); ws1["!cols"] = [9, 40, 14, 8, 8, 40, 26].map(w => ({ wch: w })); ws1["!autofilter"] = { ref: "A3:G" + (b1.length + 2) };
+  window.XLSX.utils.book_append_sheet(wb, ws1, "Buchungen");
+  const b2 = [["Konto", "Soll", "Haben", "Saldo"]].concat(ku.zeilen.map(z => [z.konto, r2(z.soll), r2(z.haben), r2(z.saldo)])).concat([["Total", r2(ku.totalSoll), r2(ku.totalHaben), r2(ku.totalSoll - ku.totalHaben)]]);
+  const ws2 = window.XLSX.utils.aoa_to_sheet([["Abstimmung (Lobu-Journal) — Durchlaufkonto " + (d ? d.konto : "")], []].concat(b2)); ws2["!cols"] = [10, 14, 14, 14].map(w => ({ wch: w }));
+  window.XLSX.utils.book_append_sheet(wb, ws2, "Abstimmung");
+  if (ausgelassen.length) { const ws3 = window.XLSX.utils.aoa_to_sheet([["Lohnart", "Bezeichnung", "Betrag", "Grund"]].concat(ausgelassen.map(x => [x.code, x.bezeichnung, r2(x.betrag), x.grund]))); ws3["!cols"] = [9, 40, 14, 40].map(w => ({ wch: w })); window.XLSX.utils.book_append_sheet(wb, ws3, "Nicht gebucht"); }
+  window.XLSX.writeFile(wb, "Abacus_" + kunde.replace(/[^\w\-]+/g, "_").slice(0, 40) + "_" + abaState.jahr + String(abaState.monat).padStart(2, "0") + ".xlsx");
+}
+function abaDruck() {
+  const { buchungen, kunde, periode, ku, d, ausgelassen } = abaExportDaten();
+  if (!buchungen.length) { toast("Zuerst ein Lohnkontoblatt laden.", true); return; }
+  const fmt = v => (Math.round(v * 100) / 100).toLocaleString("de-CH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const total = buchungen.reduce((a, b) => a + (b.ok && !abaNurAnzeige(b) ? Math.abs(b.betrag) : 0), 0);
+  const tr = (cells, cls) => `<tr${cls ? ` class="${cls}"` : ""}>${cells.map(c => `<td${typeof c === "number" ? ' class="r"' : ""}>${typeof c === "number" ? fmt(c) : escape(String(c))}</td>`).join("")}</tr>`;
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Abacus-Schnittstelle ${escape(kunde)} ${escape(periode)}</title>
+    <style>body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#111;margin:18mm 14mm}h1{font-size:16px;margin:0 0 2px}h2{font-size:12px;margin:16px 0 6px;border-bottom:1px solid #999;padding-bottom:2px}.sub{color:#555;margin-bottom:10px}table{border-collapse:collapse;width:100%}th,td{padding:3px 6px;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}th{background:#f0f0f0;font-size:10px;text-transform:uppercase}td.r,th.r{text-align:right;font-family:Consolas,monospace}tr.tot td{font-weight:bold;border-top:2px solid #999}tr.dim td{color:#888}@media print{@page{margin:12mm}}</style></head><body>
+    <h1>Abacus-Schnittstelle — Lohnjournal ${escape(periode)}</h1><div class="sub">${escape(kunde)} · erstellt ${new Date().toLocaleString("de-CH")} · Buchungssumme CHF ${fmt(total)}</div>
+    <h2>Abstimmung (Lobu-Journal) — Durchlaufkonto ${escape(d ? d.konto : "")}</h2>
+    <table><thead><tr><th>Konto</th><th class="r">Soll</th><th class="r">Haben</th><th class="r">Saldo</th></tr></thead><tbody>${ku.zeilen.map(z => tr([z.konto, z.soll, z.haben, z.saldo])).join("")}${tr(["Total", ku.totalSoll, ku.totalHaben, ku.totalSoll - ku.totalHaben], "tot")}</tbody></table>
+    <h2>Buchungen (${buchungen.length} Lohnarten)</h2>
+    <table><thead><tr><th>Lohnart</th><th>Bezeichnung</th><th class="r">Betrag</th><th>Soll</th><th>Haben</th><th>Regel</th><th>Status</th></tr></thead><tbody>${buchungen.map(b => tr([b.code, b.bezeichnung, b.betrag, b.soll, b.haben, b.grund || "", !b.ok ? "Konto fehlt" : (abaNurAnzeige(b) ? "nur Anzeige" : "gebucht")], abaNurAnzeige(b) ? "dim" : "")).join("")}</tbody></table>
+    ${ausgelassen.length ? `<h2>Nicht gebucht (${ausgelassen.length})</h2><table><thead><tr><th>Lohnart</th><th>Bezeichnung</th><th class="r">Betrag</th><th>Grund</th></tr></thead><tbody>${ausgelassen.map(x => tr([x.code, x.bezeichnung, x.betrag, x.grund])).join("")}</tbody></table>` : ""}
+    <script>window.onload=function(){window.print();}<\/script></body></html>`;
+  const w = window.open("", "_blank"); if (!w) { toast("Popup blockiert — bitte für diese Seite erlauben.", true); return; }
+  w.document.open(); w.document.write(html); w.document.close();
+}
 function abaFibuKunden() { return cache.customers.filter(c => kundenFlag(c.id, "fibu")).sort((a, b) => (a.Title || "").localeCompare(b.Title || "")); }
 function abaKundeWaehlen(id) { abaState.kunde = String(id || "") === "0" ? 0 : (String(id || "").trim() || 0); localStorage.setItem("aba-kunde", String(abaState.kunde)); abaState.xml = ""; render(); }
 function abaSettings() {
@@ -7958,11 +8003,14 @@ function abaXmlBauen(buchungen) {
   const mwst = {};
   String(s.mwstKonten || "").split(/[,;]/).map(x => x.trim()).filter(Boolean).forEach(x => { const p = x.split(":"); if (p[0]) mwst[p[0]] = { code: p[1] || "", incl: p[2] || "I" }; });
   const taxData = konto => mwst[konto] ? `\n        <TaxData mode="SAVE">\n          <TaxIncluded>${abaEsc(mwst[konto].incl)}</TaxIncluded>\n          <TaxType>1</TaxType>\n          <UseCode>1</UseCode>\n          <TaxCode>${abaEsc(mwst[konto].code)}</TaxCode>\n        </TaxData>` : "";
-  const entries = buchungen.filter(b => b.ok).map((b, i) => {
+  const entries = buchungen.filter(b => b.ok && !abaNurAnzeige(b)).map((b, i) => {
     let soll = b.soll, haben = b.haben, betrag = b.betrag;
     if (betrag < 0) { const t = soll; soll = haben; haben = t; betrag = -betrag; }
     const amt = betrag.toFixed(2);
-    const text = abaEsc(((s.textPrefix ? s.textPrefix + " " : "") + b.code + " " + b.bezeichnung + " " + String(monat).padStart(2, "0") + "." + jahr).trim().slice(0, 80));
+    // Buchungstext: Vorlage aus dem Mandant-Parameter «Buchungstext» mit Platzhaltern {MM} {JJ} {JJJJ} {LA} {BEZ};
+    // Standard «Lohnjournal TMA {MM}/{JJ}» → z.B. «Lohnjournal TMA 08/26» (Beni, 29.09.2026)
+    const vorlage = (s.textVorlage && String(s.textVorlage).trim()) || "Lohnjournal TMA {MM}/{JJ}";
+    const text = abaEsc(vorlage.replace(/\{MM\}/g, String(monat).padStart(2, "0")).replace(/\{JJJJ\}/g, String(jahr)).replace(/\{JJ\}/g, String(jahr).slice(-2)).replace(/\{LA\}/g, String(b.code)).replace(/\{BEZ\}/g, String(b.bezeichnung || "")).replace(/\s+/g, " ").trim().slice(0, 80));
     return `    <Entry mode="SAVE">
       <CollectiveInformation mode="SAVE">
         <EntryLevel>A</EntryLevel>
@@ -8039,7 +8087,8 @@ function renderAbacus(el) {
   const s = abaSettings();
   const sp = abaState.spalten.length ? abaSpaltenErkennen(abaState.spalten) : null;
   const buchungen = abaState.zeilen.length ? abaBuchungen() : [];
-  const total = buchungen.reduce((a, b) => a + (b.ok ? Math.abs(b.betrag) : 0), 0);
+  const total = buchungen.reduce((a, b) => a + (b.ok && !abaNurAnzeige(b) ? Math.abs(b.betrag) : 0), 0);
+  const nurAnzeige = buchungen.filter(b => b.ok && abaNurAnzeige(b)).length;
   const offen = buchungen.filter(b => !b.ok).length;
   const fmt = v => (Math.round(v * 100) / 100).toLocaleString("de-CH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const inp = (k, w, label, title) => `<label style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--text-dim)" title="${escape(title || "")}">${label}<input type="text" value="${escape(s[k])}" onchange="abaSettingSet('${k}', this.value)" style="width:${w}px;font-family:var(--font-mono);font-size:12px;padding:3px 6px"></label>`;
@@ -8057,15 +8106,17 @@ function renderAbacus(el) {
       ${abaFibuKunden().length ? "" : `<div style="font-size:11px;color:var(--warn);margin-top:8px">Kein Kunde mit Häkchen «FIBU Monatsabschluss» im Kundenstamm — dort setzen, dann erscheint er hier.</div>`}
       <details style="margin-top:10px"><summary style="font-size:11px;color:var(--text-dim);cursor:pointer">Mandant / XML-Parameter${abaState.kunde ? " — gespeichert pro Kunde" : " — lokal (kein Kunde gewählt)"}</summary>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
-          ${inp("client", 70, "Client")}${inp("division", 50, "Division")}${inp("currency", 50, "Währung")}${inp("mapId", 90, "MapId")}${inp("version", 60, "Version")}${inp("docCode", 50, "DocumentCode", "leer lassen — Abacus 2015/AbaDefault kennt das Element nicht (Fehler 3028); nur füllen, wenn der Mandant es verlangt")}${inp("textPrefix", 90, "Text-Präfix")}${inp("mwstKonten", 160, "MwSt-Konten (Konto:Code:I/E, kommagetrennt)", "z.B. 5490:200:I — TaxData wird nur in der Einzelbuchung (Haben-Seite) mitgegeben; im Sammelkopf kennt Abacus 2015/AbaDefault kein TaxData (Fehler 3026). Steht das MwSt-Konto im Soll, muss der Steuercode am Konto in Abacus hinterlegt sein. Leer = kein TaxData.")}
+          ${inp("client", 70, "Client")}${inp("division", 50, "Division")}${inp("currency", 50, "Währung")}${inp("mapId", 90, "MapId")}${inp("version", 60, "Version")}${inp("docCode", 50, "DocumentCode", "leer lassen — Abacus 2015/AbaDefault kennt das Element nicht (Fehler 3028); nur füllen, wenn der Mandant es verlangt")}${inp("nurAnzeigen", 70, "Nur Anzeige", "Konten (kommagetrennt), deren Buchungen angezeigt und abgestimmt, aber nicht ins XML geschrieben werden — Standard 1020 (Bank, Zahlung läuft über Bankjournal)")}${inp("textVorlage", 200, "Buchungstext", "Platzhalter: {MM} Monat, {JJ} Jahr 2-stellig, {JJJJ} Jahr, {LA} Lohnart, {BEZ} Bezeichnung — leer = «Lohnjournal TMA {MM}/{JJ}»")}${inp("mwstKonten", 160, "MwSt-Konten (Konto:Code:I/E, kommagetrennt)", "z.B. 5490:200:I — TaxData wird nur in der Einzelbuchung (Haben-Seite) mitgegeben; im Sammelkopf kennt Abacus 2015/AbaDefault kein TaxData (Fehler 3026). Steht das MwSt-Konto im Soll, muss der Steuercode am Konto in Abacus hinterlegt sein. Leer = kein TaxData.")}
         </div>
       </details>
     </div>
     ${abaState.zeilen.length ? `
     <div class="card" style="padding:14px 16px">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px">
-        <div><strong>${MONTH_NAMES[abaState.monat - 1]} ${abaState.jahr}</strong> · ${buchungen.length} Lohnarten · Buchungssumme CHF ${fmt(total)}${offen ? ` · <span style="color:var(--warn)">${offen} unvollständig kontiert</span>` : ""}${(abaState.ausgelassen || []).length ? ` · <span style="color:var(--text-faint)">${abaState.ausgelassen.length} nicht gebucht</span>` : ""}</div>
+        <div><strong>${MONTH_NAMES[abaState.monat - 1]} ${abaState.jahr}</strong> · ${buchungen.length} Lohnarten · Buchungssumme CHF ${fmt(total)}${offen ? ` · <span style="color:var(--warn)">${offen} unvollständig kontiert</span>` : ""}${nurAnzeige ? ` · <span style="color:var(--text-dim)" title="Konten ${escape(abaAnzeigeNurKonten().join(", "))}: nur Anzeige, nicht im XML">${nurAnzeige} nur Anzeige (${escape(abaAnzeigeNurKonten().join(", "))})</span>` : ""}${(abaState.ausgelassen || []).length ? ` · <span style="color:var(--text-faint)">${abaState.ausgelassen.length} nicht gebucht</span>` : ""}</div>
         <button class="btn btn-sm" onclick="abaXmlErzeugen()" ${buchungen.some(b => b.ok) ? "" : "disabled"}>⇩ AbaConnect-XML erzeugen</button>
+        <button class="btn btn-sm" onclick="abaExportExcel()" ${buchungen.length ? "" : "disabled"} title="Buchungen, Abstimmung und nicht gebuchte Lohnarten als Excel">⇩ Excel</button>
+        <button class="btn btn-sm" onclick="abaDruck()" ${buchungen.length ? "" : "disabled"} title="Druckansicht — im Druckdialog «Als PDF speichern» wählen">🖨 PDF</button>
       </div>
       ${!lcState.lohnartenliste ? `<div style="font-size:11px;color:var(--warn);margin-bottom:8px">Lohnartenstamm nicht geladen — Soll/Haben können nicht aufgelöst werden (Workflows → Lohnartenstamm).</div>` : ""}
       ${lcState.lohnartenliste && !(lcState.lohnartenliste.spalten || []).includes("Brutto") ? `<div style="font-size:11px;color:var(--warn);margin-bottom:8px">Der gespeicherte Lohnartenstamm hat noch keine Spalten Brutto/Abzug — im Lohnartenstamm einmal «Neu laden» aus Apriko, damit Nettolohn-Bestandteile ohne Kontierung erkannt werden.</div>` : ""}
@@ -8082,7 +8133,7 @@ function renderAbacus(el) {
           <td>${b.zusatz ? `<span style="font-family:var(--font-mono)">${escape(b.soll)}</span>` : `<input type="text" value="${escape(b.soll)}" onchange="abaOverride('${escape(b.code)}','soll',this.value)" style="width:60px;font-family:var(--font-mono);font-size:12px;padding:2px 5px">${um(b.quelleSoll)}`}</td>
           <td>${b.zusatz ? `<span style="font-family:var(--font-mono)">${escape(b.haben)}</span>` : `<input type="text" value="${escape(b.haben)}" onchange="abaOverride('${escape(b.code)}','haben',this.value)" style="width:60px;font-family:var(--font-mono);font-size:12px;padding:2px 5px">${um(b.quelleHaben)}`}</td>
           <td style="font-size:10px;color:var(--text-faint)">${escape(b.grund || "")}</td>
-          <td style="font-size:11px;color:${b.ok ? "var(--accent-2)" : "var(--danger)"}">${b.ok ? "✓" : "Konto fehlt"} ${b.zusatz ? "" : `<a href="#" onclick="abaErzwingen('${escape(b.code)}', false);return false;" style="color:var(--text-faint);font-size:10px" title="Diese Lohnart nicht buchen">✕</a>`}</td>
+          <td style="font-size:11px;color:${b.ok ? (abaNurAnzeige(b) ? "var(--text-dim)" : "var(--accent-2)") : "var(--danger)"}">${b.ok ? (abaNurAnzeige(b) ? `<span title="Konto ${escape(abaAnzeigeNurKonten().join(", "))}: wird angezeigt und abgestimmt, aber nicht ins Abacus-XML geschrieben">👁 nur Anzeige</span>` : "✓") : "Konto fehlt"} ${b.zusatz ? "" : `<a href="#" onclick="abaErzwingen('${escape(b.code)}', false);return false;" style="color:var(--text-faint);font-size:10px" title="Diese Lohnart nicht buchen">✕</a>`}</td>
         </tr>`; }).join("")}</tbody>
       </table></div>
       ${(abaState.ausgelassen || []).length ? `<details style="margin-top:10px"><summary style="font-size:11px;color:var(--text-dim);cursor:pointer">${abaState.ausgelassen.length} Lohnarten nicht gebucht (Basen, Info, manuell ausgeschlossen)</summary>
