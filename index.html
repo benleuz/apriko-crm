@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.333.0"></script>
-<script src="apriko-api.js?v=1.333.0"></script>
-<script src="lohncheck.js?v=1.333.0"></script>
-<script src="personalbudget.js?v=1.333.0"></script>
-<script src="jahresbudget.js?v=1.333.0"></script>
-<script src="budgetpositionen.js?v=1.333.0"></script>
-<script src="lohnchecklistetemp.js?v=1.333.0"></script>
-<script src="apriko-endpunkte.js?v=1.333.0"></script>
+<script src="apriko-filters.js?v=1.334.0"></script>
+<script src="apriko-api.js?v=1.334.0"></script>
+<script src="lohncheck.js?v=1.334.0"></script>
+<script src="personalbudget.js?v=1.334.0"></script>
+<script src="jahresbudget.js?v=1.334.0"></script>
+<script src="budgetpositionen.js?v=1.334.0"></script>
+<script src="lohnchecklistetemp.js?v=1.334.0"></script>
+<script src="apriko-endpunkte.js?v=1.334.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1003,7 +1003,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.333.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.334.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -7656,7 +7656,7 @@ function tarifartenCsvExport() {
    SingleInformation — gleiches Muster wie die Lohnschnittstelle Helva). Mandant-Konstanten
    sind hier editierbar (localStorage aba-settings). Erkennung des Blatts: entweder Monats-
    spalten (Jan…Dez / 01…12 / 2026-08) = Breitformat, oder Spalten Lohnart/Betrag(/Monat) = Langformat. */
-const ABA_DEFAULTS = { client: "99999", division: "0", currency: "CHF", mapId: "AbaDefault", version: "2015", docCode: "B", textPrefix: "Lohn", mwstKonten: "5490:200:I" };
+const ABA_DEFAULTS = { client: "99999", division: "0", currency: "CHF", mapId: "AbaDefault", version: "2015", docCode: "", textPrefix: "Lohn", mwstKonten: "5490:200:I" };
 let abaState = { datei: "", zeilen: [], spalten: [], monat: new Date().getMonth() || 12, jahr: new Date().getFullYear(), overrides: {}, xml: "", kunde: (localStorage.getItem("aba-kunde") || "0") === "0" ? 0 : localStorage.getItem("aba-kunde") };
 /* Kunden mit FIBU-Monatsabschluss (Kundenflag «fibu») — pro Kunde eigenes Regelwerk + Mandant-Parameter
    in parameter.json (abacusKunden[<id>]); der globale Block «abacus» ist die Vorlage für neue Kunden. */
@@ -7665,8 +7665,12 @@ function abaKundeWaehlen(id) { abaState.kunde = String(id || "") === "0" ? 0 : (
 function abaSettings() {
   let lokal = {};
   try { lokal = JSON.parse(localStorage.getItem("aba-settings") || "{}"); } catch (e) {}
-  if (abaState.kunde && crmParameter) { const a = abaParam(); return Object.assign({}, ABA_DEFAULTS, lokal, a.mandant || {}); }
-  return Object.assign({}, ABA_DEFAULTS, lokal);
+  let r;
+  if (abaState.kunde && crmParameter) { const a = abaParam(); r = Object.assign({}, ABA_DEFAULTS, lokal, a.mandant || {}); }
+  else r = Object.assign({}, ABA_DEFAULTS, lokal);
+  // Alter Standard «B» (vor v1.334) wird als leer behandelt: Abacus 2015/AbaDefault lehnt <DocumentCode> ab (Fehler 3028)
+  if (r.docCode === "B" && !r.docCodeExplizit) r.docCode = "";
+  return r;
 }
 async function abaSettingSet(k, v) {
   if (abaState.kunde) {
@@ -7976,8 +7980,7 @@ function abaXmlBauen(buchungen) {
         <KeyAmount>${amt}</KeyAmount>
         <Account>${abaEsc(soll)}</Account>
         <Text1>${text}</Text1>${taxData(soll)}
-        <DocumentCode>${abaEsc(s.docCode)}</DocumentCode>
-        <SingleCount>1</SingleCount>
+${s.docCode ? "        <DocumentCode>" + abaEsc(s.docCode) + "</DocumentCode>\n" : ""}        <SingleCount>1</SingleCount>
         <Number>${i + 1}</Number>
       </CollectiveInformation>
       <SingleInformation mode="SAVE">
@@ -7994,8 +7997,7 @@ function abaXmlBauen(buchungen) {
         <KeyAmount>${amt}</KeyAmount>
         <Account>${abaEsc(haben)}</Account>
         <Text1>${text}</Text1>${taxData(haben)}
-        <DocumentCode>${abaEsc(s.docCode)}</DocumentCode>
-        <Number>${i + 1}</Number>
+${s.docCode ? "        <DocumentCode>" + abaEsc(s.docCode) + "</DocumentCode>\n" : ""}        <Number>${i + 1}</Number>
       </SingleInformation>
     </Entry>`;
   });
@@ -8055,7 +8057,7 @@ function renderAbacus(el) {
       ${abaFibuKunden().length ? "" : `<div style="font-size:11px;color:var(--warn);margin-top:8px">Kein Kunde mit Häkchen «FIBU Monatsabschluss» im Kundenstamm — dort setzen, dann erscheint er hier.</div>`}
       <details style="margin-top:10px"><summary style="font-size:11px;color:var(--text-dim);cursor:pointer">Mandant / XML-Parameter${abaState.kunde ? " — gespeichert pro Kunde" : " — lokal (kein Kunde gewählt)"}</summary>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
-          ${inp("client", 70, "Client")}${inp("division", 50, "Division")}${inp("currency", 50, "Währung")}${inp("mapId", 90, "MapId")}${inp("version", 60, "Version")}${inp("docCode", 50, "DocumentCode")}${inp("textPrefix", 90, "Text-Präfix")}${inp("mwstKonten", 160, "MwSt-Konten (Konto:Code:I/E, kommagetrennt)", "z.B. 5490:200:I — für diese Konten wird TaxData mitgegeben")}
+          ${inp("client", 70, "Client")}${inp("division", 50, "Division")}${inp("currency", 50, "Währung")}${inp("mapId", 90, "MapId")}${inp("version", 60, "Version")}${inp("docCode", 50, "DocumentCode", "leer lassen — Abacus 2015/AbaDefault kennt das Element nicht (Fehler 3028); nur füllen, wenn der Mandant es verlangt")}${inp("textPrefix", 90, "Text-Präfix")}${inp("mwstKonten", 160, "MwSt-Konten (Konto:Code:I/E, kommagetrennt)", "z.B. 5490:200:I — für diese Konten wird TaxData mitgegeben")}
         </div>
       </details>
     </div>
