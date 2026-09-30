@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.345.0"></script>
-<script src="apriko-api.js?v=1.345.0"></script>
-<script src="lohncheck.js?v=1.345.0"></script>
-<script src="personalbudget.js?v=1.345.0"></script>
-<script src="jahresbudget.js?v=1.345.0"></script>
-<script src="budgetpositionen.js?v=1.345.0"></script>
-<script src="lohnchecklistetemp.js?v=1.345.0"></script>
-<script src="apriko-endpunkte.js?v=1.345.0"></script>
+<script src="apriko-filters.js?v=1.346.0"></script>
+<script src="apriko-api.js?v=1.346.0"></script>
+<script src="lohncheck.js?v=1.346.0"></script>
+<script src="personalbudget.js?v=1.346.0"></script>
+<script src="jahresbudget.js?v=1.346.0"></script>
+<script src="budgetpositionen.js?v=1.346.0"></script>
+<script src="lohnchecklistetemp.js?v=1.346.0"></script>
+<script src="apriko-endpunkte.js?v=1.346.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1003,7 +1003,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.345.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.346.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1494,6 +1494,12 @@ let currentView = DEMO_ANON ? "einsatzdash" : "dashboard";
    Berechtigungssystem
    =========================================================== */
 const SUPER_ADMIN_EMAIL = "benjamin@apriko.com";  // hat immer volle Rechte
+/* Zusätzliche Ansichten je Benutzer, fest im Code (Ergänzung zu AllowedViews im Benutzerprofil) —
+   für Freigaben, ohne dass der Super-Admin die Profile bearbeiten kann. E-Mail in Kleinbuchstaben. */
+const EXTRA_VIEWS_BY_EMAIL = {
+  "leutrim@apriko.com": ["abacus"],
+  "nicolas@apriko.com": ["abacus"]
+};
 const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","onboarding","onbparam","lohncheck","parameter","apipoc","abacus","uzcheck","grad360","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
@@ -1568,6 +1574,9 @@ function resolveCurrentUser(email) {
   } else if (typeof profile.AllowedViews === "string" && profile.AllowedViews.trim()) {
     allowedViews = profile.AllowedViews.split(/[,;]/).map(s => s.trim()).filter(Boolean);
   }
+
+  // Im Code hinterlegte Zusatzfreigaben (z.B. Abacus-Schnittstelle) ergänzen
+  (EXTRA_VIEWS_BY_EMAIL[String(email || "").toLowerCase()] || []).forEach(v => { if (!allowedViews.includes(v)) allowedViews.push(v); });
 
   // Profil existiert, gewährt aber effektiv nichts (AllowedViews leer, weder Admin noch
   // Super-Admin) → wie "kein Profil" behandeln, damit die komplette Zugriff-verweigert-Seite
