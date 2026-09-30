@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.343.0"></script>
-<script src="apriko-api.js?v=1.343.0"></script>
-<script src="lohncheck.js?v=1.343.0"></script>
-<script src="personalbudget.js?v=1.343.0"></script>
-<script src="jahresbudget.js?v=1.343.0"></script>
-<script src="budgetpositionen.js?v=1.343.0"></script>
-<script src="lohnchecklistetemp.js?v=1.343.0"></script>
-<script src="apriko-endpunkte.js?v=1.343.0"></script>
+<script src="apriko-filters.js?v=1.345.0"></script>
+<script src="apriko-api.js?v=1.345.0"></script>
+<script src="lohncheck.js?v=1.345.0"></script>
+<script src="personalbudget.js?v=1.345.0"></script>
+<script src="jahresbudget.js?v=1.345.0"></script>
+<script src="budgetpositionen.js?v=1.345.0"></script>
+<script src="lohnchecklistetemp.js?v=1.345.0"></script>
+<script src="apriko-endpunkte.js?v=1.345.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -964,6 +964,7 @@
           <button data-view="bpocheck"><span class="ic">☑</span> Lohn Checkliste Temp</button>
           <button data-view="clintern"><span class="ic">☑</span> Lohn Checkliste intern</button>
           <button data-view="clfibu"><span class="ic">☑</span> FIBU Checkliste Monatsabschluss</button>
+          <button data-view="abacus"><span class="ic">🧮</span> Abacus Schnittstelle</button>
           <button data-view="lct"><span class="ic">☑</span> Checkliste Lohn Temp 2.0</button>
           <button data-view="lohnartenstamm"><span class="ic">📋</span> Lohnartenstamm</button>
           <button data-view="tarifarten"><span class="ic">🏷️</span> Tarifarten</button>
@@ -985,7 +986,6 @@
           <button data-view="einsatzdash"><span class="ic">📊</span> Kundendashboard</button>
           <button data-view="konzern"><span class="ic">🏢</span> Konzernanalyse</button>
           <button data-view="apipoc"><span class="ic">🔌</span> Apriko API (POC)</button>
-          <button data-view="abacus"><span class="ic">🧮</span> Abacus Schnittstelle</button>
           <button data-view="uzcheck"><span class="ic">⏱</span> Überzeit-Check</button>
           <button data-view="grad360"><span class="ic">◔</span> 360 Grad</button>
         </div>
@@ -1003,7 +1003,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.343.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.345.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -8021,6 +8021,7 @@ function abaXmlBauen(buchungen) {
     zeilenXml.forEach(z => { const k = z.soll + "|" + z.haben; if (!grp[k]) grp[k] = { code: "", bezeichnung: "", soll: z.soll, haben: z.haben, betrag: 0, codes: [] }; grp[k].betrag += z.betrag; grp[k].codes.push(z.code); });
     zeilenXml = Object.values(grp).map(g => ({ ...g, code: g.codes.join("+"), bezeichnung: g.codes.length + " Lohnarten" })).sort((a, b) => a.soll.localeCompare(b.soll) || a.haben.localeCompare(b.haben));
   }
+  abaState.xmlInfo = { modus: (s.xmlModus || "lohnart"), lohnarten: buchungen.filter(b => b.ok && !abaNurAnzeige(b)).length, buchungen: zeilenXml.length };
   const entries = zeilenXml.map((b, i) => {
     const soll = b.soll, haben = b.haben, betrag = Math.round(b.betrag * 100) / 100;
     const amt = betrag.toFixed(2);
@@ -8090,6 +8091,8 @@ function abaXmlErzeugen() {
   const kn = abaState.kunde ? ((cache.customers.find(c => String(c.id) === String(abaState.kunde)) || {}).Title || "").replace(/[^\w.-]+/g, "_") + "_" : "";
   a.download = `BuBel_Abacus_${kn}${abaState.jahr}${String(abaState.monat).padStart(2, "0")}.xml`;
   a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  const xi = abaState.xmlInfo || {};
+  toast(xi.modus === "konto" ? xi.buchungen + " Buchungen im XML — nach Konto zusammengefasst aus " + xi.lohnarten + " Lohnarten" : xi.buchungen + " Buchungen im XML — je Lohnart einzeln (Modus «nach Konto» im Dropdown neben dem Knopf wählen, um zusammenzufassen)");
   render();
 }
 function renderAbacus(el) {
