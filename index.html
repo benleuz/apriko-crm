@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.363.0"></script>
-<script src="apriko-api.js?v=1.363.0"></script>
-<script src="lohncheck.js?v=1.363.0"></script>
-<script src="personalbudget.js?v=1.363.0"></script>
-<script src="jahresbudget.js?v=1.363.0"></script>
-<script src="budgetpositionen.js?v=1.363.0"></script>
-<script src="lohnchecklistetemp.js?v=1.363.0"></script>
-<script src="apriko-endpunkte.js?v=1.363.0"></script>
+<script src="apriko-filters.js?v=1.365.0"></script>
+<script src="apriko-api.js?v=1.365.0"></script>
+<script src="lohncheck.js?v=1.365.0"></script>
+<script src="personalbudget.js?v=1.365.0"></script>
+<script src="jahresbudget.js?v=1.365.0"></script>
+<script src="budgetpositionen.js?v=1.365.0"></script>
+<script src="lohnchecklistetemp.js?v=1.365.0"></script>
+<script src="apriko-endpunkte.js?v=1.365.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1013,7 +1013,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.363.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.365.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -8550,10 +8550,10 @@ function renderAuszPdf(el) {
    (Kunde/Organisation, Art/Typ/Kategorie, Status, Priorität, Bearbeiter, Erstellt, Gelöst) und sind im Mapping
    änderbar. Auswertung: Tickets je Kunde, je Art, Kunde × Art, je Monat, Ø Lösungszeit. Nichts wird gespeichert. */
 let tkState = { datei: "", spalten: [], zeilen: [], map: {}, von: "", bis: "", filterKunde: "", filterArt: "", tab: "kunde" };
-const TK_FELDER = [["kunde", "Kunde / Organisation", /organi|kunde|customer|firma|company|account/i], ["art", "Art / Typ / Kategorie", /^art$|typ|type|kategor|categor|thema|topic|tag|grund|reason/i], ["status", "Status", /status/i], ["prio", "Priorität", /prio/i], ["bearbeiter", "Bearbeiter / Assignee", /assign|bearbeit|agent|zust/i], ["erstellt", "Erstellt am", /creat|erstell|eröff|open|datum|date/i], ["geloest", "Gelöst am", /solv|gelös|clos|geschl|resol/i], ["betreff", "Betreff / Titel", /subject|betreff|titel|title|summary/i]];
+const TK_FELDER = [["kunde", "Kunde / Organisation", /organi|kunde|customer|firma|company|account/i], ["art", "Art / Anliegen / Kategorie", /^anliegen_1$|^anliegen$|unterkategor|^art$|typ|type|kategor|categor|thema|topic|tag|grund|reason/i], ["status", "Status", /status/i], ["prio", "Priorität", /prio/i], ["bearbeiter", "Bearbeiter / Assignee", /assign|bearbeit|agent|zust/i], ["erstellt", "Erstellt am", /creat|erstell|eröff|open|datum|date/i], ["geloest", "Gelöst am", /solv|gelös|clos|geschl|resol/i], ["betreff", "Betreff / Titel", /subject|betreff|titel|title|summary/i]];
 function tkAutoMap(spalten) {
   const map = {}; const belegt = new Set();
-  TK_FELDER.forEach(([k, , re]) => { const sp = spalten.find(x => !belegt.has(x) && re.test(x)); if (sp) { map[k] = sp; belegt.add(sp); } });
+  TK_FELDER.forEach(([k, , re]) => { const kand = spalten.filter(x => !belegt.has(x) && re.test(x)); const sp = k === "art" ? (kand.find(x => /^anliegen_1$/i.test(x)) || kand.find(x => /^anliegen$/i.test(x)) || kand.find(x => /unterkategor/i.test(x)) || kand[0]) : kand[0]; if (sp) { map[k] = sp; belegt.add(sp); } });
   return map;
 }
 async function tkUpload(input) {
@@ -8566,7 +8566,8 @@ async function tkUpload(input) {
   const rows = window.XLSX.utils.sheet_to_json(ws, { defval: "", raw: false });
   if (rows.length) { spalten = Object.keys(rows[0]).filter(h => !/^__EMPTY/.test(h)); zeilen = rows; }
   if (!zeilen.length) { toast("Keine Zeilen gefunden.", true); return; }
-  tkState = { ...tkState, datei: file.name, spalten, zeilen, map: tkAutoMap(spalten), von: "", bis: "", filterKunde: "", filterArt: "" };
+  // Standardzeitraum: ab 1. Januar des laufenden Jahres (ältere Tickets bleiben per Filter abrufbar)
+  tkState = { ...tkState, datei: file.name, spalten, zeilen, map: tkAutoMap(spalten), von: new Date().getFullYear() + "-01-01", bis: "", filterKunde: "", filterArt: "" };
   toast(zeilen.length + " Tickets geladen · " + spalten.length + " Spalten");
   render();
 }
@@ -8601,34 +8602,69 @@ async function tkExportExcel() {
   add("Tickets", tkState.spalten, zeilen.map(z => tkState.spalten.map(h => z[h])));
   window.XLSX.writeFile(wb, "Tickets_Auswertung.xlsx");
 }
+/* Mehrwertige Felder (z.B. «Anliegen» mit «A | B | C») aufteilen */
+function tkWerte(z, feld) { if (!feld) return ["(nicht zugeordnet)"]; const v = String(z[feld] || "").trim(); if (!v) return ["(leer)"]; return v.includes(" | ") ? v.split(" | ").map(x => x.trim()).filter(Boolean) : [v]; }
+function tkGruppeMulti(zeilen, feld) { const g = {}; zeilen.forEach(z => tkWerte(z, feld).forEach(k => { g[k] = (g[k] || 0) + 1; })); return Object.entries(g).sort((a, b) => b[1] - a[1]); }
+function tkFarbe(i) { return ["#7cb342", "#4fc3f7", "#ffb74d", "#ba68c8", "#4db6ac", "#f06292", "#a1887f", "#90a4ae", "#dce775", "#ff8a65", "#9575cd", "#81c784"][i % 12]; }
+function tkHeat(v, max) { if (!v) return "transparent"; const a = 0.12 + 0.78 * Math.pow(v / (max || 1), 0.6); return `rgba(124,179,66,${a.toFixed(2)})`; }
 function renderTickets(el) {
   const m = tkState.map; const zeilen = tkGefiltert(); const fmtTage = v => v.toFixed(1).replace(".", ",") + " Tg";
+  tkState.tab = tkState.tab || "anliegen";
   document.getElementById("view-actions").innerHTML = `<label class="btn btn-sm">⇧ CSV / Excel laden<input type="file" accept=".csv,.xlsx,.xls" style="display:none" onchange="tkUpload(this)"></label>${tkState.zeilen.length ? `<button class="btn btn-sm" onclick="tkExportExcel()">⇩ Excel</button>` : ""}`;
-  if (!tkState.zeilen.length) { el.innerHTML = `<div class="card" style="padding:24px"><div style="font-weight:600;margin-bottom:6px">Tickets Auswertung</div><div style="font-size:12px;color:var(--text-dim);line-height:1.5">Zendesk-Export (CSV oder Excel) oben rechts laden. Die Spalten Kunde/Organisation, Art/Typ, Status, Priorität, Bearbeiter, Erstellt und Gelöst werden automatisch erkannt und lassen sich danach zuordnen. Ausgewertet wird je Kunde, je Art, Kunde × Art, je Monat und die Lösungszeit — mit Zeitraum- und Kundenfilter, Export als Excel. Es wird nichts gespeichert.</div></div>`; return; }
+  if (!tkState.zeilen.length) { el.innerHTML = `<div class="card" style="padding:28px;text-align:center"><div style="font-size:40px">🎫</div><div style="font-weight:600;margin:8px 0 6px">Tickets Auswertung</div><div style="font-size:12px;color:var(--text-dim);line-height:1.6;max-width:560px;margin:0 auto">Zendesk-Export oder die kategorisierte Datei (CSV/Excel) oben rechts laden. Spalten werden automatisch erkannt (Kunde, Art/Anliegen, Status, Erstellt, Gelöst …) und sind unter «Spalten-Zuordnung» änderbar. Mehrfachwerte wie «A | B» werden einzeln gezählt. Nichts wird gespeichert.</div></div>`; return; }
   const opt = (cur) => `<option value="">—</option>` + tkState.spalten.map(sp => `<option value="${escape(sp)}" ${cur === sp ? "selected" : ""}>${escape(sp)}</option>`).join("");
-  const lz = tkLoesungszeit(zeilen);
-  const kunden = tkGruppe(tkState.zeilen, m.kunde), arten = tkGruppe(tkState.zeilen, m.art);
-  const tabelle = (titel, paare, total) => `<div class="card" style="padding:12px 14px"><div style="font-weight:600;margin-bottom:6px">${titel}</div><table style="font-size:12px;width:100%">${paare.slice(0, 40).map(([k, n]) => `<tr><td style="padding:3px 6px 3px 0">${escape(k)}</td><td style="text-align:right;font-family:var(--font-mono);padding:3px 0">${n}</td><td style="width:40%;padding-left:8px"><div style="background:var(--accent);height:8px;width:${Math.round(n / (paare[0][1] || 1) * 100)}%;border-radius:2px"></div></td><td style="text-align:right;color:var(--text-dim);font-family:var(--font-mono)">${Math.round(n / total * 100)}%</td></tr>`).join("")}${paare.length > 40 ? `<tr><td colspan="4" style="color:var(--text-faint)">… ${paare.length - 40} weitere</td></tr>` : ""}</table></div>`;
-  const matrixArten = tkGruppe(zeilen, m.art).map(x => x[0]).slice(0, 12), matrixKunden = tkGruppe(zeilen, m.kunde).map(x => x[0]).slice(0, 40);
-  const matrix = `<div class="card" style="padding:12px 14px;overflow:auto"><div style="font-weight:600;margin-bottom:6px">Kunde × Art</div><table style="font-size:11.5px"><thead><tr><th>Kunde</th>${matrixArten.map(a => `<th style="text-align:right;padding:2px 6px">${escape(a)}</th>`).join("")}<th style="text-align:right">Total</th></tr></thead><tbody>${matrixKunden.map(k => { const r = zeilen.filter(z => (String(z[m.kunde] || "").trim() || "(leer)") === k); return `<tr><td style="padding:2px 6px 2px 0;white-space:nowrap">${escape(k)}</td>${matrixArten.map(a => { const n = r.filter(z => (String(z[m.art] || "").trim() || "(leer)") === a).length; return `<td style="text-align:right;font-family:var(--font-mono);padding:2px 6px;${n ? "" : "color:var(--text-faint)"}">${n || "·"}</td>`; }).join("")}<td style="text-align:right;font-family:var(--font-mono);font-weight:600">${r.length}</td></tr>`; }).join("")}</tbody></table></div>`;
+  const lz = tkLoesungszeit(zeilen); const n = zeilen.length || 1;
+  const kundenAlle = tkGruppe(tkState.zeilen, m.kunde), artenAlle = tkGruppeMulti(tkState.zeilen, m.art);
+  const kunden = tkGruppe(zeilen, m.kunde), arten = tkGruppeMulti(zeilen, m.art), status = tkGruppe(zeilen, m.status), bearb = tkGruppe(zeilen, m.bearbeiter);
   const monate = tkGruppe(zeilen.map(z => ({ mon: (d => d ? d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") : "(ohne Datum)")(tkDatum(z[m.erstellt])) })), "mon").sort((a, b) => a[0].localeCompare(b[0]));
+  const monatsAnzahl = monate.filter(x => x[0] !== "(ohne Datum)").length || 1;
+  const top5 = kunden.slice(0, 5).reduce((a, x) => a + x[1], 0);
+  const kpi = (label, wert, sub, farbe) => `<div class="card" style="padding:14px 16px;border-top:3px solid ${farbe || "var(--accent)"}"><div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em">${label}</div><div style="font-size:26px;font-weight:700;margin:2px 0">${wert}</div><div style="font-size:11px;color:var(--text-faint)">${sub || ""}</div></div>`;
+  const balken = (titel, paare, total, feld, klickFeld, farbeIdx) => `<div class="card" style="padding:12px 14px"><div style="font-weight:600;margin-bottom:8px">${titel} <span style="font-weight:400;color:var(--text-faint);font-size:11px">${paare.length} Werte</span></div>
+    ${paare.slice(0, 25).map(([k, v], i) => `<div onclick="${klickFeld ? `tkState.${klickFeld}=tkState.${klickFeld}===${JSON.stringify(k)}?'':${JSON.stringify(k)};render()` : ""}" style="display:grid;grid-template-columns:minmax(140px,38%) 1fr 54px;gap:8px;align-items:center;padding:3px 0;${klickFeld ? "cursor:pointer" : ""}" title="${escape(k)}: ${v}">
+      <div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escape(k)}</div>
+      <div style="background:var(--bg-hover);border-radius:4px;height:14px;overflow:hidden"><div style="height:100%;width:${Math.round(v / (paare[0][1] || 1) * 100)}%;background:linear-gradient(90deg,${tkFarbe(farbeIdx || 0)},${tkFarbe((farbeIdx || 0) + 1)});border-radius:4px"></div></div>
+      <div style="font-family:var(--font-mono);font-size:12px;text-align:right">${v} <span style="color:var(--text-faint);font-size:10px">${Math.round(v / total * 100)}%</span></div></div>`).join("")}${paare.length > 25 ? `<div style="font-size:11px;color:var(--text-faint);margin-top:4px">… ${paare.length - 25} weitere</div>` : ""}</div>`;
+  // Heatmap Kunde × Art (Top-Kunden × Top-Arten)
+  const hK = kunden.slice(0, 20).map(x => x[0]), hA = arten.slice(0, 18).map(x => x[0]);
+  const zelle = {}; zeilen.forEach(z => { const k = m.kunde ? (String(z[m.kunde] || "").trim() || "(leer)") : "(nicht zugeordnet)"; tkWerte(z, m.art).forEach(a => { zelle[k + "|" + a] = (zelle[k + "|" + a] || 0) + 1; }); });
+  const hMax = Math.max(1, ...Object.values(zelle));
+  const heat = `<div class="card" style="padding:12px 14px;overflow:auto"><div style="font-weight:600;margin-bottom:8px">Heatmap Kunde × ${escape(m.art || "Art")} <span style="font-weight:400;color:var(--text-faint);font-size:11px">Farbe = Anzahl · Klick auf Kopf filtert</span></div>
+    <table style="font-size:11px;border-collapse:separate;border-spacing:2px"><thead><tr><th></th>${hA.map(a => `<th onclick="tkState.filterArt=tkState.filterArt===${JSON.stringify(a)}?'':${JSON.stringify(a)};render()" style="cursor:pointer;writing-mode:vertical-rl;transform:rotate(180deg);text-align:left;font-weight:500;max-height:150px;padding:4px 2px;white-space:nowrap">${escape(a.length > 34 ? a.slice(0, 32) + "…" : a)}</th>`).join("")}<th style="text-align:right">Σ</th></tr></thead>
+    <tbody>${hK.map(k => { const tot = kunden.find(x => x[0] === k)[1]; return `<tr><td onclick="tkState.filterKunde=tkState.filterKunde===${JSON.stringify(k)}?'':${JSON.stringify(k)};render()" style="cursor:pointer;white-space:nowrap;padding:2px 6px;font-weight:500">${escape(k)}</td>${hA.map(a => { const v = zelle[k + "|" + a] || 0; return `<td title="${escape(k)} · ${escape(a)}: ${v}" style="width:34px;height:24px;text-align:center;font-family:var(--font-mono);border-radius:3px;background:${tkHeat(v, hMax)};color:${v / hMax > 0.55 ? "#111" : "var(--text)"}">${v || ""}</td>`; }).join("")}<td style="text-align:right;font-family:var(--font-mono);font-weight:600;padding-left:8px">${tot}</td></tr>`; }).join("")}</tbody></table></div>`;
+  // Monatsverlauf gestapelt nach Top-5-Kunden
+  const top5K = kunden.slice(0, 5).map(x => x[0]); const monStack = {}; let monMax = 1;
+  zeilen.forEach(z => { const d = tkDatum(z[m.erstellt]); if (!d) return; const mon = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); const k = m.kunde ? (String(z[m.kunde] || "").trim() || "(leer)") : "x"; const key = top5K.includes(k) ? k : "übrige"; (monStack[mon] = monStack[mon] || {})[key] = (monStack[mon][key] || 0) + 1; });
+  Object.values(monStack).forEach(o => { monMax = Math.max(monMax, Object.values(o).reduce((a, b) => a + b, 0)); });
+  const monKeys = Object.keys(monStack).sort(); const legend = [...top5K, "übrige"];
+  const verlauf = `<div class="card" style="padding:12px 14px"><div style="font-weight:600;margin-bottom:8px">Tickets pro Monat <span style="font-weight:400;color:var(--text-faint);font-size:11px">gestapelt nach Top-5-Kunden</span></div>
+    <div style="display:flex;gap:8px;align-items:flex-end;height:170px">${monKeys.map(mon => { const o = monStack[mon]; const tot = Object.values(o).reduce((a, b) => a + b, 0); return `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;text-align:center;font-size:10px" title="${mon}: ${tot}"><div style="font-family:var(--font-mono);margin-bottom:2px">${tot}</div>${legend.map((k, i) => o[k] ? `<div title="${escape(k)}: ${o[k]}" style="height:${(o[k] / monMax * 140).toFixed(1)}px;background:${k === "übrige" ? "var(--text-faint)" : tkFarbe(i)}"></div>` : "").join("")}<div style="color:var(--text-faint);margin-top:3px">${mon.slice(2)}</div></div>`; }).join("")}</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;font-size:11px">${legend.map((k, i) => `<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${k === "übrige" ? "var(--text-faint)" : tkFarbe(i)};margin-right:4px"></span>${escape(k)}</span>`).join("")}</div></div>`;
+  // Konzentration: Anliegen, die bei einem Kunden gebündelt sind
+  const konz = arten.slice(0, 30).map(([a, tot]) => { let best = ["", 0]; hK.concat(kunden.slice(20).map(x => x[0])).forEach(k => { const v = zelle[k + "|" + a] || 0; if (v > best[1]) best = [k, v]; }); return { a, tot, k: best[0], v: best[1], q: best[1] / tot }; }).filter(x => x.q >= 0.4 && x.tot >= 20).sort((x, y) => y.v - x.v);
+  const konzHtml = `<div class="card" style="padding:12px 14px"><div style="font-weight:600;margin-bottom:6px">Bei einem Kunden gebündelt <span style="font-weight:400;color:var(--text-faint);font-size:11px">≥ 40 % eines Anliegens bei einem Kunden — gezielt lösbar</span></div>${konz.length ? `<table style="font-size:12px;width:100%">${konz.map(x => `<tr><td style="padding:3px 6px 3px 0">${escape(x.a)}</td><td style="padding:3px 6px;font-weight:600">${escape(x.k)}</td><td style="text-align:right;font-family:var(--font-mono)">${x.v} / ${x.tot}</td><td style="text-align:right;font-family:var(--font-mono);color:var(--accent)">${Math.round(x.q * 100)}%</td></tr>`).join("")}</table>` : `<div class="empty">keine starke Bündelung</div>`}</div>`;
+  const tabs = [["anliegen", "Anliegen"], ["kunden", "Kunden"], ["verlauf", "Zeitverlauf"], ["heat", "Heatmap"]];
   el.innerHTML = `
     <div class="card" style="padding:10px 14px;margin-bottom:10px;font-size:12px">
-      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center"><strong>${escape(tkState.datei)}</strong> · ${tkState.zeilen.length} Tickets · ${zeilen.length} nach Filter
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center"><strong>${escape(tkState.datei)}</strong>
         <label>Von <input type="date" value="${tkState.von}" onchange="tkState.von=this.value;render()" style="padding:2px 5px"></label><label>Bis <input type="date" value="${tkState.bis}" onchange="tkState.bis=this.value;render()" style="padding:2px 5px"></label>
-        <label>Kunde <select onchange="tkState.filterKunde=this.value;render()" style="padding:2px 5px"><option value="">alle</option>${kunden.map(([k]) => `<option value="${escape(k)}" ${tkState.filterKunde === k ? "selected" : ""}>${escape(k)}</option>`).join("")}</select></label>
-        <label>Art <select onchange="tkState.filterArt=this.value;render()" style="padding:2px 5px"><option value="">alle</option>${arten.map(([k]) => `<option value="${escape(k)}" ${tkState.filterArt === k ? "selected" : ""}>${escape(k)}</option>`).join("")}</select></label></div>
+        <label>Kunde <select onchange="tkState.filterKunde=this.value;render()" style="padding:2px 5px"><option value="">alle</option>${kundenAlle.map(([k]) => `<option value="${escape(k)}" ${tkState.filterKunde === k ? "selected" : ""}>${escape(k)}</option>`).join("")}</select></label>
+        <label>${escape(m.art || "Art")} <select onchange="tkState.filterArt=this.value;render()" style="padding:2px 5px;max-width:280px"><option value="">alle</option>${artenAlle.map(([k]) => `<option value="${escape(k)}" ${tkState.filterArt === k ? "selected" : ""}>${escape(k)}</option>`).join("")}</select></label>
+        ${tkState.von || tkState.bis || tkState.filterKunde || tkState.filterArt ? `<button class="btn btn-sm" onclick="tkState.von='';tkState.bis='';tkState.filterKunde='';tkState.filterArt='';render()">✕ Filter löschen</button>` : ""}</div>
       <details style="margin-top:8px"><summary style="cursor:pointer;color:var(--text-dim)">Spalten-Zuordnung</summary><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">${TK_FELDER.map(([k, label]) => `<label style="font-size:11px;color:var(--text-dim)">${label}<br><select onchange="tkState.map['${k}']=this.value;render()" style="padding:2px 5px">${opt(m[k] || "")}</select></label>`).join("")}</div></details>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px;margin-bottom:10px">
-      <div class="card" style="padding:12px 14px"><div style="font-size:11px;color:var(--text-dim)">Tickets</div><div style="font-size:24px;font-weight:700">${zeilen.length}</div></div>
-      <div class="card" style="padding:12px 14px"><div style="font-size:11px;color:var(--text-dim)">Kunden mit Tickets</div><div style="font-size:24px;font-weight:700">${tkGruppe(zeilen, m.kunde).length}</div></div>
-      <div class="card" style="padding:12px 14px"><div style="font-size:11px;color:var(--text-dim)">Lösungszeit (Erstellt → Gelöst)</div><div style="font-size:16px;font-weight:600">${lz ? "Ø " + fmtTage(lz.avg) + " · Median " + fmtTage(lz.median) + " · max " + fmtTage(lz.max) : "—"}</div><div style="font-size:11px;color:var(--text-faint)">${lz ? lz.n + " gelöste Tickets" : "Spalten Erstellt/Gelöst zuordnen"}</div></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-bottom:10px">
+      ${kpi("Tickets", zeilen.length, (zeilen.length / monatsAnzahl).toFixed(0) + " pro Monat · " + monatsAnzahl + " Monate", tkFarbe(0))}
+      ${kpi("Kunden", kunden.length, "Top 5 = " + Math.round(top5 / n * 100) + "% der Tickets", tkFarbe(1))}
+      ${kpi("Grösstes Anliegen", arten[0] ? arten[0][1] : "—", arten[0] ? escape(arten[0][0]) : "", tkFarbe(2))}
+      ${kpi("Grösster Kunde", kunden[0] ? kunden[0][1] : "—", kunden[0] ? escape(kunden[0][0]) + " · " + Math.round(kunden[0][1] / n * 100) + "%" : "", tkFarbe(3))}
+      ${kpi("Lösungszeit", lz ? "Ø " + fmtTage(lz.avg) : "—", lz ? "Median " + fmtTage(lz.median) + " · " + lz.n + " gelöst" : "Spalten Erstellt/Gelöst zuordnen", tkFarbe(4))}
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">${tabelle("Je Kunde", tkGruppe(zeilen, m.kunde), zeilen.length)}${tabelle("Je Art", tkGruppe(zeilen, m.art), zeilen.length)}</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">${tabelle("Je Status", tkGruppe(zeilen, m.status), zeilen.length)}${tabelle("Je Bearbeiter", tkGruppe(zeilen, m.bearbeiter), zeilen.length)}</div>
-    ${matrix}
-    <div class="card" style="padding:12px 14px;margin-top:10px"><div style="font-weight:600;margin-bottom:6px">Je Monat (Erstellt)</div><div style="display:flex;gap:6px;align-items:flex-end;height:120px">${monate.map(([mon, n]) => `<div title="${escape(mon)}: ${n}" style="flex:1;text-align:center;font-size:10px"><div style="background:var(--accent-2);height:${Math.round(n / (Math.max(...monate.map(x => x[1])) || 1) * 90)}px;border-radius:2px 2px 0 0"></div>${n}<br><span style="color:var(--text-faint)">${escape(mon.slice(2))}</span></div>`).join("")}</div></div>`;
+    <div style="display:flex;gap:4px;margin-bottom:10px">${tabs.map(([id, l]) => `<button class="btn btn-sm" onclick="tkState.tab='${id}';render()" style="${tkState.tab === id ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">${l}</button>`).join("")}</div>
+    ${tkState.tab === "anliegen" ? `<div style="display:grid;grid-template-columns:1.2fr 1fr;gap:10px">${balken("Anliegen / " + escape(m.art || "Art"), arten, n, m.art, "filterArt", 0)}<div style="display:grid;gap:10px;align-content:start">${konzHtml}${balken("Status", status, n, m.status, null, 6)}</div></div>` : ""}
+    ${tkState.tab === "kunden" ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${balken("Tickets je Kunde", kunden, n, m.kunde, "filterKunde", 1)}${balken("Bearbeiter", bearb, n, m.bearbeiter, null, 3)}</div>` : ""}
+    ${tkState.tab === "verlauf" ? verlauf : ""}
+    ${tkState.tab === "heat" ? heat : ""}`;
 }
 
 /* ============ Spielwiese → 360 Grad ============
