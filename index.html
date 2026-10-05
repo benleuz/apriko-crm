@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.367.0"></script>
-<script src="apriko-api.js?v=1.367.0"></script>
-<script src="lohncheck.js?v=1.367.0"></script>
-<script src="personalbudget.js?v=1.367.0"></script>
-<script src="jahresbudget.js?v=1.367.0"></script>
-<script src="budgetpositionen.js?v=1.367.0"></script>
-<script src="lohnchecklistetemp.js?v=1.367.0"></script>
-<script src="apriko-endpunkte.js?v=1.367.0"></script>
+<script src="apriko-filters.js?v=1.368.0"></script>
+<script src="apriko-api.js?v=1.368.0"></script>
+<script src="lohncheck.js?v=1.368.0"></script>
+<script src="personalbudget.js?v=1.368.0"></script>
+<script src="jahresbudget.js?v=1.368.0"></script>
+<script src="budgetpositionen.js?v=1.368.0"></script>
+<script src="lohnchecklistetemp.js?v=1.368.0"></script>
+<script src="apriko-endpunkte.js?v=1.368.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1013,7 +1013,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.367.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.368.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -8654,6 +8654,59 @@ function tkListeHtml(zeilen) {
     ${liste.length > max ? `<div style="margin-top:8px"><button class="btn btn-sm" onclick="tkState.listeMax=(tkState.listeMax||100)+200;render()">+ 200 weitere (${liste.length - max} übrig)</button></div>` : ""}
     <div style="font-size:10.5px;color:var(--text-faint);margin-top:6px">Klick auf eine Zeile zeigt den Verlauf.</div></div>`;
 }
+/* Was hinter den Anliegen-Tags steckt (Wortmuster aus Betreff und Verlauf) — für Tooltips und Legende */
+const TK_BESCHREIBUNG = {
+  "Feriengeld auszahlen / komplett abrechnen": "Feriengeld, Ferienguthaben, «komplett abrechnen», Anteile auszahlen — meist bei Austritt oder Einsatzende.",
+  "Vorschuss / Barbezug auszahlen": "Vorschuss, Akonto, Barbezug, Barauszahlung — Mitarbeitende wollen Geld vor dem Lohnlauf.",
+  "QST-Abrechnung erstellen/senden": "QST-/Quellensteuerabrechnung erstellen oder einreichen (an Steueramt oder Kunde).",
+  "Quellensteuer: Tarif / Ansässigkeit / Mahnung": "Alles rund um Quellensteuer ausser der Abrechnung selbst: Tarifcode, Ansässigkeitsbescheinigung, Mahnungen des Steueramts.",
+  "Offene Posten / Kontoauszug Debitoren": "Offene Positionen/Posten, offene Rechnungen, Kontoauszüge, Debitorenlisten — Stand der Kundenzahlungen.",
+  "Rapporte / Wochenrapporte verrechnen": "Rapporte, Wochenrapporte, Stunden eingetragen/erfasst — Arbeitszeiten zur Verrechnung/Lohn einreichen.",
+  "Rechnung erstellen (Debitoren)": "Neue Rechnung erstellen/ausstellen, Debitorenrechnung, Rechnungslauf, etwas verrechnen.",
+  "Rechnung korrigieren / Gutschrift": "Rechnung korrigieren, anpassen, stornieren; Gutschrift.",
+  "Rechnung Unterkunft / Miete": "Unterkunft, Miete, Wohnung, Zimmer — Unterkunftskosten von Mitarbeitenden verrechnen/abziehen.",
+  "Mahnung / Mahnlauf": "Mahnungen, Mahnlauf, Zahlungserinnerungen an Debitoren.",
+  "SUVA / Unfall / Arztzeugnis / Taggeld": "SUVA, Unfall(meldung), Arztzeugnis, Krankheit, Taggeld, KTG — Absenzen und Versicherungsfälle.",
+  "Kinder-/Familienzulagen": "Kinder-, Familien-, Ausbildungszulagen, Zulagenentscheide, FAK.",
+  "Lohnpfändung / Betreibung": "Lohnpfändung, Lohnsperre, Betreibung(samt).",
+  "Lohnausweis": "Lohnausweis erstellen/senden.",
+  "Arbeitgeberbescheinigung / Zwischenverdienst (RAV)": "Arbeitgeberbescheinigung (AGB), Zwischenverdienst, RAV/Arbeitslosenkasse.",
+  "Bescheinigung / Bestätigung ausstellen": "Sonstige Bescheinigungen/Bestätigungen: Arbeitszeugnis, Lohndeklaration, Nachweise.",
+  "BVG / Pensionskasse": "BVG, Pensionskasse, Vorsorge — An-/Abmeldungen, Beiträge.",
+  "AHV-Nummer / Personalien / Stammdaten": "AHV-Nummer, Personennummer, Personalien, Geburtsdatum, Adresse, Bankverbindung/IBAN, Zivilstand.",
+  "Austritt / Kündigung abmelden": "Austritt, Kündigung, abmelden, letzter Arbeitstag.",
+  "Eintritt / neuer Mitarbeiter anmelden": "Eintritt, neue(r) Mitarbeiter, anmelden, Neuanstellung.",
+  "Lohnabrechnung senden / Kopie": "Lohnabrechnung(en) senden, zustellen, Kopie verlangen.",
+  "Lohn korrigieren / Abzug / Nachzahlung": "Lohn korrigieren/anpassen, Abzug, abziehen, Nachzahlung, Rückzahlung, Differenz, fehlende Positionen.",
+  "Lohnlauf / Monatsabschluss": "Lohnlauf, Monats-/Lohnabschluss, Lohn auszahlen, Lohnjournal, Zahlungsfile, Valuta.",
+  "Zahlungen / Zahlungseingang hochgeladen": "Zahlungen hochgeladen, Zahlungseingänge, camt-Dateien.",
+  "Kreditorenrechnung / Zahlung begleichen": "Kreditorenrechnungen, Zahlungsvorschlag, begleichen, überweisen, Rückvergütung.",
+  "Auswertung / Liste / Report": "Auswertungen, Listen, Statistiken, Übersichten, Excel, Lohnsumme.",
+  "Lohnart / Tarif / Parametrierung": "Lohnarten, Tarife, Parametrierung, Einstellungen, Vorlagen, hinterlegte Werte.",
+  "Zugang / Login / Bestätigungscode / Portal": "Login, Passwort, Zugang, Bestätigungscode, Portal, Benutzer, Freigabe online.",
+  "Fehlermeldung / funktioniert nicht": "Fehlermeldung, funktioniert nicht, geht nicht, Error, Absturz.",
+  "Dokumente / Unterlagen senden": "Dokumente, Unterlagen, Anhang, «zukommen lassen», Upload — nur wenn kein spezifischeres Anliegen erkannt wurde.",
+  "Interne Löhne (Apriko-intern)": "Interne Löhne — Apriko-eigene Lohnverarbeitung.",
+  "Arbeitszeit / Stunden / Überstunden": "Überstunden, Überzeit, Arbeitszeit, Stunden (ohne Rapport-Bezug).",
+  "Spesen": "Spesen.",
+  "13. Monatslohn / Gratifikation": "13. Monatslohn, Gratifikation, Bonus.",
+  "EO / Mutterschaft / Militär": "EO, Mutterschaft, Vaterschaft, Militär, Zivildienst.",
+  "Einsatz / Vertrag / Verleih": "Einsatz, Einsatz-/Verleihvertrag, Vertrag.",
+  "Rechnungskontrolle (Rechnungen zur Kontrolle)": "Rechnungen zur Kontrolle, Rechnungskontrolle — Apriko schickt Rechnungen vor Versand zur Prüfung.",
+  "Zahlungsavis / Zahlungserinnerung": "Zahlungsavis, Avise, Zahlungserinnerungen.",
+  "Leistungsabrechnung / Taggeld-Abrechnung Versicherer": "Leistungs-/Prämienabrechnungen von Versicherern, SVA, Ausgleichskasse, Verzugszins.",
+  "Swissstaffing / BVG-Stiftung (2. Säule) Dateien": "Swissstaffing-Vorsorgestiftung, Self-Service Employer, Dateiprüfung (CtrlLog).",
+  "Systemmail / Scan / sichere Nachricht": "Automatische Mails: «Message from», sichere Nachricht, Scans, Nutzungsbedingungen, Newsletter.",
+  "Sonstige Lohn-Anfrage": "Lohnbezug ohne klares Muster (Lohn, Auszahlung, Abrechnung, Zahlung, künden, beenden …).",
+  "Ein-/Austritt & Mutationen": "Unterkategorie: Ein-/Austritte, Kündigungen, Adress-/Bankänderungen, Personalien.",
+  "Lohnlauf & Auszahlung": "Unterkategorie: Lohnlauf, Monatsabschluss, Auszahlungen, Zahlungsfiles.",
+  "Sozialversicherung & Taggeld": "Unterkategorie: SUVA, Unfall, Krankheit, Taggeld, AHV/BVG/KTG/UVG, EO.",
+  "Rapporte & Stunden": "Unterkategorie: Rapporte, Zeiterfassung, Stunden, Überzeit, Spesen.",
+  "Bescheinigungen & Dokumente": "Unterkategorie: Arbeitgeberbescheinigung, Lohnausweis, Zwischenverdienst, Zeugnisse, Nachweise.",
+  "Rechnungen erstellen/korrigieren": "Unterkategorie: Debitorenrechnungen, Gutschriften, Rechnungslauf, Positionen.",
+  "Auswertung / Liste": "Unterkategorie: Auswertungen, Listen, Reports, Kontrollen, Exporte."
+};
+function tkTip(k) { return TK_BESCHREIBUNG[k] ? k + " — " + TK_BESCHREIBUNG[k] : k; }
 /* Mehrwertige Felder (z.B. «Anliegen» mit «A | B | C») aufteilen */
 function tkWerte(z, feld) { if (!feld) return ["(nicht zugeordnet)"]; const v = String(z[feld] || "").trim(); if (!v) return ["(leer)"]; return v.includes(" | ") ? v.split(" | ").map(x => x.trim()).filter(Boolean) : [v]; }
 function tkGruppeMulti(zeilen, feld) { const g = {}; zeilen.forEach(z => tkWerte(z, feld).forEach(k => { g[k] = (g[k] || 0) + 1; })); return Object.entries(g).sort((a, b) => b[1] - a[1]); }
@@ -8673,7 +8726,7 @@ function renderTickets(el) {
   const top5 = kunden.slice(0, 5).reduce((a, x) => a + x[1], 0);
   const kpi = (label, wert, sub, farbe) => `<div class="card" style="padding:14px 16px;border-top:3px solid ${farbe || "var(--accent)"}"><div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em">${label}</div><div style="font-size:26px;font-weight:700;margin:2px 0">${wert}</div><div style="font-size:11px;color:var(--text-faint)">${sub || ""}</div></div>`;
   const balken = (titel, paare, total, feld, klickFeld, farbeIdx) => `<div class="card" style="padding:12px 14px"><div style="font-weight:600;margin-bottom:8px">${titel} <span style="font-weight:400;color:var(--text-faint);font-size:11px">${paare.length} Werte</span></div>
-    ${paare.slice(0, 25).map(([k, v], i) => `<div onclick="${klickFeld ? `tkState.${klickFeld}=tkState.${klickFeld}===${JSON.stringify(k)}?'':${JSON.stringify(k)};render()` : ""}" style="display:grid;grid-template-columns:minmax(140px,38%) 1fr 54px;gap:8px;align-items:center;padding:3px 0;${klickFeld ? "cursor:pointer" : ""}" title="${escape(k)}: ${v}">
+    ${paare.slice(0, 25).map(([k, v], i) => `<div onclick="${klickFeld ? `tkState.${klickFeld}=tkState.${klickFeld}===${JSON.stringify(k)}?'':${JSON.stringify(k)};render()` : ""}" style="display:grid;grid-template-columns:minmax(140px,38%) 1fr 54px;gap:8px;align-items:center;padding:3px 0;${klickFeld ? "cursor:pointer" : ""}" title="${escape(tkTip(k))} · ${v} Tickets">
       <div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escape(k)}${klickFeld ? ` <a href="#" onclick="event.stopPropagation();tkState.${klickFeld}=${JSON.stringify(k)};tkState.tab='liste';tkState.listeMax=100;render();return false" title="Tickets anzeigen" style="color:var(--text-faint);text-decoration:none;margin-left:4px">🔍</a>` : ""}</div>
       <div style="background:var(--bg-hover);border-radius:4px;height:14px;overflow:hidden"><div style="height:100%;width:${Math.round(v / (paare[0][1] || 1) * 100)}%;background:linear-gradient(90deg,${tkFarbe(farbeIdx || 0)},${tkFarbe((farbeIdx || 0) + 1)});border-radius:4px"></div></div>
       <div style="font-family:var(--font-mono);font-size:12px;text-align:right">${v} <span style="color:var(--text-faint);font-size:10px">${Math.round(v / total * 100)}%</span></div></div>`).join("")}${paare.length > 25 ? `<div style="font-size:11px;color:var(--text-faint);margin-top:4px">… ${paare.length - 25} weitere</div>` : ""}</div>`;
@@ -8682,7 +8735,7 @@ function renderTickets(el) {
   const zelle = {}; zeilen.forEach(z => { const k = m.kunde ? (String(z[m.kunde] || "").trim() || "(leer)") : "(nicht zugeordnet)"; tkWerte(z, m.art).forEach(a => { zelle[k + "|" + a] = (zelle[k + "|" + a] || 0) + 1; }); });
   const hMax = Math.max(1, ...Object.values(zelle));
   const heat = `<div class="card" style="padding:12px 14px;overflow:auto"><div style="font-weight:600;margin-bottom:8px">Heatmap Kunde × ${escape(m.art || "Art")} <span style="font-weight:400;color:var(--text-faint);font-size:11px">Farbe = Anzahl · Klick auf Kopf filtert</span></div>
-    <table style="font-size:11px;border-collapse:separate;border-spacing:2px"><thead><tr><th></th>${hA.map(a => `<th onclick="tkState.filterArt=tkState.filterArt===${JSON.stringify(a)}?'':${JSON.stringify(a)};render()" style="cursor:pointer;writing-mode:vertical-rl;transform:rotate(180deg);text-align:left;font-weight:500;max-height:150px;padding:4px 2px;white-space:nowrap">${escape(a.length > 34 ? a.slice(0, 32) + "…" : a)}</th>`).join("")}<th style="text-align:right">Σ</th></tr></thead>
+    <table style="font-size:11px;border-collapse:separate;border-spacing:2px"><thead><tr><th></th>${hA.map(a => `<th title="${escape(tkTip(a))}" onclick="tkState.filterArt=tkState.filterArt===${JSON.stringify(a)}?'':${JSON.stringify(a)};render()" style="cursor:pointer;writing-mode:vertical-rl;transform:rotate(180deg);text-align:left;font-weight:500;max-height:150px;padding:4px 2px;white-space:nowrap">${escape(a.length > 34 ? a.slice(0, 32) + "…" : a)}</th>`).join("")}<th style="text-align:right">Σ</th></tr></thead>
     <tbody>${hK.map(k => { const tot = kunden.find(x => x[0] === k)[1]; return `<tr><td onclick="tkState.filterKunde=tkState.filterKunde===${JSON.stringify(k)}?'':${JSON.stringify(k)};render()" style="cursor:pointer;white-space:nowrap;padding:2px 6px;font-weight:500">${escape(k)}</td>${hA.map(a => { const v = zelle[k + "|" + a] || 0; return `<td title="${escape(k)} · ${escape(a)}: ${v}" style="width:34px;height:24px;text-align:center;font-family:var(--font-mono);border-radius:3px;background:${tkHeat(v, hMax)};color:${v / hMax > 0.55 ? "#111" : "var(--text)"}">${v || ""}</td>`; }).join("")}<td style="text-align:right;font-family:var(--font-mono);font-weight:600;padding-left:8px">${tot}</td></tr>`; }).join("")}</tbody></table></div>`;
   // Monatsverlauf gestapelt nach Top-5-Kunden
   const top5K = kunden.slice(0, 5).map(x => x[0]); const monStack = {}; let monMax = 1;
@@ -8718,7 +8771,8 @@ function renderTickets(el) {
     ${tkState.tab === "verlauf" ? verlauf : ""}
     ${tkState.tab === "heat" ? heat : ""}
     ${tkState.tab === "ertrag" ? tkErtragHtml(zeilen, kunden) : ""}
-    ${tkState.tab === "liste" ? tkListeHtml(zeilen) : ""}`;
+    ${tkState.tab === "liste" ? tkListeHtml(zeilen) : ""}
+    <details class="card" style="padding:10px 14px;margin-top:10px"><summary style="cursor:pointer;font-weight:600;font-size:12px">ⓘ Legende — was steckt hinter den Anliegen</summary><div style="font-size:11.5px;color:var(--text-dim);line-height:1.6;margin-top:6px;columns:2;column-gap:28px">${arten.filter(([k]) => TK_BESCHREIBUNG[k]).map(([k, v]) => `<div style="break-inside:avoid;margin-bottom:4px"><strong style="color:var(--text)">${escape(k)}</strong> <span style="color:var(--text-faint)">(${v})</span><br>${escape(TK_BESCHREIBUNG[k])}</div>`).join("")}<div style="margin-top:6px;color:var(--text-faint)">Die Zuordnung erfolgt über Wortmuster in Betreff und Verlauf; bis zu drei Anliegen pro Ticket, das wichtigste zuerst. Generische Tags («Dokumente», «Sonstige») nur, wenn nichts Spezifisches gefunden wurde.</div></div></details>`;
 }
 
 /* ============ Spielwiese → 360 Grad ============
