@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.351.0"></script>
-<script src="apriko-api.js?v=1.351.0"></script>
-<script src="lohncheck.js?v=1.351.0"></script>
-<script src="personalbudget.js?v=1.351.0"></script>
-<script src="jahresbudget.js?v=1.351.0"></script>
-<script src="budgetpositionen.js?v=1.351.0"></script>
-<script src="lohnchecklistetemp.js?v=1.351.0"></script>
-<script src="apriko-endpunkte.js?v=1.351.0"></script>
+<script src="apriko-filters.js?v=1.353.0"></script>
+<script src="apriko-api.js?v=1.353.0"></script>
+<script src="lohncheck.js?v=1.353.0"></script>
+<script src="personalbudget.js?v=1.353.0"></script>
+<script src="jahresbudget.js?v=1.353.0"></script>
+<script src="budgetpositionen.js?v=1.353.0"></script>
+<script src="lohnchecklistetemp.js?v=1.353.0"></script>
+<script src="apriko-endpunkte.js?v=1.353.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -264,6 +264,12 @@
     border-radius: var(--radius); width: 90%; max-width: 560px;
     max-height: 90vh; overflow-y: auto;
   }
+  /* Breite Formulare (Kunde/Firma): zwei Spalten, damit nicht gescrollt werden muss */
+  .modal.breit { max-width: 1180px; }
+  .modal.breit .modal-body { column-count: 2; column-gap: 32px; }
+  .modal.breit .modal-body > * { break-inside: avoid; }
+  .modal.breit .modal-body .field, .modal.breit .modal-body .field-row, .modal.breit .modal-body details, .modal.breit .modal-body h4, .modal.breit .modal-body h3 { break-inside: avoid; }
+  @media (max-width: 1100px) { .modal.breit .modal-body { column-count: 1; } }
   .modal-header {
     padding: 16px 20px; border-bottom: 1px solid var(--border-soft);
     display: flex; justify-content: space-between; align-items: center;
@@ -1003,7 +1009,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.351.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.353.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -12779,7 +12785,7 @@ function openCustomer(id) {
       <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Prozentual" && kundenMin(c.id, "minBpo") ? ` · min. CHF ${kundenMin(c.id, "minBpo").toLocaleString("de-CH")}/Monat` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}${c.BPOYtd ? ` · <span style="color:var(--accent-3)">YTD-kumulativ</span>` : ""}</dd>
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Link</dt><dd>${appLinkText(c.id, c.Link) ? `<a href="${escape(normalizeUrl(appLinkText(c.id, c.Link)) || appLinkText(c.id, c.Link))}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent-2);text-decoration:underline;cursor:pointer">${escape(appLinkText(c.id, c.Link))} ↗</a>` : "—"}</dd>
-      <dt>Ansprechpersonen</dt><dd style="font-size:12px">${(() => { const f = (crmKundenFlags || {})[String(c.id)] || {}; const mail = e => `<a href="mailto:${escape(e)}?subject=${encodeURIComponent((c.Title || "") + " — ")}" onclick="event.stopPropagation()" title="E-Mail an ${escape(e)}" style="text-decoration:none;margin-left:3px">✉</a>`; const zeile = arr => arr.filter(x => x[1]).map(x => x[0] + ": " + escape(x[1]) + mail(x[1])).join(" · "); const z = zeile([["AP Lohn", f.apLohn], ["Backup Lohn", f.apLohnBackup], ["Lohn intern", f.apLohnIntern]]); const z2 = zeile([["AP FIBU", f.apFibu], ["Backup FIBU", f.apFibuBackup]]); return [z, z2].filter(Boolean).join("<br>") || "—"; })()}</dd>
+      <dt>Ansprechpersonen</dt><dd style="font-size:12px">${(() => { const f = (crmKundenFlags || {})[String(c.id)] || {}; const mail = e => `<a href="mailto:${escape(e)}?subject=${encodeURIComponent((c.Title || "") + " — ")}" onclick="event.stopPropagation()" title="E-Mail an ${escape(e)}" style="text-decoration:none;margin-left:3px">✉</a>`; const zeile = arr => arr.filter(x => x[1]).map(x => x[0] + ": " + escape(x[1]) + mail(x[1])).join(" · "); const z = zeile([["Ansprechperson Lohn", f.apLohn], ["Backup Lohn", f.apLohnBackup], ["Lohn intern", f.apLohnIntern]]); const z2 = zeile([["Ansprechperson FIBU", f.apFibu], ["Backup FIBU", f.apFibuBackup]]); return [z, z2].filter(Boolean).join("<br>") || "—"; })()}</dd>
       ${VERTRAG_ARTEN.map(([art, label]) => `<dt>${label}</dt><dd>${vertragLink(c.id, art) ? `<a href="${escape(vertragLink(c.id, art))}" target="_blank" rel="noopener" style="color:var(--accent-2)">📄 Öffnen ↗</a>` : "—"}</dd>`).join("")}
       <dt>Workflows</dt><dd>${[kundenFlag(c.id, "intern") ? "Interner Lohn ✓" : "", kundenFlag(c.id, "fibu") ? "FIBU Monatsabschluss ✓" : "", kundenFlag(c.id, "hatDb") ? "Datenbank (Hosting) ✓" : ""].filter(Boolean).join(" · ") || "—"}</dd>
       <dt>Mindesthonorar</dt><dd style="white-space:pre-wrap">${escape(minFeeText(c.id, c.MinFee)||"—")}</dd>
@@ -12805,6 +12811,7 @@ function editCustomer(id) {
     .sort((a,b) => (a.Title||"").localeCompare(b.Title||""))
     .map(co => `<option value="${co.id}" ${c.CompanyId==co.id?"selected":""}>${escape(co.Title)}${co.IsCustomer ? " ★" : ""}</option>`).join("");
 
+  modalBreit();
   showModal(id ? "Kunde bearbeiten" : "Neuer Kunde", `
     <input type="hidden" id="f-title" value="${escape(c.Title||"")}">
     <div class="field"><label>Firma *</label><select id="f-company" onchange="updateCustomerTitle();kundeFirmenBlockFuellen()"><option value="">—</option>${companyOptions}</select></div>
@@ -12886,8 +12893,8 @@ function editCustomer(id) {
     </div>
     ${(() => { const f = (crmKundenFlags || {})[String(c.id || "")] || {}; const emails = [...new Set((cache.userprofiles || []).map(p => (p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase()).filter(Boolean))].sort();
       const sel = (id, label, cur) => `<div class="field"><label>${label}</label><select id="${id}"><option value="">—</option>${emails.map(e => `<option value="${escape(e)}" ${cur === e ? "selected" : ""}>${escape(e)}</option>`).join("")}${cur && !emails.includes(cur) ? `<option value="${escape(cur)}" selected>${escape(cur)}</option>` : ""}</select></div>`;
-      return `<div class="field-row">${sel("f-ap-lohn", "AP Lohn", f.apLohn || "")}${sel("f-ap-lohn-backup", "AP Backup Lohn", f.apLohnBackup || "")}${sel("f-ap-lohn-intern", "AP Lohn intern", f.apLohnIntern || "")}</div>
-    <div class="field-row">${sel("f-ap-fibu", "AP FIBU", f.apFibu || "")}${sel("f-ap-fibu-backup", "AP Backup FIBU", f.apFibuBackup || "")}</div>`; })()}
+      return `<div class="field-row">${sel("f-ap-lohn", "Ansprechperson Lohn", f.apLohn || "")}${sel("f-ap-lohn-backup", "Ansprechperson Backup Lohn", f.apLohnBackup || "")}${sel("f-ap-lohn-intern", "Ansprechperson Lohn intern", f.apLohnIntern || "")}</div>
+    <div class="field-row">${sel("f-ap-fibu", "Ansprechperson FIBU", f.apFibu || "")}${sel("f-ap-fibu-backup", "Ansprechperson Backup FIBU", f.apFibuBackup || "")}</div>`; })()}
     <div class="field"><label>Mindesthonorar</label><textarea id="f-minfee" rows="3" placeholder="z.B. CHF 1'500/Monat, gültig ab Q3 2026">${escape(minFeeText(c.id || "", c.MinFee))}</textarea></div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
   `, [
@@ -13894,6 +13901,7 @@ async function firmenFelderSpeichern(compId, pfx, extraData) {
 function editCompany(id) {
   crmLoadStamm();
   const c = id ? cache.companies.find(x => x.id == id) : {};
+  modalBreit();
   showModal(id ? "Firma bearbeiten" : "Neue Firma", `
     <div class="field"><label>Firmenname *</label><input id="f-title" value="${escape(c.Title||"")}"></div>
     <div class="field-row">
@@ -14216,6 +14224,7 @@ async function deleteActivity(id) {
 /* ===========================================================
    UI Helpers
    =========================================================== */
+function modalBreit() { const mb = document.querySelector("#modal .modal"); if (mb) mb.classList.add("breit"); }
 function showModal(title, body, footerButtons = []) {
   document.getElementById("modal-title").textContent = title;
   document.getElementById("modal-body").innerHTML = body;
@@ -14225,7 +14234,7 @@ function showModal(title, body, footerButtons = []) {
 function closeModal() {
   document.getElementById("modal").classList.remove("open");
   var mb = document.querySelector("#modal .modal");
-  if(mb) mb.style.maxWidth = "";   // Breiten-Override (z.B. Einsatzliste) wieder zurücksetzen
+  if(mb) { mb.style.maxWidth = ""; mb.classList.remove("breit"); }   // Breiten-Override wieder zurücksetzen
 }
 function val(id) { return document.getElementById(id)?.value?.trim() || ""; }
 
