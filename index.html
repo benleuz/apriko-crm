@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.365.0"></script>
-<script src="apriko-api.js?v=1.365.0"></script>
-<script src="lohncheck.js?v=1.365.0"></script>
-<script src="personalbudget.js?v=1.365.0"></script>
-<script src="jahresbudget.js?v=1.365.0"></script>
-<script src="budgetpositionen.js?v=1.365.0"></script>
-<script src="lohnchecklistetemp.js?v=1.365.0"></script>
-<script src="apriko-endpunkte.js?v=1.365.0"></script>
+<script src="apriko-filters.js?v=1.366.0"></script>
+<script src="apriko-api.js?v=1.366.0"></script>
+<script src="lohncheck.js?v=1.366.0"></script>
+<script src="personalbudget.js?v=1.366.0"></script>
+<script src="jahresbudget.js?v=1.366.0"></script>
+<script src="budgetpositionen.js?v=1.366.0"></script>
+<script src="lohnchecklistetemp.js?v=1.366.0"></script>
+<script src="apriko-endpunkte.js?v=1.366.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1013,7 +1013,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.365.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.366.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -8602,6 +8602,41 @@ async function tkExportExcel() {
   add("Tickets", tkState.spalten, zeilen.map(z => tkState.spalten.map(h => z[h])));
   window.XLSX.writeFile(wb, "Tickets_Auswertung.xlsx");
 }
+/* ---------- Tickets × Ertrag: Ticket-Kunden mit dem Kundenstamm abgleichen und Umsatz gegenüberstellen ---------- */
+function tkNormName(n) { return String(n || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\b(ag|gmbh|sa|sarl|sagl|kg|ltd|inc|schweiz|swiss|personal|personalberatung|jobs?|group|holding|services?)\b/g, " ").replace(/[^a-z0-9]+/g, " ").trim(); }
+function tkMatchKunde(name) {
+  const k = tkNormName(name); if (!k) return null;
+  const kand = cache.customers.map(c => { const comp = cache.companies.find(x => x.id == c.CompanyId); return { c, n1: tkNormName(c.Title), n2: tkNormName(comp && comp.Title) }; });
+  let hit = kand.find(x => x.n1 === k || x.n2 === k);
+  if (!hit) { const kw = k.split(" ").filter(w => w.length >= 4); hit = kand.find(x => kw.length && kw.every(w => x.n1.includes(w) || x.n2.includes(w))); }
+  if (!hit) { const first = k.split(" ")[0]; if (first && first.length >= 5) hit = kand.find(x => x.n1.split(" ")[0] === first || x.n2.split(" ")[0] === first); }
+  return hit ? hit.c : null;
+}
+function tkUmsatzKunde(c, von, bis) {
+  // Umsatz (SaaS + BPO) über die Monate des Ticket-Zeitraums; fehlt ein Monatsumsatz, zählt er 0
+  let sum = 0, monate = 0; const start = von ? new Date(von) : new Date(new Date().getFullYear(), 0, 1), ende = bis ? new Date(bis) : new Date();
+  for (let y = start.getFullYear(); y <= ende.getFullYear(); y++) for (let mth = (y === start.getFullYear() ? start.getMonth() + 1 : 1); mth <= (y === ende.getFullYear() ? ende.getMonth() + 1 : 12); mth++) {
+    monate++; const r = findRev(c.id, y, mth); if (!r) continue; const calc = calcRevenue(r, c, y, mth); sum += (calc.saas || 0) + (calc.bpo || 0);
+  }
+  return { sum, monate };
+}
+function tkErtragHtml(zeilen, kunden) {
+  const m = tkState.map; if (!m.kunde || !cache.customers.length) return `<div class="empty">Kundenstamm nicht geladen oder keine Kundenspalte.</div>`;
+  const rows = kunden.map(([name, n]) => { const c = tkMatchKunde(name); const u = c ? tkUmsatzKunde(c, tkState.von, tkState.bis) : null; return { name, n, c, umsatz: u ? u.sum : null, segment: c ? c.Segment : "" }; });
+  const gem = rows.filter(r => r.c && r.umsatz > 0).map(r => ({ ...r, proTicket: r.umsatz / r.n, ticketsPro10k: r.n / (r.umsatz / 10000) }));
+  const ohne = rows.filter(r => !r.c); const nullUmsatz = rows.filter(r => r.c && !(r.umsatz > 0));
+  const fmt = v => Math.round(v).toLocaleString("de-CH");
+  const maxU = Math.max(1, ...gem.map(r => r.umsatz)), maxN = Math.max(1, ...gem.map(r => r.n));
+  // Streudiagramm: x = Umsatz, y = Tickets; Blase = Kunde
+  const W = 760, H = 340, px = 60, py = 24;
+  const punkte = gem.map((r, i) => { const x = px + (r.umsatz / maxU) * (W - px - 30), y = H - py - (r.n / maxN) * (H - py - 30); return `<g><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(6 + 10 * Math.sqrt(r.n / maxN)).toFixed(1)}" fill="${tkFarbe(i)}" fill-opacity=".75" stroke="var(--bg-card)"><title>${escape(r.name)}: ${r.n} Tickets · CHF ${fmt(r.umsatz)} · CHF ${fmt(r.proTicket)} pro Ticket</title></circle><text x="${(x + 10).toFixed(1)}" y="${(y + 4).toFixed(1)}" font-size="10" fill="var(--text-dim)">${escape(r.name.length > 18 ? r.name.slice(0, 17) + "…" : r.name)}</text></g>`; }).join("");
+  const scatter = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto"><line x1="${px}" y1="${H - py}" x2="${W - 20}" y2="${H - py}" stroke="var(--border)"/><line x1="${px}" y1="10" x2="${px}" y2="${H - py}" stroke="var(--border)"/><text x="${W - 20}" y="${H - 6}" font-size="10" text-anchor="end" fill="var(--text-faint)">Umsatz im Zeitraum (CHF) →</text><text x="12" y="16" font-size="10" fill="var(--text-faint)">Tickets ↑</text>${punkte}</svg>`;
+  const tab = (titel, liste, sub) => `<div class="card" style="padding:12px 14px"><div style="font-weight:600">${titel}</div><div style="font-size:11px;color:var(--text-faint);margin-bottom:6px">${sub}</div><table style="font-size:12px;width:100%"><tr style="color:var(--text-dim)"><th style="text-align:left">Kunde</th><th style="text-align:left">Segment</th><th style="text-align:right">Tickets</th><th style="text-align:right">Umsatz</th><th style="text-align:right">CHF/Ticket</th><th style="text-align:right">Tickets je 10k</th></tr>${liste.map(r => `<tr><td style="padding:3px 6px 3px 0">${escape(r.name)}</td><td style="color:var(--text-dim)">${escape(r.segment || "")}</td><td style="text-align:right;font-family:var(--font-mono)">${r.n}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(r.umsatz)}</td><td style="text-align:right;font-family:var(--font-mono);font-weight:600;color:${r.proTicket >= 500 ? "var(--accent)" : r.proTicket < 150 ? "var(--danger)" : "inherit"}">${fmt(r.proTicket)}</td><td style="text-align:right;font-family:var(--font-mono)">${r.ticketsPro10k.toFixed(1)}</td></tr>`).join("")}</table></div>`;
+  return `<div style="display:grid;gap:10px">
+    <div class="card" style="padding:12px 14px"><div style="font-weight:600">Tickets vs. Umsatz <span style="font-weight:400;color:var(--text-faint);font-size:11px">${gem.length} Kunden zugeordnet · Umsatz = SaaS + BPO aus den Monatsumsätzen im Zeitraum · rechts unten = viel Umsatz, wenig Tickets</span></div>${scatter}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${tab("Beste Relation", [...gem].sort((a, b) => b.proTicket - a.proTicket).slice(0, 12), "meister Umsatz pro Ticket")}${tab("Schlechteste Relation", [...gem].sort((a, b) => a.proTicket - b.proTicket).slice(0, 12), "wenig Umsatz pro Ticket — Aufwandstreiber")}</div>
+    ${ohne.length || nullUmsatz.length ? `<div class="card" style="padding:10px 14px;font-size:11px;color:var(--text-dim)">${ohne.length ? `Nicht im Kundenstamm gefunden: ${ohne.map(r => escape(r.name) + " (" + r.n + ")").join(", ")}. ` : ""}${nullUmsatz.length ? `Ohne Umsatz im Zeitraum: ${nullUmsatz.map(r => escape(r.name) + " (" + r.n + ")").join(", ")}.` : ""}</div>` : ""}</div>`;
+}
 /* Mehrwertige Felder (z.B. «Anliegen» mit «A | B | C») aufteilen */
 function tkWerte(z, feld) { if (!feld) return ["(nicht zugeordnet)"]; const v = String(z[feld] || "").trim(); if (!v) return ["(leer)"]; return v.includes(" | ") ? v.split(" | ").map(x => x.trim()).filter(Boolean) : [v]; }
 function tkGruppeMulti(zeilen, feld) { const g = {}; zeilen.forEach(z => tkWerte(z, feld).forEach(k => { g[k] = (g[k] || 0) + 1; })); return Object.entries(g).sort((a, b) => b[1] - a[1]); }
@@ -8643,7 +8678,7 @@ function renderTickets(el) {
   // Konzentration: Anliegen, die bei einem Kunden gebündelt sind
   const konz = arten.slice(0, 30).map(([a, tot]) => { let best = ["", 0]; hK.concat(kunden.slice(20).map(x => x[0])).forEach(k => { const v = zelle[k + "|" + a] || 0; if (v > best[1]) best = [k, v]; }); return { a, tot, k: best[0], v: best[1], q: best[1] / tot }; }).filter(x => x.q >= 0.4 && x.tot >= 20).sort((x, y) => y.v - x.v);
   const konzHtml = `<div class="card" style="padding:12px 14px"><div style="font-weight:600;margin-bottom:6px">Bei einem Kunden gebündelt <span style="font-weight:400;color:var(--text-faint);font-size:11px">≥ 40 % eines Anliegens bei einem Kunden — gezielt lösbar</span></div>${konz.length ? `<table style="font-size:12px;width:100%">${konz.map(x => `<tr><td style="padding:3px 6px 3px 0">${escape(x.a)}</td><td style="padding:3px 6px;font-weight:600">${escape(x.k)}</td><td style="text-align:right;font-family:var(--font-mono)">${x.v} / ${x.tot}</td><td style="text-align:right;font-family:var(--font-mono);color:var(--accent)">${Math.round(x.q * 100)}%</td></tr>`).join("")}</table>` : `<div class="empty">keine starke Bündelung</div>`}</div>`;
-  const tabs = [["anliegen", "Anliegen"], ["kunden", "Kunden"], ["verlauf", "Zeitverlauf"], ["heat", "Heatmap"]];
+  const tabs = [["anliegen", "Anliegen"], ["kunden", "Kunden"], ["verlauf", "Zeitverlauf"], ["heat", "Heatmap"], ["ertrag", "Tickets × Ertrag"]];
   el.innerHTML = `
     <div class="card" style="padding:10px 14px;margin-bottom:10px;font-size:12px">
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center"><strong>${escape(tkState.datei)}</strong>
@@ -8664,7 +8699,8 @@ function renderTickets(el) {
     ${tkState.tab === "anliegen" ? `<div style="display:grid;grid-template-columns:1.2fr 1fr;gap:10px">${balken("Anliegen / " + escape(m.art || "Art"), arten, n, m.art, "filterArt", 0)}<div style="display:grid;gap:10px;align-content:start">${konzHtml}${balken("Status", status, n, m.status, null, 6)}</div></div>` : ""}
     ${tkState.tab === "kunden" ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${balken("Tickets je Kunde", kunden, n, m.kunde, "filterKunde", 1)}${balken("Bearbeiter", bearb, n, m.bearbeiter, null, 3)}</div>` : ""}
     ${tkState.tab === "verlauf" ? verlauf : ""}
-    ${tkState.tab === "heat" ? heat : ""}`;
+    ${tkState.tab === "heat" ? heat : ""}
+    ${tkState.tab === "ertrag" ? tkErtragHtml(zeilen, kunden) : ""}`;
 }
 
 /* ============ Spielwiese → 360 Grad ============
