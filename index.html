@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.362.0"></script>
-<script src="apriko-api.js?v=1.362.0"></script>
-<script src="lohncheck.js?v=1.362.0"></script>
-<script src="personalbudget.js?v=1.362.0"></script>
-<script src="jahresbudget.js?v=1.362.0"></script>
-<script src="budgetpositionen.js?v=1.362.0"></script>
-<script src="lohnchecklistetemp.js?v=1.362.0"></script>
-<script src="apriko-endpunkte.js?v=1.362.0"></script>
+<script src="apriko-filters.js?v=1.363.0"></script>
+<script src="apriko-api.js?v=1.363.0"></script>
+<script src="lohncheck.js?v=1.363.0"></script>
+<script src="personalbudget.js?v=1.363.0"></script>
+<script src="jahresbudget.js?v=1.363.0"></script>
+<script src="budgetpositionen.js?v=1.363.0"></script>
+<script src="lohnchecklistetemp.js?v=1.363.0"></script>
+<script src="apriko-endpunkte.js?v=1.363.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1013,7 +1013,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.362.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.363.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -8442,7 +8442,9 @@ async function renderOnboarding(el) {
    neues PDF, das ausschliesslich die Abrechnungen der Mitarbeitenden auf der Auszahlungsliste enthält.
    Zuordnung: Mitarbeiternummer (Begünstigter Nr. ↔ Pers.-Nr. auf der Abrechnung), sonst Name + Vorname.
    Nutzt die Abrechnungs-Erkennung des Ultimativen Checks (lcReadPdf/lcSplitSlips) und pdf-lib zum Seitenkopieren. */
-let azState = { pdfs: [], csv: null, slips: [], ergebnis: null, busy: false };
+let azState = { pdfs: [], csv: null, slips: [], ergebnis: null, busy: false, manuell: {} };   // manuell: {slipKey: true} = zusätzlich ins PDF
+function azSlipKey(sl) { return sl.pdfIdx + ":" + sl.id; }
+function azManuell(key, on) { azState.manuell[key] = !!on; if (!on) delete azState.manuell[key]; render(); }
 async function azLoadPdfLib() {
   if (window.PDFLib) return;
   await new Promise((ok, err) => { const sc = document.createElement("script"); sc.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"; sc.onload = ok; sc.onerror = () => err(new Error("pdf-lib konnte nicht geladen werden")); document.head.appendChild(sc); });
@@ -8487,7 +8489,9 @@ function azAbgleich() {
     if (sl) { sl.forEach(x => gewaehlt.add(x)); treffer.push({ z, slips: sl, via }); } else fehlend.push(z);
   });
   const ohneZahlung = azState.slips.filter(sl => !gewaehlt.has(sl));
-  return { treffer, fehlend, ohneZahlung, gewaehlt: [...gewaehlt] };
+  const manuell = ohneZahlung.filter(sl => azState.manuell[azSlipKey(sl)]);
+  manuell.forEach(sl => gewaehlt.add(sl));
+  return { treffer, fehlend, ohneZahlung, manuell, gewaehlt: [...gewaehlt] };
 }
 async function azPdfErzeugen() {
   const erg = azAbgleich(); if (!erg || !erg.gewaehlt.length) { toast("Keine Treffer — nichts zu exportieren.", true); return; }
@@ -8499,6 +8503,7 @@ async function azPdfErzeugen() {
     for (const p of azState.pdfs) srcDocs.push(await window.PDFLib.PDFDocument.load(p.bytes.slice(0)));
     // Reihenfolge wie in der Auszahlungsliste; Seiten je Abrechnung in Originalreihenfolge
     const reihenfolge = []; erg.treffer.forEach(t => t.slips.forEach(sl => { if (!reihenfolge.includes(sl)) reihenfolge.push(sl); }));
+    erg.manuell.forEach(sl => { if (!reihenfolge.includes(sl)) reihenfolge.push(sl); });   // manuell gewählte am Schluss
     for (const sl of reihenfolge) {
       const idx = sl.pages.map(pg => pg.n - 1);
       const copied = await out.copyPages(srcDocs[sl.pdfIdx], idx);
@@ -8511,12 +8516,12 @@ async function azPdfErzeugen() {
   } catch (e) { toast("PDF erzeugen fehlgeschlagen: " + e.message, true); }
   azState.busy = false; render();
 }
-function azReset() { azState = { pdfs: [], csv: null, slips: [], ergebnis: null, busy: false }; render(); }
+function azReset() { azState = { pdfs: [], csv: null, slips: [], ergebnis: null, busy: false, manuell: {} }; render(); }
 function renderAuszPdf(el) {
   const erg = azAbgleich();
   document.getElementById("view-actions").innerHTML = `<label class="btn btn-sm">⇧ Lohnabrechnungen (PDF)<input type="file" accept=".pdf" multiple style="display:none" onchange="azUploadPdf(this)"></label>
     <label class="btn btn-sm">⇧ Auszahlungsliste (CSV)<input type="file" accept=".csv,.txt" style="display:none" onchange="azUploadCsv(this)"></label>
-    <button class="btn btn-primary btn-sm" onclick="azPdfErzeugen()" ${erg && erg.gewaehlt.length && !azState.busy ? "" : "disabled"}>⇩ PDF nur Ausbezahlte</button>
+    <button class="btn btn-primary btn-sm" onclick="azPdfErzeugen()" ${erg && erg.gewaehlt.length && !azState.busy ? "" : "disabled"}>⇩ PDF nur Ausbezahlte${erg && erg.manuell.length ? " (+" + erg.manuell.length + " manuell)" : ""}</button>
     ${azState.pdfs.length || azState.csv ? `<button class="btn btn-sm" onclick="azReset()">✕ Zurücksetzen</button>` : ""}`;
   const fmt = v => Math.round(v).toLocaleString("de-CH");
   const stand = `<div class="card" style="padding:12px 16px;margin-bottom:10px;font-size:12px;line-height:1.6">
@@ -8535,7 +8540,9 @@ function renderAuszPdf(el) {
     </div>
     ${erg.fehlend.length ? `<div class="card" style="padding:12px 14px;margin-bottom:10px"><div style="font-weight:600;color:var(--danger);margin-bottom:4px">Zahlungen ohne Abrechnung</div><table style="font-size:12px;width:100%">${erg.fehlend.map(z => zeile([escape(z.nr || "—"), escape(z.name), `<span style="font-family:var(--font-mono)">${fmt(z.betrag)}</span>`])).join("")}</table></div>` : ""}
     <div class="card" style="padding:12px 14px;margin-bottom:10px"><div style="font-weight:600;margin-bottom:4px">Ins PDF (${erg.treffer.length})</div><table style="font-size:12px;width:100%"><tr style="color:var(--text-dim)"><th style="text-align:left;padding:2px 8px">Nr.</th><th style="text-align:left;padding:2px 8px">Auszahlungsliste</th><th style="text-align:left;padding:2px 8px">Abrechnung</th><th style="text-align:left;padding:2px 8px">Periode</th><th style="text-align:left;padding:2px 8px">Seiten</th><th style="text-align:right;padding:2px 8px">Betrag</th><th style="padding:2px 8px">via</th></tr>${erg.treffer.map(t => zeile([escape(t.z.nr || "—"), escape(t.z.name), t.slips.map(sl => escape(sl.anzeige)).join("<br>"), t.slips.map(sl => escape(sl.periode || "")).join("<br>"), t.slips.map(sl => sl.pages.map(pg => pg.n).join(",")).join("<br>"), `<span style="font-family:var(--font-mono);float:right">${fmt(t.z.betrag)}</span>`, `<span style="font-size:11px;color:${t.via === "Nr." ? "var(--accent)" : "var(--warn)"}">${t.via}</span>`])).join("")}</table></div>
-    <details class="card" style="padding:12px 14px"><summary style="cursor:pointer;font-weight:600">Abrechnungen ohne Zahlung (${erg.ohneZahlung.length})</summary><table style="font-size:12px;width:100%;margin-top:6px">${erg.ohneZahlung.map(sl => zeile([escape(sl.persNr || "—"), escape(sl.anzeige), escape(sl.periode || ""), `<span style="font-family:var(--font-mono)">${sl.auszahlung === null ? "" : fmt(sl.auszahlung)}</span>`])).join("")}</table></details>`;
+    <details class="card" style="padding:12px 14px" ${erg.manuell.length ? "open" : ""}><summary style="cursor:pointer;font-weight:600">Abrechnungen ohne Zahlung (${erg.ohneZahlung.length})${erg.manuell.length ? ` — <span style="color:var(--accent)">${erg.manuell.length} manuell ins PDF gewählt</span>` : ""}</summary>
+      <div style="font-size:11px;color:var(--text-faint);margin:4px 0 6px">Häkchen setzen, um eine Abrechnung trotzdem ins PDF zu nehmen (z.B. Zahlung per Barauszahlung oder separater Lauf). Manuell gewählte stehen im PDF am Schluss.</div>
+      <table style="font-size:12px;width:100%"><tr style="color:var(--text-dim)"><th></th><th style="text-align:left;padding:2px 8px">Nr.</th><th style="text-align:left;padding:2px 8px">Abrechnung</th><th style="text-align:left;padding:2px 8px">Periode</th><th style="text-align:left;padding:2px 8px">Seiten</th><th style="text-align:right;padding:2px 8px">Auszahlung</th></tr>${erg.ohneZahlung.map(sl => { const k = azSlipKey(sl); return `<tr style="${azState.manuell[k] ? "background:var(--bg-hover)" : ""}"><td style="padding:4px 8px;border-top:1px solid var(--border)"><input type="checkbox" ${azState.manuell[k] ? "checked" : ""} onchange="azManuell('${k}', this.checked)"></td>${[escape(sl.persNr || "—"), escape(sl.anzeige), escape(sl.periode || ""), sl.pages.map(pg => pg.n).join(","), `<span style="font-family:var(--font-mono);float:right">${sl.auszahlung === null ? "" : fmt(sl.auszahlung)}</span>`].map(c => `<td style="padding:4px 8px;border-top:1px solid var(--border)">${c}</td>`).join("")}</tr>`; }).join("")}</table></details>`;
 }
 
 /* ============ Spielwiese → Tickets Auswertung ============
