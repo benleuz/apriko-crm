@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.348.0"></script>
-<script src="apriko-api.js?v=1.348.0"></script>
-<script src="lohncheck.js?v=1.348.0"></script>
-<script src="personalbudget.js?v=1.348.0"></script>
-<script src="jahresbudget.js?v=1.348.0"></script>
-<script src="budgetpositionen.js?v=1.348.0"></script>
-<script src="lohnchecklistetemp.js?v=1.348.0"></script>
-<script src="apriko-endpunkte.js?v=1.348.0"></script>
+<script src="apriko-filters.js?v=1.351.0"></script>
+<script src="apriko-api.js?v=1.351.0"></script>
+<script src="lohncheck.js?v=1.351.0"></script>
+<script src="personalbudget.js?v=1.351.0"></script>
+<script src="jahresbudget.js?v=1.351.0"></script>
+<script src="budgetpositionen.js?v=1.351.0"></script>
+<script src="lohnchecklistetemp.js?v=1.351.0"></script>
+<script src="apriko-endpunkte.js?v=1.351.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1003,7 +1003,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.348.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.351.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -12671,7 +12671,7 @@ function renderCustomers(el) {
             const riskColor = c.Risk === "Rot" ? "var(--danger)" : c.Risk === "Gelb" ? "var(--warn)" : "var(--accent)";
             return `<tr class="cust-row" data-search="${escape((c.Title||"") + " " + (comp?.Title||"") + " " + (c.Segment||""))}">
               <td onclick="openCustomer(${c.id})"><strong>${escape(c.Title||"")}</strong></td>
-              <td onclick="openCustomer(${c.id})" class="dim">${escape(comp?.Title||"—")}</td>
+              <td onclick="openCustomer(${c.id})" class="dim">${comp ? escape(comp.Title) : `<span style="color:var(--danger)" title="Kunde ohne Firma — bitte zuordnen">⚠ Firma fehlt</span>`}</td>
               <td onclick="openCustomer(${c.id})" class="dim">${escape(c.Segment||"")}</td>
               <td onclick="openCustomer(${c.id})" class="dim">${escape(c.Status||"")}</td>
               <td onclick="openCustomer(${c.id})"><span style="color:${riskColor}">●</span> <span class="dim">${escape(c.Risk||"")}</span></td>
@@ -12752,7 +12752,13 @@ function openCustomer(id) {
 
   showModal(escape(c.Title || "Kunde"), `
     <dl class="kv">
-      <dt>Firma</dt><dd>${comp ? `<a href="#" onclick="closeModal();openCompany(${comp.id});return false">${escape(comp.Title)}</a>` : "—"}</dd>
+      <dt>Firma</dt><dd>${comp ? `<a href="#" onclick="closeModal();openCompany(${comp.id});return false">${escape(comp.Title)}</a>` : `<span style="color:var(--danger)">fehlt — bitte im Formular (✎) eine Firma zuordnen</span>`}</dd>
+      ${comp ? (() => { const st = (crmStamm && crmStamm[String(comp.id)]) || {}; const mails = t => String(t || "").split(/[,;\s]+/).filter(Boolean).map(e => escape(e) + `<a href="mailto:${escape(e)}" onclick="event.stopPropagation()" title="E-Mail an ${escape(e)}" style="text-decoration:none;margin:0 6px 0 3px">✉</a>`).join(" "); const ansp = (crmAnsprech || {})[String(comp.id)] || "";
+        return `<dt>Website</dt><dd>${comp.Website ? `<a href="${escape(normalizeUrl(comp.Website) || comp.Website)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent-2)">${escape(comp.Website)} ↗</a>` : "—"}</dd>
+      <dt>Adresse</dt><dd>${escape([st.strasse, [comp.City, comp.Country].filter(Boolean).join(", ")].filter(Boolean).join(" · ") || "—")}</dd>
+      <dt>Interne Ansprechperson</dt><dd style="font-size:12px">${ansp ? mails(ansp) : "—"}</dd>
+      <dt>Entscheidungsträger</dt><dd style="font-size:12px">${st.entscheid ? mails(st.entscheid) : "—"}</dd>
+      <dt>User</dt><dd style="font-size:12px">${st.user ? mails(st.user) : "—"}</dd>`; })() : ""}
       <dt>Segment</dt><dd>${escape(c.Segment||"—")}</dd>
       <dt>Status</dt><dd>${escape(c.Status||"—")}</dd>
       <dt>Risiko</dt><dd><span style="color:${riskColor}">●</span> ${escape(c.Risk||"—")}</dd>
@@ -12773,7 +12779,7 @@ function openCustomer(id) {
       <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Prozentual" && kundenMin(c.id, "minBpo") ? ` · min. CHF ${kundenMin(c.id, "minBpo").toLocaleString("de-CH")}/Monat` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}${c.BPOYtd ? ` · <span style="color:var(--accent-3)">YTD-kumulativ</span>` : ""}</dd>
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Link</dt><dd>${appLinkText(c.id, c.Link) ? `<a href="${escape(normalizeUrl(appLinkText(c.id, c.Link)) || appLinkText(c.id, c.Link))}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent-2);text-decoration:underline;cursor:pointer">${escape(appLinkText(c.id, c.Link))} ↗</a>` : "—"}</dd>
-      <dt>Ansprechpersonen</dt><dd style="font-size:12px">${(() => { const f = (crmKundenFlags || {})[String(c.id)] || {}; const z = [["AP Lohn", f.apLohn], ["Backup Lohn", f.apLohnBackup], ["Lohn intern", f.apLohnIntern]].filter(x => x[1]).map(x => x[0] + ": " + escape(x[1])).join(" · "); const z2 = [["AP FIBU", f.apFibu], ["Backup FIBU", f.apFibuBackup]].filter(x => x[1]).map(x => x[0] + ": " + escape(x[1])).join(" · "); return [z, z2].filter(Boolean).join("<br>") || "—"; })()}</dd>
+      <dt>Ansprechpersonen</dt><dd style="font-size:12px">${(() => { const f = (crmKundenFlags || {})[String(c.id)] || {}; const mail = e => `<a href="mailto:${escape(e)}?subject=${encodeURIComponent((c.Title || "") + " — ")}" onclick="event.stopPropagation()" title="E-Mail an ${escape(e)}" style="text-decoration:none;margin-left:3px">✉</a>`; const zeile = arr => arr.filter(x => x[1]).map(x => x[0] + ": " + escape(x[1]) + mail(x[1])).join(" · "); const z = zeile([["AP Lohn", f.apLohn], ["Backup Lohn", f.apLohnBackup], ["Lohn intern", f.apLohnIntern]]); const z2 = zeile([["AP FIBU", f.apFibu], ["Backup FIBU", f.apFibuBackup]]); return [z, z2].filter(Boolean).join("<br>") || "—"; })()}</dd>
       ${VERTRAG_ARTEN.map(([art, label]) => `<dt>${label}</dt><dd>${vertragLink(c.id, art) ? `<a href="${escape(vertragLink(c.id, art))}" target="_blank" rel="noopener" style="color:var(--accent-2)">📄 Öffnen ↗</a>` : "—"}</dd>`).join("")}
       <dt>Workflows</dt><dd>${[kundenFlag(c.id, "intern") ? "Interner Lohn ✓" : "", kundenFlag(c.id, "fibu") ? "FIBU Monatsabschluss ✓" : "", kundenFlag(c.id, "hatDb") ? "Datenbank (Hosting) ✓" : ""].filter(Boolean).join(" · ") || "—"}</dd>
       <dt>Mindesthonorar</dt><dd style="white-space:pre-wrap">${escape(minFeeText(c.id, c.MinFee)||"—")}</dd>
@@ -12804,7 +12810,7 @@ function editCustomer(id) {
     <div class="field"><label>Firma *</label><select id="f-company" onchange="updateCustomerTitle();kundeFirmenBlockFuellen()"><option value="">—</option>${companyOptions}</select></div>
     <details id="kunde-firmenblock" ${id ? "" : "open"} style="margin:6px 0 12px;border:1px solid var(--border);border-radius:6px;padding:8px 12px">
       <summary style="cursor:pointer;font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em">Firmendaten — identisch mit «Firma» (Adresse, Ansprechpersonen, E-Mails, Notes)</summary>
-      <div id="kunde-firmenfelder" style="margin-top:8px">${firmenFelderHtml(cache.companies.find(x => x.id == c.CompanyId), "fc-")}</div>
+      <div id="kunde-firmenfelder" style="margin-top:8px">${c.CompanyId && cache.companies.find(x => x.id == c.CompanyId) ? firmenFelderHtml(cache.companies.find(x => x.id == c.CompanyId), "fc-") : `<div style="font-size:11px;color:var(--warn)">Keine Firma zugeordnet — oben eine Firma wählen, dann lassen sich Website, Adresse, Ansprechperson, Entscheidungsträger und User hier pflegen (sie gehören zur Firma, nicht zum Vertrag).</div>`}</div>
     </details>
     <div class="field-row">
       <div class="field"><label>Segment</label><select id="f-segment" onchange="updateCustomerTitle()">${SEGMENTS.map(s => `<option ${s===(c.Segment||"Nur SaaS")?"selected":""}>${s}</option>`).join("")}</select></div>
@@ -12978,10 +12984,11 @@ function togglePriceHistory() {
 function kundeFirmenBlockFuellen() {
   const compId = parseInt(val("f-company")) || 0;
   const el = document.getElementById("kunde-firmenfelder");
-  if (el) el.innerHTML = firmenFelderHtml(cache.companies.find(x => x.id === compId), "fc-");
+  if (el) el.innerHTML = compId && cache.companies.find(x => x.id === compId) ? firmenFelderHtml(cache.companies.find(x => x.id === compId), "fc-") : `<div style="font-size:11px;color:var(--warn)">Keine Firma zugeordnet — oben eine Firma wählen, dann lassen sich die Firmendaten hier pflegen.</div>`;
 }
 async function saveCustomer(id) {
   const compId = val("f-company");
+  if (!compId) { toast("Ein Kunde braucht immer eine Firma — bitte oben eine Firma wählen (oder zuerst unter Firmen anlegen).", true); const sel = document.getElementById("f-company"); if (sel) { sel.focus(); sel.style.borderColor = "var(--danger)"; } return; }
   const start = val("f-start");
   const end = val("f-end");
   let title = val("f-title");
