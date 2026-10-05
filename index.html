@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.347.0"></script>
-<script src="apriko-api.js?v=1.347.0"></script>
-<script src="lohncheck.js?v=1.347.0"></script>
-<script src="personalbudget.js?v=1.347.0"></script>
-<script src="jahresbudget.js?v=1.347.0"></script>
-<script src="budgetpositionen.js?v=1.347.0"></script>
-<script src="lohnchecklistetemp.js?v=1.347.0"></script>
-<script src="apriko-endpunkte.js?v=1.347.0"></script>
+<script src="apriko-filters.js?v=1.348.0"></script>
+<script src="apriko-api.js?v=1.348.0"></script>
+<script src="lohncheck.js?v=1.348.0"></script>
+<script src="personalbudget.js?v=1.348.0"></script>
+<script src="jahresbudget.js?v=1.348.0"></script>
+<script src="budgetpositionen.js?v=1.348.0"></script>
+<script src="lohnchecklistetemp.js?v=1.348.0"></script>
+<script src="apriko-endpunkte.js?v=1.348.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1003,7 +1003,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.347.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.348.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -12772,7 +12772,8 @@ function openCustomer(id) {
       <dt>SaaS-Modell</dt><dd>${saasIsPercentEver(c) ? `Prozentual${saasPctFrom(c) ? " ab " + saasPctFrom(c).slice(8,10) + "." + saasPctFrom(c).slice(5,7) + "." + saasPctFrom(c).slice(0,4) + " (davor pro Lizenz)" : ""} · ${parseFloat(c.SaaSRate || 0).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}% auf Aussenumsatz${kundenMin(c.id, "minSaas") ? ` · min. CHF ${kundenMin(c.id, "minSaas").toLocaleString("de-CH")}/Monat` : ""}` : "Pro Lizenz"}</dd>
       <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Prozentual" && kundenMin(c.id, "minBpo") ? ` · min. CHF ${kundenMin(c.id, "minBpo").toLocaleString("de-CH")}/Monat` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}${c.BPOYtd ? ` · <span style="color:var(--accent-3)">YTD-kumulativ</span>` : ""}</dd>
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
-      <dt>Link</dt><dd>${appLinkText(c.id, c.Link) ? `<a href="${escape(appLinkText(c.id, c.Link))}" target="_blank" rel="noopener" style="color:var(--accent-2)">${escape(appLinkText(c.id, c.Link))} ↗</a>` : "—"}</dd>
+      <dt>Link</dt><dd>${appLinkText(c.id, c.Link) ? `<a href="${escape(normalizeUrl(appLinkText(c.id, c.Link)) || appLinkText(c.id, c.Link))}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent-2);text-decoration:underline;cursor:pointer">${escape(appLinkText(c.id, c.Link))} ↗</a>` : "—"}</dd>
+      <dt>Ansprechpersonen</dt><dd style="font-size:12px">${(() => { const f = (crmKundenFlags || {})[String(c.id)] || {}; const z = [["AP Lohn", f.apLohn], ["Backup Lohn", f.apLohnBackup], ["Lohn intern", f.apLohnIntern]].filter(x => x[1]).map(x => x[0] + ": " + escape(x[1])).join(" · "); const z2 = [["AP FIBU", f.apFibu], ["Backup FIBU", f.apFibuBackup]].filter(x => x[1]).map(x => x[0] + ": " + escape(x[1])).join(" · "); return [z, z2].filter(Boolean).join("<br>") || "—"; })()}</dd>
       ${VERTRAG_ARTEN.map(([art, label]) => `<dt>${label}</dt><dd>${vertragLink(c.id, art) ? `<a href="${escape(vertragLink(c.id, art))}" target="_blank" rel="noopener" style="color:var(--accent-2)">📄 Öffnen ↗</a>` : "—"}</dd>`).join("")}
       <dt>Workflows</dt><dd>${[kundenFlag(c.id, "intern") ? "Interner Lohn ✓" : "", kundenFlag(c.id, "fibu") ? "FIBU Monatsabschluss ✓" : "", kundenFlag(c.id, "hatDb") ? "Datenbank (Hosting) ✓" : ""].filter(Boolean).join(" · ") || "—"}</dd>
       <dt>Mindesthonorar</dt><dd style="white-space:pre-wrap">${escape(minFeeText(c.id, c.MinFee)||"—")}</dd>
@@ -12877,6 +12878,10 @@ function editCustomer(id) {
       <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-wf-fibu" ${kundenFlag(c.id || "", "fibu") ? "checked" : ""} style="width:auto;margin:0"> FIBU Monatsabschluss</label></div>
       <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer" title="Eigene Datenbank beim Kunden → löst monatliche Hostingkosten aus (Budgetpositionen, Konto 4400, Betrag pro DB zentral einstellbar)"><input type="checkbox" id="f-wf-hatdb" ${kundenFlag(c.id || "", "hatDb") ? "checked" : ""} style="width:auto;margin:0"> Hat Datenbank (Hostingkosten)</label></div>
     </div>
+    ${(() => { const f = (crmKundenFlags || {})[String(c.id || "")] || {}; const emails = [...new Set((cache.userprofiles || []).map(p => (p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase()).filter(Boolean))].sort();
+      const sel = (id, label, cur) => `<div class="field"><label>${label}</label><select id="${id}"><option value="">—</option>${emails.map(e => `<option value="${escape(e)}" ${cur === e ? "selected" : ""}>${escape(e)}</option>`).join("")}${cur && !emails.includes(cur) ? `<option value="${escape(cur)}" selected>${escape(cur)}</option>` : ""}</select></div>`;
+      return `<div class="field-row">${sel("f-ap-lohn", "AP Lohn", f.apLohn || "")}${sel("f-ap-lohn-backup", "AP Backup Lohn", f.apLohnBackup || "")}${sel("f-ap-lohn-intern", "AP Lohn intern", f.apLohnIntern || "")}</div>
+    <div class="field-row">${sel("f-ap-fibu", "AP FIBU", f.apFibu || "")}${sel("f-ap-fibu-backup", "AP Backup FIBU", f.apFibuBackup || "")}</div>`; })()}
     <div class="field"><label>Mindesthonorar</label><textarea id="f-minfee" rows="3" placeholder="z.B. CHF 1'500/Monat, gültig ab Q3 2026">${escape(minFeeText(c.id || "", c.MinFee))}</textarea></div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
   `, [
@@ -13047,12 +13052,16 @@ async function saveCustomer(id) {
       const neuMinBpo = parseFloat(val("f-minbpo")) || 0;
       const neuZielExt = parseFloat(val("f-zielext")) || 0;
       const neuPctFrom = val("f-saasmodel") === "Prozentual" ? (val("f-saaspctfrom") || "") : "";
+      const ap = { apLohn: val("f-ap-lohn"), apLohnBackup: val("f-ap-lohn-backup"), apLohnIntern: val("f-ap-lohn-intern"), apFibu: val("f-ap-fibu"), apFibuBackup: val("f-ap-fibu-backup") };
       const alt = crmKundenFlags[key] || {};
-      if (neuIntern !== !!alt.intern || neuFibu !== !!alt.fibu || neuHatDb !== !!alt.hatDb || neuMinfee !== (alt.minfee || "") || neuApplink !== (alt.applink || "")
+      const apGeaendert = Object.keys(ap).some(k => (ap[k] || "") !== (alt[k] || ""));
+      const apGesetzt = Object.values(ap).some(Boolean);
+      if (apGeaendert || neuIntern !== !!alt.intern || neuFibu !== !!alt.fibu || neuHatDb !== !!alt.hatDb || neuMinfee !== (alt.minfee || "") || neuApplink !== (alt.applink || "")
           || neuMinSaas !== (parseFloat(alt.minSaas) || 0) || neuMinBpo !== (parseFloat(alt.minBpo) || 0)
           || neuZielExt !== (parseFloat(alt.zielExt) || 0) || neuPctFrom !== (alt.saasPctFrom || "")) {
-        if (neuIntern || neuFibu || neuHatDb || neuMinfee || neuApplink || neuMinSaas || neuMinBpo || neuZielExt || neuPctFrom) {
+        if (neuIntern || neuFibu || neuHatDb || neuMinfee || neuApplink || neuMinSaas || neuMinBpo || neuZielExt || neuPctFrom || apGesetzt) {
           crmKundenFlags[key] = { intern: neuIntern, fibu: neuFibu, minfee: neuMinfee, applink: neuApplink };
+          Object.keys(ap).forEach(k => { if (ap[k]) crmKundenFlags[key][k] = ap[k]; });
           if (neuHatDb) crmKundenFlags[key].hatDb = true;
           if (neuMinSaas) crmKundenFlags[key].minSaas = neuMinSaas;
           if (neuMinBpo) crmKundenFlags[key].minBpo = neuMinBpo;
