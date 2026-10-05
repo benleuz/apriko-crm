@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.360.0"></script>
-<script src="apriko-api.js?v=1.360.0"></script>
-<script src="lohncheck.js?v=1.360.0"></script>
-<script src="personalbudget.js?v=1.360.0"></script>
-<script src="jahresbudget.js?v=1.360.0"></script>
-<script src="budgetpositionen.js?v=1.360.0"></script>
-<script src="lohnchecklistetemp.js?v=1.360.0"></script>
-<script src="apriko-endpunkte.js?v=1.360.0"></script>
+<script src="apriko-filters.js?v=1.361.0"></script>
+<script src="apriko-api.js?v=1.361.0"></script>
+<script src="lohncheck.js?v=1.361.0"></script>
+<script src="personalbudget.js?v=1.361.0"></script>
+<script src="jahresbudget.js?v=1.361.0"></script>
+<script src="budgetpositionen.js?v=1.361.0"></script>
+<script src="lohnchecklistetemp.js?v=1.361.0"></script>
+<script src="apriko-endpunkte.js?v=1.361.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -996,6 +996,7 @@
           <button data-view="apipoc"><span class="ic">🔌</span> Apriko API (POC)</button>
           <button data-view="uzcheck"><span class="ic">⏱</span> Überzeit-Check</button>
           <button data-view="grad360"><span class="ic">◔</span> 360 Grad</button>
+          <button data-view="tickets"><span class="ic">🎫</span> Tickets Auswertung</button>
         </div>
       </div>
       <div class="nav-group" data-group="admin">
@@ -1011,7 +1012,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.360.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.361.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1508,7 +1509,7 @@ const EXTRA_VIEWS_BY_EMAIL = {
   "leutrim@apriko.com": ["abacus"],
   "nicolas@apriko.com": ["abacus"]
 };
-const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","onboarding","onbparam","lohncheck","parameter","apipoc","abacus","uzcheck","grad360","profiles"];
+const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","onboarding","onbparam","lohncheck","parameter","apipoc","abacus","uzcheck","grad360","tickets","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
@@ -1521,7 +1522,7 @@ const VIEW_TITLES = {
   lohnartenstamm: "Lohnartenstamm",
   tarifarten: "Tarifarten",
   rapport: "Rapport", einsatzdash: "Kundendashboard", konzern: "Konzernanalyse",
-  onboarding: "Onboarding-Checkliste", onbparam: "Parametrierung (Fragebogen für Neukunden)", lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)", abacus: "Abacus Schnittstelle", uzcheck: "Überzeit-Check", grad360: "360 Grad — Ökosystem statt nur Software",
+  onboarding: "Onboarding-Checkliste", onbparam: "Parametrierung (Fragebogen für Neukunden)", lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)", abacus: "Abacus Schnittstelle", uzcheck: "Überzeit-Check", grad360: "360 Grad — Ökosystem statt nur Software", tickets: "Tickets Auswertung (Zendesk-Export)",
   profiles: "Profile"
 };
 
@@ -2006,6 +2007,7 @@ function render() {
   else if (currentView === "abacus") renderAbacus(content);
   else if (currentView === "uzcheck") renderUeberzeitCheck(content);
   else if (currentView === "grad360") render360(content);
+  else if (currentView === "tickets") renderTickets(content);
   else if (currentView === "personalbudget") renderPersonalBudget(content);
   else if (currentView === "jahresbudget") renderJahresbudget(content);
   else if (currentView === "budgetpos") renderBudgetpositionen(content);
@@ -8431,6 +8433,92 @@ async function renderOnboarding(el) {
       ${kunden.length ? `<div class="table-wrap" style="overflow-x:auto"><table style="font-size:12px;border-collapse:collapse">${kopf}<tbody>${zeilen}</tbody></table></div>` : `<div class="empty">Noch keine Kunden im Onboarding — oben rechts einen Kunden hinzufügen.</div>`}
     </div>
     ${bearbeiten}`;
+}
+
+/* ============ Spielwiese → Tickets Auswertung ============
+   CSV/XLSX (Zendesk-Export oder daraus erstellte Auswertung) hochladen; Spalten werden automatisch erkannt
+   (Kunde/Organisation, Art/Typ/Kategorie, Status, Priorität, Bearbeiter, Erstellt, Gelöst) und sind im Mapping
+   änderbar. Auswertung: Tickets je Kunde, je Art, Kunde × Art, je Monat, Ø Lösungszeit. Nichts wird gespeichert. */
+let tkState = { datei: "", spalten: [], zeilen: [], map: {}, von: "", bis: "", filterKunde: "", filterArt: "", tab: "kunde" };
+const TK_FELDER = [["kunde", "Kunde / Organisation", /organi|kunde|customer|firma|company|account/i], ["art", "Art / Typ / Kategorie", /^art$|typ|type|kategor|categor|thema|topic|tag|grund|reason/i], ["status", "Status", /status/i], ["prio", "Priorität", /prio/i], ["bearbeiter", "Bearbeiter / Assignee", /assign|bearbeit|agent|zust/i], ["erstellt", "Erstellt am", /creat|erstell|eröff|open|datum|date/i], ["geloest", "Gelöst am", /solv|gelös|clos|geschl|resol/i], ["betreff", "Betreff / Titel", /subject|betreff|titel|title|summary/i]];
+function tkAutoMap(spalten) {
+  const map = {}; const belegt = new Set();
+  TK_FELDER.forEach(([k, , re]) => { const sp = spalten.find(x => !belegt.has(x) && re.test(x)); if (sp) { map[k] = sp; belegt.add(sp); } });
+  return map;
+}
+async function tkUpload(input) {
+  const file = input.files && input.files[0]; input.value = ""; if (!file) return;
+  let spalten = [], zeilen = [];
+  await lcLoadXlsx();
+  // CSV ebenfalls über die XLSX-Bibliothek: robust bei Anführungszeichen und mehrzeiligen Feldern (Zendesk-Beschreibungen)
+  const wb = /\.xlsx?$/i.test(file.name) ? window.XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true }) : window.XLSX.read(await file.text(), { type: "string", raw: true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = window.XLSX.utils.sheet_to_json(ws, { defval: "", raw: false });
+  if (rows.length) { spalten = Object.keys(rows[0]).filter(h => !/^__EMPTY/.test(h)); zeilen = rows; }
+  if (!zeilen.length) { toast("Keine Zeilen gefunden.", true); return; }
+  tkState = { ...tkState, datei: file.name, spalten, zeilen, map: tkAutoMap(spalten), von: "", bis: "", filterKunde: "", filterArt: "" };
+  toast(zeilen.length + " Tickets geladen · " + spalten.length + " Spalten");
+  render();
+}
+function tkDatum(v) { if (!v) return null; const s = String(v).trim(); let m = /^(\d{1,2})\.(\d{1,2})\.(\d{2,4})/.exec(s); if (m) return new Date((m[3].length === 2 ? "20" + m[3] : m[3]) + "-" + m[2].padStart(2, "0") + "-" + m[1].padStart(2, "0")); const d = new Date(s); return isNaN(d) ? null : d; }
+function tkGefiltert() {
+  const m = tkState.map;
+  return tkState.zeilen.filter(z => {
+    const d = m.erstellt ? tkDatum(z[m.erstellt]) : null;
+    if (tkState.von && d && d < new Date(tkState.von)) return false;
+    if (tkState.bis && d && d > new Date(tkState.bis + "T23:59:59")) return false;
+    if (tkState.filterKunde && m.kunde && String(z[m.kunde] || "") !== tkState.filterKunde) return false;
+    if (tkState.filterArt && m.art && String(z[m.art] || "") !== tkState.filterArt) return false;
+    return true;
+  });
+}
+function tkGruppe(zeilen, feld) { const g = {}; zeilen.forEach(z => { const k = feld ? (String(z[feld] || "").trim() || "(leer)") : "(nicht zugeordnet)"; g[k] = (g[k] || 0) + 1; }); return Object.entries(g).sort((a, b) => b[1] - a[1]); }
+function tkLoesungszeit(zeilen) {
+  const m = tkState.map; if (!m.erstellt || !m.geloest) return null;
+  const t = zeilen.map(z => { const a = tkDatum(z[m.erstellt]), b = tkDatum(z[m.geloest]); return a && b ? (b - a) / 86400000 : null; }).filter(x => x !== null && x >= 0).sort((a, b) => a - b);
+  if (!t.length) return null;
+  return { n: t.length, avg: t.reduce((s, x) => s + x, 0) / t.length, median: t[Math.floor(t.length / 2)], max: t[t.length - 1] };
+}
+async function tkExportExcel() {
+  const zeilen = tkGefiltert(); if (!zeilen.length) return;
+  await lcLoadXlsx(); const m = tkState.map; const wb = window.XLSX.utils.book_new();
+  const add = (name, hdr, rows) => { const ws = window.XLSX.utils.aoa_to_sheet([hdr].concat(rows)); ws["!cols"] = hdr.map(() => ({ wch: 24 })); window.XLSX.utils.book_append_sheet(wb, ws, name); };
+  add("Je Kunde", ["Kunde", "Tickets"], tkGruppe(zeilen, m.kunde));
+  add("Je Art", ["Art", "Tickets"], tkGruppe(zeilen, m.art));
+  const arten = tkGruppe(zeilen, m.art).map(x => x[0]); const kunden = tkGruppe(zeilen, m.kunde).map(x => x[0]);
+  add("Kunde x Art", ["Kunde", ...arten, "Total"], kunden.map(k => { const r = zeilen.filter(z => (String(z[m.kunde] || "").trim() || "(leer)") === k); return [k, ...arten.map(a => r.filter(z => (String(z[m.art] || "").trim() || "(leer)") === a).length), r.length]; }));
+  add("Je Monat", ["Monat", "Tickets"], tkGruppe(zeilen.map(z => ({ mon: (d => d ? d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") : "")(tkDatum(z[m.erstellt])) })), "mon").sort((a, b) => a[0].localeCompare(b[0])));
+  add("Tickets", tkState.spalten, zeilen.map(z => tkState.spalten.map(h => z[h])));
+  window.XLSX.writeFile(wb, "Tickets_Auswertung.xlsx");
+}
+function renderTickets(el) {
+  const m = tkState.map; const zeilen = tkGefiltert(); const fmtTage = v => v.toFixed(1).replace(".", ",") + " Tg";
+  document.getElementById("view-actions").innerHTML = `<label class="btn btn-sm">⇧ CSV / Excel laden<input type="file" accept=".csv,.xlsx,.xls" style="display:none" onchange="tkUpload(this)"></label>${tkState.zeilen.length ? `<button class="btn btn-sm" onclick="tkExportExcel()">⇩ Excel</button>` : ""}`;
+  if (!tkState.zeilen.length) { el.innerHTML = `<div class="card" style="padding:24px"><div style="font-weight:600;margin-bottom:6px">Tickets Auswertung</div><div style="font-size:12px;color:var(--text-dim);line-height:1.5">Zendesk-Export (CSV oder Excel) oben rechts laden. Die Spalten Kunde/Organisation, Art/Typ, Status, Priorität, Bearbeiter, Erstellt und Gelöst werden automatisch erkannt und lassen sich danach zuordnen. Ausgewertet wird je Kunde, je Art, Kunde × Art, je Monat und die Lösungszeit — mit Zeitraum- und Kundenfilter, Export als Excel. Es wird nichts gespeichert.</div></div>`; return; }
+  const opt = (cur) => `<option value="">—</option>` + tkState.spalten.map(sp => `<option value="${escape(sp)}" ${cur === sp ? "selected" : ""}>${escape(sp)}</option>`).join("");
+  const lz = tkLoesungszeit(zeilen);
+  const kunden = tkGruppe(tkState.zeilen, m.kunde), arten = tkGruppe(tkState.zeilen, m.art);
+  const tabelle = (titel, paare, total) => `<div class="card" style="padding:12px 14px"><div style="font-weight:600;margin-bottom:6px">${titel}</div><table style="font-size:12px;width:100%">${paare.slice(0, 40).map(([k, n]) => `<tr><td style="padding:3px 6px 3px 0">${escape(k)}</td><td style="text-align:right;font-family:var(--font-mono);padding:3px 0">${n}</td><td style="width:40%;padding-left:8px"><div style="background:var(--accent);height:8px;width:${Math.round(n / (paare[0][1] || 1) * 100)}%;border-radius:2px"></div></td><td style="text-align:right;color:var(--text-dim);font-family:var(--font-mono)">${Math.round(n / total * 100)}%</td></tr>`).join("")}${paare.length > 40 ? `<tr><td colspan="4" style="color:var(--text-faint)">… ${paare.length - 40} weitere</td></tr>` : ""}</table></div>`;
+  const matrixArten = tkGruppe(zeilen, m.art).map(x => x[0]).slice(0, 12), matrixKunden = tkGruppe(zeilen, m.kunde).map(x => x[0]).slice(0, 40);
+  const matrix = `<div class="card" style="padding:12px 14px;overflow:auto"><div style="font-weight:600;margin-bottom:6px">Kunde × Art</div><table style="font-size:11.5px"><thead><tr><th>Kunde</th>${matrixArten.map(a => `<th style="text-align:right;padding:2px 6px">${escape(a)}</th>`).join("")}<th style="text-align:right">Total</th></tr></thead><tbody>${matrixKunden.map(k => { const r = zeilen.filter(z => (String(z[m.kunde] || "").trim() || "(leer)") === k); return `<tr><td style="padding:2px 6px 2px 0;white-space:nowrap">${escape(k)}</td>${matrixArten.map(a => { const n = r.filter(z => (String(z[m.art] || "").trim() || "(leer)") === a).length; return `<td style="text-align:right;font-family:var(--font-mono);padding:2px 6px;${n ? "" : "color:var(--text-faint)"}">${n || "·"}</td>`; }).join("")}<td style="text-align:right;font-family:var(--font-mono);font-weight:600">${r.length}</td></tr>`; }).join("")}</tbody></table></div>`;
+  const monate = tkGruppe(zeilen.map(z => ({ mon: (d => d ? d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") : "(ohne Datum)")(tkDatum(z[m.erstellt])) })), "mon").sort((a, b) => a[0].localeCompare(b[0]));
+  el.innerHTML = `
+    <div class="card" style="padding:10px 14px;margin-bottom:10px;font-size:12px">
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center"><strong>${escape(tkState.datei)}</strong> · ${tkState.zeilen.length} Tickets · ${zeilen.length} nach Filter
+        <label>Von <input type="date" value="${tkState.von}" onchange="tkState.von=this.value;render()" style="padding:2px 5px"></label><label>Bis <input type="date" value="${tkState.bis}" onchange="tkState.bis=this.value;render()" style="padding:2px 5px"></label>
+        <label>Kunde <select onchange="tkState.filterKunde=this.value;render()" style="padding:2px 5px"><option value="">alle</option>${kunden.map(([k]) => `<option value="${escape(k)}" ${tkState.filterKunde === k ? "selected" : ""}>${escape(k)}</option>`).join("")}</select></label>
+        <label>Art <select onchange="tkState.filterArt=this.value;render()" style="padding:2px 5px"><option value="">alle</option>${arten.map(([k]) => `<option value="${escape(k)}" ${tkState.filterArt === k ? "selected" : ""}>${escape(k)}</option>`).join("")}</select></label></div>
+      <details style="margin-top:8px"><summary style="cursor:pointer;color:var(--text-dim)">Spalten-Zuordnung</summary><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">${TK_FELDER.map(([k, label]) => `<label style="font-size:11px;color:var(--text-dim)">${label}<br><select onchange="tkState.map['${k}']=this.value;render()" style="padding:2px 5px">${opt(m[k] || "")}</select></label>`).join("")}</div></details>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px;margin-bottom:10px">
+      <div class="card" style="padding:12px 14px"><div style="font-size:11px;color:var(--text-dim)">Tickets</div><div style="font-size:24px;font-weight:700">${zeilen.length}</div></div>
+      <div class="card" style="padding:12px 14px"><div style="font-size:11px;color:var(--text-dim)">Kunden mit Tickets</div><div style="font-size:24px;font-weight:700">${tkGruppe(zeilen, m.kunde).length}</div></div>
+      <div class="card" style="padding:12px 14px"><div style="font-size:11px;color:var(--text-dim)">Lösungszeit (Erstellt → Gelöst)</div><div style="font-size:16px;font-weight:600">${lz ? "Ø " + fmtTage(lz.avg) + " · Median " + fmtTage(lz.median) + " · max " + fmtTage(lz.max) : "—"}</div><div style="font-size:11px;color:var(--text-faint)">${lz ? lz.n + " gelöste Tickets" : "Spalten Erstellt/Gelöst zuordnen"}</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">${tabelle("Je Kunde", tkGruppe(zeilen, m.kunde), zeilen.length)}${tabelle("Je Art", tkGruppe(zeilen, m.art), zeilen.length)}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">${tabelle("Je Status", tkGruppe(zeilen, m.status), zeilen.length)}${tabelle("Je Bearbeiter", tkGruppe(zeilen, m.bearbeiter), zeilen.length)}</div>
+    ${matrix}
+    <div class="card" style="padding:12px 14px;margin-top:10px"><div style="font-weight:600;margin-bottom:6px">Je Monat (Erstellt)</div><div style="display:flex;gap:6px;align-items:flex-end;height:120px">${monate.map(([mon, n]) => `<div title="${escape(mon)}: ${n}" style="flex:1;text-align:center;font-size:10px"><div style="background:var(--accent-2);height:${Math.round(n / (Math.max(...monate.map(x => x[1])) || 1) * 90)}px;border-radius:2px 2px 0 0"></div>${n}<br><span style="color:var(--text-faint)">${escape(mon.slice(2))}</span></div>`).join("")}</div></div>`;
 }
 
 /* ============ Spielwiese → 360 Grad ============
