@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.357.0"></script>
-<script src="apriko-api.js?v=1.357.0"></script>
-<script src="lohncheck.js?v=1.357.0"></script>
-<script src="personalbudget.js?v=1.357.0"></script>
-<script src="jahresbudget.js?v=1.357.0"></script>
-<script src="budgetpositionen.js?v=1.357.0"></script>
-<script src="lohnchecklistetemp.js?v=1.357.0"></script>
-<script src="apriko-endpunkte.js?v=1.357.0"></script>
+<script src="apriko-filters.js?v=1.358.0"></script>
+<script src="apriko-api.js?v=1.358.0"></script>
+<script src="lohncheck.js?v=1.358.0"></script>
+<script src="personalbudget.js?v=1.358.0"></script>
+<script src="jahresbudget.js?v=1.358.0"></script>
+<script src="budgetpositionen.js?v=1.358.0"></script>
+<script src="lohnchecklistetemp.js?v=1.358.0"></script>
+<script src="apriko-endpunkte.js?v=1.358.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1011,7 +1011,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.357.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.358.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -7673,7 +7673,7 @@ function tarifartenCsvExport() {
    SingleInformation — gleiches Muster wie die Lohnschnittstelle Helva). Mandant-Konstanten
    sind hier editierbar (localStorage aba-settings). Erkennung des Blatts: entweder Monats-
    spalten (Jan…Dez / 01…12 / 2026-08) = Breitformat, oder Spalten Lohnart/Betrag(/Monat) = Langformat. */
-const ABA_DEFAULTS = { client: "99999", division: "0", currency: "CHF", mapId: "AbaDefault", version: "2015", docCode: "", textPrefix: "Lohn", textVorlage: "Lohnjournal TMA {MM}/{JJ}", nurAnzeigen: "1020", negSaldoLohnart: "8995", negSaldoSoll: "1142", negSaldoHaben: "1091", negSaldoAuszahlung: "8900", xmlModus: "lohnart", mwstSatz: "8.1", mwstKonten: "5490:200:I" };
+const ABA_DEFAULTS = { client: "99999", division: "0", currency: "CHF", mapId: "AbaDefault", version: "2015", docCode: "", textPrefix: "Lohn", textVorlage: "Lohnjournal TMA {MM}/{JJ}", nurAnzeigen: "1020", negSaldoLohnart: "8995", negSaldoSoll: "1142", negSaldoHaben: "1091", negSaldoAuszahlung: "8900", xmlModus: "lohnart", mwstSatz: "8.1", mwstLand: "CH", mwstKonten: "5490:200:I" };
 let abaState = { datei: "", zeilen: [], spalten: [], monat: new Date().getMonth() || 12, jahr: new Date().getFullYear(), overrides: {}, xml: "", kunde: (localStorage.getItem("aba-kunde") || "0") === "0" ? 0 : localStorage.getItem("aba-kunde") };
 /* Kunden mit FIBU-Monatsabschluss (Kundenflag «fibu») — pro Kunde eigenes Regelwerk + Mandant-Parameter
    in parameter.json (abacusKunden[<id>]); der globale Block «abacus» ist die Vorlage für neue Kunden. */
@@ -8034,7 +8034,7 @@ function abaXmlBauen(buchungen) {
     const m = mwst[konto]; if (!m) return "";
     const r = (parseFloat(m.satz) || satzStd) / 100;
     const steuer = Math.round((m.incl === "E" ? betrag * r : betrag - betrag / (1 + r)) * 100) / 100;
-    return `\n        <TaxData mode="SAVE">\n          <TaxIncluded>${abaEsc(m.incl)}</TaxIncluded>\n          <TaxType>1</TaxType>\n          <UseCode>1</UseCode>\n          <TaxCode>${abaEsc(m.code)}</TaxCode>\n          <TaxRate>${(r * 100).toFixed(2).replace(/\.?0+$/, "")}</TaxRate>\n          <TaxCoefficient>100</TaxCoefficient>\n          <AmountData mode="SAVE">\n            <Amount>${steuer.toFixed(2)}</Amount>\n            <Currency>${abaEsc(s.currency)}</Currency>\n          </AmountData>\n          <KeyAmount>${steuer.toFixed(2)}</KeyAmount>\n        </TaxData>`;
+    return `\n        <TaxData mode="SAVE">\n          <TaxIncluded>${abaEsc(m.incl)}</TaxIncluded>\n          <TaxType>1</TaxType>\n          <UseCode>1</UseCode>\n          <TaxCode>${abaEsc(m.code)}</TaxCode>\n          <TaxRate>${(r * 100).toFixed(2).replace(/\.?0+$/, "")}</TaxRate>\n          <TaxCoefficient>100</TaxCoefficient>\n          <Country>${abaEsc(s.mwstLand || "CH")}</Country>\n          <AmountData mode="SAVE">\n            <Amount>${steuer.toFixed(2)}</Amount>\n            <Currency>${abaEsc(s.currency)}</Currency>\n          </AmountData>\n          <KeyAmount>${steuer.toFixed(2)}</KeyAmount>\n        </TaxData>`;
   };
   // Buchungszeilen normalisieren (negativ → Konten drehen); Modus «konto»: gleiche Soll/Haben-Paare zu einer Buchung summieren
   let zeilenXml = buchungen.filter(b => b.ok && !abaNurAnzeige(b)).map(b => {
