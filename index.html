@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.359.0"></script>
-<script src="apriko-api.js?v=1.359.0"></script>
-<script src="lohncheck.js?v=1.359.0"></script>
-<script src="personalbudget.js?v=1.359.0"></script>
-<script src="jahresbudget.js?v=1.359.0"></script>
-<script src="budgetpositionen.js?v=1.359.0"></script>
-<script src="lohnchecklistetemp.js?v=1.359.0"></script>
-<script src="apriko-endpunkte.js?v=1.359.0"></script>
+<script src="apriko-filters.js?v=1.360.0"></script>
+<script src="apriko-api.js?v=1.360.0"></script>
+<script src="lohncheck.js?v=1.360.0"></script>
+<script src="personalbudget.js?v=1.360.0"></script>
+<script src="jahresbudget.js?v=1.360.0"></script>
+<script src="budgetpositionen.js?v=1.360.0"></script>
+<script src="lohnchecklistetemp.js?v=1.360.0"></script>
+<script src="apriko-endpunkte.js?v=1.360.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1011,7 +1011,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.359.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.360.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -8027,6 +8027,8 @@ function abaXmlBauen(buchungen) {
   const mwst = {};
   // Format «Konto:Code:I/E[:Satz]» — Satz optional (z.B. 8.1); TaxCoefficient 100 = ganzer Betrag steuerbar (Pflicht ab Abacus-Antwort Ceran 02.10.2026)
   String(s.mwstKonten || "").split(/[,;]/).map(x => x.trim()).filter(Boolean).forEach(x => { const p = x.split(":"); if (p[0]) mwst[p[0]] = { code: p[1] || "", incl: p[2] || "I", satz: (p[3] || "").replace(",", ".") }; });
+  // TaxData gemäss AbaConnect-Doku «FIBU – XML Buchungen» (2014/2015, AbaDefault): nur in SingleInformation; Pflicht:
+  // TaxIncluded, TaxType, UseCode, AmountData, KeyAmount, TaxRate, TaxCoefficient, Country, TaxCode, FlatRate (Zahl, 0 = keine Saldosteuer)
   // Steuerbetrag (Abacus verlangt AmountData/KeyAmount im TaxData, Antwort Ceran 05.10.2026): Satz aus «Konto:Code:I/E:Satz»,
   // sonst Standardsatz aus dem Parameter «MwSt-Satz» (8.1). I = Betrag inkl. MwSt → Steuer = Betrag − Betrag/(1+r); E = Betrag × r
   const satzStd = parseFloat(String(s.mwstSatz || "8.1").replace(",", ".")) || 8.1;
@@ -8034,7 +8036,7 @@ function abaXmlBauen(buchungen) {
     const m = mwst[konto]; if (!m) return "";
     const r = (parseFloat(m.satz) || satzStd) / 100;
     const steuer = Math.round((m.incl === "E" ? betrag * r : betrag - betrag / (1 + r)) * 100) / 100;
-    return `\n        <TaxData mode="SAVE">\n          <TaxIncluded>${abaEsc(m.incl)}</TaxIncluded>\n          <TaxType>1</TaxType>\n          <UseCode>1</UseCode>\n          <TaxCode>${abaEsc(m.code)}</TaxCode>\n          <TaxRate>${(r * 100).toFixed(2).replace(/\.?0+$/, "")}</TaxRate>\n          <TaxCoefficient>100</TaxCoefficient>\n          <Country>${abaEsc(s.mwstLand || "CH")}</Country>\n          <FlatRate>false</FlatRate>\n          <AmountData mode="SAVE">\n            <Amount>${steuer.toFixed(2)}</Amount>\n            <Currency>${abaEsc(s.currency)}</Currency>\n          </AmountData>\n          <KeyAmount>${steuer.toFixed(2)}</KeyAmount>\n        </TaxData>`;
+    return `\n        <TaxData mode="SAVE">\n          <TaxIncluded>${abaEsc(m.incl)}</TaxIncluded>\n          <TaxType>1</TaxType>\n          <UseCode>1</UseCode>\n          <TaxCode>${abaEsc(m.code)}</TaxCode>\n          <TaxRate>${(r * 100).toFixed(2).replace(/\.?0+$/, "")}</TaxRate>\n          <TaxCoefficient>100</TaxCoefficient>\n          <Country>${abaEsc(s.mwstLand || "CH")}</Country>\n          <FlatRate>0</FlatRate>\n          <AmountData mode="SAVE">\n            <Amount>${steuer.toFixed(2)}</Amount>\n            <Currency>${abaEsc(s.currency)}</Currency>\n          </AmountData>\n          <KeyAmount>${steuer.toFixed(2)}</KeyAmount>\n        </TaxData>`;
   };
   // Buchungszeilen normalisieren (negativ → Konten drehen); Modus «konto»: gleiche Soll/Haben-Paare zu einer Buchung summieren
   let zeilenXml = buchungen.filter(b => b.ok && !abaNurAnzeige(b)).map(b => {
