@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.366.0"></script>
-<script src="apriko-api.js?v=1.366.0"></script>
-<script src="lohncheck.js?v=1.366.0"></script>
-<script src="personalbudget.js?v=1.366.0"></script>
-<script src="jahresbudget.js?v=1.366.0"></script>
-<script src="budgetpositionen.js?v=1.366.0"></script>
-<script src="lohnchecklistetemp.js?v=1.366.0"></script>
-<script src="apriko-endpunkte.js?v=1.366.0"></script>
+<script src="apriko-filters.js?v=1.367.0"></script>
+<script src="apriko-api.js?v=1.367.0"></script>
+<script src="lohncheck.js?v=1.367.0"></script>
+<script src="personalbudget.js?v=1.367.0"></script>
+<script src="jahresbudget.js?v=1.367.0"></script>
+<script src="budgetpositionen.js?v=1.367.0"></script>
+<script src="lohnchecklistetemp.js?v=1.367.0"></script>
+<script src="apriko-endpunkte.js?v=1.367.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1013,7 +1013,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.366.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.367.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -8637,6 +8637,23 @@ function tkErtragHtml(zeilen, kunden) {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${tab("Beste Relation", [...gem].sort((a, b) => b.proTicket - a.proTicket).slice(0, 12), "meister Umsatz pro Ticket")}${tab("Schlechteste Relation", [...gem].sort((a, b) => a.proTicket - b.proTicket).slice(0, 12), "wenig Umsatz pro Ticket — Aufwandstreiber")}</div>
     ${ohne.length || nullUmsatz.length ? `<div class="card" style="padding:10px 14px;font-size:11px;color:var(--text-dim)">${ohne.length ? `Nicht im Kundenstamm gefunden: ${ohne.map(r => escape(r.name) + " (" + r.n + ")").join(", ")}. ` : ""}${nullUmsatz.length ? `Ohne Umsatz im Zeitraum: ${nullUmsatz.map(r => escape(r.name) + " (" + r.n + ")").join(", ")}.` : ""}</div>` : ""}</div>`;
 }
+/* Ticketliste zum aktuellen Filter: Betreff, Kunde, Datum, Status, Anliegen — mit Suche und Aufklappen des Verlaufs */
+function tkListeHtml(zeilen) {
+  const m = tkState.map; const q = (tkState.listeSuche || "").toLowerCase();
+  const textCol = tkState.spalten.find(c => /verlauf|description|beschreibung|comment|kommentar|body|text/i.test(c));
+  const idCol = tkState.spalten.find(c => /^id$|ticket.?id|^nr$/i.test(c));
+  let liste = zeilen.filter(z => !q || Object.values(z).some(v => String(v || "").toLowerCase().includes(q)));
+  liste = liste.slice().sort((a, b) => String(b[m.erstellt] || "").localeCompare(String(a[m.erstellt] || "")));
+  const max = tkState.listeMax || 100;
+  return `<div class="card" style="padding:12px 14px"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><div style="font-weight:600">Tickets <span style="font-weight:400;color:var(--text-faint);font-size:11px">${liste.length} zum aktuellen Filter${tkState.filterArt ? " · " + escape(tkState.filterArt) : ""}${tkState.filterKunde ? " · " + escape(tkState.filterKunde) : ""}</span></div>
+      <input type="search" id="tk-liste-suche" value="${escape(tkState.listeSuche || "")}" placeholder="In Betreff/Verlauf suchen …" oninput="bpSucheTippen(this, tkState, 'listeSuche')" style="padding:4px 8px;font-size:12px;width:260px"></div>
+    <table style="font-size:12px;width:100%"><tr style="color:var(--text-dim)"><th style="text-align:left;padding:2px 6px">Datum</th><th style="text-align:left;padding:2px 6px">Kunde</th><th style="text-align:left;padding:2px 6px">Betreff</th><th style="text-align:left;padding:2px 6px">${escape(m.art || "Art")}</th><th style="text-align:left;padding:2px 6px">Status</th></tr>
+    ${liste.slice(0, max).map((z, i) => { const d = tkDatum(z[m.erstellt]); const key = idCol ? z[idCol] : i; return `<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="const r=document.getElementById('tk-v-${escape(String(key))}'); if(r) r.style.display=r.style.display==='none'?'':'none'">
+        <td style="padding:4px 6px;white-space:nowrap;color:var(--text-dim)">${d ? d.toLocaleDateString("de-CH") : ""}</td><td style="padding:4px 6px;white-space:nowrap">${escape(m.kunde ? z[m.kunde] : "")}</td><td style="padding:4px 6px">${escape(m.betreff ? z[m.betreff] : (z.betreff || z.subject || ""))}</td><td style="padding:4px 6px;font-size:11px;color:var(--text-dim)">${escape(m.art ? z[m.art] : "")}</td><td style="padding:4px 6px;font-size:11px">${escape(m.status ? z[m.status] : "")}</td></tr>
+      ${textCol ? `<tr id="tk-v-${escape(String(key))}" style="display:none"><td colspan="5" style="padding:6px 10px 10px;font-size:11.5px;color:var(--text-dim);white-space:pre-wrap;line-height:1.5;border-left:3px solid var(--accent)">${escape(String(z[textCol] || "").slice(0, 3000))}${String(z[textCol] || "").length > 3000 ? " …" : ""}</td></tr>` : ""}`; }).join("")}</table>
+    ${liste.length > max ? `<div style="margin-top:8px"><button class="btn btn-sm" onclick="tkState.listeMax=(tkState.listeMax||100)+200;render()">+ 200 weitere (${liste.length - max} übrig)</button></div>` : ""}
+    <div style="font-size:10.5px;color:var(--text-faint);margin-top:6px">Klick auf eine Zeile zeigt den Verlauf.</div></div>`;
+}
 /* Mehrwertige Felder (z.B. «Anliegen» mit «A | B | C») aufteilen */
 function tkWerte(z, feld) { if (!feld) return ["(nicht zugeordnet)"]; const v = String(z[feld] || "").trim(); if (!v) return ["(leer)"]; return v.includes(" | ") ? v.split(" | ").map(x => x.trim()).filter(Boolean) : [v]; }
 function tkGruppeMulti(zeilen, feld) { const g = {}; zeilen.forEach(z => tkWerte(z, feld).forEach(k => { g[k] = (g[k] || 0) + 1; })); return Object.entries(g).sort((a, b) => b[1] - a[1]); }
@@ -8657,7 +8674,7 @@ function renderTickets(el) {
   const kpi = (label, wert, sub, farbe) => `<div class="card" style="padding:14px 16px;border-top:3px solid ${farbe || "var(--accent)"}"><div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em">${label}</div><div style="font-size:26px;font-weight:700;margin:2px 0">${wert}</div><div style="font-size:11px;color:var(--text-faint)">${sub || ""}</div></div>`;
   const balken = (titel, paare, total, feld, klickFeld, farbeIdx) => `<div class="card" style="padding:12px 14px"><div style="font-weight:600;margin-bottom:8px">${titel} <span style="font-weight:400;color:var(--text-faint);font-size:11px">${paare.length} Werte</span></div>
     ${paare.slice(0, 25).map(([k, v], i) => `<div onclick="${klickFeld ? `tkState.${klickFeld}=tkState.${klickFeld}===${JSON.stringify(k)}?'':${JSON.stringify(k)};render()` : ""}" style="display:grid;grid-template-columns:minmax(140px,38%) 1fr 54px;gap:8px;align-items:center;padding:3px 0;${klickFeld ? "cursor:pointer" : ""}" title="${escape(k)}: ${v}">
-      <div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escape(k)}</div>
+      <div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escape(k)}${klickFeld ? ` <a href="#" onclick="event.stopPropagation();tkState.${klickFeld}=${JSON.stringify(k)};tkState.tab='liste';tkState.listeMax=100;render();return false" title="Tickets anzeigen" style="color:var(--text-faint);text-decoration:none;margin-left:4px">🔍</a>` : ""}</div>
       <div style="background:var(--bg-hover);border-radius:4px;height:14px;overflow:hidden"><div style="height:100%;width:${Math.round(v / (paare[0][1] || 1) * 100)}%;background:linear-gradient(90deg,${tkFarbe(farbeIdx || 0)},${tkFarbe((farbeIdx || 0) + 1)});border-radius:4px"></div></div>
       <div style="font-family:var(--font-mono);font-size:12px;text-align:right">${v} <span style="color:var(--text-faint);font-size:10px">${Math.round(v / total * 100)}%</span></div></div>`).join("")}${paare.length > 25 ? `<div style="font-size:11px;color:var(--text-faint);margin-top:4px">… ${paare.length - 25} weitere</div>` : ""}</div>`;
   // Heatmap Kunde × Art (Top-Kunden × Top-Arten)
@@ -8678,7 +8695,7 @@ function renderTickets(el) {
   // Konzentration: Anliegen, die bei einem Kunden gebündelt sind
   const konz = arten.slice(0, 30).map(([a, tot]) => { let best = ["", 0]; hK.concat(kunden.slice(20).map(x => x[0])).forEach(k => { const v = zelle[k + "|" + a] || 0; if (v > best[1]) best = [k, v]; }); return { a, tot, k: best[0], v: best[1], q: best[1] / tot }; }).filter(x => x.q >= 0.4 && x.tot >= 20).sort((x, y) => y.v - x.v);
   const konzHtml = `<div class="card" style="padding:12px 14px"><div style="font-weight:600;margin-bottom:6px">Bei einem Kunden gebündelt <span style="font-weight:400;color:var(--text-faint);font-size:11px">≥ 40 % eines Anliegens bei einem Kunden — gezielt lösbar</span></div>${konz.length ? `<table style="font-size:12px;width:100%">${konz.map(x => `<tr><td style="padding:3px 6px 3px 0">${escape(x.a)}</td><td style="padding:3px 6px;font-weight:600">${escape(x.k)}</td><td style="text-align:right;font-family:var(--font-mono)">${x.v} / ${x.tot}</td><td style="text-align:right;font-family:var(--font-mono);color:var(--accent)">${Math.round(x.q * 100)}%</td></tr>`).join("")}</table>` : `<div class="empty">keine starke Bündelung</div>`}</div>`;
-  const tabs = [["anliegen", "Anliegen"], ["kunden", "Kunden"], ["verlauf", "Zeitverlauf"], ["heat", "Heatmap"], ["ertrag", "Tickets × Ertrag"]];
+  const tabs = [["anliegen", "Anliegen"], ["kunden", "Kunden"], ["verlauf", "Zeitverlauf"], ["heat", "Heatmap"], ["ertrag", "Tickets × Ertrag"], ["liste", "Tickets (" + zeilen.length + ")"]];
   el.innerHTML = `
     <div class="card" style="padding:10px 14px;margin-bottom:10px;font-size:12px">
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center"><strong>${escape(tkState.datei)}</strong>
@@ -8700,7 +8717,8 @@ function renderTickets(el) {
     ${tkState.tab === "kunden" ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${balken("Tickets je Kunde", kunden, n, m.kunde, "filterKunde", 1)}${balken("Bearbeiter", bearb, n, m.bearbeiter, null, 3)}</div>` : ""}
     ${tkState.tab === "verlauf" ? verlauf : ""}
     ${tkState.tab === "heat" ? heat : ""}
-    ${tkState.tab === "ertrag" ? tkErtragHtml(zeilen, kunden) : ""}`;
+    ${tkState.tab === "ertrag" ? tkErtragHtml(zeilen, kunden) : ""}
+    ${tkState.tab === "liste" ? tkListeHtml(zeilen) : ""}`;
 }
 
 /* ============ Spielwiese → 360 Grad ============
