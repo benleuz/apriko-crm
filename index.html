@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.361.0"></script>
-<script src="apriko-api.js?v=1.361.0"></script>
-<script src="lohncheck.js?v=1.361.0"></script>
-<script src="personalbudget.js?v=1.361.0"></script>
-<script src="jahresbudget.js?v=1.361.0"></script>
-<script src="budgetpositionen.js?v=1.361.0"></script>
-<script src="lohnchecklistetemp.js?v=1.361.0"></script>
-<script src="apriko-endpunkte.js?v=1.361.0"></script>
+<script src="apriko-filters.js?v=1.362.0"></script>
+<script src="apriko-api.js?v=1.362.0"></script>
+<script src="lohncheck.js?v=1.362.0"></script>
+<script src="personalbudget.js?v=1.362.0"></script>
+<script src="jahresbudget.js?v=1.362.0"></script>
+<script src="budgetpositionen.js?v=1.362.0"></script>
+<script src="lohnchecklistetemp.js?v=1.362.0"></script>
+<script src="apriko-endpunkte.js?v=1.362.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -973,6 +973,7 @@
           <button data-view="clintern"><span class="ic">☑</span> Lohn Checkliste intern</button>
           <button data-view="clfibu"><span class="ic">☑</span> FIBU Checkliste Monatsabschluss</button>
           <button data-view="abacus"><span class="ic">🧮</span> Abacus Schnittstelle</button>
+          <button data-view="auszpdf"><span class="ic">📄</span> Auszahlungsliste → PDF</button>
           <button data-view="lct"><span class="ic">☑</span> Checkliste Lohn Temp 2.0</button>
           <button data-view="lohnartenstamm"><span class="ic">📋</span> Lohnartenstamm</button>
           <button data-view="tarifarten"><span class="ic">🏷️</span> Tarifarten</button>
@@ -1012,7 +1013,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.361.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.362.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1509,7 +1510,7 @@ const EXTRA_VIEWS_BY_EMAIL = {
   "leutrim@apriko.com": ["abacus"],
   "nicolas@apriko.com": ["abacus"]
 };
-const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","onboarding","onbparam","lohncheck","parameter","apipoc","abacus","uzcheck","grad360","tickets","profiles"];
+const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","onboarding","onbparam","lohncheck","parameter","apipoc","abacus","auszpdf","uzcheck","grad360","tickets","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
@@ -1522,7 +1523,7 @@ const VIEW_TITLES = {
   lohnartenstamm: "Lohnartenstamm",
   tarifarten: "Tarifarten",
   rapport: "Rapport", einsatzdash: "Kundendashboard", konzern: "Konzernanalyse",
-  onboarding: "Onboarding-Checkliste", onbparam: "Parametrierung (Fragebogen für Neukunden)", lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)", abacus: "Abacus Schnittstelle", uzcheck: "Überzeit-Check", grad360: "360 Grad — Ökosystem statt nur Software", tickets: "Tickets Auswertung (Zendesk-Export)",
+  onboarding: "Onboarding-Checkliste", onbparam: "Parametrierung (Fragebogen für Neukunden)", lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)", abacus: "Abacus Schnittstelle", auszpdf: "Auszahlungsliste → PDF (nur ausbezahlte Lohnabrechnungen)", uzcheck: "Überzeit-Check", grad360: "360 Grad — Ökosystem statt nur Software", tickets: "Tickets Auswertung (Zendesk-Export)",
   profiles: "Profile"
 };
 
@@ -2005,6 +2006,7 @@ function render() {
   else if (currentView === "onboarding") renderOnboarding(content);
   else if (currentView === "onbparam") renderOnbParam(content);
   else if (currentView === "abacus") renderAbacus(content);
+  else if (currentView === "auszpdf") renderAuszPdf(content);
   else if (currentView === "uzcheck") renderUeberzeitCheck(content);
   else if (currentView === "grad360") render360(content);
   else if (currentView === "tickets") renderTickets(content);
@@ -8433,6 +8435,107 @@ async function renderOnboarding(el) {
       ${kunden.length ? `<div class="table-wrap" style="overflow-x:auto"><table style="font-size:12px;border-collapse:collapse">${kopf}<tbody>${zeilen}</tbody></table></div>` : `<div class="empty">Noch keine Kunden im Onboarding — oben rechts einen Kunden hinzufügen.</div>`}
     </div>
     ${bearbeiten}`;
+}
+
+/* ============ Workflows → Auszahlungsliste → PDF ============
+   PDF mit allen Lohnabrechnungen + Auszahlungsliste (CSV: Zahlungsart; Begünstigter Nr.; Begünstigter; …; Betrag) →
+   neues PDF, das ausschliesslich die Abrechnungen der Mitarbeitenden auf der Auszahlungsliste enthält.
+   Zuordnung: Mitarbeiternummer (Begünstigter Nr. ↔ Pers.-Nr. auf der Abrechnung), sonst Name + Vorname.
+   Nutzt die Abrechnungs-Erkennung des Ultimativen Checks (lcReadPdf/lcSplitSlips) und pdf-lib zum Seitenkopieren. */
+let azState = { pdfs: [], csv: null, slips: [], ergebnis: null, busy: false };
+async function azLoadPdfLib() {
+  if (window.PDFLib) return;
+  await new Promise((ok, err) => { const sc = document.createElement("script"); sc.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"; sc.onload = ok; sc.onerror = () => err(new Error("pdf-lib konnte nicht geladen werden")); document.head.appendChild(sc); });
+}
+async function azUploadPdf(input) {
+  const files = [...(input.files || [])]; input.value = ""; if (!files.length) return;
+  azState.busy = true; render();
+  try {
+    for (const f of files) {
+      const ab = await f.arrayBuffer();
+      const pages = await lcReadPdf(ab.slice(0));
+      const slips = lcSplitSlips(pages, f.name);
+      slips.forEach(sl => { lcIdentify(sl); });
+      azState.pdfs.push({ name: f.name, bytes: ab, seiten: pages.length, slips });
+    }
+    azState.slips = azState.pdfs.flatMap((p, pi) => p.slips.map(sl => ({ ...sl, pdfIdx: pi })));
+    toast(azState.slips.length + " Lohnabrechnungen erkannt.");
+  } catch (e) { toast("PDF lesen fehlgeschlagen: " + e.message, true); }
+  azState.busy = false; azState.ergebnis = null; render();
+}
+async function azUploadCsv(input) {
+  const f = input.files && input.files[0]; input.value = ""; if (!f) return;
+  const text = await f.text();
+  const r = parseCsvRows(text);
+  const nrCol = r.headers.find(h => /beg.*nr|nummer|pers/i.test(h)), nameCol = r.headers.find(h => /^beg[üu]nstigter$|name|empf/i.test(h)), betragCol = r.headers.find(h => /betrag|amount/i.test(h));
+  const zeilen = r.rows.map(z => ({ nr: String(z[nrCol] || "").trim(), name: String(z[nameCol] || "").trim(), betrag: parseFloat(String(z[betragCol] || "").replace(/['’\s]/g, "").replace(",", ".")) || 0 })).filter(z => z.nr || z.name);
+  azState.csv = { name: f.name, zeilen, nrCol, nameCol };
+  azState.ergebnis = null;
+  toast(zeilen.length + " Zahlungen in der Auszahlungsliste.");
+  render();
+}
+function azNameKey(n) { return String(n || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[\s,]+/).filter(w => w.length >= 2).sort().join(" "); }
+function azAbgleich() {
+  const csv = azState.csv; if (!csv || !azState.slips.length) return null;
+  const perNr = {}, perName = {};
+  azState.slips.forEach(sl => { if (sl.persNr) (perNr[String(parseInt(sl.persNr, 10))] = perNr[String(parseInt(sl.persNr, 10))] || []).push(sl); if (sl.name) (perName[azNameKey(sl.name)] = perName[azNameKey(sl.name)] || []).push(sl); });
+  const treffer = [], fehlend = []; const gewaehlt = new Set();
+  csv.zeilen.forEach(z => {
+    let sl = null, via = "";
+    if (z.nr && perNr[String(parseInt(z.nr, 10))]) { sl = perNr[String(parseInt(z.nr, 10))]; via = "Nr."; }
+    else if (z.name && perName[azNameKey(z.name)]) { sl = perName[azNameKey(z.name)]; via = "Name"; }
+    if (sl) { sl.forEach(x => gewaehlt.add(x)); treffer.push({ z, slips: sl, via }); } else fehlend.push(z);
+  });
+  const ohneZahlung = azState.slips.filter(sl => !gewaehlt.has(sl));
+  return { treffer, fehlend, ohneZahlung, gewaehlt: [...gewaehlt] };
+}
+async function azPdfErzeugen() {
+  const erg = azAbgleich(); if (!erg || !erg.gewaehlt.length) { toast("Keine Treffer — nichts zu exportieren.", true); return; }
+  azState.busy = true; render();
+  try {
+    await azLoadPdfLib();
+    const out = await window.PDFLib.PDFDocument.create();
+    const srcDocs = [];
+    for (const p of azState.pdfs) srcDocs.push(await window.PDFLib.PDFDocument.load(p.bytes.slice(0)));
+    // Reihenfolge wie in der Auszahlungsliste; Seiten je Abrechnung in Originalreihenfolge
+    const reihenfolge = []; erg.treffer.forEach(t => t.slips.forEach(sl => { if (!reihenfolge.includes(sl)) reihenfolge.push(sl); }));
+    for (const sl of reihenfolge) {
+      const idx = sl.pages.map(pg => pg.n - 1);
+      const copied = await out.copyPages(srcDocs[sl.pdfIdx], idx);
+      copied.forEach(pg => out.addPage(pg));
+    }
+    const bytes = await out.save();
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+    a.download = "Lohnabrechnungen_ausbezahlt_" + new Date().toISOString().slice(0, 10) + ".pdf"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    toast(reihenfolge.length + " Abrechnungen (" + reihenfolge.reduce((n, sl) => n + sl.pages.length, 0) + " Seiten) ins PDF geschrieben.");
+  } catch (e) { toast("PDF erzeugen fehlgeschlagen: " + e.message, true); }
+  azState.busy = false; render();
+}
+function azReset() { azState = { pdfs: [], csv: null, slips: [], ergebnis: null, busy: false }; render(); }
+function renderAuszPdf(el) {
+  const erg = azAbgleich();
+  document.getElementById("view-actions").innerHTML = `<label class="btn btn-sm">⇧ Lohnabrechnungen (PDF)<input type="file" accept=".pdf" multiple style="display:none" onchange="azUploadPdf(this)"></label>
+    <label class="btn btn-sm">⇧ Auszahlungsliste (CSV)<input type="file" accept=".csv,.txt" style="display:none" onchange="azUploadCsv(this)"></label>
+    <button class="btn btn-primary btn-sm" onclick="azPdfErzeugen()" ${erg && erg.gewaehlt.length && !azState.busy ? "" : "disabled"}>⇩ PDF nur Ausbezahlte</button>
+    ${azState.pdfs.length || azState.csv ? `<button class="btn btn-sm" onclick="azReset()">✕ Zurücksetzen</button>` : ""}`;
+  const fmt = v => Math.round(v).toLocaleString("de-CH");
+  const stand = `<div class="card" style="padding:12px 16px;margin-bottom:10px;font-size:12px;line-height:1.6">
+      ${azState.busy ? `<div style="color:var(--accent)">⏳ Verarbeite …</div>` : ""}
+      <div><strong>Lohnabrechnungen:</strong> ${azState.pdfs.length ? azState.pdfs.map(p => escape(p.name) + " (" + p.seiten + " Seiten, " + p.slips.length + " Abrechnungen)").join(" · ") : "<span style=\"color:var(--text-dim)\">noch kein PDF geladen</span>"}</div>
+      <div><strong>Auszahlungsliste:</strong> ${azState.csv ? escape(azState.csv.name) + " (" + azState.csv.zeilen.length + " Zahlungen, Nummer aus «" + escape(azState.csv.nrCol || "—") + "», Name aus «" + escape(azState.csv.nameCol || "—") + "»)" : "<span style=\"color:var(--text-dim)\">noch keine CSV geladen</span>"}</div>
+      <div style="color:var(--text-faint)">Zuordnung über Mitarbeiternummer (Begünstigter Nr. ↔ Pers.-Nr. der Abrechnung), sonst über Name + Vorname. Das Ergebnis-PDF enthält nur Abrechnungen von Personen auf der Auszahlungsliste, in deren Reihenfolge.</div>
+    </div>`;
+  if (!erg) { el.innerHTML = stand + `<div class="empty">PDF und CSV laden — dann erscheint hier der Abgleich.</div>`; return; }
+  const zeile = (cells) => `<tr>${cells.map(c => `<td style="padding:4px 8px;border-top:1px solid var(--border)">${c}</td>`).join("")}</tr>`;
+  el.innerHTML = stand + `
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
+      <div class="card" style="padding:12px 14px"><div style="font-size:11px;color:var(--text-dim)">Zahlungen mit Abrechnung</div><div style="font-size:22px;font-weight:700;color:var(--accent)">${erg.treffer.length} / ${azState.csv.zeilen.length}</div><div style="font-size:11px;color:var(--text-faint)">${erg.treffer.filter(t => t.via === "Nr.").length} über Nummer · ${erg.treffer.filter(t => t.via === "Name").length} über Name · Total CHF ${fmt(erg.treffer.reduce((a, t) => a + t.z.betrag, 0))}</div></div>
+      <div class="card" style="padding:12px 14px"><div style="font-size:11px;color:var(--text-dim)">Zahlungen ohne Abrechnung im PDF</div><div style="font-size:22px;font-weight:700;color:${erg.fehlend.length ? "var(--danger)" : "var(--text)"}">${erg.fehlend.length}</div><div style="font-size:11px;color:var(--text-faint)">kommen nicht ins PDF — bitte prüfen</div></div>
+      <div class="card" style="padding:12px 14px"><div style="font-size:11px;color:var(--text-dim)">Abrechnungen ohne Zahlung</div><div style="font-size:22px;font-weight:700">${erg.ohneZahlung.length}</div><div style="font-size:11px;color:var(--text-faint)">werden weggelassen (Minuslohn, 0, Rückbehalt …)</div></div>
+    </div>
+    ${erg.fehlend.length ? `<div class="card" style="padding:12px 14px;margin-bottom:10px"><div style="font-weight:600;color:var(--danger);margin-bottom:4px">Zahlungen ohne Abrechnung</div><table style="font-size:12px;width:100%">${erg.fehlend.map(z => zeile([escape(z.nr || "—"), escape(z.name), `<span style="font-family:var(--font-mono)">${fmt(z.betrag)}</span>`])).join("")}</table></div>` : ""}
+    <div class="card" style="padding:12px 14px;margin-bottom:10px"><div style="font-weight:600;margin-bottom:4px">Ins PDF (${erg.treffer.length})</div><table style="font-size:12px;width:100%"><tr style="color:var(--text-dim)"><th style="text-align:left;padding:2px 8px">Nr.</th><th style="text-align:left;padding:2px 8px">Auszahlungsliste</th><th style="text-align:left;padding:2px 8px">Abrechnung</th><th style="text-align:left;padding:2px 8px">Periode</th><th style="text-align:left;padding:2px 8px">Seiten</th><th style="text-align:right;padding:2px 8px">Betrag</th><th style="padding:2px 8px">via</th></tr>${erg.treffer.map(t => zeile([escape(t.z.nr || "—"), escape(t.z.name), t.slips.map(sl => escape(sl.anzeige)).join("<br>"), t.slips.map(sl => escape(sl.periode || "")).join("<br>"), t.slips.map(sl => sl.pages.map(pg => pg.n).join(",")).join("<br>"), `<span style="font-family:var(--font-mono);float:right">${fmt(t.z.betrag)}</span>`, `<span style="font-size:11px;color:${t.via === "Nr." ? "var(--accent)" : "var(--warn)"}">${t.via}</span>`])).join("")}</table></div>
+    <details class="card" style="padding:12px 14px"><summary style="cursor:pointer;font-weight:600">Abrechnungen ohne Zahlung (${erg.ohneZahlung.length})</summary><table style="font-size:12px;width:100%;margin-top:6px">${erg.ohneZahlung.map(sl => zeile([escape(sl.persNr || "—"), escape(sl.anzeige), escape(sl.periode || ""), `<span style="font-family:var(--font-mono)">${sl.auszahlung === null ? "" : fmt(sl.auszahlung)}</span>`])).join("")}</table></details>`;
 }
 
 /* ============ Spielwiese → Tickets Auswertung ============
