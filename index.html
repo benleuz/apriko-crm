@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.356.0"></script>
-<script src="apriko-api.js?v=1.356.0"></script>
-<script src="lohncheck.js?v=1.356.0"></script>
-<script src="personalbudget.js?v=1.356.0"></script>
-<script src="jahresbudget.js?v=1.356.0"></script>
-<script src="budgetpositionen.js?v=1.356.0"></script>
-<script src="lohnchecklistetemp.js?v=1.356.0"></script>
-<script src="apriko-endpunkte.js?v=1.356.0"></script>
+<script src="apriko-filters.js?v=1.357.0"></script>
+<script src="apriko-api.js?v=1.357.0"></script>
+<script src="lohncheck.js?v=1.357.0"></script>
+<script src="personalbudget.js?v=1.357.0"></script>
+<script src="jahresbudget.js?v=1.357.0"></script>
+<script src="budgetpositionen.js?v=1.357.0"></script>
+<script src="lohnchecklistetemp.js?v=1.357.0"></script>
+<script src="apriko-endpunkte.js?v=1.357.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1011,7 +1011,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.356.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.357.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -7673,7 +7673,7 @@ function tarifartenCsvExport() {
    SingleInformation — gleiches Muster wie die Lohnschnittstelle Helva). Mandant-Konstanten
    sind hier editierbar (localStorage aba-settings). Erkennung des Blatts: entweder Monats-
    spalten (Jan…Dez / 01…12 / 2026-08) = Breitformat, oder Spalten Lohnart/Betrag(/Monat) = Langformat. */
-const ABA_DEFAULTS = { client: "99999", division: "0", currency: "CHF", mapId: "AbaDefault", version: "2015", docCode: "", textPrefix: "Lohn", textVorlage: "Lohnjournal TMA {MM}/{JJ}", nurAnzeigen: "1020", negSaldoLohnart: "8995", negSaldoSoll: "1142", negSaldoHaben: "1091", negSaldoAuszahlung: "8900", xmlModus: "lohnart", mwstKonten: "5490:200:I" };
+const ABA_DEFAULTS = { client: "99999", division: "0", currency: "CHF", mapId: "AbaDefault", version: "2015", docCode: "", textPrefix: "Lohn", textVorlage: "Lohnjournal TMA {MM}/{JJ}", nurAnzeigen: "1020", negSaldoLohnart: "8995", negSaldoSoll: "1142", negSaldoHaben: "1091", negSaldoAuszahlung: "8900", xmlModus: "lohnart", mwstSatz: "8.1", mwstKonten: "5490:200:I" };
 let abaState = { datei: "", zeilen: [], spalten: [], monat: new Date().getMonth() || 12, jahr: new Date().getFullYear(), overrides: {}, xml: "", kunde: (localStorage.getItem("aba-kunde") || "0") === "0" ? 0 : localStorage.getItem("aba-kunde") };
 /* Kunden mit FIBU-Monatsabschluss (Kundenflag «fibu») — pro Kunde eigenes Regelwerk + Mandant-Parameter
    in parameter.json (abacusKunden[<id>]); der globale Block «abacus» ist die Vorlage für neue Kunden. */
@@ -8027,7 +8027,15 @@ function abaXmlBauen(buchungen) {
   const mwst = {};
   // Format «Konto:Code:I/E[:Satz]» — Satz optional (z.B. 8.1); TaxCoefficient 100 = ganzer Betrag steuerbar (Pflicht ab Abacus-Antwort Ceran 02.10.2026)
   String(s.mwstKonten || "").split(/[,;]/).map(x => x.trim()).filter(Boolean).forEach(x => { const p = x.split(":"); if (p[0]) mwst[p[0]] = { code: p[1] || "", incl: p[2] || "I", satz: (p[3] || "").replace(",", ".") }; });
-  const taxData = konto => mwst[konto] ? `\n        <TaxData mode="SAVE">\n          <TaxIncluded>${abaEsc(mwst[konto].incl)}</TaxIncluded>\n          <TaxType>1</TaxType>\n          <UseCode>1</UseCode>\n          <TaxCode>${abaEsc(mwst[konto].code)}</TaxCode>${mwst[konto].satz ? `\n          <TaxRate>${abaEsc(mwst[konto].satz)}</TaxRate>` : ""}\n          <TaxCoefficient>100</TaxCoefficient>\n        </TaxData>` : "";
+  // Steuerbetrag (Abacus verlangt AmountData/KeyAmount im TaxData, Antwort Ceran 05.10.2026): Satz aus «Konto:Code:I/E:Satz»,
+  // sonst Standardsatz aus dem Parameter «MwSt-Satz» (8.1). I = Betrag inkl. MwSt → Steuer = Betrag − Betrag/(1+r); E = Betrag × r
+  const satzStd = parseFloat(String(s.mwstSatz || "8.1").replace(",", ".")) || 8.1;
+  const taxData = (konto, betrag) => {
+    const m = mwst[konto]; if (!m) return "";
+    const r = (parseFloat(m.satz) || satzStd) / 100;
+    const steuer = Math.round((m.incl === "E" ? betrag * r : betrag - betrag / (1 + r)) * 100) / 100;
+    return `\n        <TaxData mode="SAVE">\n          <TaxIncluded>${abaEsc(m.incl)}</TaxIncluded>\n          <TaxType>1</TaxType>\n          <UseCode>1</UseCode>\n          <TaxCode>${abaEsc(m.code)}</TaxCode>\n          <TaxRate>${(r * 100).toFixed(2).replace(/\.?0+$/, "")}</TaxRate>\n          <TaxCoefficient>100</TaxCoefficient>\n          <AmountData mode="SAVE">\n            <Amount>${steuer.toFixed(2)}</Amount>\n            <Currency>${abaEsc(s.currency)}</Currency>\n          </AmountData>\n          <KeyAmount>${steuer.toFixed(2)}</KeyAmount>\n        </TaxData>`;
+  };
   // Buchungszeilen normalisieren (negativ → Konten drehen); Modus «konto»: gleiche Soll/Haben-Paare zu einer Buchung summieren
   let zeilenXml = buchungen.filter(b => b.ok && !abaNurAnzeige(b)).map(b => {
     let soll = b.soll, haben = b.haben, betrag = b.betrag;
@@ -8078,7 +8086,7 @@ ${s.docCode ? "        <DocumentCode>" + abaEsc(s.docCode) + "</DocumentCode>\n"
         </AmountData>
         <KeyAmount>${amt}</KeyAmount>
         <Account>${abaEsc(haben)}</Account>
-        <Text1>${text}</Text1>${taxData(haben)}
+        <Text1>${text}</Text1>${taxData(haben, betrag)}
 ${s.docCode ? "        <DocumentCode>" + abaEsc(s.docCode) + "</DocumentCode>\n" : ""}      </SingleInformation>
     </Entry>`;
   });
@@ -8144,7 +8152,7 @@ function renderAbacus(el) {
       ${abaFibuKunden().length ? "" : `<div style="font-size:11px;color:var(--warn);margin-top:8px">Kein Kunde mit Häkchen «FIBU Monatsabschluss» im Kundenstamm — dort setzen, dann erscheint er hier.</div>`}
       <details style="margin-top:10px"><summary style="font-size:11px;color:var(--text-dim);cursor:pointer">Mandant / XML-Parameter${abaState.kunde ? " — gespeichert pro Kunde" : " — lokal (kein Kunde gewählt)"}</summary>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
-          ${inp("client", 70, "Client")}${inp("division", 50, "Division")}${inp("currency", 50, "Währung")}${inp("mapId", 90, "MapId")}${inp("version", 60, "Version")}${inp("docCode", 50, "DocumentCode", "leer lassen — Abacus 2015/AbaDefault kennt das Element nicht (Fehler 3028); nur füllen, wenn der Mandant es verlangt")}${inp("negSaldoLohnart", 60, "Neg. Saldo LoA", "Lohnart «Negativer Gehaltssaldo» (Standard 8995): ist sie negativ, wird sie gebucht und zur Auszahlung addiert")}${inp("negSaldoSoll", 55, "…Soll", "Standard 1142")}${inp("negSaldoHaben", 55, "…Haben", "Standard 1091")}${inp("negSaldoAuszahlung", 60, "…Auszahlung LoA", "Lohnart der Auszahlung (Standard 8900, nur Anzeige), die um den negativen Saldo erhöht wird")}${inp("nurAnzeigen", 70, "Nur Anzeige", "Konten (kommagetrennt), deren Buchungen angezeigt und abgestimmt, aber nicht ins XML geschrieben werden — Standard 1020 (Bank, Zahlung läuft über Bankjournal)")}${inp("textVorlage", 200, "Buchungstext", "Platzhalter: {MM} Monat, {JJ} Jahr 2-stellig, {JJJJ} Jahr, {LA} Lohnart, {BEZ} Bezeichnung — leer = «Lohnjournal TMA {MM}/{JJ}»")}${inp("mwstKonten", 160, "MwSt-Konten (Konto:Code:I/E[:Satz], kommagetrennt)", "z.B. 5490:200:I oder 5490:200:I:8.1 — TaxData wird nur in der Einzelbuchung (Haben-Seite) mitgegeben; im Sammelkopf kennt Abacus 2015/AbaDefault kein TaxData (Fehler 3026). Steht das MwSt-Konto im Soll, muss der Steuercode am Konto in Abacus hinterlegt sein. Leer = kein TaxData.")}
+          ${inp("client", 70, "Client")}${inp("division", 50, "Division")}${inp("currency", 50, "Währung")}${inp("mapId", 90, "MapId")}${inp("version", 60, "Version")}${inp("docCode", 50, "DocumentCode", "leer lassen — Abacus 2015/AbaDefault kennt das Element nicht (Fehler 3028); nur füllen, wenn der Mandant es verlangt")}${inp("negSaldoLohnart", 60, "Neg. Saldo LoA", "Lohnart «Negativer Gehaltssaldo» (Standard 8995): ist sie negativ, wird sie gebucht und zur Auszahlung addiert")}${inp("negSaldoSoll", 55, "…Soll", "Standard 1142")}${inp("negSaldoHaben", 55, "…Haben", "Standard 1091")}${inp("negSaldoAuszahlung", 60, "…Auszahlung LoA", "Lohnart der Auszahlung (Standard 8900, nur Anzeige), die um den negativen Saldo erhöht wird")}${inp("nurAnzeigen", 70, "Nur Anzeige", "Konten (kommagetrennt), deren Buchungen angezeigt und abgestimmt, aber nicht ins XML geschrieben werden — Standard 1020 (Bank, Zahlung läuft über Bankjournal)")}${inp("textVorlage", 200, "Buchungstext", "Platzhalter: {MM} Monat, {JJ} Jahr 2-stellig, {JJJJ} Jahr, {LA} Lohnart, {BEZ} Bezeichnung — leer = «Lohnjournal TMA {MM}/{JJ}»")}${inp("mwstSatz", 50, "MwSt-Satz %", "Standardsatz für den Steuerbetrag im TaxData, wenn bei «MwSt-Konten» kein Satz angegeben ist (Standard 8.1)")}${inp("mwstKonten", 160, "MwSt-Konten (Konto:Code:I/E[:Satz], kommagetrennt)", "z.B. 5490:200:I oder 5490:200:I:8.1 — TaxData wird nur in der Einzelbuchung (Haben-Seite) mitgegeben; im Sammelkopf kennt Abacus 2015/AbaDefault kein TaxData (Fehler 3026). Steht das MwSt-Konto im Soll, muss der Steuercode am Konto in Abacus hinterlegt sein. Leer = kein TaxData.")}
         </div>
       </details>
     </div>
