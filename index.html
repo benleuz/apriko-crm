@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.353.0"></script>
-<script src="apriko-api.js?v=1.353.0"></script>
-<script src="lohncheck.js?v=1.353.0"></script>
-<script src="personalbudget.js?v=1.353.0"></script>
-<script src="jahresbudget.js?v=1.353.0"></script>
-<script src="budgetpositionen.js?v=1.353.0"></script>
-<script src="lohnchecklistetemp.js?v=1.353.0"></script>
-<script src="apriko-endpunkte.js?v=1.353.0"></script>
+<script src="apriko-filters.js?v=1.356.0"></script>
+<script src="apriko-api.js?v=1.356.0"></script>
+<script src="lohncheck.js?v=1.356.0"></script>
+<script src="personalbudget.js?v=1.356.0"></script>
+<script src="jahresbudget.js?v=1.356.0"></script>
+<script src="budgetpositionen.js?v=1.356.0"></script>
+<script src="lohnchecklistetemp.js?v=1.356.0"></script>
+<script src="apriko-endpunkte.js?v=1.356.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -266,7 +266,9 @@
   }
   /* Breite Formulare (Kunde/Firma): zwei Spalten, damit nicht gescrollt werden muss */
   .modal.breit { max-width: 1180px; }
-  .modal.breit .modal-body { column-count: 2; column-gap: 32px; }
+  .modal.breit:not(.detail) .modal-body { column-count: 2; column-gap: 32px; }
+  .modal.breit.detail .kv { grid-template-columns: 150px 1fr 150px 1fr; gap: 8px 18px; font-size: 13.5px; }
+  .modal.breit.detail .kv dd { min-width: 0; overflow-wrap: anywhere; }
   .modal.breit .modal-body > * { break-inside: avoid; }
   .modal.breit .modal-body .field, .modal.breit .modal-body .field-row, .modal.breit .modal-body details, .modal.breit .modal-body h4, .modal.breit .modal-body h3 { break-inside: avoid; }
   @media (max-width: 1100px) { .modal.breit .modal-body { column-count: 1; } }
@@ -1009,7 +1011,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.353.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.356.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -12756,6 +12758,7 @@ function openCustomer(id) {
   const riskColor = c.Risk === "Rot" ? "var(--danger)" : c.Risk === "Gelb" ? "var(--warn)" : "var(--accent)";
   const revs = cache.monthlyrevenue.filter(r => r.CustomerId == id);
 
+  modalBreit(true);
   showModal(escape(c.Title || "Kunde"), `
     <dl class="kv">
       <dt>Firma</dt><dd>${comp ? `<a href="#" onclick="closeModal();openCompany(${comp.id});return false">${escape(comp.Title)}</a>` : `<span style="color:var(--danger)">fehlt — bitte im Formular (✎) eine Firma zuordnen</span>`}</dd>
@@ -12786,15 +12789,12 @@ function openCustomer(id) {
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Link</dt><dd>${appLinkText(c.id, c.Link) ? `<a href="${escape(normalizeUrl(appLinkText(c.id, c.Link)) || appLinkText(c.id, c.Link))}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent-2);text-decoration:underline;cursor:pointer">${escape(appLinkText(c.id, c.Link))} ↗</a>` : "—"}</dd>
       <dt>Ansprechpersonen</dt><dd style="font-size:12px">${(() => { const f = (crmKundenFlags || {})[String(c.id)] || {}; const mail = e => `<a href="mailto:${escape(e)}?subject=${encodeURIComponent((c.Title || "") + " — ")}" onclick="event.stopPropagation()" title="E-Mail an ${escape(e)}" style="text-decoration:none;margin-left:3px">✉</a>`; const zeile = arr => arr.filter(x => x[1]).map(x => x[0] + ": " + escape(x[1]) + mail(x[1])).join(" · "); const z = zeile([["Ansprechperson Lohn", f.apLohn], ["Backup Lohn", f.apLohnBackup], ["Lohn intern", f.apLohnIntern]]); const z2 = zeile([["Ansprechperson FIBU", f.apFibu], ["Backup FIBU", f.apFibuBackup]]); return [z, z2].filter(Boolean).join("<br>") || "—"; })()}</dd>
-      ${VERTRAG_ARTEN.map(([art, label]) => `<dt>${label}</dt><dd>${vertragLink(c.id, art) ? `<a href="${escape(vertragLink(c.id, art))}" target="_blank" rel="noopener" style="color:var(--accent-2)">📄 Öffnen ↗</a>` : "—"}</dd>`).join("")}
+      ${VERTRAG_ARTEN.map(([art, label]) => `<dt>${label}</dt><dd>${vertragLink(c.id, art) ? `<a href="${escape(vertragLink(c.id, art))}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${escape(vertragLink(c.id, art))}" style="color:var(--accent-2)">📄 ${escape(vertragName(vertragLink(c.id, art)))} ↗</a>` : "—"}</dd>`).join("")}
       <dt>Workflows</dt><dd>${[kundenFlag(c.id, "intern") ? "Interner Lohn ✓" : "", kundenFlag(c.id, "fibu") ? "FIBU Monatsabschluss ✓" : "", kundenFlag(c.id, "hatDb") ? "Datenbank (Hosting) ✓" : ""].filter(Boolean).join(" · ") || "—"}</dd>
       <dt>Mindesthonorar</dt><dd style="white-space:pre-wrap">${escape(minFeeText(c.id, c.MinFee)||"—")}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
     </dl>
-
-    <h3 style="margin-top:20px;font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Letzte Monatsumsätze</h3>
-    ${renderCustomerRevPreview(id)}
-    <div style="margin-top:8px"><button class="btn btn-sm" onclick="closeModal();filters.revenueMode='customer';filters.revenueCustomerId=${id};currentView='revenue';document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));document.querySelector('nav button[data-view=revenue]').classList.add('active');render()">In Umsätze-Tab öffnen</button></div>
+    <div style="margin-top:14px"><button class="btn btn-sm" onclick="closeModal();filters.revenueMode='customer';filters.revenueCustomerId=${id};currentView='revenue';document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));document.querySelector('nav button[data-view=revenue]').classList.add('active');render()">In Umsätze-Tab öffnen</button></div>
   `, [
     `<button class="btn btn-danger" onclick="deleteCustomer(${id})">Löschen</button>`,
     c.CompanyId ? `<button class="btn" onclick="closeModal();ofDialog(${c.CompanyId})">📄 Offerte erstellen</button>` : "",
@@ -12885,14 +12885,15 @@ function editCustomer(id) {
     <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-bpoytd" ${c.BPOYtd?"checked":""} style="width:auto;margin:0"> BPO-Abrechnung YTD-kumulativ (Jahresbasis, Vormonate werden automatisch abgezogen)</label></div>
     <div class="field"><label>Ziel-ARR SaaS (CHF)</label><input id="f-targetarr" type="number" step="1000" min="0" value="${c.TargetARR||""}"></div>
     <div class="field"><label>Link</label><input id="f-link" type="text" value="${escape(appLinkText(c.id || "", c.Link))}" placeholder="z.B. helva.apriko.app"></div>
-    ${VERTRAG_ARTEN.map(([art, label]) => `<div class="field"><label>${label} (SharePoint-URL)</label><input id="f-vertrag-${art}" type="text" value="${escape(vertragLink(c.id || "", art))}" placeholder="In SharePoint: Dokument → Link kopieren → hier einfügen"></div>`).join("")}
+    ${VERTRAG_ARTEN.map(([art, label]) => { const u = vertragLink(c.id || "", art); return `<div class="field"><label>${label}${u ? ` — <a href="${escape(u)}" target="_blank" rel="noopener" style="color:var(--accent-2);text-transform:none;letter-spacing:0" title="${escape(u)}">📄 ${escape(vertragName(u))} ↗</a>` : ""}</label><input id="f-vertrag-${art}" type="text" value="${escape(u)}" placeholder="In SharePoint: Dokument → Link kopieren → hier einfügen" style="font-size:11px;color:var(--text-dim)"></div>`; }).join("")}
     <div class="field-row">
       <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-wf-intern" ${kundenFlag(c.id || "", "intern") ? "checked" : ""} style="width:auto;margin:0"> Interner Lohn</label></div>
       <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-wf-fibu" ${kundenFlag(c.id || "", "fibu") ? "checked" : ""} style="width:auto;margin:0"> FIBU Monatsabschluss</label></div>
       <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer" title="Eigene Datenbank beim Kunden → löst monatliche Hostingkosten aus (Budgetpositionen, Konto 4400, Betrag pro DB zentral einstellbar)"><input type="checkbox" id="f-wf-hatdb" ${kundenFlag(c.id || "", "hatDb") ? "checked" : ""} style="width:auto;margin:0"> Hat Datenbank (Hostingkosten)</label></div>
     </div>
     ${(() => { const f = (crmKundenFlags || {})[String(c.id || "")] || {}; const emails = [...new Set((cache.userprofiles || []).map(p => (p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase()).filter(Boolean))].sort();
-      const sel = (id, label, cur) => `<div class="field"><label>${label}</label><select id="${id}"><option value="">—</option>${emails.map(e => `<option value="${escape(e)}" ${cur === e ? "selected" : ""}>${escape(e)}</option>`).join("")}${cur && !emails.includes(cur) ? `<option value="${escape(cur)}" selected>${escape(cur)}</option>` : ""}</select></div>`;
+      // ✉ neben dem Dropdown: öffnet Outlook mit der gewählten Adresse (passt sich beim Wechsel an)
+      const sel = (id, label, cur) => `<div class="field"><label>${label}</label><div style="display:flex;gap:6px;align-items:center"><select id="${id}" style="flex:1" onchange="const a=document.getElementById('${id}-mail'); if(a){a.href='mailto:'+encodeURIComponent(this.value); a.style.visibility=this.value?'visible':'hidden';}"><option value="">—</option>${emails.map(e => `<option value="${escape(e)}" ${cur === e ? "selected" : ""}>${escape(e)}</option>`).join("")}${cur && !emails.includes(cur) ? `<option value="${escape(cur)}" selected>${escape(cur)}</option>` : ""}</select><a id="${id}-mail" href="mailto:${escape(cur)}" title="E-Mail schreiben" style="font-size:18px;text-decoration:none;visibility:${cur ? "visible" : "hidden"}">✉</a></div></div>`;
       return `<div class="field-row">${sel("f-ap-lohn", "Ansprechperson Lohn", f.apLohn || "")}${sel("f-ap-lohn-backup", "Ansprechperson Backup Lohn", f.apLohnBackup || "")}${sel("f-ap-lohn-intern", "Ansprechperson Lohn intern", f.apLohnIntern || "")}</div>
     <div class="field-row">${sel("f-ap-fibu", "Ansprechperson FIBU", f.apFibu || "")}${sel("f-ap-fibu-backup", "Ansprechperson Backup FIBU", f.apFibuBackup || "")}</div>`; })()}
     <div class="field"><label>Mindesthonorar</label><textarea id="f-minfee" rows="3" placeholder="z.B. CHF 1'500/Monat, gültig ab Q3 2026">${escape(minFeeText(c.id || "", c.MinFee))}</textarea></div>
@@ -14224,7 +14225,7 @@ async function deleteActivity(id) {
 /* ===========================================================
    UI Helpers
    =========================================================== */
-function modalBreit() { const mb = document.querySelector("#modal .modal"); if (mb) mb.classList.add("breit"); }
+function modalBreit(detail) { const mb = document.querySelector("#modal .modal"); if (mb) { mb.classList.add("breit"); if (detail) mb.classList.add("detail"); } }
 function showModal(title, body, footerButtons = []) {
   document.getElementById("modal-title").textContent = title;
   document.getElementById("modal-body").innerHTML = body;
@@ -14234,7 +14235,7 @@ function showModal(title, body, footerButtons = []) {
 function closeModal() {
   document.getElementById("modal").classList.remove("open");
   var mb = document.querySelector("#modal .modal");
-  if(mb) { mb.style.maxWidth = ""; mb.classList.remove("breit"); }   // Breiten-Override wieder zurücksetzen
+  if(mb) { mb.style.maxWidth = ""; mb.classList.remove("breit"); mb.classList.remove("detail"); }   // Breiten-Override wieder zurücksetzen
 }
 function val(id) { return document.getElementById(id)?.value?.trim() || ""; }
 
@@ -14337,7 +14338,19 @@ async function crmSaveVertragLinks() {
     await graph(path, { method: "PUT", body });
   }
 }
-const VERTRAG_ARTEN = [["saas", "Vertrag SaaS"], ["bpo", "Vertrag BPO"], ["sonst", "Sonstiges"]];
+const VERTRAG_ARTEN = [["saas", "Vertrag SaaS"], ["bpo", "Vertrag BPO"], ["adv", "ADV-Vertrag"], ["sonst", "Sonstiges"]];
+/* Anzeigename aus einer SharePoint-URL: Dateiname aus dem Pfad (dekodiert, ohne Query); Freigabe-Links ohne
+   Dateinamen (…/:b:/s/…) bekommen «Dokument öffnen». */
+function vertragName(url) {
+  try {
+    const u = new URL(url); let name = "";
+    const file = u.searchParams.get("file") || u.searchParams.get("sourcedoc") || "";
+    if (file && /\.[a-z0-9]{2,5}$/i.test(file)) name = file;
+    if (!name) { const seg = u.pathname.split("/").filter(Boolean).pop() || ""; if (/\.[a-z0-9]{2,5}$/i.test(seg)) name = seg; }
+    name = decodeURIComponent(name).replace(/^\{?[0-9a-f-]{36}\}?$/i, "");
+    return name || "Dokument öffnen";
+  } catch (e) { return "Dokument öffnen"; }
+}
 function vertragLink(custId, art) {
   const raw = (crmVertragLinks || {})[String(custId)];
   if (!raw) return "";
