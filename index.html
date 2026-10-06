@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.381.0"></script>
-<script src="apriko-api.js?v=1.381.0"></script>
-<script src="lohncheck.js?v=1.381.0"></script>
-<script src="personalbudget.js?v=1.381.0"></script>
-<script src="jahresbudget.js?v=1.381.0"></script>
-<script src="budgetpositionen.js?v=1.381.0"></script>
-<script src="lohnchecklistetemp.js?v=1.381.0"></script>
-<script src="apriko-endpunkte.js?v=1.381.0"></script>
+<script src="apriko-filters.js?v=1.382.0"></script>
+<script src="apriko-api.js?v=1.382.0"></script>
+<script src="lohncheck.js?v=1.382.0"></script>
+<script src="personalbudget.js?v=1.382.0"></script>
+<script src="jahresbudget.js?v=1.382.0"></script>
+<script src="budgetpositionen.js?v=1.382.0"></script>
+<script src="lohnchecklistetemp.js?v=1.382.0"></script>
+<script src="apriko-endpunkte.js?v=1.382.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1013,7 +1013,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.381.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.382.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -7456,7 +7456,7 @@ function apChHtml() {
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <label title="Entitätstyp für entityTypes — auf dieser Instanz ist «EntityChange» der Änderungsindex (Millionen Einträge, darum immer mit Entity-ID oder Initiator filtern); «Change» ist leer">Typ ${inp("entityType", "110px")}</label>
       <label title="entityId = ID des Objekts, dessen Änderungen gelistet werden (Kunde, Einsatz, Vertrag …)">Entity-ID ${inp("entityId", "300px", "ID aus Suche oder einfügen")}</label>${st.entityName ? `<span style="color:var(--accent)">${escape(st.entityName)}</span>` : ""}
-      <label title="initiators = Name des ChangeTrackers, z.B. PercentagePlacementInvolvementChangeTracker, StaffLeasePlacementChangeTracker, CustomerStaffingAgreementChangeTracker">Initiator ${inp("initiator", "280px", "z.B. StaffLeasePlacementChangeTracker")}</label>
+      <label title="initiators = exakter Name, wie er in der Spalte Initiatoren steht (z.B. PercentagePlacementInvolvementPlacementContextMutation, StaffLeasePlacementChangeTracker) — Klick auf einen Wert in der Tabelle übernimmt ihn">Initiator ${inp("initiator", "280px", "z.B. StaffLeasePlacementChangeTracker")}</label>
       <label>Von ${inp("von", "130px", "", "date")}</label><label>Bis ${inp("bis", "130px", "", "date")}</label>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -7482,7 +7482,7 @@ function apChHtml() {
     ${apChSichtbar().map((c, i) => { const a = st.refs[c.activityId] || {}; const ent = st.refs[c.entityId]; const z = apChDiffZeilen(c.diff); const offen = st.offen[i]; const show = offen ? z : z.slice(0, 6);
       return `<tr><td style="white-space:nowrap;font-family:var(--font-mono)">${zeit(c.createdTime || a.activityTime)}</td><td>${escape(a.actionName || "")}</td><td>${escape(apChExecutor(a))}</td>
         <td title="${escape(c.entityId || "")}">${escape(ent ? apChName(ent) + (ent.type ? " · " + ent.type : "") : (c.entityId || "").slice(0, 12) + "…")}</td><td>${escape(c.entityState || "")}</td><td style="font-family:var(--font-mono);text-align:right">${escape(c.entityVersion ?? "")}</td>
-        <td style="font-size:10.5px;color:var(--text-dim)">${(c.initiators || []).map(x => escape(String(x).replace(/ChangeTracker$/, ""))).join("<br>")}</td>
+        <td style="font-size:10.5px;color:var(--text-dim)">${(c.initiators || []).map(x => `<a href="#" onclick="apChState.initiator=${tkJs(String(x))};apChLaden(false);return false" title="Nach diesem Initiator filtern (exakter Wert)" style="color:inherit;text-decoration:none;border-bottom:1px dotted">${escape(String(x))}</a>`).join("<br>")}</td>
         <td>${show.length ? `<table style="font-size:11px;border-collapse:collapse">${show.map(d => `<tr><td style="padding:1px 8px 1px 0;color:var(--text-dim);white-space:nowrap">${escape(d[0])}</td><td style="padding:1px 6px;color:var(--danger);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escape(d[1])}">${escape(d[1])}</td><td>→</td><td style="padding:1px 6px;color:var(--accent);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escape(d[2])}">${escape(d[2])}</td></tr>`).join("")}</table>${z.length > 6 ? `<a href="#" onclick="apChState.offen[${i}]=!apChState.offen[${i}];render();return false" style="font-size:10.5px">${offen ? "weniger" : "… " + (z.length - 6) + " weitere Felder"}</a>` : ""}` : `<span style="color:var(--text-faint)">${c.diff ? escape(JSON.stringify(c.diff).slice(0, 200)) : "—"}</span>`}</td></tr>`; }).join("")}
     </tbody></table></div><div style="font-size:11px;color:var(--text-faint);margin-top:6px">${apChSichtbar().length} Änderungen angezeigt · ${st.rows.length} geladen${st.initiator.trim() ? " · " + st.rows.filter(c => !apChInitiatorPasst(c)).length + " ohne «" + escape(st.initiator.trim()) + "» in initiators" : ""}${st.total !== null ? " von " + st.total : ""} · ${Object.keys(st.refs).length} Referenzen aufgelöst</div>`;
   return kopf + tbl;
