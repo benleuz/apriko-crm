@@ -11,7 +11,7 @@
    Abrechnung sind im Detail-Modal sichtbar, damit die Erkennung
    iterativ nachgeschärft werden kann. */
 
-const LC_VERSION = "1.136.0";
+const LC_VERSION = "1.137.0";
 const lcState = {
   von: 1000, bis: 9999,
   slips: [],          // [{id, file, pages:[], name, key, ahv, persNr, periode, rows:[], header:[], issues:[]}]
@@ -475,17 +475,23 @@ function lcCheckAll(slips) {
       add(s, "gelb", "Ferienrückbehalt", "Ferienrückbehalt " + lcFmt(ferienRb.betrag) + " ≠ Ferienvergütung " + lcFmt(ferien.betrag) + ".");
     // Anzahl Vorschussgebühren (6390) vs. Anzahl Vorschüsse (8105)
     const vorschuesse = s.rows.filter(r => r.code === 8105 || (/^Vorschuss\b/i.test(r.label) && r.code >= 8000 && r.code < 8500));
-    const gebuehr = s.rows.find(r => r.code === 6390 || /Vorschussgebühr/i.test(r.label));
-    if (vorschuesse.length && gebuehr && gebuehr.anzahl !== null && !lcNear(gebuehr.anzahl, vorschuesse.length)) {
+    // Alle Vorschussgebühr-Zeilen (auch monatsübergreifend, z.B. "August 2026" + "September 2026")
+    // zusammenzählen — die Anzahl kann über mehrere Positionen verteilt sein.
+    const gebuehren = s.rows.filter(r => !r.isTotal && (r.code === 6390 || /Vorschussgeb/i.test(r.label)));
+    const gebAnzahl = gebuehren.some(r => r.anzahl !== null) ? gebuehren.reduce((a, r) => a + (r.anzahl || 0), 0) : null;
+    const gebDetail = gebuehren.length > 1 ? " (" + gebuehren.map(r => { const m = r.label.match(/(Jan(?:uar)?|Feb(?:ruar)?|März|Maerz|Apr(?:il)?|Mai|Jun[i]?|Jul[i]?|Aug(?:ust)?|Sep(?:tember)?|Okt(?:ober)?|Nov(?:ember)?|Dez(?:ember)?)\.?\s*\d{2,4}/i); return lcFmt(r.anzahl || 0) + (m ? " " + m[0] : ""); }).join(" + ") + ")" : "";
+    if (vorschuesse.length && gebuehren.length && gebAnzahl !== null && !lcNear(gebAnzahl, vorschuesse.length)) {
       // Punkt 8: kundenspezifische Regeln berücksichtigen — bei hinterlegtem Hinweis nicht hart als
       // Differenz werten (der Kunde kann z.B. nur für bestimmte Wochen Vorschussgebühren vereinbart
       // haben), sondern informativ mit der hinterlegten Regel zusammen anzeigen.
       const regeln = (lcState.kundenregeln && lcState.kundenregeln.hinweise) || [];
       if (regeln.length) {
-        add(s, "grau", "Vorschuss (Kundenregel)", vorschuesse.length + " Vorschüsse, " + lcFmt(gebuehr.anzahl) + " Vorschussgebühren — weicht von der Standardregel ab, aber Kundenhinweis hinterlegt: „" + regeln.join(" / ") + "\" — bitte anhand der Regel prüfen.");
+        add(s, "grau", "Vorschuss (Kundenregel)", vorschuesse.length + " Vorschüsse, " + lcFmt(gebAnzahl) + " Vorschussgebühren" + gebDetail + " — weicht von der Standardregel ab, aber Kundenhinweis hinterlegt: „" + regeln.join(" / ") + "\" — bitte anhand der Regel prüfen.");
       } else {
-        add(s, "gelb", "Vorschuss", vorschuesse.length + " Vorschüsse, aber " + lcFmt(gebuehr.anzahl) + " Vorschussgebühren verrechnet.");
+        add(s, "gelb", "Vorschuss", vorschuesse.length + " Vorschüsse, aber " + lcFmt(gebAnzahl) + " Vorschussgebühren verrechnet" + gebDetail + ".");
       }
+    } else if (vorschuesse.length && gebuehren.length > 1 && gebAnzahl !== null) {
+      add(s, "grau", "Vorschuss", vorschuesse.length + " Vorschüsse, " + lcFmt(gebAnzahl) + " Vorschussgebühren" + gebDetail + " — stimmt (monatsübergreifend zusammengezählt).");
     }
     // Basis × Ansatz = Betrag
     for (const r of s.rows) {

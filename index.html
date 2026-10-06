@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.368.0"></script>
-<script src="apriko-api.js?v=1.368.0"></script>
-<script src="lohncheck.js?v=1.368.0"></script>
-<script src="personalbudget.js?v=1.368.0"></script>
-<script src="jahresbudget.js?v=1.368.0"></script>
-<script src="budgetpositionen.js?v=1.368.0"></script>
-<script src="lohnchecklistetemp.js?v=1.368.0"></script>
-<script src="apriko-endpunkte.js?v=1.368.0"></script>
+<script src="apriko-filters.js?v=1.371.0"></script>
+<script src="apriko-api.js?v=1.371.0"></script>
+<script src="lohncheck.js?v=1.371.0"></script>
+<script src="personalbudget.js?v=1.371.0"></script>
+<script src="jahresbudget.js?v=1.371.0"></script>
+<script src="budgetpositionen.js?v=1.371.0"></script>
+<script src="lohnchecklistetemp.js?v=1.371.0"></script>
+<script src="apriko-endpunkte.js?v=1.371.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1013,7 +1013,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.368.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.371.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -8567,7 +8567,9 @@ async function tkUpload(input) {
   if (rows.length) { spalten = Object.keys(rows[0]).filter(h => !/^__EMPTY/.test(h)); zeilen = rows; }
   if (!zeilen.length) { toast("Keine Zeilen gefunden.", true); return; }
   // Standardzeitraum: ab 1. Januar des laufenden Jahres (ältere Tickets bleiben per Filter abrufbar)
-  tkState = { ...tkState, datei: file.name, spalten, zeilen, map: tkAutoMap(spalten), von: new Date().getFullYear() + "-01-01", bis: "", filterKunde: "", filterArt: "" };
+  tkMatchCache = {};
+  tkState = { ...tkState, datei: file.name, spalten, zeilen, map: tkAutoMap(spalten), von: new Date().getFullYear() + "-01-01", bis: "", filterKunde: "", filterArt: "", filterSeg: "" };
+  if (!crmParameter) { try { await parameterLaden(false); } catch (e) {} }
   toast(zeilen.length + " Tickets geladen · " + spalten.length + " Spalten");
   render();
 }
@@ -8580,9 +8582,16 @@ function tkGefiltert() {
     if (tkState.bis && d && d > new Date(tkState.bis + "T23:59:59")) return false;
     if (tkState.filterKunde && m.kunde && String(z[m.kunde] || "") !== tkState.filterKunde) return false;
     if (tkState.filterArt && m.art && String(z[m.art] || "") !== tkState.filterArt) return false;
+    if (tkState.filterSeg && m.kunde) {
+      const c = tkMatchKundeCached(String(z[m.kunde] || "").trim()); const seg = c ? (c.Segment || "Nur SaaS") : "";
+      if (tkState.filterSeg === "saas" && seg !== "Nur SaaS") return false;
+      if (tkState.filterSeg === "bpo" && !(seg === "Nur BPO" || seg === "BPO inkl. SaaS" || seg === "SaaS und BPO")) return false;
+    }
     return true;
   });
 }
+let tkMatchCache = {};
+function tkMatchKundeCached(name) { if (!(name in tkMatchCache)) tkMatchCache[name] = tkMatchKunde(name); return tkMatchCache[name]; }
 function tkGruppe(zeilen, feld) { const g = {}; zeilen.forEach(z => { const k = feld ? (String(z[feld] || "").trim() || "(leer)") : "(nicht zugeordnet)"; g[k] = (g[k] || 0) + 1; }); return Object.entries(g).sort((a, b) => b[1] - a[1]); }
 function tkLoesungszeit(zeilen) {
   const m = tkState.map; if (!m.erstellt || !m.geloest) return null;
@@ -8604,7 +8613,18 @@ async function tkExportExcel() {
 }
 /* ---------- Tickets × Ertrag: Ticket-Kunden mit dem Kundenstamm abgleichen und Umsatz gegenüberstellen ---------- */
 function tkNormName(n) { return String(n || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\b(ag|gmbh|sa|sarl|sagl|kg|ltd|inc|schweiz|swiss|personal|personalberatung|jobs?|group|holding|services?)\b/g, " ").replace(/[^a-z0-9]+/g, " ").trim(); }
+function tkZuordnung() { if (!crmParameter) return {}; if (!crmParameter.ticketsZuordnung) crmParameter.ticketsZuordnung = {}; return crmParameter.ticketsZuordnung; }
+async function tkZuordnungSetzen(name, custId) {
+  await parameterLaden(false); const z = tkZuordnung(); tkMatchCache = {};
+  if (custId === "") delete z[name]; else z[name] = custId;   // "" = Automatik, "-" = bewusst kein Kunde
+  try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  render();
+}
 function tkMatchKunde(name) {
+  const z = tkZuordnung(); if (z[name] !== undefined) { if (z[name] === "-") return null; return cache.customers.find(c => String(c.id) === String(z[name])) || null; }
+  return tkMatchKundeAuto(name);
+}
+function tkMatchKundeAuto(name) {
   const k = tkNormName(name); if (!k) return null;
   const kand = cache.customers.map(c => { const comp = cache.companies.find(x => x.id == c.CompanyId); return { c, n1: tkNormName(c.Title), n2: tkNormName(comp && comp.Title) }; });
   let hit = kand.find(x => x.n1 === k || x.n2 === k);
@@ -8620,6 +8640,23 @@ function tkUmsatzKunde(c, von, bis) {
   }
   return { sum, monate };
 }
+function tkKundenBalken(kunden, total) {
+  // Tickets je Kunde mit zweitem Balken (Umsatz im Zeitraum) und Sortierung nach Tickets oder Umsatz
+  const sortU = tkState.kundenSort === "umsatz";
+  const rows = kunden.map(([k, v]) => { const c = (cache.customers.length ? tkMatchKunde(k) : null); const u = c ? tkUmsatzKunde(c, tkState.von, tkState.bis).sum : null; return { k, v, u }; });
+  if (sortU) rows.sort((a, b) => (b.u || 0) - (a.u || 0) || b.v - a.v);
+  const maxV = Math.max(1, ...rows.map(r => r.v)), maxU = Math.max(1, ...rows.map(r => r.u || 0)), sumU = rows.reduce((a, r) => a + (r.u || 0), 0);
+  const fmt = x => Math.round(x).toLocaleString("de-CH");
+  const sortBtn = (id, label) => `<button class="btn btn-sm" onclick="event.stopPropagation();tkState.kundenSort='${id}';render()" style="padding:1px 7px;font-size:11px;${(tkState.kundenSort || "tickets") === id ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">${label}</button>`;
+  return `<div class="card" style="padding:12px 14px"><div style="font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">Tickets je Kunde <span style="font-weight:400;color:var(--text-faint);font-size:11px">${rows.length} Werte</span>
+      <span style="margin-left:auto;display:flex;gap:4px;align-items:center;font-size:11px;font-weight:400;color:var(--text-faint)">Sortieren: ${sortBtn("tickets", "Tickets")}${sortBtn("umsatz", "Umsatz")}</span></div>
+    <div style="display:flex;gap:12px;font-size:10px;color:var(--text-faint);margin-bottom:6px"><span><span style="display:inline-block;width:10px;height:6px;border-radius:2px;background:${tkFarbe(1)};margin-right:4px"></span>Tickets</span><span><span style="display:inline-block;width:10px;height:6px;border-radius:2px;background:${tkFarbe(4)};margin-right:4px"></span>Umsatz im Zeitraum (CHF, SaaS + BPO)</span></div>
+    ${rows.slice(0, 25).map(r => `<div onclick="tkState.filterKunde=tkState.filterKunde===${JSON.stringify(r.k)}?'':${JSON.stringify(r.k)};render()" style="display:grid;grid-template-columns:minmax(140px,38%) 1fr 84px;gap:8px;align-items:center;padding:4px 0;cursor:pointer;border-bottom:1px solid var(--border)" title="${escape(r.k)} · ${r.v} Tickets${r.u !== null ? " · CHF " + fmt(r.u) : " · kein CRM-Kunde zugeordnet"}">
+      <div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escape(r.k)} <a href="#" onclick="event.stopPropagation();tkState.filterKunde=${JSON.stringify(r.k)};tkState.tab='liste';tkState.listeMax=100;render();return false" title="Tickets anzeigen" style="color:var(--text-faint);text-decoration:none;margin-left:4px">🔍</a></div>
+      <div style="display:grid;gap:3px"><div style="background:var(--bg-hover);border-radius:4px;height:10px;overflow:hidden"><div style="height:100%;width:${Math.round(r.v / maxV * 100)}%;background:linear-gradient(90deg,${tkFarbe(1)},${tkFarbe(2)});border-radius:4px"></div></div>
+        <div style="background:var(--bg-hover);border-radius:4px;height:10px;overflow:hidden">${r.u !== null ? `<div style="height:100%;width:${Math.round(r.u / maxU * 100)}%;background:linear-gradient(90deg,${tkFarbe(4)},${tkFarbe(5)});border-radius:4px"></div>` : ""}</div></div>
+      <div style="font-family:var(--font-mono);font-size:11px;text-align:right;line-height:1.25"><div>${r.v} <span style="color:var(--text-faint);font-size:10px">${Math.round(r.v / total * 100)}%</span></div><div style="color:${tkFarbe(4)}">${r.u !== null ? fmt(r.u) + ` <span style="color:var(--text-faint);font-size:10px">${sumU ? Math.round(r.u / sumU * 100) : 0}%</span>` : `<span style="color:var(--text-faint)">—</span>`}</div></div></div>`).join("")}${rows.length > 25 ? `<div style="font-size:11px;color:var(--text-faint);margin-top:4px">… ${rows.length - 25} weitere</div>` : ""}</div>`;
+}
 function tkErtragHtml(zeilen, kunden) {
   const m = tkState.map; if (!m.kunde || !cache.customers.length) return `<div class="empty">Kundenstamm nicht geladen oder keine Kundenspalte.</div>`;
   const rows = kunden.map(([name, n]) => { const c = tkMatchKunde(name); const u = c ? tkUmsatzKunde(c, tkState.von, tkState.bis) : null; return { name, n, c, umsatz: u ? u.sum : null, segment: c ? c.Segment : "" }; });
@@ -8632,7 +8669,15 @@ function tkErtragHtml(zeilen, kunden) {
   const punkte = gem.map((r, i) => { const x = px + (r.umsatz / maxU) * (W - px - 30), y = H - py - (r.n / maxN) * (H - py - 30); return `<g><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(6 + 10 * Math.sqrt(r.n / maxN)).toFixed(1)}" fill="${tkFarbe(i)}" fill-opacity=".75" stroke="var(--bg-card)"><title>${escape(r.name)}: ${r.n} Tickets · CHF ${fmt(r.umsatz)} · CHF ${fmt(r.proTicket)} pro Ticket</title></circle><text x="${(x + 10).toFixed(1)}" y="${(y + 4).toFixed(1)}" font-size="10" fill="var(--text-dim)">${escape(r.name.length > 18 ? r.name.slice(0, 17) + "…" : r.name)}</text></g>`; }).join("");
   const scatter = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto"><line x1="${px}" y1="${H - py}" x2="${W - 20}" y2="${H - py}" stroke="var(--border)"/><line x1="${px}" y1="10" x2="${px}" y2="${H - py}" stroke="var(--border)"/><text x="${W - 20}" y="${H - 6}" font-size="10" text-anchor="end" fill="var(--text-faint)">Umsatz im Zeitraum (CHF) →</text><text x="12" y="16" font-size="10" fill="var(--text-faint)">Tickets ↑</text>${punkte}</svg>`;
   const tab = (titel, liste, sub) => `<div class="card" style="padding:12px 14px"><div style="font-weight:600">${titel}</div><div style="font-size:11px;color:var(--text-faint);margin-bottom:6px">${sub}</div><table style="font-size:12px;width:100%"><tr style="color:var(--text-dim)"><th style="text-align:left">Kunde</th><th style="text-align:left">Segment</th><th style="text-align:right">Tickets</th><th style="text-align:right">Umsatz</th><th style="text-align:right">CHF/Ticket</th><th style="text-align:right">Tickets je 10k</th></tr>${liste.map(r => `<tr><td style="padding:3px 6px 3px 0">${escape(r.name)}</td><td style="color:var(--text-dim)">${escape(r.segment || "")}</td><td style="text-align:right;font-family:var(--font-mono)">${r.n}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(r.umsatz)}</td><td style="text-align:right;font-family:var(--font-mono);font-weight:600;color:${r.proTicket >= 500 ? "var(--accent)" : r.proTicket < 150 ? "var(--danger)" : "inherit"}">${fmt(r.proTicket)}</td><td style="text-align:right;font-family:var(--font-mono)">${r.ticketsPro10k.toFixed(1)}</td></tr>`).join("")}</table></div>`;
+  const z = tkZuordnung();
+  const custOpts = cache.customers.slice().sort((a, b) => (a.Title || "").localeCompare(b.Title || "")).map(c => `<option value="${c.id}">${escape(c.Title)}${c.Segment ? " · " + escape(c.Segment) : ""}</option>`).join("");
+  const zuordnung = `<details class="card" style="padding:10px 14px" ${ohne.length ? "open" : ""}><summary style="cursor:pointer;font-weight:600">Kunden-Zuordnung <span style="font-weight:400;color:var(--text-faint);font-size:11px">Ticket-Organisation → CRM-Kunde · Automatik als Vorschlag, manuell übersteuerbar, gespeichert in den Parametern</span></summary>
+    <table style="font-size:12px;width:100%;margin-top:6px"><tr style="color:var(--text-dim)"><th style="text-align:left">Ticket-Organisation</th><th style="text-align:right">Tickets</th><th style="text-align:left">CRM-Kunde</th><th></th></tr>
+    ${rows.map(r => { const auto = tkMatchKundeAuto(r.name); const man = z[r.name]; return `<tr><td style="padding:3px 6px 3px 0">${escape(r.name)}</td><td style="text-align:right;font-family:var(--font-mono)">${r.n}</td><td style="padding:3px 6px">
+      <select onchange="tkZuordnungSetzen(${JSON.stringify(r.name)}, this.value)" style="padding:2px 5px;max-width:320px;${man !== undefined ? "border-color:var(--accent)" : ""}"><option value="" ${man === undefined ? "selected" : ""}>Automatik${auto ? ": " + escape(auto.Title) : ": kein Treffer"}</option><option value="-" ${man === "-" ? "selected" : ""}>— kein Kunde (ausblenden)</option>${custOpts.replace(`value="${man}"`, `value="${man}" selected`)}</select></td>
+      <td style="font-size:11px;color:var(--text-faint)">${man !== undefined ? "manuell" : (auto ? "automatisch" : "<span style=\"color:var(--warn)\">offen</span>")}</td></tr>`; }).join("")}</table></details>`;
   return `<div style="display:grid;gap:10px">
+    ${zuordnung}
     <div class="card" style="padding:12px 14px"><div style="font-weight:600">Tickets vs. Umsatz <span style="font-weight:400;color:var(--text-faint);font-size:11px">${gem.length} Kunden zugeordnet · Umsatz = SaaS + BPO aus den Monatsumsätzen im Zeitraum · rechts unten = viel Umsatz, wenig Tickets</span></div>${scatter}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${tab("Beste Relation", [...gem].sort((a, b) => b.proTicket - a.proTicket).slice(0, 12), "meister Umsatz pro Ticket")}${tab("Schlechteste Relation", [...gem].sort((a, b) => a.proTicket - b.proTicket).slice(0, 12), "wenig Umsatz pro Ticket — Aufwandstreiber")}</div>
     ${ohne.length || nullUmsatz.length ? `<div class="card" style="padding:10px 14px;font-size:11px;color:var(--text-dim)">${ohne.length ? `Nicht im Kundenstamm gefunden: ${ohne.map(r => escape(r.name) + " (" + r.n + ")").join(", ")}. ` : ""}${nullUmsatz.length ? `Ohne Umsatz im Zeitraum: ${nullUmsatz.map(r => escape(r.name) + " (" + r.n + ")").join(", ")}.` : ""}</div>` : ""}</div>`;
@@ -8754,8 +8799,9 @@ function renderTickets(el) {
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center"><strong>${escape(tkState.datei)}</strong>
         <label>Von <input type="date" value="${tkState.von}" onchange="tkState.von=this.value;render()" style="padding:2px 5px"></label><label>Bis <input type="date" value="${tkState.bis}" onchange="tkState.bis=this.value;render()" style="padding:2px 5px"></label>
         <label>Kunde <select onchange="tkState.filterKunde=this.value;render()" style="padding:2px 5px"><option value="">alle</option>${kundenAlle.map(([k]) => `<option value="${escape(k)}" ${tkState.filterKunde === k ? "selected" : ""}>${escape(k)}</option>`).join("")}</select></label>
+        <label>Segment <select onchange="tkState.filterSeg=this.value;render()" style="padding:2px 5px" title="Nach Segment des zugeordneten CRM-Kunden"><option value="">alle</option><option value="saas" ${tkState.filterSeg === "saas" ? "selected" : ""}>Nur SaaS</option><option value="bpo" ${tkState.filterSeg === "bpo" ? "selected" : ""}>BPO (inkl. BPO inkl. SaaS)</option></select></label>
         <label>${escape(m.art || "Art")} <select onchange="tkState.filterArt=this.value;render()" style="padding:2px 5px;max-width:280px"><option value="">alle</option>${artenAlle.map(([k]) => `<option value="${escape(k)}" ${tkState.filterArt === k ? "selected" : ""}>${escape(k)}</option>`).join("")}</select></label>
-        ${tkState.von || tkState.bis || tkState.filterKunde || tkState.filterArt ? `<button class="btn btn-sm" onclick="tkState.von='';tkState.bis='';tkState.filterKunde='';tkState.filterArt='';render()">✕ Filter löschen</button>` : ""}</div>
+        ${tkState.von || tkState.bis || tkState.filterKunde || tkState.filterArt || tkState.filterSeg ? `<button class="btn btn-sm" onclick="tkState.von='';tkState.bis='';tkState.filterKunde='';tkState.filterArt='';tkState.filterSeg='';render()">✕ Filter löschen</button>` : ""}</div>
       <details style="margin-top:8px"><summary style="cursor:pointer;color:var(--text-dim)">Spalten-Zuordnung</summary><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">${TK_FELDER.map(([k, label]) => `<label style="font-size:11px;color:var(--text-dim)">${label}<br><select onchange="tkState.map['${k}']=this.value;render()" style="padding:2px 5px">${opt(m[k] || "")}</select></label>`).join("")}</div></details>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-bottom:10px">
@@ -8767,7 +8813,7 @@ function renderTickets(el) {
     </div>
     <div style="display:flex;gap:4px;margin-bottom:10px">${tabs.map(([id, l]) => `<button class="btn btn-sm" onclick="tkState.tab='${id}';render()" style="${tkState.tab === id ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">${l}</button>`).join("")}</div>
     ${tkState.tab === "anliegen" ? `<div style="display:grid;grid-template-columns:1.2fr 1fr;gap:10px">${balken("Anliegen / " + escape(m.art || "Art"), arten, n, m.art, "filterArt", 0)}<div style="display:grid;gap:10px;align-content:start">${konzHtml}${balken("Status", status, n, m.status, null, 6)}</div></div>` : ""}
-    ${tkState.tab === "kunden" ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${balken("Tickets je Kunde", kunden, n, m.kunde, "filterKunde", 1)}${balken("Bearbeiter", bearb, n, m.bearbeiter, null, 3)}</div>` : ""}
+    ${tkState.tab === "kunden" ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${tkKundenBalken(kunden, n)}${balken("Bearbeiter", bearb, n, m.bearbeiter, null, 3)}</div>` : ""}
     ${tkState.tab === "verlauf" ? verlauf : ""}
     ${tkState.tab === "heat" ? heat : ""}
     ${tkState.tab === "ertrag" ? tkErtragHtml(zeilen, kunden) : ""}
