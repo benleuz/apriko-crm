@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.376.0"></script>
-<script src="apriko-api.js?v=1.376.0"></script>
-<script src="lohncheck.js?v=1.376.0"></script>
-<script src="personalbudget.js?v=1.376.0"></script>
-<script src="jahresbudget.js?v=1.376.0"></script>
-<script src="budgetpositionen.js?v=1.376.0"></script>
-<script src="lohnchecklistetemp.js?v=1.376.0"></script>
-<script src="apriko-endpunkte.js?v=1.376.0"></script>
+<script src="apriko-filters.js?v=1.377.0"></script>
+<script src="apriko-api.js?v=1.377.0"></script>
+<script src="lohncheck.js?v=1.377.0"></script>
+<script src="personalbudget.js?v=1.377.0"></script>
+<script src="jahresbudget.js?v=1.377.0"></script>
+<script src="budgetpositionen.js?v=1.377.0"></script>
+<script src="lohnchecklistetemp.js?v=1.377.0"></script>
+<script src="apriko-endpunkte.js?v=1.377.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1013,7 +1013,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.376.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.377.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -7348,13 +7348,13 @@ function apReset() {
    Change: { activityId, diff, entityId, entitySchemaRevision, entityState, entityVersion, initiators[], createdTime }
    Activity: { actionName, activityTime, executor, initiator, contextEntityId } — über includes/resolveReferences
    in result.references mitgeliefert. Filterformat wie überall: feld|op|wert|text|false|false|["G1"]. */
-let apChState = { entityType: "Change", entityId: "", entityName: "", initiator: "", von: "", bis: "", includes: "Activity", resolve: true, pageSize: 50, pageIndex: 0, extra: "", rows: [], refs: {}, total: null, loading: false, fehler: "", raw: false, suche: "", sucheTyp: "LegalPerson", treffer: [], offen: {} };
+let apChState = { datumTyp: "date", sort: true, diag: "", entityType: "Change", entityId: "", entityName: "", initiator: "", von: "", bis: "", includes: "Activity", resolve: true, pageSize: 50, pageIndex: 0, extra: "", rows: [], refs: {}, total: null, loading: false, fehler: "", raw: false, suche: "", sucheTyp: "LegalPerson", treffer: [], offen: {} };
 function apChFilters() {
   const f = [];
   if (apChState.entityId.trim()) f.push('entityId|=|' + JSON.stringify(apChState.entityId.trim()) + '|text|false|false|["G1"]');
   if (apChState.initiator.trim()) f.push('initiators|=|' + JSON.stringify(apChState.initiator.trim()) + '|text|false|false|["G1"]');
-  if (apChState.von) f.push('createdTime|>=|' + JSON.stringify(apChState.von + "T00:00:00Z") + '|date|false|false|["G1"]');
-  if (apChState.bis) f.push('createdTime|<=|' + JSON.stringify(apChState.bis + "T23:59:59Z") + '|date|false|false|["G1"]');
+  if (apChState.von) f.push('createdTime|>=|' + JSON.stringify(apChState.von + "T00:00:00Z") + '|' + apChState.datumTyp + '|false|false|["G1"]');
+  if (apChState.bis) f.push('createdTime|<=|' + JSON.stringify(apChState.bis + "T23:59:59Z") + '|' + apChState.datumTyp + '|false|false|["G1"]');
   if (apChState.extra.trim()) apChState.extra.split("\n").map(x => x.trim()).filter(Boolean).forEach(x => f.push(x));
   return f;
 }
@@ -7364,7 +7364,8 @@ async function apChLaden(weiter) {
   apChState.loading = true; apChState.fehler = ""; render();
   try {
     rpApiUse();
-    const model = { entityTypes: apChState.entityType.trim() || "Change", pageIndex: apChState.pageIndex, pageSize: Math.min(120, Math.max(1, +apChState.pageSize || 50)), resolveReferences: !!apChState.resolve, sortOptions: "createdTime|DESC|false" };
+    const model = { entityTypes: apChState.entityType.trim() || "Change", pageIndex: apChState.pageIndex, pageSize: Math.min(120, Math.max(1, +apChState.pageSize || 50)), resolveReferences: !!apChState.resolve };
+    if (apChState.sort) model.sortOptions = "createdTime|DESC|false";
     const f = apChFilters(); if (f.length) model.filters = f;
     if (apChState.includes.trim()) model.includes = apChState.includes.split(",").map(x => x.trim()).filter(Boolean);
     apChState.letztesModel = model;
@@ -7375,6 +7376,28 @@ async function apChLaden(weiter) {
     toast(hits.length + " Änderungen geladen" + (apChState.total !== null ? " (total " + apChState.total + ")" : ""));
   } catch (e) { apChState.fehler = (e && e.message) || String(e); }
   apChState.loading = false; render();
+}
+/* Schrittweise herausfinden, welcher Teil der Abfrage den HTTP 500 auslöst */
+async function apChDiagnose() {
+  if (apChState.loading) return; apChState.loading = true; apChState.diag = "Diagnose läuft …"; apChState.fehler = ""; render();
+  const typ = apChState.entityType.trim() || "Change"; const zeilen = []; rpApiUse();
+  const probe = async (name, model) => { const t0 = Date.now(); try { const r = await AprikoApi.models.query(model); const n = (r && r.results || []).length; zeilen.push("✅ " + name + " → " + n + " Treffer" + (typeof r.totalCount === "number" ? " (total " + r.totalCount + ")" : "") + " · " + (Date.now() - t0) + " ms"); return true; } catch (e) { zeilen.push("❌ " + name + " → " + ((e && e.message) || e)); return false; } };
+  const basis = { pageIndex: 0, pageSize: 5, resolveReferences: false };
+  const okTyp = {};
+  for (const t of [typ, "EntityChange", "Activity"].filter((v, i, a) => a.indexOf(v) === i)) okTyp[t] = await probe("Typ " + t + " ohne Filter/Sortierung", { ...basis, entityTypes: t });
+  const t = Object.keys(okTyp).find(k => okTyp[k]) || typ;
+  await probe(t + " + sortOptions createdTime|DESC|false", { ...basis, entityTypes: t, sortOptions: "createdTime|DESC|false" });
+  await probe(t + " + sortOptions createdTime|DESC|true", { ...basis, entityTypes: t, sortOptions: "createdTime|DESC|true" });
+  const ini = apChState.initiator.trim() || "StaffLeasePlacementChangeTracker";
+  await probe(t + " + Filter initiators = " + ini, { ...basis, entityTypes: t, filters: 'initiators|=|' + JSON.stringify(ini) + '|text|false|false|["G1"]' });
+  await probe(t + " + Filter initiators CONTAINS " + ini, { ...basis, entityTypes: t, filters: 'initiators|CONTAINS|' + JSON.stringify(ini) + '|text|false|false|["G1"]' });
+  const von = (apChState.von || "2026-01-01") + "T00:00:00Z";
+  for (const dt of ["date", "datetime", "text"]) await probe(t + " + Filter createdTime >= (" + dt + ")", { ...basis, entityTypes: t, filters: 'createdTime|>=|' + JSON.stringify(von) + '|' + dt + '|false|false|["G1"]' });
+  if (apChState.entityId.trim()) await probe(t + " + Filter entityId", { ...basis, entityTypes: t, filters: 'entityId|=|' + JSON.stringify(apChState.entityId.trim()) + '|text|false|false|["G1"]' });
+  await probe(t + " + includes Activity", { ...basis, entityTypes: t, includes: "Activity" });
+  await probe(t + " + includes Entity", { ...basis, entityTypes: t, includes: "Entity" });
+  await probe(t + " + resolveReferences", { ...basis, entityTypes: t, resolveReferences: true });
+  apChState.diag = zeilen.join("\n"); apChState.loading = false; render();
 }
 async function apChSuchen() {
   const q = apChState.suche.trim(); if (!q) return;
@@ -7423,12 +7446,16 @@ function apChHtml() {
       <label title="includes (kommagetrennt)">Includes ${inp("includes", "140px")}</label>
       <label><input type="checkbox" ${st.resolve ? "checked" : ""} onchange="apChState.resolve=this.checked"> resolveReferences</label>
       <label>pageSize ${inp("pageSize", "56px", "", "number")}</label>
+      <label><input type="checkbox" ${st.sort ? "checked" : ""} onchange="apChState.sort=this.checked"> sort createdTime DESC</label>
+      <label title="Werttyp im Datumsfilter (Position 4 des Filters)">Datumstyp <select onchange="apChState.datumTyp=this.value" style="padding:3px 5px;font-size:11.5px">${["date", "datetime", "text"].map(x => `<option ${st.datumTyp === x ? "selected" : ""}>${x}</option>`).join("")}</select></label>
+      <button class="btn btn-sm" onclick="apChDiagnose()" ${st.loading ? "disabled" : ""} title="Testet Typ, Sortierung, jeden Filter, Includes und resolveReferences einzeln und zeigt, welcher Teil den Fehler auslöst">🧪 Schrittweise testen</button>
       <label title="Zusätzliche Filterzeilen im Rohformat feld|op|wert|typ|false|false|[&quot;G1&quot;] — eine pro Zeile">Extra-Filter <textarea onchange="apChState.extra=this.value" rows="1" style="width:360px;padding:3px 6px;font-size:11px;font-family:var(--font-mono);vertical-align:middle">${escape(st.extra)}</textarea></label>
       <button class="btn btn-sm" onclick="apChLaden(false)" ${st.loading ? "disabled" : ""} style="background:var(--accent);color:#fff;border-color:var(--accent)">${st.loading ? "Lädt …" : "▶ Änderungen laden"}</button>
       ${st.rows.length ? `<button class="btn btn-sm" onclick="apChLaden(true)" ${st.loading || (st.total !== null && st.rows.length >= st.total) ? "disabled" : ""}>+ weitere</button><button class="btn btn-sm" onclick="apChExportExcel()">⇩ Excel</button><label><input type="checkbox" ${st.raw ? "checked" : ""} onchange="apChState.raw=this.checked;render()"> JSON</label>` : ""}
     </div>
     ${st.letztesModel ? `<div style="font-size:10.5px;color:var(--text-faint);font-family:var(--font-mono);word-break:break-all">POST /api/models/Query ${escape(JSON.stringify(st.letztesModel))}</div>` : ""}
     ${st.fehler ? `<div style="color:var(--danger);border:1px solid var(--danger);border-radius:4px;padding:6px 10px;font-size:11.5px">⚠ ${escape(st.fehler)}</div>` : ""}
+    ${st.diag ? `<pre style="font-size:11px;margin:0;padding:8px 10px;border:1px solid var(--border);border-radius:4px;white-space:pre-wrap">${escape(st.diag)}</pre>` : ""}
   </div>`;
   if (!st.rows.length) return kopf + `<div class="empty" style="margin-top:12px">${st.loading ? "Lädt …" : "Kunde/Einsatz suchen und wählen oder Entity-ID einfügen, dann «Änderungen laden». Ohne Entity-ID werden die neuesten Änderungen der ganzen Instanz gelistet (Initiator-Filter empfohlen)."}</div>`;
   if (st.raw) return kopf + `<pre style="font-size:10.5px;max-height:70vh;overflow:auto;margin-top:10px">${escape(JSON.stringify({ results: st.rows, references: st.refs }, null, 2))}</pre>`;
