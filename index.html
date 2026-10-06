@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.380.0"></script>
-<script src="apriko-api.js?v=1.380.0"></script>
-<script src="lohncheck.js?v=1.380.0"></script>
-<script src="personalbudget.js?v=1.380.0"></script>
-<script src="jahresbudget.js?v=1.380.0"></script>
-<script src="budgetpositionen.js?v=1.380.0"></script>
-<script src="lohnchecklistetemp.js?v=1.380.0"></script>
-<script src="apriko-endpunkte.js?v=1.380.0"></script>
+<script src="apriko-filters.js?v=1.381.0"></script>
+<script src="apriko-api.js?v=1.381.0"></script>
+<script src="lohncheck.js?v=1.381.0"></script>
+<script src="personalbudget.js?v=1.381.0"></script>
+<script src="jahresbudget.js?v=1.381.0"></script>
+<script src="budgetpositionen.js?v=1.381.0"></script>
+<script src="lohnchecklistetemp.js?v=1.381.0"></script>
+<script src="apriko-endpunkte.js?v=1.381.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1013,7 +1013,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.380.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.381.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -7348,7 +7348,7 @@ function apReset() {
    Change: { activityId, diff, entityId, entitySchemaRevision, entityState, entityVersion, initiators[], createdTime }
    Activity: { actionName, activityTime, executor, initiator, contextEntityId } — über includes/resolveReferences
    in result.references mitgeliefert. Filterformat wie überall: feld|op|wert|text|false|false|["G1"]. */
-let apChState = { datumTyp: "text", datumServer: true, sort: true, diag: "", entityType: "EntityChange", entityId: "", entityName: "", initiator: "", von: "", bis: "", includes: "Activity", resolve: true, pageSize: 120, pageIndex: 0, extra: "", rows: [], refs: {}, total: null, loading: false, fehler: "", raw: false, suche: "", sucheTyp: "LegalPerson", treffer: [], offen: {} };
+let apChState = { streng: true, datumTyp: "text", datumServer: true, sort: true, diag: "", entityType: "EntityChange", entityId: "", entityName: "", initiator: "", von: "", bis: "", includes: "Activity", resolve: true, pageSize: 120, pageIndex: 0, extra: "", rows: [], refs: {}, total: null, loading: false, fehler: "", raw: false, suche: "", sucheTyp: "LegalPerson", treffer: [], offen: {} };
 function apChFilters() {
   const f = [];
   if (apChState.entityId.trim()) f.push('entityId|=|' + JSON.stringify(apChState.entityId.trim()) + '|text|false|false|["G1"]');
@@ -7382,10 +7382,17 @@ async function apChLaden(weiter) {
   } catch (e) { apChState.fehler = (e && e.message) || String(e); }
   apChState.loading = false; render();
 }
+function apChInitiatorPasst(c) {
+  const ini = apChState.initiator.trim(); if (!ini) return true;
+  const arr = Array.isArray(c.initiators) ? c.initiators : (c.initiators ? [c.initiators] : []);
+  return arr.some(x => (typeof x === "string" ? x : JSON.stringify(x)).includes(ini));
+}
 function apChSichtbar() {
-  // Von/Bis clientseitig anwenden (Server-Datumsfilter liefert auf dieser Instanz HTTP 500)
-  const v = apChState.von, b = apChState.bis; if (apChState.datumServer || (!v && !b)) return apChState.rows;
-  return apChState.rows.filter(c => { const t = (c.createdTime || "").slice(0, 10); return (!v || !t || t >= v) && (!b || !t || t <= b); });
+  // Von/Bis und Initiator clientseitig nachprüfen (Server-Filter liefert z.T. Treffer, die den Wert nicht enthalten)
+  const v = apChState.von, b = apChState.bis;
+  return apChState.rows.filter(c => { const t = (c.createdTime || "").slice(0, 10);
+    const datumOk = apChState.datumServer || ((!v || !t || t >= v) && (!b || !t || t <= b));
+    return datumOk && (!apChState.streng || apChInitiatorPasst(c)); });
 }
 /* Schrittweise herausfinden, welcher Teil der Abfrage den HTTP 500 auslöst */
 async function apChDiagnose() {
@@ -7462,14 +7469,14 @@ function apChHtml() {
       <button class="btn btn-sm" onclick="apChDiagnose()" ${st.loading ? "disabled" : ""} title="Testet Typ, Sortierung, jeden Filter, Includes und resolveReferences einzeln und zeigt, welcher Teil den Fehler auslöst">🧪 Schrittweise testen</button>
       <label title="Zusätzliche Filterzeilen im Rohformat feld|op|wert|typ|false|false|[&quot;G1&quot;] — eine pro Zeile">Extra-Filter <textarea onchange="apChState.extra=this.value" rows="1" style="width:360px;padding:3px 6px;font-size:11px;font-family:var(--font-mono);vertical-align:middle">${escape(st.extra)}</textarea></label>
       <button class="btn btn-sm" onclick="apChLaden(false)" ${st.loading ? "disabled" : ""} style="background:var(--accent);color:#fff;border-color:var(--accent)">${st.loading ? "Lädt …" : "▶ Änderungen laden"}</button>
-      ${st.rows.length ? `<button class="btn btn-sm" onclick="apChLaden(true)" ${st.loading || (st.total !== null && st.rows.length >= st.total) ? "disabled" : ""}>+ weitere</button><button class="btn btn-sm" onclick="apChExportExcel()">⇩ Excel</button><label><input type="checkbox" ${st.raw ? "checked" : ""} onchange="apChState.raw=this.checked;render()"> JSON</label>` : ""}
+      ${st.rows.length ? `<button class="btn btn-sm" onclick="apChLaden(true)" ${st.loading || (st.total !== null && st.rows.length >= st.total) ? "disabled" : ""}>+ weitere</button><button class="btn btn-sm" onclick="apChExportExcel()">⇩ Excel</button><label title="Nur Zeilen zeigen, deren initiators den Initiator-Filter wirklich enthalten (clientseitige Nachprüfung)"><input type="checkbox" ${st.streng ? "checked" : ""} onchange="apChState.streng=this.checked;render()"> streng</label><label><input type="checkbox" ${st.raw ? "checked" : ""} onchange="apChState.raw=this.checked;render()"> JSON</label>` : ""}
     </div>
     ${st.letztesModel ? `<div style="font-size:10.5px;color:var(--text-faint);font-family:var(--font-mono);word-break:break-all">POST /api/models/Query ${escape(JSON.stringify(st.letztesModel))}</div>` : ""}
     ${st.fehler ? `<div style="color:var(--danger);border:1px solid var(--danger);border-radius:4px;padding:6px 10px;font-size:11.5px">⚠ ${escape(st.fehler)}</div>` : ""}
     ${st.diag ? `<pre style="font-size:11px;margin:0;padding:8px 10px;border:1px solid var(--border);border-radius:4px;white-space:pre-wrap">${escape(st.diag)}</pre>` : ""}
   </div>`;
   if (!st.rows.length) return kopf + `<div class="empty" style="margin-top:12px">${st.loading ? "Lädt …" : "Kunde/Einsatz suchen und wählen oder Entity-ID einfügen, dann «Änderungen laden». Ohne Entity-ID werden die neuesten Änderungen der ganzen Instanz gelistet (Initiator-Filter empfohlen)."}</div>`;
-  if (st.raw) return kopf + `<pre style="font-size:10.5px;max-height:70vh;overflow:auto;margin-top:10px">${escape(JSON.stringify({ results: st.rows, references: st.refs }, null, 2))}</pre>`;
+  if (st.raw) return kopf + `<div style="font-size:11px;color:var(--text-dim);margin-top:8px">Rohantwort: erste 3 Treffer + zugehörige Referenzen (zum Kopieren)</div><pre style="font-size:10.5px;max-height:70vh;overflow:auto;margin-top:4px">${escape(JSON.stringify({ results: st.rows.slice(0, 3), references: Object.fromEntries(Object.entries(st.refs).filter(([id]) => st.rows.slice(0, 3).some(c => c.activityId === id || c.entityId === id))) }, null, 2))}</pre>`;
   const zeit = t => { if (!t) return ""; const d = new Date(t); return isNaN(d) ? String(t) : d.toLocaleDateString("de-CH") + " " + d.toLocaleTimeString("de-CH", { hour: "2-digit", minute: "2-digit" }); };
   const tbl = `<div class="table-wrap" style="margin-top:10px"><table style="font-size:11.5px"><thead><tr><th>Zeit</th><th>Aktion</th><th>Durch</th><th>Entity</th><th>Status</th><th>Vers.</th><th>Initiatoren</th><th>Änderungen (Feld: vorher → nachher)</th></tr></thead><tbody>
     ${apChSichtbar().map((c, i) => { const a = st.refs[c.activityId] || {}; const ent = st.refs[c.entityId]; const z = apChDiffZeilen(c.diff); const offen = st.offen[i]; const show = offen ? z : z.slice(0, 6);
@@ -7477,7 +7484,7 @@ function apChHtml() {
         <td title="${escape(c.entityId || "")}">${escape(ent ? apChName(ent) + (ent.type ? " · " + ent.type : "") : (c.entityId || "").slice(0, 12) + "…")}</td><td>${escape(c.entityState || "")}</td><td style="font-family:var(--font-mono);text-align:right">${escape(c.entityVersion ?? "")}</td>
         <td style="font-size:10.5px;color:var(--text-dim)">${(c.initiators || []).map(x => escape(String(x).replace(/ChangeTracker$/, ""))).join("<br>")}</td>
         <td>${show.length ? `<table style="font-size:11px;border-collapse:collapse">${show.map(d => `<tr><td style="padding:1px 8px 1px 0;color:var(--text-dim);white-space:nowrap">${escape(d[0])}</td><td style="padding:1px 6px;color:var(--danger);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escape(d[1])}">${escape(d[1])}</td><td>→</td><td style="padding:1px 6px;color:var(--accent);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escape(d[2])}">${escape(d[2])}</td></tr>`).join("")}</table>${z.length > 6 ? `<a href="#" onclick="apChState.offen[${i}]=!apChState.offen[${i}];render();return false" style="font-size:10.5px">${offen ? "weniger" : "… " + (z.length - 6) + " weitere Felder"}</a>` : ""}` : `<span style="color:var(--text-faint)">${c.diff ? escape(JSON.stringify(c.diff).slice(0, 200)) : "—"}</span>`}</td></tr>`; }).join("")}
-    </tbody></table></div><div style="font-size:11px;color:var(--text-faint);margin-top:6px">${apChSichtbar().length} Änderungen im Zeitraum · ${st.rows.length} geladen${st.total !== null ? " von " + st.total : ""} · ${Object.keys(st.refs).length} Referenzen aufgelöst</div>`;
+    </tbody></table></div><div style="font-size:11px;color:var(--text-faint);margin-top:6px">${apChSichtbar().length} Änderungen angezeigt · ${st.rows.length} geladen${st.initiator.trim() ? " · " + st.rows.filter(c => !apChInitiatorPasst(c)).length + " ohne «" + escape(st.initiator.trim()) + "» in initiators" : ""}${st.total !== null ? " von " + st.total : ""} · ${Object.keys(st.refs).length} Referenzen aufgelöst</div>`;
   return kopf + tbl;
 }
 /* ---------- API-Explorer: alle GET-Endpunkte aus den OpenAPI-Dateien ausführen (read-only) ---------- */
