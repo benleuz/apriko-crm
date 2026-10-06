@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.382.0"></script>
-<script src="apriko-api.js?v=1.382.0"></script>
-<script src="lohncheck.js?v=1.382.0"></script>
-<script src="personalbudget.js?v=1.382.0"></script>
-<script src="jahresbudget.js?v=1.382.0"></script>
-<script src="budgetpositionen.js?v=1.382.0"></script>
-<script src="lohnchecklistetemp.js?v=1.382.0"></script>
-<script src="apriko-endpunkte.js?v=1.382.0"></script>
+<script src="apriko-filters.js?v=1.383.0"></script>
+<script src="apriko-api.js?v=1.383.0"></script>
+<script src="lohncheck.js?v=1.383.0"></script>
+<script src="personalbudget.js?v=1.383.0"></script>
+<script src="jahresbudget.js?v=1.383.0"></script>
+<script src="budgetpositionen.js?v=1.383.0"></script>
+<script src="lohnchecklistetemp.js?v=1.383.0"></script>
+<script src="apriko-endpunkte.js?v=1.383.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1013,7 +1013,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.382.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.383.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -7348,11 +7348,13 @@ function apReset() {
    Change: { activityId, diff, entityId, entitySchemaRevision, entityState, entityVersion, initiators[], createdTime }
    Activity: { actionName, activityTime, executor, initiator, contextEntityId } — über includes/resolveReferences
    in result.references mitgeliefert. Filterformat wie überall: feld|op|wert|text|false|false|["G1"]. */
-let apChState = { streng: true, datumTyp: "text", datumServer: true, sort: true, diag: "", entityType: "EntityChange", entityId: "", entityName: "", initiator: "", von: "", bis: "", includes: "Activity", resolve: true, pageSize: 120, pageIndex: 0, extra: "", rows: [], refs: {}, total: null, loading: false, fehler: "", raw: false, suche: "", sucheTyp: "LegalPerson", treffer: [], offen: {} };
+let apChState = { iniModus: "=", streng: true, datumTyp: "text", datumServer: true, sort: true, diag: "", entityType: "EntityChange", entityId: "", entityName: "", initiator: "", von: "", bis: "", includes: "Activity", resolve: true, pageSize: 120, pageIndex: 0, extra: "", rows: [], refs: {}, total: null, loading: false, fehler: "", raw: false, suche: "", sucheTyp: "LegalPerson", treffer: [], offen: {} };
 function apChFilters() {
   const f = [];
   if (apChState.entityId.trim()) f.push('entityId|=|' + JSON.stringify(apChState.entityId.trim()) + '|text|false|false|["G1"]');
-  if (apChState.initiator.trim()) f.push('initiators|=|' + JSON.stringify(apChState.initiator.trim()) + '|text|false|false|["G1"]');
+  const ini = apChState.initiator.trim();
+  if (ini && apChState.iniModus === "=") f.push('initiators|=|' + JSON.stringify(ini) + '|text|false|false|["G1"]');
+  if (ini && apChState.iniModus === "ANY") f.push('initiators|ANY|' + JSON.stringify([ini]) + '|text|false|false|["G1"]');
   if (apChState.datumServer && apChState.von) f.push('createdTime|>=|' + JSON.stringify(apChState.von + "T00:00:00Z") + '|' + apChState.datumTyp + '|false|false|["G1"]');
   if (apChState.datumServer && apChState.bis) f.push('createdTime|<=|' + JSON.stringify(apChState.bis + "T23:59:59Z") + '|' + apChState.datumTyp + '|false|false|["G1"]');
   if (apChState.extra.trim()) apChState.extra.split("\n").map(x => x.trim()).filter(Boolean).forEach(x => f.push(x));
@@ -7366,6 +7368,7 @@ async function apChLaden(weiter) {
     rpApiUse();
     const model = { entityTypes: apChState.entityType.trim() || "EntityChange", pageIndex: apChState.pageIndex, pageSize: Math.min(120, Math.max(1, +apChState.pageSize || 50)), resolveReferences: !!apChState.resolve };
     if (apChState.sort) model.sortOptions = "createdTime|DESC|false";
+    if (apChState.initiator.trim() && apChState.iniModus === "query") model.query = apChState.initiator.trim();
     const f = apChFilters(); if (f.length) model.filters = f;
     if (apChState.includes.trim()) model.includes = apChState.includes.split(",").map(x => x.trim()).filter(Boolean);
     apChState.letztesModel = model;
@@ -7408,6 +7411,10 @@ async function apChDiagnose() {
   await probe(t + " + sortOptions createdTime|DESC|true", { ...basis, entityTypes: t, sortOptions: "createdTime|DESC|true" });
   const ini = apChState.initiator.trim() || "StaffLeasePlacementChangeTracker";
   await probe(t + " + Filter initiators = " + ini, { ...basis, entityTypes: t, filters: 'initiators|=|' + JSON.stringify(ini) + '|text|false|false|["G1"]' });
+  await probe(t + " + Filter initiators ANY [" + ini + "]", { ...basis, entityTypes: t, filters: 'initiators|ANY|' + JSON.stringify([ini]) + '|text|false|false|["G1"]' });
+  await probe(t + " + Filter initiators = (ignoreUnset true)", { ...basis, entityTypes: t, filters: 'initiators|=|' + JSON.stringify(ini) + '|text|true|false|["G1"]' });
+  await probe(t + " + query (Volltext) " + ini, { ...basis, entityTypes: t, query: ini });
+  await probe(t + " + Filter entityState = Modified", { ...basis, entityTypes: t, filters: 'entityState|=|"Modified"|text|false|false|["G1"]' });
   const von = (apChState.von || "2026-01-01") + "T00:00:00Z";
   for (const dt of ["text", "date"]) await probe(t + " + Filter createdTime >= (" + dt + ")", { ...basis, entityTypes: t, filters: 'createdTime|>=|' + JSON.stringify(von) + '|' + dt + '|false|false|["G1"]' });
   if (apChState.entityId.trim()) await probe(t + " + Filter entityId", { ...basis, entityTypes: t, filters: 'entityId|=|' + JSON.stringify(apChState.entityId.trim()) + '|text|false|false|["G1"]' });
@@ -7457,6 +7464,7 @@ function apChHtml() {
       <label title="Entitätstyp für entityTypes — auf dieser Instanz ist «EntityChange» der Änderungsindex (Millionen Einträge, darum immer mit Entity-ID oder Initiator filtern); «Change» ist leer">Typ ${inp("entityType", "110px")}</label>
       <label title="entityId = ID des Objekts, dessen Änderungen gelistet werden (Kunde, Einsatz, Vertrag …)">Entity-ID ${inp("entityId", "300px", "ID aus Suche oder einfügen")}</label>${st.entityName ? `<span style="color:var(--accent)">${escape(st.entityName)}</span>` : ""}
       <label title="initiators = exakter Name, wie er in der Spalte Initiatoren steht (z.B. PercentagePlacementInvolvementPlacementContextMutation, StaffLeasePlacementChangeTracker) — Klick auf einen Wert in der Tabelle übernimmt ihn">Initiator ${inp("initiator", "280px", "z.B. StaffLeasePlacementChangeTracker")}</label>
+      <select onchange="apChState.iniModus=this.value" title="Wie der Initiator gesendet wird: Filter =, Filter ANY (Listenfeld) oder als Volltext-query" style="padding:3px 5px;font-size:11.5px">${[["=", "Filter ="], ["ANY", "Filter ANY"], ["query", "Volltext"]].map(([v, l]) => `<option value="${v}" ${st.iniModus === v ? "selected" : ""}>${l}</option>`).join("")}</select>
       <label>Von ${inp("von", "130px", "", "date")}</label><label>Bis ${inp("bis", "130px", "", "date")}</label>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
