@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.378.0"></script>
-<script src="apriko-api.js?v=1.378.0"></script>
-<script src="lohncheck.js?v=1.378.0"></script>
-<script src="personalbudget.js?v=1.378.0"></script>
-<script src="jahresbudget.js?v=1.378.0"></script>
-<script src="budgetpositionen.js?v=1.378.0"></script>
-<script src="lohnchecklistetemp.js?v=1.378.0"></script>
-<script src="apriko-endpunkte.js?v=1.378.0"></script>
+<script src="apriko-filters.js?v=1.379.0"></script>
+<script src="apriko-api.js?v=1.379.0"></script>
+<script src="lohncheck.js?v=1.379.0"></script>
+<script src="personalbudget.js?v=1.379.0"></script>
+<script src="jahresbudget.js?v=1.379.0"></script>
+<script src="budgetpositionen.js?v=1.379.0"></script>
+<script src="lohnchecklistetemp.js?v=1.379.0"></script>
+<script src="apriko-endpunkte.js?v=1.379.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1013,7 +1013,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.378.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.379.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -7348,7 +7348,7 @@ function apReset() {
    Change: { activityId, diff, entityId, entitySchemaRevision, entityState, entityVersion, initiators[], createdTime }
    Activity: { actionName, activityTime, executor, initiator, contextEntityId } — über includes/resolveReferences
    in result.references mitgeliefert. Filterformat wie überall: feld|op|wert|text|false|false|["G1"]. */
-let apChState = { datumTyp: "date", datumServer: false, sort: true, diag: "", entityType: "Change", entityId: "", entityName: "", initiator: "", von: "", bis: "", includes: "Activity", resolve: true, pageSize: 50, pageIndex: 0, extra: "", rows: [], refs: {}, total: null, loading: false, fehler: "", raw: false, suche: "", sucheTyp: "LegalPerson", treffer: [], offen: {} };
+let apChState = { datumTyp: "text", datumServer: true, sort: true, diag: "", entityType: "EntityChange", entityId: "", entityName: "", initiator: "", von: "", bis: "", includes: "Activity", resolve: true, pageSize: 50, pageIndex: 0, extra: "", rows: [], refs: {}, total: null, loading: false, fehler: "", raw: false, suche: "", sucheTyp: "LegalPerson", treffer: [], offen: {} };
 function apChFilters() {
   const f = [];
   if (apChState.entityId.trim()) f.push('entityId|=|' + JSON.stringify(apChState.entityId.trim()) + '|text|false|false|["G1"]');
@@ -7364,7 +7364,7 @@ async function apChLaden(weiter) {
   apChState.loading = true; apChState.fehler = ""; render();
   try {
     rpApiUse();
-    const model = { entityTypes: apChState.entityType.trim() || "Change", pageIndex: apChState.pageIndex, pageSize: Math.min(120, Math.max(1, +apChState.pageSize || 50)), resolveReferences: !!apChState.resolve };
+    const model = { entityTypes: apChState.entityType.trim() || "EntityChange", pageIndex: apChState.pageIndex, pageSize: Math.min(120, Math.max(1, +apChState.pageSize || 50)), resolveReferences: !!apChState.resolve };
     if (apChState.sort) model.sortOptions = "createdTime|DESC|false";
     const f = apChFilters(); if (f.length) model.filters = f;
     if (apChState.includes.trim()) model.includes = apChState.includes.split(",").map(x => x.trim()).filter(Boolean);
@@ -7390,19 +7390,19 @@ function apChSichtbar() {
 /* Schrittweise herausfinden, welcher Teil der Abfrage den HTTP 500 auslöst */
 async function apChDiagnose() {
   if (apChState.loading) return; apChState.loading = true; apChState.diag = "Diagnose läuft …"; apChState.fehler = ""; render();
-  const typ = apChState.entityType.trim() || "Change"; const zeilen = []; rpApiUse();
-  const probe = async (name, model) => { const t0 = Date.now(); try { const r = await AprikoApi.models.query(model); const n = (r && r.results || []).length; zeilen.push("✅ " + name + " → " + n + " Treffer" + (typeof r.totalCount === "number" ? " (total " + r.totalCount + ")" : "") + " · " + (Date.now() - t0) + " ms"); return true; } catch (e) { zeilen.push("❌ " + name + " → " + ((e && e.message) || e)); return false; } };
+  const typ = apChState.entityType.trim() || "EntityChange"; const zeilen = []; rpApiUse();
+  const probe = async (name, model) => { const t0 = Date.now(); try { const r = await AprikoApi.models.query(model); const n = (r && r.results || []).length; zeilen.push("✅ " + name + " → " + n + " Treffer" + (typeof r.totalCount === "number" ? " (total " + r.totalCount + ")" : "") + " · " + (Date.now() - t0) + " ms"); return typeof r.totalCount === "number" ? r.totalCount : n; } catch (e) { zeilen.push("❌ " + name + " → " + ((e && e.message) || e)); return -1; } };
   const basis = { pageIndex: 0, pageSize: 5, resolveReferences: false };
   const okTyp = {};
-  for (const t of [typ, "EntityChange", "Activity"].filter((v, i, a) => a.indexOf(v) === i)) okTyp[t] = await probe("Typ " + t + " ohne Filter/Sortierung", { ...basis, entityTypes: t });
-  const t = Object.keys(okTyp).find(k => okTyp[k]) || typ;
+  for (const t of [typ, "EntityChange", "Change"].filter((v, i, a) => a.indexOf(v) === i)) okTyp[t] = await probe("Typ " + t + " ohne Filter/Sortierung", { ...basis, entityTypes: t });
+  const t = Object.keys(okTyp).sort((a, b) => okTyp[b] - okTyp[a])[0] || typ;
+  zeilen.push("→ weitere Tests mit Typ " + t);
   await probe(t + " + sortOptions createdTime|DESC|false", { ...basis, entityTypes: t, sortOptions: "createdTime|DESC|false" });
   await probe(t + " + sortOptions createdTime|DESC|true", { ...basis, entityTypes: t, sortOptions: "createdTime|DESC|true" });
   const ini = apChState.initiator.trim() || "StaffLeasePlacementChangeTracker";
   await probe(t + " + Filter initiators = " + ini, { ...basis, entityTypes: t, filters: 'initiators|=|' + JSON.stringify(ini) + '|text|false|false|["G1"]' });
-  await probe(t + " + Filter initiators CONTAINS " + ini, { ...basis, entityTypes: t, filters: 'initiators|CONTAINS|' + JSON.stringify(ini) + '|text|false|false|["G1"]' });
   const von = (apChState.von || "2026-01-01") + "T00:00:00Z";
-  for (const dt of ["date", "datetime", "text"]) await probe(t + " + Filter createdTime >= (" + dt + ")", { ...basis, entityTypes: t, filters: 'createdTime|>=|' + JSON.stringify(von) + '|' + dt + '|false|false|["G1"]' });
+  for (const dt of ["text", "date"]) await probe(t + " + Filter createdTime >= (" + dt + ")", { ...basis, entityTypes: t, filters: 'createdTime|>=|' + JSON.stringify(von) + '|' + dt + '|false|false|["G1"]' });
   if (apChState.entityId.trim()) await probe(t + " + Filter entityId", { ...basis, entityTypes: t, filters: 'entityId|=|' + JSON.stringify(apChState.entityId.trim()) + '|text|false|false|["G1"]' });
   await probe(t + " + includes Activity", { ...basis, entityTypes: t, includes: "Activity" });
   await probe(t + " + includes Entity", { ...basis, entityTypes: t, includes: "Entity" });
@@ -7447,7 +7447,7 @@ function apChHtml() {
       ${st.treffer.length ? `<select onchange="if(this.value){const o=this.options[this.selectedIndex];apChWaehlen(this.value,o.text)}" style="padding:3px 5px;font-size:11.5px;max-width:360px"><option value="">— Treffer wählen (${st.treffer.length}) —</option>${st.treffer.map(t => `<option value="${escape(t.id)}">${escape(t.name)} · ${escape(t.typ)}</option>`).join("")}</select>` : ""}
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-      <label title="Entitätstyp für entityTypes — laut OpenAPI «Change» (Activity-Service); alternativ «EntityChange» probieren">Typ ${inp("entityType", "110px")}</label>
+      <label title="Entitätstyp für entityTypes — auf dieser Instanz ist «EntityChange» der Änderungsindex (Millionen Einträge, darum immer mit Entity-ID oder Initiator filtern); «Change» ist leer">Typ ${inp("entityType", "110px")}</label>
       <label title="entityId = ID des Objekts, dessen Änderungen gelistet werden (Kunde, Einsatz, Vertrag …)">Entity-ID ${inp("entityId", "300px", "ID aus Suche oder einfügen")}</label>${st.entityName ? `<span style="color:var(--accent)">${escape(st.entityName)}</span>` : ""}
       <label title="initiators = Name des ChangeTrackers, z.B. PercentagePlacementInvolvementChangeTracker, StaffLeasePlacementChangeTracker, CustomerStaffingAgreementChangeTracker">Initiator ${inp("initiator", "280px", "z.B. StaffLeasePlacementChangeTracker")}</label>
       <label>Von ${inp("von", "130px", "", "date")}</label><label>Bis ${inp("bis", "130px", "", "date")}</label>
@@ -7457,7 +7457,7 @@ function apChHtml() {
       <label><input type="checkbox" ${st.resolve ? "checked" : ""} onchange="apChState.resolve=this.checked"> resolveReferences</label>
       <label>pageSize ${inp("pageSize", "56px", "", "number")}</label>
       <label><input type="checkbox" ${st.sort ? "checked" : ""} onchange="apChState.sort=this.checked"> sort createdTime DESC</label>
-      <label title="Von/Bis an den Server schicken (liefert auf dieser Instanz bisher HTTP 500) — sonst clientseitig: es wird absteigend geladen, bis «Von» erreicht ist"><input type="checkbox" ${st.datumServer ? "checked" : ""} onchange="apChState.datumServer=this.checked"> Datum serverseitig</label>
+      <label title="Von/Bis an den Server schicken (Datumstyp «text» wird akzeptiert, «date» gibt HTTP 500) — sonst clientseitig: es wird absteigend geladen, bis «Von» erreicht ist"><input type="checkbox" ${st.datumServer ? "checked" : ""} onchange="apChState.datumServer=this.checked"> Datum serverseitig</label>
       <label title="Werttyp im Datumsfilter (Position 4 des Filters)">Datumstyp <select onchange="apChState.datumTyp=this.value" style="padding:3px 5px;font-size:11.5px">${["date", "datetime", "text"].map(x => `<option ${st.datumTyp === x ? "selected" : ""}>${x}</option>`).join("")}</select></label>
       <button class="btn btn-sm" onclick="apChDiagnose()" ${st.loading ? "disabled" : ""} title="Testet Typ, Sortierung, jeden Filter, Includes und resolveReferences einzeln und zeigt, welcher Teil den Fehler auslöst">🧪 Schrittweise testen</button>
       <label title="Zusätzliche Filterzeilen im Rohformat feld|op|wert|typ|false|false|[&quot;G1&quot;] — eine pro Zeile">Extra-Filter <textarea onchange="apChState.extra=this.value" rows="1" style="width:360px;padding:3px 6px;font-size:11px;font-family:var(--font-mono);vertical-align:middle">${escape(st.extra)}</textarea></label>
