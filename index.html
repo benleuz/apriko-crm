@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.385.0"></script>
-<script src="apriko-api.js?v=1.385.0"></script>
-<script src="lohncheck.js?v=1.385.0"></script>
-<script src="personalbudget.js?v=1.385.0"></script>
-<script src="jahresbudget.js?v=1.385.0"></script>
-<script src="budgetpositionen.js?v=1.385.0"></script>
-<script src="lohnchecklistetemp.js?v=1.385.0"></script>
-<script src="apriko-endpunkte.js?v=1.385.0"></script>
+<script src="apriko-filters.js?v=1.386.0"></script>
+<script src="apriko-api.js?v=1.386.0"></script>
+<script src="lohncheck.js?v=1.386.0"></script>
+<script src="personalbudget.js?v=1.386.0"></script>
+<script src="jahresbudget.js?v=1.386.0"></script>
+<script src="budgetpositionen.js?v=1.386.0"></script>
+<script src="lohnchecklistetemp.js?v=1.386.0"></script>
+<script src="apriko-endpunkte.js?v=1.386.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1013,7 +1013,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.385.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.386.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -7457,6 +7457,45 @@ async function apChDiagnose() {
   await probe(t + " + resolveReferences", { ...basis, entityTypes: t, resolveReferences: true });
   apChState.diag = zeilen.join("\n"); apChState.loading = false; render();
 }
+/* Ganzen Zeitraum durchgehen, ohne Datumsfilter am Server (der schaltet den Initiator-Filter aus):
+   Initiator/Status/Entity-ID serverseitig, Sortierung createdTime DESC, dann per Binärsuche über den pageIndex
+   die erste Seite ≤ «Bis» finden und ab dort seitenweise bis vor «Von» lesen. */
+async function apChZeitraum() {
+  if (apChState.loading) return;
+  const st = apChState; if (!st.von) { toast("Bitte ein Von-Datum setzen.", true); return; }
+  if (!st.initiator.trim() && !st.entityId.trim()) { if (!confirm("Ohne Initiator oder Entity-ID wird die ganze Instanz durchgegangen (Millionen Einträge). Trotzdem?")) return; }
+  st.loading = true; st.fehler = ""; st.abbruch = false; st.rows = []; st.refs = {}; st.total = null; render();
+  const vonT = st.von + "T00:00:00", bisT = (st.bis || "9999-12-31") + "T23:59:59";
+  const ps = Math.min(120, Math.max(1, +st.pageSize || 120));
+  const model = { entityTypes: st.entityType.trim() || "EntityChange", pageSize: ps, resolveReferences: !!st.resolve, sortOptions: "createdTime|DESC|false" };
+  const merkeDatum = st.datumServer; st.datumServer = false; const f = apChFilters(); st.datumServer = merkeDatum; if (f.length) model.filters = f;
+  if (st.initiator.trim() && st.iniModus === "query") model.query = st.initiator.trim();
+  if (st.includes.trim()) model.includes = st.includes.split(",").map(x => x.trim()).filter(Boolean);
+  st.letztesModel = { ...model, pageIndex: "…" };
+  const seiten = {};
+  const lade = async (i) => { if (seiten[i]) return seiten[i]; rpApiUse(); const r = await AprikoApi.models.query({ ...model, pageIndex: i }); const hits = ((r && r.results) || []).map(h => { try { return AprikoApi.models.hitData(h); } catch (e) { return h; } }); (r && r.references || []).forEach(ref => { const d = ref && ref.data ? ref.data : ref; if (d && d.id) st.refs[d.id] = d; }); if (typeof r.totalCount === "number") st.total = r.totalCount; return seiten[i] = hits; };
+  const aeltestes = h => h.length ? (h[h.length - 1].createdTime || "") : "", neuestes = h => h.length ? (h[0].createdTime || "") : "";
+  try {
+    let hits0 = await lade(0); const anzSeiten = st.total !== null ? Math.ceil(st.total / ps) : 1; toast("Total " + st.total + " Einträge in " + anzSeiten + " Seiten — suche Einstieg per Binärsuche …");
+    // Binärsuche: erste Seite, deren ältester Eintrag ≤ Bis ist
+    let lo = 0, hi = Math.max(0, anzSeiten - 1), start = 0;
+    if (st.bis && aeltestes(hits0) > bisT) {
+      while (lo <= hi && !st.abbruch) { const mid = Math.floor((lo + hi) / 2); const h = await lade(mid); toast("Binärsuche Seite " + mid + " (" + (neuestes(h) || "").slice(0, 10) + ") …"); if (!h.length || aeltestes(h) <= bisT) { start = mid; hi = mid - 1; } else lo = mid + 1; }
+      start = lo;   // lo = kleinste Seite, deren ältester Eintrag ≤ Bis ist (oder anzSeiten, wenn keine)
+    }
+    const gesehen = {}; let i = start, n = 0;
+    while (i < anzSeiten && !st.abbruch && n < 400) {
+      const h = await lade(i); n++;
+      h.forEach(c => { const t = c.createdTime || ""; if (t >= vonT && t <= bisT && !gesehen[c.id]) { gesehen[c.id] = true; st.rows.push(c); } });
+      toast("Seite " + i + " von " + anzSeiten + " · " + st.rows.length + " im Zeitraum" + (h.length ? " · bis " + (aeltestes(h) || "").slice(0, 10) : ""));
+      if (!h.length || aeltestes(h) < vonT) break;
+      i++; render();
+    }
+    st.pageIndex = i + 1;
+    toast(st.rows.length + " Änderungen im Zeitraum " + st.von + (st.bis ? " – " + st.bis : "") + " (" + n + " Seiten gelesen)");
+  } catch (e) { st.fehler = (e && e.message) || String(e); }
+  st.loading = false; render();
+}
 async function apChSuchen() {
   const q = apChState.suche.trim(); if (!q) return;
   apChState.loading = true; apChState.fehler = ""; render();
@@ -7513,6 +7552,8 @@ function apChHtml() {
       <button class="btn btn-sm" onclick="apChDiagnose()" ${st.loading ? "disabled" : ""} title="Testet Typ, Sortierung, jeden Filter, Includes und resolveReferences einzeln und zeigt, welcher Teil den Fehler auslöst">🧪 Schrittweise testen</button>
       <label title="Zusätzliche Filterzeilen im Rohformat feld|op|wert|typ|false|false|[&quot;G1&quot;] — eine pro Zeile">Extra-Filter <textarea onchange="apChState.extra=this.value" rows="1" style="width:360px;padding:3px 6px;font-size:11px;font-family:var(--font-mono);vertical-align:middle">${escape(st.extra)}</textarea></label>
       <button class="btn btn-sm" onclick="apChLaden(false)" ${st.loading ? "disabled" : ""} style="background:var(--accent);color:#fff;border-color:var(--accent)">${st.loading ? "Lädt …" : "▶ Änderungen laden"}</button>
+      <button class="btn btn-sm" onclick="apChZeitraum()" ${st.loading ? "disabled" : ""} title="Alle Einträge im Zeitraum Von–Bis holen: Initiator/Status serverseitig, Datum clientseitig — Einstieg per Binärsuche über die Seiten, dann seitenweise bis vor «Von» (ca. 25 s pro Seite à 120)">⏩ Zeitraum komplett</button>
+      ${st.loading ? `<button class="btn btn-sm" onclick="apChState.abbruch=true" title="Nach der laufenden Seite stoppen; bisher gelesene Einträge bleiben">■ Stopp</button>` : ""}
       ${st.rows.length ? `<button class="btn btn-sm" onclick="apChLaden(true)" ${st.loading || (st.total !== null && st.rows.length >= st.total) ? "disabled" : ""}>+ weitere</button><button class="btn btn-sm" onclick="apChEinsaetzeNachladen()" ${st.loading ? "disabled" : ""} title="Zu jedem geänderten Objekt Einsatz-Nr., Mitarbeiter und Kunde nachladen (ein Aufruf je Objekt)">👷 Einsatz-Nr. nachladen</button><button class="btn btn-sm" onclick="apChExportExcel()">⇩ Excel</button><label title="Nur Zeilen zeigen, deren initiators den Initiator-Filter wirklich enthalten (clientseitige Nachprüfung)"><input type="checkbox" ${st.streng ? "checked" : ""} onchange="apChState.streng=this.checked;render()"> streng</label><label><input type="checkbox" ${st.raw ? "checked" : ""} onchange="apChState.raw=this.checked;render()"> JSON</label>` : ""}
     </div>
     ${st.letztesModel ? `<div style="font-size:10.5px;color:var(--text-faint);font-family:var(--font-mono);word-break:break-all">POST /api/models/Query ${escape(JSON.stringify(st.letztesModel))}</div>` : ""}
