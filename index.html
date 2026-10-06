@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.373.0"></script>
-<script src="apriko-api.js?v=1.373.0"></script>
-<script src="lohncheck.js?v=1.373.0"></script>
-<script src="personalbudget.js?v=1.373.0"></script>
-<script src="jahresbudget.js?v=1.373.0"></script>
-<script src="budgetpositionen.js?v=1.373.0"></script>
-<script src="lohnchecklistetemp.js?v=1.373.0"></script>
-<script src="apriko-endpunkte.js?v=1.373.0"></script>
+<script src="apriko-filters.js?v=1.374.0"></script>
+<script src="apriko-api.js?v=1.374.0"></script>
+<script src="lohncheck.js?v=1.374.0"></script>
+<script src="personalbudget.js?v=1.374.0"></script>
+<script src="jahresbudget.js?v=1.374.0"></script>
+<script src="budgetpositionen.js?v=1.374.0"></script>
+<script src="lohnchecklistetemp.js?v=1.374.0"></script>
+<script src="apriko-endpunkte.js?v=1.374.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1013,7 +1013,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.373.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.374.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -8550,6 +8550,8 @@ function renderAuszPdf(el) {
    (Kunde/Organisation, Art/Typ/Kategorie, Status, Priorität, Bearbeiter, Erstellt, Gelöst) und sind im Mapping
    änderbar. Auswertung: Tickets je Kunde, je Art, Kunde × Art, je Monat, Ø Lösungszeit. Nichts wird gespeichert. */
 let tkState = { datei: "", spalten: [], zeilen: [], map: {}, von: "", bis: "", filterKunde: "", filterArt: "", tab: "kunde" };
+/* Wert als JS-Literal für onclick/onchange-Attribute (Anführungszeichen HTML-sicher) */
+function tkJs(v) { return escape(JSON.stringify(v)); }
 const TK_FELDER = [["kunde", "Kunde / Organisation", /organi|kunde|customer|firma|company|account/i], ["art", "Art / Anliegen / Kategorie", /^anliegen_1$|^anliegen$|unterkategor|^art$|typ|type|kategor|categor|thema|topic|tag|grund|reason/i], ["status", "Status", /status/i], ["prio", "Priorität", /prio/i], ["bearbeiter", "Bearbeiter / Assignee", /assign|bearbeit|agent|zust/i], ["erstellt", "Erstellt am", /creat|erstell|eröff|open|datum|date/i], ["geloest", "Gelöst am", /solv|gelös|clos|geschl|resol/i], ["betreff", "Betreff / Titel", /subject|betreff|titel|title|summary/i]];
 function tkAutoMap(spalten) {
   const map = {}; const belegt = new Set();
@@ -8660,8 +8662,8 @@ function tkKundenBalken(kunden, total) {
   return `<div class="card" style="padding:12px 14px"><div style="font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">Tickets je Kunde <span style="font-weight:400;color:var(--text-faint);font-size:11px">${rows.length} Werte</span>
       <span style="margin-left:auto;display:flex;gap:4px;align-items:center;font-size:11px;font-weight:400;color:var(--text-faint)">Sortieren: ${sortBtn("tickets", "Tickets")}${sortBtn("umsatz", "Umsatz")}</span></div>
     <div style="display:flex;gap:12px;font-size:10px;color:var(--text-faint);margin-bottom:6px"><span><span style="display:inline-block;width:10px;height:6px;border-radius:2px;background:${tkFarbe(1)};margin-right:4px"></span>Tickets</span><span><span style="display:inline-block;width:10px;height:6px;border-radius:2px;background:${tkFarbe(4)};margin-right:4px"></span>Umsatz im Zeitraum (CHF, SaaS + BPO)</span></div>
-    ${rows.slice(0, 25).map(r => `<div onclick="tkState.filterKunde=tkState.filterKunde===${JSON.stringify(r.k)}?'':${JSON.stringify(r.k)};render()" style="display:grid;grid-template-columns:minmax(140px,38%) 1fr 84px;gap:8px;align-items:center;padding:4px 0;cursor:pointer;border-bottom:1px solid var(--border)" title="${escape(r.k)} · ${r.v} Tickets${r.u !== null ? " · CHF " + fmt(r.u) : " · kein CRM-Kunde zugeordnet"}">
-      <div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escape(r.k)} <a href="#" onclick="event.stopPropagation();tkState.filterKunde=${JSON.stringify(r.k)};tkState.tab='liste';tkState.listeMax=100;render();return false" title="Tickets anzeigen" style="color:var(--text-faint);text-decoration:none;margin-left:4px">🔍</a></div>
+    ${rows.slice(0, 25).map(r => `<div onclick="tkState.filterKunde=tkState.filterKunde===${tkJs(r.k)}?'':${tkJs(r.k)};render()" style="display:grid;grid-template-columns:minmax(140px,38%) 1fr 84px;gap:8px;align-items:center;padding:4px 0;cursor:pointer;border-bottom:1px solid var(--border)" title="${escape(r.k)} · ${r.v} Tickets${r.u !== null ? " · CHF " + fmt(r.u) : " · kein CRM-Kunde zugeordnet"}">
+      <div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escape(r.k)} <a href="#" onclick="event.stopPropagation();tkState.filterKunde=${tkJs(r.k)};tkState.tab='liste';tkState.listeMax=100;render();return false" title="Tickets anzeigen" style="color:var(--text-faint);text-decoration:none;margin-left:4px">🔍</a></div>
       <div style="display:grid;gap:3px"><div style="background:var(--bg-hover);border-radius:4px;height:10px;overflow:hidden"><div style="height:100%;width:${Math.round(r.v / maxV * 100)}%;background:linear-gradient(90deg,${tkFarbe(1)},${tkFarbe(2)});border-radius:4px"></div></div>
         <div style="background:var(--bg-hover);border-radius:4px;height:10px;overflow:hidden">${r.u !== null ? `<div style="height:100%;width:${Math.round(r.u / maxU * 100)}%;background:linear-gradient(90deg,${tkFarbe(4)},${tkFarbe(5)});border-radius:4px"></div>` : ""}</div></div>
       <div style="font-family:var(--font-mono);font-size:11px;text-align:right;line-height:1.25"><div>${r.v} <span style="color:var(--text-faint);font-size:10px">${Math.round(r.v / total * 100)}%</span></div><div style="color:${tkFarbe(4)}">${r.u !== null ? fmt(r.u) + ` <span style="color:var(--text-faint);font-size:10px">${sumU ? Math.round(r.u / sumU * 100) : 0}%</span>` : `<span style="color:var(--text-faint)">—</span>`}</div></div></div>`).join("")}${rows.length > 25 ? `<div style="font-size:11px;color:var(--text-faint);margin-top:4px">… ${rows.length - 25} weitere</div>` : ""}</div>`;
@@ -8690,7 +8692,7 @@ function tkErtragHtml(zeilen, kunden, rohKunden) {
     <text x="${pl + 6}" y="${pt + 13}" font-size="10" fill="var(--text-faint)">wenig Umsatz · wenig Tickets</text><text x="${pl + pw - 6}" y="${pt + ph - 6}" font-size="10" text-anchor="end" fill="var(--text-faint)">viel Umsatz · viele Tickets</text>`;
   const sortiert = gem.slice().sort((a, b) => b.umsatz - a.umsatz);
   const punkte = sortiert.map(r => { const x = X(r.umsatz), y = Y(r.n), rad = 5 + 13 * Math.sqrt(r.umsatz / maxU), [farbe, wort] = bewertung(r); const lbl = r.name.length > 22 ? r.name.slice(0, 21) + "…" : r.name;
-    return `<g style="cursor:pointer" onclick="tkState.filterKunde=${JSON.stringify(r.name)};tkState.tab='liste';tkState.listeMax=100;render()"><title>${escape(r.name)} (${escape(r.segment || "")})
+    return `<g style="cursor:pointer" onclick="tkState.filterKunde=${tkJs(r.name)};tkState.tab='liste';tkState.listeMax=100;render()"><title>${escape(r.name)} (${escape(r.segment || "")})
 ${r.n} Tickets · CHF ${fmt(r.umsatz)} Umsatz
 CHF ${fmt(r.proTicket)} pro Ticket · ${r.ticketsPro10k.toFixed(1)} Tickets je 10k → ${wort}</title><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${rad.toFixed(1)}" fill="${farbe}" fill-opacity=".55" stroke="${farbe}" stroke-width="1.5"/><text x="${(x + rad + 4).toFixed(1)}" y="${(y + 3.5).toFixed(1)}" font-size="10.5" fill="var(--text)" stroke="var(--bg-card)" stroke-width="3" paint-order="stroke">${escape(lbl)}</text></g>`; }).join("");
   const legende = `<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--text-dim);margin-top:4px"><span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#7cb342;margin-right:4px"></span>≥ CHF 500 pro Ticket</span><span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ffb74d;margin-right:4px"></span>CHF 150–500</span><span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ef5350;margin-right:4px"></span>&lt; CHF 150 pro Ticket</span><span style="color:var(--text-faint)">Blasengrösse = Umsatz · gestrichelt = Median · Klick = Tickets des Kunden</span></div>`;
@@ -8701,7 +8703,7 @@ CHF ${fmt(r.proTicket)} pro Ticket · ${r.ticketsPro10k.toFixed(1)} Tickets je 1
   const zuordnung = `<details class="card" style="padding:10px 14px" ${ohne.length ? "open" : ""}><summary style="cursor:pointer;font-weight:600">Kunden-Zuordnung <span style="font-weight:400;color:var(--text-faint);font-size:11px">Ticket-Organisation → CRM-Kunde · Automatik als Vorschlag, manuell übersteuerbar, gespeichert in den Parametern</span></summary>
     <table style="font-size:12px;width:100%;margin-top:6px"><tr style="color:var(--text-dim)"><th style="text-align:left">Ticket-Organisation</th><th style="text-align:right">Tickets</th><th style="text-align:left">CRM-Kunde</th><th></th></tr>
     ${(rohKunden || []).map(([name, n]) => ({ name, n })).map(r => { const auto = tkMatchKundeAuto(r.name); const man = z[r.name]; return `<tr><td style="padding:3px 6px 3px 0">${escape(r.name)}</td><td style="text-align:right;font-family:var(--font-mono)">${r.n}</td><td style="padding:3px 6px">
-      <select onchange="tkZuordnungSetzen(${JSON.stringify(r.name)}, this.value)" style="padding:2px 5px;max-width:320px;${man !== undefined ? "border-color:var(--accent)" : ""}"><option value="" ${man === undefined ? "selected" : ""}>Automatik${auto ? ": " + escape(auto.Title) : ": kein Treffer"}</option><option value="-" ${man === "-" ? "selected" : ""}>— kein Kunde (ausblenden)</option>${custOpts.replace(`value="${man}"`, `value="${man}" selected`)}</select></td>
+      <select onchange="tkZuordnungSetzen(${tkJs(r.name)}, this.value)" style="padding:2px 5px;max-width:320px;${man !== undefined ? "border-color:var(--accent)" : ""}"><option value="" ${man === undefined ? "selected" : ""}>Automatik${auto ? ": " + escape(auto.Title) : ": kein Treffer"}</option><option value="-" ${man === "-" ? "selected" : ""}>— kein Kunde (ausblenden)</option>${custOpts.replace(`value="${man}"`, `value="${man}" selected`)}</select></td>
       <td style="font-size:11px;color:var(--text-faint)">${man !== undefined ? "manuell" : (auto ? "automatisch" : "<span style=\"color:var(--warn)\">offen</span>")}</td></tr>`; }).join("")}</table></details>`;
   return `<div style="display:grid;gap:10px">
     ${zuordnung}
@@ -8798,8 +8800,8 @@ function renderTickets(el) {
   const top5 = kunden.slice(0, 5).reduce((a, x) => a + x[1], 0);
   const kpi = (label, wert, sub, farbe) => `<div class="card" style="padding:14px 16px;border-top:3px solid ${farbe || "var(--accent)"}"><div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em">${label}</div><div style="font-size:26px;font-weight:700;margin:2px 0">${wert}</div><div style="font-size:11px;color:var(--text-faint)">${sub || ""}</div></div>`;
   const balken = (titel, paare, total, feld, klickFeld, farbeIdx) => `<div class="card" style="padding:12px 14px"><div style="font-weight:600;margin-bottom:8px">${titel} <span style="font-weight:400;color:var(--text-faint);font-size:11px">${paare.length} Werte</span></div>
-    ${paare.slice(0, 25).map(([k, v], i) => `<div onclick="${klickFeld ? `tkState.${klickFeld}=tkState.${klickFeld}===${JSON.stringify(k)}?'':${JSON.stringify(k)};render()` : ""}" style="display:grid;grid-template-columns:minmax(140px,38%) 1fr 54px;gap:8px;align-items:center;padding:3px 0;${klickFeld ? "cursor:pointer" : ""}" title="${escape(tkTip(k))} · ${v} Tickets">
-      <div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escape(k)}${klickFeld ? ` <a href="#" onclick="event.stopPropagation();tkState.${klickFeld}=${JSON.stringify(k)};tkState.tab='liste';tkState.listeMax=100;render();return false" title="Tickets anzeigen" style="color:var(--text-faint);text-decoration:none;margin-left:4px">🔍</a>` : ""}</div>
+    ${paare.slice(0, 25).map(([k, v], i) => `<div onclick="${klickFeld ? `tkState.${klickFeld}=tkState.${klickFeld}===${tkJs(k)}?'':${tkJs(k)};render()` : ""}" style="display:grid;grid-template-columns:minmax(140px,38%) 1fr 54px;gap:8px;align-items:center;padding:3px 0;${klickFeld ? "cursor:pointer" : ""}" title="${escape(tkTip(k))} · ${v} Tickets">
+      <div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escape(k)}${klickFeld ? ` <a href="#" onclick="event.stopPropagation();tkState.${klickFeld}=${tkJs(k)};tkState.tab='liste';tkState.listeMax=100;render();return false" title="Tickets anzeigen" style="color:var(--text-faint);text-decoration:none;margin-left:4px">🔍</a>` : ""}</div>
       <div style="background:var(--bg-hover);border-radius:4px;height:14px;overflow:hidden"><div style="height:100%;width:${Math.round(v / (paare[0][1] || 1) * 100)}%;background:linear-gradient(90deg,${tkFarbe(farbeIdx || 0)},${tkFarbe((farbeIdx || 0) + 1)});border-radius:4px"></div></div>
       <div style="font-family:var(--font-mono);font-size:12px;text-align:right">${v} <span style="color:var(--text-faint);font-size:10px">${Math.round(v / total * 100)}%</span></div></div>`).join("")}${paare.length > 25 ? `<div style="font-size:11px;color:var(--text-faint);margin-top:4px">… ${paare.length - 25} weitere</div>` : ""}</div>`;
   // Heatmap Kunde × Art (Top-Kunden × Top-Arten)
@@ -8807,8 +8809,8 @@ function renderTickets(el) {
   const zelle = {}; zeilen.forEach(z => { const k = m.kunde ? (String(z[m.kunde] || "").trim() || "(leer)") : "(nicht zugeordnet)"; tkWerte(z, m.art).forEach(a => { zelle[k + "|" + a] = (zelle[k + "|" + a] || 0) + 1; }); });
   const hMax = Math.max(1, ...Object.values(zelle));
   const heat = `<div class="card" style="padding:12px 14px;overflow:auto"><div style="font-weight:600;margin-bottom:8px">Heatmap Kunde × ${escape(m.art || "Art")} <span style="font-weight:400;color:var(--text-faint);font-size:11px">Farbe = Anzahl · Klick auf Kopf filtert</span></div>
-    <table style="font-size:11px;border-collapse:separate;border-spacing:2px"><thead><tr><th></th>${hA.map(a => `<th title="${escape(tkTip(a))}" onclick="tkState.filterArt=tkState.filterArt===${JSON.stringify(a)}?'':${JSON.stringify(a)};render()" style="cursor:pointer;writing-mode:vertical-rl;transform:rotate(180deg);text-align:left;font-weight:500;max-height:150px;padding:4px 2px;white-space:nowrap">${escape(a.length > 34 ? a.slice(0, 32) + "…" : a)}</th>`).join("")}<th style="text-align:right">Σ</th></tr></thead>
-    <tbody>${hK.map(k => { const tot = kunden.find(x => x[0] === k)[1]; return `<tr><td onclick="tkState.filterKunde=tkState.filterKunde===${JSON.stringify(k)}?'':${JSON.stringify(k)};render()" style="cursor:pointer;white-space:nowrap;padding:2px 6px;font-weight:500">${escape(k)}</td>${hA.map(a => { const v = zelle[k + "|" + a] || 0; return `<td title="${escape(k)} · ${escape(a)}: ${v}" style="width:34px;height:24px;text-align:center;font-family:var(--font-mono);border-radius:3px;background:${tkHeat(v, hMax)};color:${v / hMax > 0.55 ? "#111" : "var(--text)"}">${v || ""}</td>`; }).join("")}<td style="text-align:right;font-family:var(--font-mono);font-weight:600;padding-left:8px">${tot}</td></tr>`; }).join("")}</tbody></table></div>`;
+    <table style="font-size:11px;border-collapse:separate;border-spacing:2px"><thead><tr><th></th>${hA.map(a => `<th title="${escape(tkTip(a))}" onclick="tkState.filterArt=tkState.filterArt===${tkJs(a)}?'':${tkJs(a)};render()" style="cursor:pointer;writing-mode:vertical-rl;transform:rotate(180deg);text-align:left;font-weight:500;max-height:150px;padding:4px 2px;white-space:nowrap">${escape(a.length > 34 ? a.slice(0, 32) + "…" : a)}</th>`).join("")}<th style="text-align:right">Σ</th></tr></thead>
+    <tbody>${hK.map(k => { const tot = kunden.find(x => x[0] === k)[1]; return `<tr><td onclick="tkState.filterKunde=tkState.filterKunde===${tkJs(k)}?'':${tkJs(k)};render()" style="cursor:pointer;white-space:nowrap;padding:2px 6px;font-weight:500">${escape(k)}</td>${hA.map(a => { const v = zelle[k + "|" + a] || 0; return `<td title="${escape(k)} · ${escape(a)}: ${v}" style="width:34px;height:24px;text-align:center;font-family:var(--font-mono);border-radius:3px;background:${tkHeat(v, hMax)};color:${v / hMax > 0.55 ? "#111" : "var(--text)"}">${v || ""}</td>`; }).join("")}<td style="text-align:right;font-family:var(--font-mono);font-weight:600;padding-left:8px">${tot}</td></tr>`; }).join("")}</tbody></table></div>`;
   // Monatsverlauf gestapelt nach Top-5-Kunden
   const top5K = kunden.slice(0, 5).map(x => x[0]); const monStack = {}; let monMax = 1;
   zeilen.forEach(z => { const d = tkDatum(z[m.erstellt]); if (!d) return; const mon = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); const k = m.kunde ? (String(z[m.kunde] || "").trim() || "(leer)") : "x"; const key = top5K.includes(k) ? k : "übrige"; (monStack[mon] = monStack[mon] || {})[key] = (monStack[mon][key] || 0) + 1; });
