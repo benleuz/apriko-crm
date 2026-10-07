@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.394.0"></script>
-<script src="apriko-api.js?v=1.394.0"></script>
-<script src="lohncheck.js?v=1.394.0"></script>
-<script src="personalbudget.js?v=1.394.0"></script>
-<script src="jahresbudget.js?v=1.394.0"></script>
-<script src="budgetpositionen.js?v=1.394.0"></script>
-<script src="lohnchecklistetemp.js?v=1.394.0"></script>
-<script src="apriko-endpunkte.js?v=1.394.0"></script>
+<script src="apriko-filters.js?v=1.396.0"></script>
+<script src="apriko-api.js?v=1.396.0"></script>
+<script src="lohncheck.js?v=1.396.0"></script>
+<script src="personalbudget.js?v=1.396.0"></script>
+<script src="jahresbudget.js?v=1.396.0"></script>
+<script src="budgetpositionen.js?v=1.396.0"></script>
+<script src="lohnchecklistetemp.js?v=1.396.0"></script>
+<script src="apriko-endpunkte.js?v=1.396.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1013,7 +1013,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.394.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.396.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -8520,16 +8520,25 @@ const ONB_STANDARD_AUFGABEN = [
   ["Vertrag", "Ansprechpersonen & Projektteam benannt", "beide", -85],
   ["Kick-off", "Kick-off-Meeting durchgeführt", "Apriko", -80],
   ["Kick-off", "Projektplan / Timeline abgestimmt", "Apriko", -78],
+  ["Parametrierung", "Parametrierungsfile an Kunden versendet", "Apriko", -75],
   ["Parametrierung", "Parametrierungsbogen vom Kunden ausgefüllt", "Kunde", -70],
+  ["Parametrierung", "Dokumentvorlagen vom Kunden erhalten", "Kunde", -60],
   ["Parametrierung", "Instanz erstellt, Mandant & Filialen angelegt", "Apriko", -65],
   ["Parametrierung", "Lohnarten, GAV & Zuschläge parametriert", "Apriko", -55],
   ["Parametrierung", "Sozialversicherungen (AHV/ALV/UVG/KTG/BVG/QST) erfasst", "Apriko", -55, "bpo"],
+  ["Parametrierung", "Sozialversicherungen vom internen Verantwortlichen abgenommen", "Apriko", -52, "bpo"],
+  ["Parametrierung", "Sozialversicherungen vom externen Verantwortlichen abgenommen", "Kunde", -50, "bpo"],
   ["Parametrierung", "Vorlagen (Verträge, Rapporte, Rechnungen) eingerichtet", "Apriko", -50],
-  ["Daten", "Stammdaten-Export aus Altsystem geliefert", "Kunde", -50],
-  ["Daten", "Kunden-, Kandidaten- und Mitarbeitendendaten importiert", "Apriko", -40],
+  ["Daten", "Datenexport vom bisherigen Provider erhalten", "Kunde", -50],
+  ["Daten", "Test-Datenimport durchgeführt", "Apriko", -45],
+  ["Daten", "Datenimport mit Testscript geprüft", "Apriko", -42],
+  ["Daten", "Datenimport dem Kunden zum Testen bereitgestellt", "Apriko", -40],
+  ["Daten", "Feedback vom Kunden zum Datenimport erhalten", "Kunde", -36],
+  ["Daten", "Kunden-, Kandidaten- und Mitarbeitendendaten definitiv importiert", "Apriko", -33],
   ["Daten", "Lohnhistorie / offene Salden übernommen", "Apriko", -35, "bpo"],
   ["Schnittstellen", "FIBU-Schnittstelle konfiguriert & getestet", "Apriko", -30, "bpo"],
   ["Schnittstellen", "Zahlungsverkehr (pain.001) getestet", "beide", -30, "bpo"],
+  ["Schnittstellen", "QR-IBAN getestet", "beide", -30],
   ["Schnittstellen", "Swissdec / ELM-Übermittlung eingerichtet", "Apriko", -28, "bpo"],
   ["Schulung", "Schulung Disposition & Vermittlung", "Apriko", -25],
   ["Schulung", "Schulung Lohn & Fakturierung", "Apriko", -20, "bpo"],
@@ -8547,6 +8556,17 @@ function onbParam() {
     crmParameter.onboarding = { aufgaben: ONB_STANDARD_AUFGABEN.map((a, i) => ({ id: "a" + (i + 1), phase: a[0], titel: a[1], zustaendig: a[2], tage: a[3], gilt: a[4] || "alle" })), kunden: {} };
   }
   const o = crmParameter.onboarding; o.aufgaben = o.aufgaben || []; o.kunden = o.kunden || {};
+  // Neue Standardaufgaben in bestehende Listen nachziehen (per Titel), alte Titel umbenennen — Erledigt-Status bleibt erhalten
+  const umbenannt = { "Stammdaten-Export aus Altsystem geliefert": "Datenexport vom bisherigen Provider erhalten", "Kunden-, Kandidaten- und Mitarbeitendendaten importiert": "Kunden-, Kandidaten- und Mitarbeitendendaten definitiv importiert" };
+  o.aufgaben.forEach(a => { if (umbenannt[a.titel]) a.titel = umbenannt[a.titel]; });
+  const vorhanden = new Set(o.aufgaben.map(a => a.titel));
+  let maxId = o.aufgaben.reduce((m, a) => Math.max(m, parseInt(String(a.id).replace(/\D/g, "")) || 0), 0);
+  ONB_STANDARD_AUFGABEN.forEach(a => { if (vorhanden.has(a[1])) return;
+    const neu = { id: "a" + (++maxId), phase: a[0], titel: a[1], zustaendig: a[2], tage: a[3], gilt: a[4] || "alle" };
+    // in der eigenen Phase nach Tagen einsortieren (manuelle Reihenfolge der übrigen bleibt)
+    let pos = -1; o.aufgaben.forEach((x, i) => { if (x.phase === a[0] && (parseInt(x.tage) || 0) <= a[3]) pos = i; });
+    if (pos < 0) { const ersteDerPhase = o.aufgaben.findIndex(x => x.phase === a[0]); pos = ersteDerPhase >= 0 ? ersteDerPhase - 1 : o.aufgaben.length - 1; }
+    o.aufgaben.splice(pos + 1, 0, neu); vorhanden.add(a[1]); });
   return o;
 }
 async function onbSpeichern() { try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); } }
@@ -8648,7 +8668,7 @@ function onbKundeChecklisteHtml(id, c, k, o, heute, print) {
   const zust = z => z === "Kunde" ? "var(--warn)" : (z === "beide" ? "var(--accent-3)" : "var(--accent)");
   let html = `<div class="card" style="padding:16px 18px;margin-bottom:14px">
     <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
-      <div><span style="font-size:16px;font-weight:600">${escape(c.Title)}</span> <span style="color:var(--text-dim);font-size:12px">· ${escape(c.Segment || "—")}${k.verantwortlich ? " · verantwortlich " + escape(k.verantwortlich) : ""}${k.techVerantwortlich ? " · tech. " + escape(k.techVerantwortlich) : ""}${k.goLive ? " · Go-Live " + onbFmtDatum(k.goLive) : ""}</span></div>
+      <div><span style="font-size:16px;font-weight:600">${escape(c.Title)}</span> <span style="color:var(--text-dim);font-size:12px">· ${escape(c.Segment || "—")}${k.verantwortlich ? " · verantwortlich " + escape(k.verantwortlich) : ""}${k.techVerantwortlich ? " · tech. " + escape(k.techVerantwortlich) : ""}${k.kundeVerantwortlich ? " · Kunde: " + escape(k.kundeVerantwortlich) : ""}${k.goLive ? " · Go-Live " + onbFmtDatum(k.goLive) : ""}</span></div>
       <div style="font-family:var(--font-mono);font-size:12px">${n}/${aufg.length} erledigt</div>
     </div>
     <div style="height:6px;background:var(--bg);border-radius:3px;margin:8px 0 12px;overflow:hidden"><div style="height:100%;width:${aufg.length ? Math.round(n / aufg.length * 100) : 0}%;background:var(--accent)"></div></div>`;
@@ -8700,6 +8720,7 @@ async function renderOnboarding(el) {
         <div style="font-size:10px;color:var(--text-dim);margin:2px 0 4px">${escape(typ)} · <span style="font-family:var(--font-mono)">${n}/${gilt.length}</span></div>
         <select onchange="onbKundeFeld('${id}','verantwortlich',this.value)" style="width:100%;padding:2px 2px;font-size:10px;margin-bottom:3px" title="Hauptverantwortliche/r${k.verantwortlich ? ": " + escape(k.verantwortlich) : ""}"><option value="">— verantw. —</option>${emails.map(e => `<option value="${escape(e)}" ${e === (k.verantwortlich || "").toLowerCase() ? "selected" : ""}>${escape(e.split("@")[0])}</option>`).join("")}</select>
         <select onchange="onbKundeFeld('${id}','techVerantwortlich',this.value)" style="width:100%;padding:2px 2px;font-size:10px;margin-bottom:3px" title="Technisch Verantwortliche/r${k.techVerantwortlich ? ": " + escape(k.techVerantwortlich) : ""}"><option value="">— tech. verantw. —</option>${emails.map(e => `<option value="${escape(e)}" ${e === (k.techVerantwortlich || "").toLowerCase() ? "selected" : ""}>${escape(e.split("@")[0])}</option>`).join("")}</select>
+        <input type="text" value="${escape(k.kundeVerantwortlich || "")}" placeholder="— verantw. Kunde —" onchange="onbKundeFeld('${id}','kundeVerantwortlich',this.value)" style="width:100%;padding:2px 2px;font-size:10px;margin-bottom:3px" title="Verantwortliche Person beim Kunden${k.kundeVerantwortlich ? ": " + escape(k.kundeVerantwortlich) : ""}">
         <input type="date" value="${k.goLive || ""}" onchange="onbKundeFeld('${id}','goLive',this.value)" style="width:100%;padding:2px 2px;font-size:10px" title="Go-Live-Datum">
       </th>`; }).join("")}
     </tr>
