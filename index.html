@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.390.0"></script>
-<script src="apriko-api.js?v=1.390.0"></script>
-<script src="lohncheck.js?v=1.390.0"></script>
-<script src="personalbudget.js?v=1.390.0"></script>
-<script src="jahresbudget.js?v=1.390.0"></script>
-<script src="budgetpositionen.js?v=1.390.0"></script>
-<script src="lohnchecklistetemp.js?v=1.390.0"></script>
-<script src="apriko-endpunkte.js?v=1.390.0"></script>
+<script src="apriko-filters.js?v=1.394.0"></script>
+<script src="apriko-api.js?v=1.394.0"></script>
+<script src="lohncheck.js?v=1.394.0"></script>
+<script src="personalbudget.js?v=1.394.0"></script>
+<script src="jahresbudget.js?v=1.394.0"></script>
+<script src="budgetpositionen.js?v=1.394.0"></script>
+<script src="lohnchecklistetemp.js?v=1.394.0"></script>
+<script src="apriko-endpunkte.js?v=1.394.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1013,7 +1013,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.390.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.394.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1550,6 +1550,62 @@ function canAccessView(viewName) {
   return currentUser.allowedViews.includes(viewName);
 }
 
+/* ---------- Benutzergruppen (parameter.json → benutzergruppen) ----------
+   { gruppen: { <id>: { name, admin: bool, views: [...] } }, zuweisung: { <email>: <id> } }
+   Effektive Rechte eines Users = Bereiche seiner Gruppe ∪ individuelle AllowedViews im Profil ∪ EXTRA_VIEWS_BY_EMAIL.
+   Admin-Rechte (Profile/Gruppen verwalten) über Gruppe «admin: true» oder Profil-Rolle Admin. */
+const BG_STANDARD = {
+  admin: { name: "Admin", admin: true, views: "ALLE" },
+  gl: { name: "GL", admin: false, views: "ALLE" },
+  mitarbeiter: { name: "Mitarbeiter", admin: false, views: ["dashboard", "customers", "companies", "contacts", "tasks", "bpocheck", "clintern", "clfibu", "lct", "lohncheck", "onboarding", "einsatzdash"] }
+};
+function bgParam() {
+  if (!crmParameter) return { gruppen: {}, zuweisung: {} };
+  if (!crmParameter.benutzergruppen) {
+    crmParameter.benutzergruppen = { gruppen: {}, zuweisung: {} };
+    Object.entries(BG_STANDARD).forEach(([id, g]) => { crmParameter.benutzergruppen.gruppen[id] = { name: g.name, admin: g.admin, views: g.views === "ALLE" ? ALL_VIEWS.filter(v => v !== "profiles").concat(g.admin ? ["profiles"] : []) : g.views.slice() }; });
+  }
+  const b = crmParameter.benutzergruppen; b.gruppen = b.gruppen || {}; b.zuweisung = b.zuweisung || {}; return b;
+}
+function bgVonEmail(email) { const b = bgParam(); const id = b.zuweisung[String(email || "").toLowerCase()]; return id && b.gruppen[id] ? Object.assign({ id }, b.gruppen[id]) : null; }
+async function bgSpeichern() { try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); } }
+async function bgZuweisen(email, gruppeId) {
+  await parameterLaden(false); const b = bgParam(); const key = String(email || "").toLowerCase();
+  if (gruppeId) b.zuweisung[key] = gruppeId; else delete b.zuweisung[key];
+  await bgSpeichern(); render();
+}
+async function bgGruppeAnlegen() {
+  const name = prompt("Name der neuen Benutzergruppe:"); if (!name) return;
+  await parameterLaden(false); const b = bgParam(); const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || ("g" + Date.now());
+  if (b.gruppen[id]) { toast("Gruppe existiert bereits.", true); return; }
+  b.gruppen[id] = { name, admin: false, views: ["dashboard"] }; await bgSpeichern(); bgGruppeBearbeiten(id);
+}
+async function bgGruppeLoeschen(id) {
+  await parameterLaden(false); const b = bgParam(); const g = b.gruppen[id]; if (!g) return;
+  const n = Object.values(b.zuweisung).filter(x => x === id).length;
+  if (!confirm("Gruppe «" + g.name + "» löschen?" + (n ? " " + n + " Benutzer verlieren dadurch die Gruppenrechte." : ""))) return;
+  delete b.gruppen[id]; Object.keys(b.zuweisung).forEach(k => { if (b.zuweisung[k] === id) delete b.zuweisung[k]; });
+  await bgSpeichern(); render();
+}
+function bgGruppeBearbeiten(id) {
+  const b = bgParam(); const g = b.gruppen[id]; if (!g) return;
+  showModal("Benutzergruppe bearbeiten", `
+    <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--text-dim);margin-bottom:5px">Name</label><input id="bg-name" value="${escape(g.name)}" style="width:100%;padding:8px 10px"></div>
+    <div style="margin-bottom:12px"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="bg-admin" ${g.admin ? "checked" : ""} style="width:auto;margin:0"> Admin — darf Profile und Benutzergruppen verwalten</label></div>
+    <div style="margin-bottom:6px"><label style="display:block;font-size:12px;color:var(--text-dim);margin-bottom:8px">Bereiche der Gruppe
+      <button type="button" onclick="toggleAllViews(true)" style="float:right;font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer">Alle</button>
+      <button type="button" onclick="toggleAllViews(false)" style="float:right;font-size:11px;color:var(--text-faint);background:none;border:none;cursor:pointer;margin-right:12px">Keine</button></label>
+      ${profileViewGridHtml(g.views || [])}</div>`, [
+    `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
+    `<button class="btn btn-primary" onclick="bgGruppeSpeichern(${tkJs(id)})">Speichern</button>`]);
+}
+async function bgGruppeSpeichern(id) {
+  await parameterLaden(false); const b = bgParam(); const g = b.gruppen[id]; if (!g) return;
+  g.name = (document.getElementById("bg-name").value || g.name).trim(); g.admin = document.getElementById("bg-admin").checked;
+  g.views = Array.from(document.querySelectorAll(".profile-view-cb:checked")).map(cb => cb.value);
+  if (g.admin && !g.views.includes("profiles")) g.views.push("profiles");
+  await bgSpeichern(); closeModal(); render(); toast("Gruppe «" + g.name + "» gespeichert.");
+}
 /* Sucht den User-Profileintrag anhand E-Mail und baut daraus currentUser. */
 function resolveCurrentUser(email) {
   const emailLower = String(email || "").toLowerCase();
@@ -1572,18 +1628,19 @@ function resolveCurrentUser(email) {
     };
   }
 
-  if (!profile) {
-    // Kein Eintrag → kein Zugriff
+  const gruppe = bgVonEmail(emailLower);
+  if (!profile && !gruppe) {
+    // Weder Profil noch Benutzergruppe → kein Zugriff
     return null;
   }
 
-  // AllowedViews kann als Multi-Choice-Array oder String kommen
-  let allowedViews = [];
-  if (Array.isArray(profile.AllowedViews)) {
-    allowedViews = profile.AllowedViews;
-  } else if (typeof profile.AllowedViews === "string" && profile.AllowedViews.trim()) {
-    allowedViews = profile.AllowedViews.split(/[,;]/).map(s => s.trim()).filter(Boolean);
-  }
+  // Gruppenrechte + individuelle AllowedViews (Array oder String) zusammenführen
+  let allowedViews = gruppe ? (gruppe.views || []).slice() : [];
+  const indiv = !profile ? [] : Array.isArray(profile.AllowedViews) ? profile.AllowedViews
+    : (typeof profile.AllowedViews === "string" && profile.AllowedViews.trim()) ? profile.AllowedViews.split(/[,;]/).map(s => s.trim()).filter(Boolean) : [];
+  indiv.forEach(v => { if (!allowedViews.includes(v)) allowedViews.push(v); });
+  const istAdmin = !!((profile && profile.Role === "Admin") || (gruppe && gruppe.admin));
+  if (istAdmin && !allowedViews.includes("profiles")) allowedViews.push("profiles");
 
   // Im Code hinterlegte Zusatzfreigaben (z.B. Abacus-Schnittstelle) ergänzen
   (EXTRA_VIEWS_BY_EMAIL[String(email || "").toLowerCase()] || []).forEach(v => { if (!allowedViews.includes(v)) allowedViews.push(v); });
@@ -1591,14 +1648,15 @@ function resolveCurrentUser(email) {
   // Profil existiert, gewährt aber effektiv nichts (AllowedViews leer, weder Admin noch
   // Super-Admin) → wie "kein Profil" behandeln, damit die komplette Zugriff-verweigert-Seite
   // greift statt einer Seitenleiste mit nur dem öffentlichen Kundendashboard sichtbar zu lassen.
-  if (!allowedViews.length && profile.Role !== "Admin") return null;
+  if (!allowedViews.length && !istAdmin) return null;
 
   return {
     email: email,
     isSuperAdmin: false,
-    role: profile.Role || "User",
+    role: istAdmin ? "Admin" : "User",
+    gruppe: gruppe ? gruppe.name : "",
     allowedViews: allowedViews,
-    profileId: profile.id
+    profileId: profile ? profile.id : null
   };
 }
 
@@ -1822,6 +1880,8 @@ async function startApp() {
       }
     }
 
+    // Parameter (Benutzergruppen) vor der Berechtigungsprüfung laden
+    try { await parameterLaden(false); } catch (e) { console.warn("Parameter nicht geladen:", e.message); }
     // currentUser anhand E-Mail auflösen
     currentUser = resolveCurrentUser(account.username);
 
@@ -8741,7 +8801,10 @@ function azAbgleich() {
     else if (z.name && perName[azNameKey(z.name)]) { sl = perName[azNameKey(z.name)]; via = "Name"; }
     if (sl) { sl.forEach(x => gewaehlt.add(x)); treffer.push({ z, slips: sl, via }); } else fehlend.push(z);
   });
-  const ohneZahlung = azState.slips.filter(sl => !gewaehlt.has(sl));
+  // Nicht zugewiesene Abrechnungen alphabetisch (Name, dann Personal-Nr.), fehlende Zahlungszeilen ebenso
+  const byName = (a, b) => String(a.name || "").localeCompare(String(b.name || ""), "de", { sensitivity: "base" }) || String(a.persNr || a.nr || "").localeCompare(String(b.persNr || b.nr || ""), undefined, { numeric: true });
+  const ohneZahlung = azState.slips.filter(sl => !gewaehlt.has(sl)).sort(byName);
+  fehlend.sort(byName);
   const manuell = ohneZahlung.filter(sl => azState.manuell[azSlipKey(sl)]);
   manuell.forEach(sl => gewaehlt.add(sl));
   return { treffer, fehlend, ohneZahlung, manuell, gewaehlt: [...gewaehlt] };
@@ -8754,9 +8817,10 @@ async function azPdfErzeugen() {
     const out = await window.PDFLib.PDFDocument.create();
     const srcDocs = [];
     for (const p of azState.pdfs) srcDocs.push(await window.PDFLib.PDFDocument.load(p.bytes.slice(0)));
-    // Reihenfolge wie in der Auszahlungsliste; Seiten je Abrechnung in Originalreihenfolge
+    // Alphabetisch nach Name (dann Personal-Nr.), manuell gewählte eingereiht; Seiten je Abrechnung in Originalreihenfolge
     const reihenfolge = []; erg.treffer.forEach(t => t.slips.forEach(sl => { if (!reihenfolge.includes(sl)) reihenfolge.push(sl); }));
-    erg.manuell.forEach(sl => { if (!reihenfolge.includes(sl)) reihenfolge.push(sl); });   // manuell gewählte am Schluss
+    erg.manuell.forEach(sl => { if (!reihenfolge.includes(sl)) reihenfolge.push(sl); });
+    reihenfolge.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "de", { sensitivity: "base" }) || String(a.persNr || "").localeCompare(String(b.persNr || ""), undefined, { numeric: true }));
     for (const sl of reihenfolge) {
       const idx = sl.pages.map(pg => pg.n - 1);
       const copied = await out.copyPages(srcDocs[sl.pdfIdx], idx);
@@ -14089,16 +14153,22 @@ function renderProfiles(el) {
         <b style="color:var(--text)">${escape(SUPER_ADMIN_EMAIL)}</b> hat unabhängig von diesen Einstellungen immer vollen Zugriff (Super-Admin).
       </div>
 
+      ${(() => { const b = bgParam(); const grp = profileViewGroups(); const ids = Object.keys(b.gruppen);
+        return `<div style="margin-bottom:22px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div style="font-weight:600">Benutzergruppen</div><span style="font-size:11px;color:var(--text-faint)">Bereiche pro Gruppe festlegen, dann unten jedem Benutzer eine Gruppe zuweisen. Individuelle Freigaben im Profil kommen zusätzlich dazu.</span><button class="btn btn-sm" style="margin-left:auto" onclick="bgGruppeAnlegen()">+ Gruppe</button></div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">${ids.map(id => { const g = b.gruppen[id]; const n = Object.values(b.zuweisung).filter(x => x === id).length; const v = g.views || []; const alle = v.length >= ALL_VIEWS.length - 1;
+          const txt = alle ? `<span style="color:var(--accent)">Alle Bereiche</span>` : grp.map(gg => { const hit = gg.views.filter(x => v.includes(x.key)); if (!hit.length) return ""; return `<div><span style="color:var(--text-faint);font-size:10px;text-transform:uppercase;letter-spacing:.04em;margin-right:4px">${escape(gg.name)}</span>${hit.length === gg.views.length ? "alle" : hit.map(x => escape(x.label)).join(", ")}</div>`; }).join("") || `<span style="color:var(--warn)">keine Bereiche</span>`;
+          return `<div class="card" style="padding:10px 12px;font-size:12px"><div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><strong>${escape(g.name)}</strong>${g.admin ? `<span style="background:rgba(184,233,134,0.15);color:var(--accent);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600">Admin</span>` : ""}<span style="color:var(--text-faint);font-size:11px">· ${n} Benutzer</span><span style="margin-left:auto"><button class="btn btn-sm" onclick="bgGruppeBearbeiten(${tkJs(id)})">Bearbeiten</button> <button class="btn btn-sm" style="color:var(--danger)" onclick="bgGruppeLoeschen(${tkJs(id)})">✕</button></span></div><div style="color:var(--text-dim);line-height:1.5">${txt}</div></div>`; }).join("")}</div></div>`; })()}
       <table class="table">
         <thead><tr>
           <th style="width:280px">E-Mail</th>
           <th style="width:100px">Rolle</th>
-          <th>Freigeschaltete Bereiche</th>
+          <th style="width:150px">Gruppe</th>
+          <th>Freigeschaltete Bereiche <span style="font-weight:400;color:var(--text-faint)">(individuell, zusätzlich zur Gruppe)</span></th>
           <th style="width:120px;text-align:right">Aktionen</th>
         </tr></thead>
         <tbody>
           ${profiles.length === 0 ? `
-            <tr><td colspan="4" class="empty">Noch keine Profile angelegt. Klick auf "+ Profil hinzufügen".</td></tr>
+            <tr><td colspan="5" class="empty">Noch keine Profile angelegt. Klick auf "+ Profil hinzufügen".</td></tr>
           ` : profiles.map(p => {
             const views = Array.isArray(p.AllowedViews) ? p.AllowedViews
               : (typeof p.AllowedViews === "string" ? p.AllowedViews.split(/[,;]/).map(s => s.trim()).filter(Boolean) : []);
@@ -14112,15 +14182,18 @@ function renderProfiles(el) {
             }).join("");
             const unknown = views.filter(v => !VIEW_LABELS_FOR_PROFILE.some(x => x.key === v));
             const displayEmail = p.Email || (p.UserPerson && p.UserPerson.email) || "(kein Email)";
-            const roleBadge = p.Role === "Admin"
+            const bg = bgParam(); const bgId = bg.zuweisung[String(displayEmail).toLowerCase()] || ""; const bgG = bgId && bg.gruppen[bgId];
+            const gruppeSel = `<select onchange="bgZuweisen(${tkJs(String(displayEmail).toLowerCase())}, this.value)" style="padding:3px 6px;font-size:12px;max-width:140px;${bgG ? "border-color:var(--accent)" : ""}"><option value="">— keine —</option>${Object.keys(bg.gruppen).map(id => `<option value="${escape(id)}" ${id === bgId ? "selected" : ""}>${escape(bg.gruppen[id].name)}</option>`).join("")}</select>`;
+            const roleBadge = p.Role === "Admin" || (bgG && bgG.admin)
               ? `<span style="background:rgba(184,233,134,0.15);color:var(--accent);padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">Admin</span>`
               : `<span style="color:var(--text-dim);font-size:12px">User</span>`;
             return `
               <tr>
                 <td style="font-weight:500">${escape(displayEmail)}</td>
                 <td>${roleBadge}</td>
+                <td>${gruppeSel}</td>
                 <td style="color:var(--text-dim);font-size:12px">
-                  ${views.length === 0 ? `<span style="color:var(--warn)">— (kein Zugriff)</span>`
+                  ${views.length === 0 ? (bgG ? `<span style="color:var(--text-faint)">— nur Gruppenrechte</span>` : `<span style="color:var(--warn)">— (kein Zugriff)</span>`)
                     : (views.length >= ALL_VIEWS.length - 1 ? `<span style="color:var(--accent)">Alle Bereiche</span>`
                       : viewGroupsHtml + (unknown.length ? `<div style="color:var(--text-faint)">unbekannt: ${unknown.map(escape).join(", ")}</div>` : ""))}
                 </td>
@@ -14137,6 +14210,28 @@ function renderProfiles(el) {
   `;
 }
 
+/* Checkbox-Raster aller Bereiche, gruppiert wie das Menü — für Profile und Benutzergruppen */
+function profileViewGridHtml(currentViews) {
+  return `
+        <div style="background:var(--bg);padding:12px;border:1px solid var(--border);border-radius:4px;max-height:60vh;overflow:auto">
+          ${profileViewGroups().map((g, gi) => `
+            <div style="margin-bottom:${gi === 0 ? 0 : 10}px;padding-top:${gi === 0 ? 0 : 10}px;${gi === 0 ? "" : "border-top:1px solid var(--border-soft)"}">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);margin-bottom:4px">
+                <input type="checkbox" class="profile-group-cb" data-group="${gi}" ${g.views.every(v => currentViews.includes(v.key)) ? "checked" : ""} onchange="toggleViewGroup(${gi}, this.checked)"
+                  style="cursor:pointer;accent-color:var(--accent);width:auto;margin:0" title="Ganze Gruppe an/aus">
+                <span>${escape(g.name)}</span>
+              </label>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;padding-left:22px">
+              ${g.views.map(v => `
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:3px 6px;border-radius:3px;font-size:13px">
+                  <input type="checkbox" class="profile-view-cb" data-group="${gi}" value="${v.key}" ${currentViews.includes(v.key) ? "checked" : ""} onchange="syncViewGroupCb(${gi})"
+                    style="cursor:pointer;accent-color:var(--accent);width:auto;margin:0">
+                  <span>${escape(v.label)}</span>
+                </label>`).join("")}
+              </div>
+            </div>`).join("")}
+        </div>`;
+}
 /* Modal für Neu/Bearbeiten */
 function openProfileModal(profileId) {
   const isEdit = profileId != null;
@@ -14172,24 +14267,7 @@ function openProfileModal(profileId) {
           <button type="button" onclick="toggleAllViews(true)" style="float:right;font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer">Alle</button>
           <button type="button" onclick="toggleAllViews(false)" style="float:right;font-size:11px;color:var(--text-faint);background:none;border:none;cursor:pointer;margin-right:12px">Keine</button>
         </label>
-        <div style="background:var(--bg);padding:12px;border:1px solid var(--border);border-radius:4px;max-height:60vh;overflow:auto">
-          ${profileViewGroups().map((g, gi) => `
-            <div style="margin-bottom:${gi === 0 ? 0 : 10}px;padding-top:${gi === 0 ? 0 : 10}px;${gi === 0 ? "" : "border-top:1px solid var(--border-soft)"}">
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);margin-bottom:4px">
-                <input type="checkbox" class="profile-group-cb" data-group="${gi}" ${g.views.every(v => currentViews.includes(v.key)) ? "checked" : ""} onchange="toggleViewGroup(${gi}, this.checked)"
-                  style="cursor:pointer;accent-color:var(--accent);width:auto;margin:0" title="Ganze Gruppe an/aus">
-                <span>${escape(g.name)}</span>
-              </label>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;padding-left:22px">
-              ${g.views.map(v => `
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:3px 6px;border-radius:3px;font-size:13px">
-                  <input type="checkbox" class="profile-view-cb" data-group="${gi}" value="${v.key}" ${currentViews.includes(v.key) ? "checked" : ""} onchange="syncViewGroupCb(${gi})"
-                    style="cursor:pointer;accent-color:var(--accent);width:auto;margin:0">
-                  <span>${escape(v.label)}</span>
-                </label>`).join("")}
-              </div>
-            </div>`).join("")}
-        </div>
+        ${profileViewGridHtml(currentViews)}
       </div>
   `;
 
