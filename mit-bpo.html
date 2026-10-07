@@ -369,9 +369,12 @@
 
       <!-- 5 Briefvorlage -->
       <section class="panel" id="s-brief" data-title="Briefvorlage" data-optional>
-        <div class="panel-h"><div class="pn">5</div><div class="ph-txt"><h3>Briefvorlage <span class="opt-tag">Upload</span></h3><div class="sub">Verträge · Rechnungen · Lohnabrechnungen</div></div><span class="badge"></span></div>
+        <div class="panel-h"><div class="pn">5</div><div class="ph-txt"><h3>Briefvorlage <span class="opt-tag">Upload</span></h3><div class="sub">Briefvorlage · Logo · Vertrags- und Dokumentvorlagen</div></div><span class="badge"></span></div>
         <div class="panel-body">
           <div class="note">Benutzt ihr eine personalisierte Briefvorlage? Sendet sie uns zu, wir integrieren sie in Apriko: <b>A4 als DOCX</b>, Logo wenn möglich transparent als <b>SVG</b>, sonst <b>PNG</b>. Dateien einfach an die Rückmail anhängen.</div>
+          <div class="sub-h">Dokumente, die ihr uns mit der Rückmail schickt</div>
+          <div class="choices" data-key="briefvorlage.dokumente" data-multi><label class="choice"><input type="checkbox" value="Logo (SVG oder PNG, sonst JPG)"><span>Logo (SVG oder PNG, sonst JPG)</span></label><label class="choice"><input type="checkbox" value="Einsatzvertrag (Word)"><span>Einsatzvertrag (Word)</span></label><label class="choice"><input type="checkbox" value="Verleihvertrag (Word)"><span>Verleihvertrag (Word)</span></label><label class="choice"><input type="checkbox" value="Rahmenarbeitsvertrag (Word)"><span>Rahmenarbeitsvertrag (Word)</span></label><label class="choice"><input type="checkbox" value="Lohnabrechnung – Beispiel"><span>Lohnabrechnung – Beispiel</span></label><label class="choice"><input type="checkbox" value="Faktura / Rechnung – Beispiel"><span>Faktura / Rechnung – Beispiel</span></label></div>
+          <div class="note" style="margin-top:8px">Die Verträge bitte als bearbeitbare <b>Word-Dateien</b> (DOCX), Lohnabrechnung und Rechnung als Beispiel (PDF genügt). Wir übernehmen Layout und Platzhalter daraus in die Apriko-Vorlagen.</div>
           <div class="field"><label>Anmerkung <span class="o">· optional</span></label><input type="text" data-key="briefvorlage.anmerkung" placeholder="z. B. „Logo folgt separat“"></div>
         </div>
       </section>
@@ -1152,7 +1155,9 @@ Besten Dank für Ihre Unterstützung</div>
     });
     x+='  </ansprechpersonen>'+nl;
 
-    x+='  <briefvorlage anmerkung="'+esc(val("briefvorlage.anmerkung"))+'"/>'+nl;
+    x+='  <briefvorlage anmerkung="'+esc(val("briefvorlage.anmerkung"))+'">'+nl;
+    x+=listBlock("dokumente","dokument","briefvorlage.dokumente","    ");
+    x+='  </briefvorlage>'+nl;
 
     // sozialversicherungen
     x+='  <sozialversicherungen>'+nl;
@@ -1320,7 +1325,8 @@ Besten Dank für Ihre Unterstützung</div>
       "Bitte vor dem Senden anhängen:"+"\r\n"+
       "  - "+base+".xml"+"\r\n"+
       "  - "+base+".pdf"+"\r\n"+
-      "  - (falls vorhanden) Versicherungspolicen und Briefvorlage"+"\r\n\r\n"+
+      "  - (falls vorhanden) Versicherungspolicen und Briefvorlage"+"\r\n"+
+      "  - Logo, Einsatzvertrag / Verleihvertrag / Rahmenarbeitsvertrag (Word), Beispiel Lohnabrechnung und Rechnung"+"\r\n\r\n"+
       "Freundliche Grüsse";
     return "mailto:admin@apriko.com?subject="+encodeURIComponent(subj)+"&body="+encodeURIComponent(body);
   }
