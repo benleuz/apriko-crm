@@ -405,7 +405,7 @@
 
       <!-- 7 Unfallversicherung -->
       <section class="panel" id="s-uvg" data-title="Unfallversicherung (UVG)">
-        <div class="panel-h"><div class="pn">7</div><div class="ph-txt"><h3>Unfallversicherung (UVG / SUVA)</h3><div class="sub">Bruttoprämiensätze je Betriebsteil</div></div><span class="badge"></span></div>
+        <div class="panel-h"><div class="pn">7</div><div class="ph-txt"><h3>Unfallversicherung (UVG / SUVA)</h3><div class="sub">Versicherung und Taritemp-Zugang</div></div><span class="badge"></span></div>
         <div class="panel-body">
           <div class="grid g2">
             <div class="field span2"><label>Name der Versicherung / SUVA-Niederlassung</label><input type="text" data-key="uvg.name" data-req></div>
@@ -414,11 +414,18 @@
             <div class="field"><label>Strasse</label><input type="text" data-key="uvg.strasse"></div>
             <div class="field"><label>PLZ / Ort</label><input type="text" data-key="uvg.plzOrt"></div>
           </div>
-          <div class="sub-h">Bruttoprämiensätze je Betriebsteil · bitte prüfen / anpassen</div>
-          <div class="table-wrap"><table>
-            <thead><tr><th>Betriebsteil</th><th>Versicherungszweig</th><th>Ihre Bruttoprämiensätze</th></tr></thead>
-            <tbody id="uvgBranchen"></tbody>
-          </table></div>
+          <div class="sub-h">Prämiensätze (Taritemp)</div>
+          <div class="note">Die Bruttoprämiensätze je Betriebsteil müssen nicht erfasst werden – Apriko bezieht sie direkt über die SUVA-Schnittstelle <b>Taritemp</b>. Dafür brauchen wir euren Taritemp API-Key. Bitte sendet an <b>berufscode@suva.ch</b> das folgende Mail:
+            <div style="margin:10px 0 8px;padding:10px 12px;border:1px dashed currentColor;border-radius:6px;white-space:pre-line" id="suvaMailText">Guten Tag
+
+Wir benötigen für unseren neuen Software-Anbieter Apriko AG den Taritemp API-Key bzw. wir geben Ihnen hiermit die Erlaubnis, diesen an help@apriko.com zu senden.
+
+Besten Dank für Ihre Unterstützung</div>
+            <a class="btn" href="mailto:berufscode@suva.ch?subject=Taritemp%20API-Key%20f%C3%BCr%20Apriko%20AG&body=Guten%20Tag%0A%0AWir%20ben%C3%B6tigen%20f%C3%BCr%20unseren%20neuen%20Software-Anbieter%20Apriko%20AG%20den%20Taritemp%20API-Key%20bzw.%20wir%20geben%20Ihnen%20hiermit%20die%20Erlaubnis%2C%20diesen%20an%20help%40apriko.com%20zu%20senden.%0A%0ABesten%20Dank%20f%C3%BCr%20Ihre%20Unterst%C3%BCtzung">✉ Mail an berufscode@suva.ch öffnen</a>
+            <button type="button" class="btn" onclick="(function(){var t=document.getElementById('suvaMailText').innerText;navigator.clipboard&&navigator.clipboard.writeText(t);this.textContent='Kopiert ✓'}).call(this)">Text kopieren</button>
+          </div>
+          <div class="field" style="margin-top:12px"><label>Mail an die SUVA versendet?</label>
+            <div class="choices" data-key="uvg.taritempMail"><label class="choice"><input type="radio" name="uvgTaritemp" value="ja"><span>Ja, versendet</span></label><label class="choice"><input type="radio" name="uvgTaritemp" value="nein"><span>Noch offen</span></label></div></div>
         </div>
       </section>
 
@@ -672,20 +679,6 @@
     ["P","Büro und Administration","0.1092","0.7300"],
     ["Q","Finanz und Informatik","0.0476","0.6300"]
   ];
-  var ub = document.getElementById("uvgBranchen");
-  ub.innerHTML="";
-  branchen.forEach(function(b){
-    var code=b[0], name=b[1], buv=b[2], nbuv=b[3];
-    var tr=document.createElement("tr");
-    tr.innerHTML='<td rowspan="2">'+code+' '+name+'</td>'+
-      '<td style="background:transparent">BUV</td>'+
-      '<td><div class="suffix"><input type="text" data-key="uvg.branche.'+code+'.buv" value="'+buv+'"><span class="u">%</span></div></td>';
-    ub.appendChild(tr);
-    var tr2=document.createElement("tr");
-    tr2.innerHTML='<td style="background:transparent">NBUV</td>'+
-      '<td><div class="suffix"><input type="text" data-key="uvg.branche.'+code+'.nbuv" value="'+nbuv+'"><span class="u">%</span></div></td>';
-    ub.appendChild(tr2);
-  });
 
   var ages=[["18","24"],["25","34"],["35","44"],["45","54"],["55","65"]];
   [["bvgAG","ag"],["bvgAN","an"]].forEach(function(t){
@@ -1016,12 +1009,7 @@
 
     x+='    <unfallversicherung>'+nl;
     ["name","versNr","vertragNr","strasse","plzOrt"].forEach(function(k){ x+=tag(k,val("uvg."+k),"      "); });
-    x+='      <branchen>'+nl;
-    branchen.forEach(function(b){
-      var c=b[0];
-      x+='        <branche code="'+c+'" name="'+esc(b[1])+'" buv="'+esc(val("uvg.branche."+c+".buv"))+'" nbuv="'+esc(val("uvg.branche."+c+".nbuv"))+'"/>'+nl;
-    });
-    x+='      </branchen>'+nl;
+    x+=tag('taritempMailVersendet',radioVal('uvg.taritempMail'),'      ');
     x+='    </unfallversicherung>'+nl;
 
     x+='    <unfallZusatz>'+nl;
