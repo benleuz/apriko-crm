@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.396.0"></script>
-<script src="apriko-api.js?v=1.396.0"></script>
-<script src="lohncheck.js?v=1.396.0"></script>
-<script src="personalbudget.js?v=1.396.0"></script>
-<script src="jahresbudget.js?v=1.396.0"></script>
-<script src="budgetpositionen.js?v=1.396.0"></script>
-<script src="lohnchecklistetemp.js?v=1.396.0"></script>
-<script src="apriko-endpunkte.js?v=1.396.0"></script>
+<script src="apriko-filters.js?v=1.398.0"></script>
+<script src="apriko-api.js?v=1.398.0"></script>
+<script src="lohncheck.js?v=1.398.0"></script>
+<script src="personalbudget.js?v=1.398.0"></script>
+<script src="jahresbudget.js?v=1.398.0"></script>
+<script src="budgetpositionen.js?v=1.398.0"></script>
+<script src="lohnchecklistetemp.js?v=1.398.0"></script>
+<script src="apriko-endpunkte.js?v=1.398.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -237,6 +237,11 @@
 
   /* Tables */
   .table-wrap { border: 1px solid var(--border-soft); border-radius: var(--radius); overflow-x: auto; overflow-y: hidden; }
+  /* Onboarding-Matrix: eigener Scrollbereich, Kundenkopf oben und Aufgabenspalte links fixiert */
+  .onb-wrap { overflow: auto; max-height: calc(100vh - 170px); }
+  .onb-matrix thead th { position: sticky; top: 0; background: var(--bg-card); z-index: 3; box-shadow: 0 1px 0 var(--border); }
+  .onb-matrix thead th:first-child { left: 0; z-index: 4; }
+  .onb-matrix tbody td:first-child { position: sticky; left: 0; background: var(--bg-card); z-index: 1; }
   table { width: 100%; border-collapse: collapse; }
   thead th {
     background: var(--bg-elev); padding: 10px 14px;
@@ -1013,7 +1018,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.396.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.398.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -8563,10 +8568,16 @@ function onbParam() {
   let maxId = o.aufgaben.reduce((m, a) => Math.max(m, parseInt(String(a.id).replace(/\D/g, "")) || 0), 0);
   ONB_STANDARD_AUFGABEN.forEach(a => { if (vorhanden.has(a[1])) return;
     const neu = { id: "a" + (++maxId), phase: a[0], titel: a[1], zustaendig: a[2], tage: a[3], gilt: a[4] || "alle" };
-    // in der eigenen Phase nach Tagen einsortieren (manuelle Reihenfolge der übrigen bleibt)
-    let pos = -1; o.aufgaben.forEach((x, i) => { if (x.phase === a[0] && (parseInt(x.tage) || 0) <= a[3]) pos = i; });
-    if (pos < 0) { const ersteDerPhase = o.aufgaben.findIndex(x => x.phase === a[0]); pos = ersteDerPhase >= 0 ? ersteDerPhase - 1 : o.aufgaben.length - 1; }
+    // Direkt hinter dem Vorgänger aus der Standardliste einfügen (gleiche Reihenfolge wie dort); sonst ans Ende der Phase
+    const idxStd = ONB_STANDARD_AUFGABEN.findIndex(x => x[1] === a[1]); let pos = -1;
+    for (let j = idxStd - 1; j >= 0 && pos < 0; j--) { const k = o.aufgaben.findIndex(x => x.titel === ONB_STANDARD_AUFGABEN[j][1]); if (k >= 0) pos = k; }
+    if (pos < 0) { o.aufgaben.forEach((x, i) => { if (x.phase === a[0]) pos = i; }); }
+    if (pos < 0) pos = o.aufgaben.length - 1;
     o.aufgaben.splice(pos + 1, 0, neu); vorhanden.add(a[1]); });
+  // Reihenfolge-Korrektur für bereits eingefügte Aufgaben: SV-Abnahmen direkt hinter «Sozialversicherungen erfasst»
+  const nach = (titel, vorgaenger) => { const i = o.aufgaben.findIndex(x => x.titel === titel), v = o.aufgaben.findIndex(x => x.titel === vorgaenger); if (i < 0 || v < 0 || i === v + 1) return; const [t] = o.aufgaben.splice(i, 1); const v2 = o.aufgaben.findIndex(x => x.titel === vorgaenger); o.aufgaben.splice(v2 + 1, 0, t); };
+  nach("Sozialversicherungen vom internen Verantwortlichen abgenommen", "Sozialversicherungen (AHV/ALV/UVG/KTG/BVG/QST) erfasst");
+  nach("Sozialversicherungen vom externen Verantwortlichen abgenommen", "Sozialversicherungen vom internen Verantwortlichen abgenommen");
   return o;
 }
 async function onbSpeichern() { try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); } }
@@ -8710,7 +8721,7 @@ async function renderOnboarding(el) {
   // Lesbarkeit: Aufgaben als ZEILEN (Phasen als Zwischentitel), Kunden als SPALTEN
   const kopf = `<thead>
     <tr>
-      <th style="min-width:240px;position:sticky;left:0;background:var(--bg-card);z-index:2">Aufgabe</th>
+      <th style="min-width:240px">Aufgabe</th>
       <th style="min-width:56px;font-size:10px">Zust.</th><th style="min-width:40px;text-align:right;font-size:10px" title="Tage relativ zum Go-Live">Tage</th>
       ${kunden.map(({ id, c, k }) => { const erl = k.erledigt || {}; const gilt = o.aufgaben.filter(a => onbGilt(a, c)); const n = gilt.filter(a => erl[a.id]).length;
         const name = String(c.Title || "").replace(/\s*[-–·]\s*(Nur SaaS|SaaS und BPO|Nur BPO|BPO inkl\. SaaS)\s*$/i, "");
@@ -8766,7 +8777,7 @@ async function renderOnboarding(el) {
     <div class="print-only" style="font-size:11px;color:#666;margin-bottom:8px">Apriko AG · Onboarding-Übersicht · Stand ${new Date().toLocaleDateString("de-CH")}</div>
     <div class="card" style="padding:14px 16px">
       <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px" class="no-print">Häkchen setzen = erledigt (Datum · Person erscheint daneben, Details beim Überfahren). Rot = überfällig gemäss Go-Live-Datum. «—» = Aufgabe gilt nicht für diesen Kundentyp. Zuständigkeit: <span style="color:var(--accent)">Apriko</span> · <span style="color:var(--warn)">Kunde</span> · <span style="color:var(--accent-3)">beide</span>.</div>
-      ${kunden.length ? `<div class="table-wrap" style="overflow-x:auto"><table style="font-size:12px;border-collapse:collapse">${kopf}<tbody>${zeilen}</tbody></table></div>` : `<div class="empty">Noch keine Kunden im Onboarding — oben rechts einen Kunden hinzufügen.</div>`}
+      ${kunden.length ? `<div class="table-wrap onb-wrap"><table class="onb-matrix" style="font-size:12px;border-collapse:collapse">${kopf}<tbody>${zeilen}</tbody></table></div>` : `<div class="empty">Noch keine Kunden im Onboarding — oben rechts einen Kunden hinzufügen.</div>`}
     </div>
     ${bearbeiten}`;
 }
