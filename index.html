@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.386.0"></script>
-<script src="apriko-api.js?v=1.386.0"></script>
-<script src="lohncheck.js?v=1.386.0"></script>
-<script src="personalbudget.js?v=1.386.0"></script>
-<script src="jahresbudget.js?v=1.386.0"></script>
-<script src="budgetpositionen.js?v=1.386.0"></script>
-<script src="lohnchecklistetemp.js?v=1.386.0"></script>
-<script src="apriko-endpunkte.js?v=1.386.0"></script>
+<script src="apriko-filters.js?v=1.390.0"></script>
+<script src="apriko-api.js?v=1.390.0"></script>
+<script src="lohncheck.js?v=1.390.0"></script>
+<script src="personalbudget.js?v=1.390.0"></script>
+<script src="jahresbudget.js?v=1.390.0"></script>
+<script src="budgetpositionen.js?v=1.390.0"></script>
+<script src="lohnchecklistetemp.js?v=1.390.0"></script>
+<script src="apriko-endpunkte.js?v=1.390.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1013,7 +1013,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.386.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.390.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -2392,6 +2392,21 @@ function budgetSuggest(refType, refId, btype) {
   return out;
 }
 
+/* Hinweis unter «Ziel-ARR SaaS»: aus Ziel-Aussenumsatz × SaaS-Satz (bzw. Lizenzen × Preis) berechneter Richtwert,
+   damit die beiden Zielfelder nicht verwechselt werden (Aussenumsatz = Umsatz des Kunden, ARR = unser Honorar). */
+function zielArrHinweis() {
+  const el = document.getElementById("f-targetarr-hint"); if (!el) return;
+  const ext = parseFloat((document.getElementById("f-zielext") || {}).value) || 0;
+  const satz = parseFloat((document.getElementById("f-saasrate") || {}).value) || 0;
+  const arr = parseFloat((document.getElementById("f-targetarr") || {}).value) || 0;
+  const minM = parseFloat((document.getElementById("f-minsaas") || {}).value) || 0;
+  let rechn = ext && satz ? Math.round(ext * satz / 100) : 0;
+  if (rechn && minM * 12 > rechn) rechn = minM * 12;
+  let txt = rechn ? "Rechnerisch aus Ziel-Aussenumsatz × SaaS-Satz" + (minM * 12 === rechn ? " (Mindesthonorar greift)" : "") + ": CHF " + rechn.toLocaleString("de-CH") : "";
+  if (arr && ext && arr > ext * 0.5) txt += (txt ? " · " : "") + "⚠ Wert sieht nach Aussenumsatz aus, nicht nach ARR";
+  if (rechn && !arr) txt += ` <a href="#" onclick="document.getElementById('f-targetarr').value=${rechn};zielArrHinweis();return false">übernehmen</a>`;
+  el.innerHTML = txt;
+}
 async function budgetDbToggle(id, on) {
   const b = budgetRows().find(x => x.id === id); if (!b) return;
   b.Db = !!on;
@@ -2405,7 +2420,7 @@ function budgetDbProMonat(year) {
   const out = Array(12).fill(0); const seen = Array.from({ length: 12 }, () => new Set());
   budgetRows().filter(b => b.BYear == year).forEach(b => {
     const c = b.RefType === "customer" ? cache.customers.find(x => String(x.id) === String(b.RefId)) : null;
-    const hat = (c && kundenFlag(c.id, "hatDb")) || b.Db;
+    const hat = (c ? kundenHatDb(c.id) : false) || b.Db;
     if (!hat) return;
     const key = b.RefType + ":" + (b.RefId || b.RefName);
     const sm = parseInt(b.StartMonth) || 1;
@@ -4551,7 +4566,7 @@ function renderBudget(el) {
       <tbody>
         ${rows.map(b => `
           <tr>
-            <td title="${escape(budgetRefName(b))}${b.StartMonth > 1 ? " — ab " + MONTH_NAMES[b.StartMonth-1] : ""}" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escape(budgetRefName(b))}${b.RefType === "company" || b.RefType === "text" ? ` <span style="font-size:9px;color:var(--text-faint)">(Lead)</span>` : ""}${(() => { const c = b.RefType === "customer" ? cache.customers.find(x => x.id == b.RefId) : null; if (!c) return ""; const e = budgetEndMonat(c, year); if (e === 0 || (c.Status || "Aktiv") !== "Aktiv") return ` <span style="font-size:9px;color:var(--danger)" title="Vertrag beendet — Zeile mit «Aktive Kunden übernehmen» oder ✕ entfernen">beendet</span>`; if (e) return ` <span style="font-size:9px;color:var(--warn)" title="Vertragsende ${c.EndDate.slice(0,10)}">bis ${MONTH_NAMES[e-1]}</span>`; return ""; })()}${b.StartMonth > 1 ? ` <span style="font-size:9px;color:var(--accent-2)">ab ${MONTH_NAMES[b.StartMonth-1]}</span>` : ""}${(() => { const kd = b.RefType === "customer" && kundenFlag(b.RefId, "hatDb"); return ` <label style="font-size:9px;color:var(--text-faint);cursor:pointer;white-space:nowrap" title="${kd ? "Datenbank gemäss Kundenstamm (Hostingkosten)" : "Datenbank → Hostingkosten pro Monat auf Konto 4400 (Budgetpositionen)"}"><input type="checkbox" ${kd || b.Db ? "checked" : ""} ${kd ? "disabled" : ""} onchange="budgetDbToggle(${b.id}, this.checked)" style="width:auto;margin:0;vertical-align:middle"> DB</label>`; })()}</td>
+            <td title="${escape(budgetRefName(b))}${b.StartMonth > 1 ? " — ab " + MONTH_NAMES[b.StartMonth-1] : ""}" style="max-width:190px;white-space:nowrap"><div style="display:flex;align-items:center;gap:3px;min-width:0"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">${escape(budgetRefName(b))}</span>${b.RefType === "company" || b.RefType === "text" ? ` <span style="font-size:9px;color:var(--text-faint)">(Lead)</span>` : ""}${(() => { const c = b.RefType === "customer" ? cache.customers.find(x => x.id == b.RefId) : null; if (!c) return ""; const e = budgetEndMonat(c, year); if (e === 0 || (c.Status || "Aktiv") !== "Aktiv") return ` <span style="font-size:9px;color:var(--danger)" title="Vertrag beendet — Zeile mit «Aktive Kunden übernehmen» oder ✕ entfernen">beendet</span>`; if (e) return ` <span style="font-size:9px;color:var(--warn)" title="Vertragsende ${c.EndDate.slice(0,10)}">bis ${MONTH_NAMES[e-1]}</span>`; return ""; })()}${b.StartMonth > 1 ? ` <span style="font-size:9px;color:var(--accent-2)">ab ${MONTH_NAMES[b.StartMonth-1]}</span>` : ""}${(() => { const kd = b.RefType === "customer" && kundenHatDb(b.RefId); return ` <label style="font-size:9px;color:var(--text-faint);cursor:pointer;white-space:nowrap" title="${kd ? "Datenbank gemäss Kundenstamm «Hat Datenbank» — wird für die Hostingkosten gezählt (im Kundenstamm ändern)" : "Kein DB-Flag im Kundenstamm — hier ankreuzen, falls diese Zeile trotzdem eine Datenbank hat (Hostingkosten Konto 4400)"}">${kd ? `<span style="color:var(--accent);font-weight:600">🗄 DB</span>` : `<input type="checkbox" ${b.Db ? "checked" : ""} onchange="budgetDbToggle(${b.id}, this.checked)" style="width:auto;margin:0;vertical-align:middle"> DB`}</label>`; })()}</div></td>
             <td>${typCell(b)}</td>
             <td>${paramCell(b)}</td>
             ${BUDGET_MONTH_FIELDS.map(f => `<td style="text-align:right"><input id="bud-c-${b.id}-${f}" class="bud-in bud-in-m" ${b.BType === "BPOStd" ? `style="color:var(--accent-2)" title="${num(b[f])} h × ${num(b.Rate)} = CHF ${Math.round(budgetChfOf(b, b[f])).toLocaleString("de-CH")}"` : ""} value="${num(b[f])}" onchange="budgetCellChange(${b.id},'${f}',this.value)">${b.BType === "BPOStd" ? `<div style="font-size:8.5px;color:var(--text-faint);text-align:right;padding-right:4px">${Math.round(budgetChfOf(b, b[f])).toLocaleString("de-CH")}</div>` : ""}</td>`).join("")}
@@ -7348,7 +7363,7 @@ function apReset() {
    Change: { activityId, diff, entityId, entitySchemaRevision, entityState, entityVersion, initiators[], createdTime }
    Activity: { actionName, activityTime, executor, initiator, contextEntityId } — über includes/resolveReferences
    in result.references mitgeliefert. Filterformat wie überall: feld|op|wert|text|false|false|["G1"]. */
-let apChState = { status: "", nachErstellung: true, toleranzMin: 60, ent: {}, namen: {}, iniModus: "=", streng: true, datumTyp: "text", datumServer: true, sort: true, diag: "", entityType: "EntityChange", entityId: "", entityName: "", initiator: "", von: "", bis: "", includes: "Activity", resolve: true, pageSize: 120, pageIndex: 0, extra: "", rows: [], refs: {}, total: null, loading: false, fehler: "", raw: false, suche: "", sucheTyp: "LegalPerson", treffer: [], offen: {} };
+let apChState = { leereAus: true, status: "", nachErstellung: true, toleranzMin: 60, ent: {}, namen: {}, iniModus: "=", streng: true, datumTyp: "text", datumServer: true, sort: true, diag: "", entityType: "EntityChange", entityId: "", entityName: "", initiator: "", von: "", bis: "", includes: "Activity", resolve: true, pageSize: 120, pageIndex: 0, extra: "", rows: [], refs: {}, total: null, loading: false, fehler: "", raw: false, suche: "", sucheTyp: "LegalPerson", treffer: [], offen: {} };
 function apChFilters() {
   const f = [];
   if (apChState.entityId.trim()) f.push('entityId|=|' + JSON.stringify(apChState.entityId.trim()) + '|text|false|false|["G1"]');
@@ -7397,7 +7412,15 @@ function apChSichtbar() {
   return apChState.rows.filter(c => { const t = (c.createdTime || "").slice(0, 10);
     const datumOk = apChState.datumServer || ((!v || !t || t >= v) && (!b || !t || t <= b));
     const statusOk = !apChState.status || (c.entityState || "") === apChState.status;
-    return datumOk && statusOk && (!apChState.streng || apChInitiatorPasst(c)) && !apChIstErsterfassung(c); });
+    return datumOk && statusOk && (!apChState.streng || apChInitiatorPasst(c)) && !apChIstErsterfassung(c) && !apChIstLeer(c); });
+}
+/* Einträge ohne Feldänderung (diff = {}) sind nur dann aussagekräftig, wenn es ein nachträglich hinzugefügtes
+   Objekt ist (Added, Vertrag nachgeladen und älter als die Toleranz) — sonst ausblenden. */
+function apChIstLeer(c) {
+  if (!apChState.leereAus) return false;
+  if (apChDiffZeilen(c.diff).length) return false;
+  const e = apChState.ent[c.entityId];
+  return !((c.entityState === "Added" || c.entityState === "Deleted") && e && e.erstellt);
 }
 /* Änderung gehört zur Ersterfassung des Vertrags, wenn sie innerhalb der Toleranz nach dessen createdTime liegt —
    ein später hinzugefügtes Beteiligungsobjekt (entityState Added) ist dagegen eine echte Vertragsänderung. */
@@ -7539,6 +7562,7 @@ function apChHtml() {
       <label title="initiators = exakter Name, wie er in der Spalte Initiatoren steht (z.B. PercentagePlacementInvolvementPlacementContextMutation, StaffLeasePlacementChangeTracker) — Klick auf einen Wert in der Tabelle übernimmt ihn">Initiator ${inp("initiator", "280px", "z.B. StaffLeasePlacementChangeTracker")}</label>
       <select onchange="apChState.iniModus=this.value" title="Wie der Initiator gesendet wird: Filter =, Filter ANY (Listenfeld) oder als Volltext-query" style="padding:3px 5px;font-size:11.5px">${[["=", "Filter ="], ["ANY", "Filter ANY"], ["query", "Volltext"]].map(([v, l]) => `<option value="${v}" ${st.iniModus === v ? "selected" : ""}>${l}</option>`).join("")}</select>
       <label title="entityState: Modified = Änderung, Added = Ersterfassung, Deleted = Löschung">Status <select onchange="apChState.status=this.value;render()" style="padding:3px 5px;font-size:11.5px">${[["", "alle"], ["Modified", "nur Änderungen"], ["Added", "nur Ersterfassung"], ["Deleted", "nur Löschungen"]].map(([v, l]) => `<option value="${v}" ${st.status === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label title="Einträge ohne Feldänderung (leeres Diff) ausblenden — ausser es ist ein nachträglich hinzugefügtes/gelöschtes Objekt mit nachgeladenem Vertrag"><input type="checkbox" ${st.leereAus ? "checked" : ""} onchange="apChState.leereAus=this.checked;render()"> leere ausblenden</label>
       <label title="Blendet Einträge aus, die innerhalb der Toleranz nach dem Erstellungsdatum des Einsatzvertrags liegen (Ersterfassung) — wirkt erst nach «Einsatz-Nr. nachladen», weil dafür das createdTime des Vertrags nötig ist"><input type="checkbox" ${st.nachErstellung ? "checked" : ""} onchange="apChState.nachErstellung=this.checked;render()"> nur nach Vertragserstellung, Toleranz <input type="number" value="${st.toleranzMin}" onchange="apChState.toleranzMin=+this.value;render()" style="width:48px;padding:2px 4px;font-size:11px"> Min.</label>
       <label>Von ${inp("von", "130px", "", "date")}</label><label>Bis ${inp("bis", "130px", "", "date")}</label>
     </div>
@@ -7568,8 +7592,8 @@ function apChHtml() {
       return `<tr><td style="white-space:nowrap;font-family:var(--font-mono)">${zeit(c.createdTime || a.activityTime)}</td><td>${escape(a.actionName || "")}</td><td>${escape(apChExecutor(a))}</td>
         <td title="${escape(c.entityId || "")}">${escape(apChEntityText(c) || (ent ? apChName(ent) + (ent.type ? " · " + ent.type : "") : (c.entityId || "").slice(0, 12) + "…"))}</td><td>${escape(c.entityState || "")}</td><td style="font-family:var(--font-mono);text-align:right">${escape(c.entityVersion ?? "")}</td>
         <td style="font-size:10.5px;color:var(--text-dim)">${(c.initiators || []).map(x => `<a href="#" onclick="apChState.initiator=${tkJs(String(x))};apChLaden(false);return false" title="Nach diesem Initiator filtern (exakter Wert)" style="color:inherit;text-decoration:none;border-bottom:1px dotted">${escape(String(x))}</a>`).join("<br>")}</td>
-        <td>${show.length ? `<table style="font-size:11px;border-collapse:collapse">${show.map(d => `<tr><td style="padding:1px 8px 1px 0;color:var(--text-dim);white-space:nowrap">${escape(d[0])}</td><td style="padding:1px 6px;color:var(--danger);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escape(d[1])}">${escape(st.namen[d[1]] || d[1])}</td><td>→</td><td style="padding:1px 6px;color:var(--accent);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escape(d[2])}">${escape(st.namen[d[2]] || d[2])}</td></tr>`).join("")}</table>${z.length > 6 ? `<a href="#" onclick="apChState.offen[${i}]=!apChState.offen[${i}];render();return false" style="font-size:10.5px">${offen ? "weniger" : "… " + (z.length - 6) + " weitere Felder"}</a>` : ""}` : `<span style="color:var(--text-faint)">${c.diff ? escape(JSON.stringify(c.diff).slice(0, 200)) : "—"}</span>`}</td></tr>`; }).join("")}
-    </tbody></table></div><div style="font-size:11px;color:var(--text-faint);margin-top:6px">${apChSichtbar().length} Änderungen angezeigt · ${st.rows.length} geladen${st.nachErstellung ? " · " + st.rows.filter(apChIstErsterfassung).length + " als Ersterfassung ausgeblendet · " + st.rows.filter(c => !st.ent[c.entityId]).length + " ohne nachgeladenen Vertrag (Erstellungsdatum unbekannt → angezeigt)" : ""}${st.initiator.trim() ? " · " + st.rows.filter(c => !apChInitiatorPasst(c)).length + " ohne «" + escape(st.initiator.trim()) + "» in initiators" : ""}${st.total !== null ? " von " + st.total : ""} · ${Object.keys(st.refs).length} Referenzen aufgelöst</div>`;
+        <td>${show.length ? `<table style="font-size:11px;border-collapse:collapse">${show.map(d => `<tr><td style="padding:1px 8px 1px 0;color:var(--text-dim);white-space:nowrap">${escape(d[0])}</td><td style="padding:1px 6px;color:var(--danger);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escape(d[1])}">${escape(st.namen[d[1]] || d[1])}</td><td>→</td><td style="padding:1px 6px;color:var(--accent);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escape(d[2])}">${escape(st.namen[d[2]] || d[2])}</td></tr>`).join("")}</table>${z.length > 6 ? `<a href="#" onclick="apChState.offen[${i}]=!apChState.offen[${i}];render();return false" style="font-size:10.5px">${offen ? "weniger" : "… " + (z.length - 6) + " weitere Felder"}</a>` : ""}` : `<span style="color:var(--text-faint)">${c.entityState === "Added" ? "neu angelegt" + (apChEntityText(c) ? ": " + escape(apChEntityText(c)) : "") : c.entityState === "Deleted" ? "gelöscht" : c.diff ? escape(JSON.stringify(c.diff).slice(0, 200)) : "—"}</span>`}</td></tr>`; }).join("")}
+    </tbody></table></div><div style="font-size:11px;color:var(--text-faint);margin-top:6px">${apChSichtbar().length} Änderungen angezeigt · ${st.rows.length} geladen${st.leereAus ? " · " + st.rows.filter(apChIstLeer).length + " leere ausgeblendet" : ""}${st.nachErstellung ? " · " + st.rows.filter(apChIstErsterfassung).length + " als Ersterfassung ausgeblendet · " + st.rows.filter(c => !st.ent[c.entityId]).length + " ohne nachgeladenen Vertrag (Erstellungsdatum unbekannt → angezeigt)" : ""}${st.initiator.trim() ? " · " + st.rows.filter(c => !apChInitiatorPasst(c)).length + " ohne «" + escape(st.initiator.trim()) + "» in initiators" : ""}${st.total !== null ? " von " + st.total : ""} · ${Object.keys(st.refs).length} Referenzen aufgelöst</div>`;
   return kopf + tbl;
 }
 /* ---------- API-Explorer: alle GET-Endpunkte aus den OpenAPI-Dateien ausführen (read-only) ---------- */
@@ -13447,7 +13471,7 @@ function openCustomer(id) {
       <dt>Link</dt><dd>${appLinkText(c.id, c.Link) ? `<a href="${escape(normalizeUrl(appLinkText(c.id, c.Link)) || appLinkText(c.id, c.Link))}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent-2);text-decoration:underline;cursor:pointer">${escape(appLinkText(c.id, c.Link))} ↗</a>` : "—"}</dd>
       <dt>Ansprechpersonen</dt><dd style="font-size:12px">${(() => { const f = (crmKundenFlags || {})[String(c.id)] || {}; const mail = e => `<a href="mailto:${escape(e)}?subject=${encodeURIComponent((c.Title || "") + " — ")}" onclick="event.stopPropagation()" title="E-Mail an ${escape(e)}" style="text-decoration:none;margin-left:3px">✉</a>`; const zeile = arr => arr.filter(x => x[1]).map(x => x[0] + ": " + escape(x[1]) + mail(x[1])).join(" · "); const z = zeile([["Ansprechperson Lohn", f.apLohn], ["Backup Lohn", f.apLohnBackup], ["Lohn intern", f.apLohnIntern]]); const z2 = zeile([["Ansprechperson FIBU", f.apFibu], ["Backup FIBU", f.apFibuBackup]]); return [z, z2].filter(Boolean).join("<br>") || "—"; })()}</dd>
       ${VERTRAG_ARTEN.map(([art, label]) => `<dt>${label}</dt><dd>${vertragLink(c.id, art) ? `<a href="${escape(vertragLink(c.id, art))}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${escape(vertragLink(c.id, art))}" style="color:var(--accent-2)">📄 ${escape(vertragName(vertragLink(c.id, art)))} ↗</a>` : "—"}</dd>`).join("")}
-      <dt>Workflows</dt><dd>${[kundenFlag(c.id, "intern") ? "Interner Lohn ✓" : "", kundenFlag(c.id, "fibu") ? "FIBU Monatsabschluss ✓" : "", kundenFlag(c.id, "hatDb") ? "Datenbank (Hosting) ✓" : ""].filter(Boolean).join(" · ") || "—"}</dd>
+      <dt>Workflows</dt><dd>${[kundenFlag(c.id, "intern") ? "Interner Lohn ✓" : "", kundenFlag(c.id, "fibu") ? "FIBU Monatsabschluss ✓" : "", kundenHatDb(c.id) ? "Datenbank (Hosting) ✓" : ""].filter(Boolean).join(" · ") || "—"}</dd>
       <dt>Mindesthonorar</dt><dd style="white-space:pre-wrap">${escape(minFeeText(c.id, c.MinFee)||"—")}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
     </dl>
@@ -13534,19 +13558,21 @@ function editCustomer(id) {
       <input id="f-minbpo" type="number" step="1" min="0" value="${kundenMin(c.id, "minBpo") || ""}" placeholder="z.B. 1'500 — leer = keines">
     </div>
     <div class="field"><label>Ziel-Aussenumsatz (CHF/Jahr) <span style="color:var(--text-faint);font-weight:400">— Budget-Vorschlag für SaaS % und BPO %, solange keine Ist-Zahlen vorliegen</span></label>
-      <input id="f-zielext" type="number" step="10000" min="0" value="${kundenMin(c.id, "zielExt") || ""}" placeholder="z.B. 2'500'000"></div>
+      <input id="f-zielext" type="number" step="10000" min="0" value="${kundenMin(c.id, "zielExt") || ""}" placeholder="z.B. 2'500'000" oninput="zielArrHinweis()"></div>
+    <div class="field"><label>Ziel-ARR SaaS (CHF/Jahr) <span style="color:var(--text-faint);font-weight:400">— unser Honorar vom Kunden (nicht sein Aussenumsatz); Richtwert für die Kundenliste</span></label>
+      <input id="f-targetarr" type="number" step="1000" min="0" value="${c.TargetARR||""}" placeholder="z.B. 36'000" oninput="zielArrHinweis()">
+      <div id="f-targetarr-hint" style="font-size:11px;color:var(--text-faint);margin-top:3px"></div></div>
     <div id="bpo-hourly-row" class="field" style="display:${c.BPOModel==='Stundensatz'?'block':'none'}">
       <label>Stundensatz (CHF/h)</label>
       <input id="f-hourlyrate" type="number" step="0.01" min="0" value="${c.HourlyRate||""}" placeholder="z.B. 180">
     </div>
     <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-bpoytd" ${c.BPOYtd?"checked":""} style="width:auto;margin:0"> BPO-Abrechnung YTD-kumulativ (Jahresbasis, Vormonate werden automatisch abgezogen)</label></div>
-    <div class="field"><label>Ziel-ARR SaaS (CHF)</label><input id="f-targetarr" type="number" step="1000" min="0" value="${c.TargetARR||""}"></div>
     <div class="field"><label>Link</label><input id="f-link" type="text" value="${escape(appLinkText(c.id || "", c.Link))}" placeholder="z.B. helva.apriko.app"></div>
     ${VERTRAG_ARTEN.map(([art, label]) => { const u = vertragLink(c.id || "", art); return `<div class="field"><label>${label}${u ? ` — <a href="${escape(u)}" target="_blank" rel="noopener" style="color:var(--accent-2);text-transform:none;letter-spacing:0" title="${escape(u)}">📄 ${escape(vertragName(u))} ↗</a>` : ""}</label><input id="f-vertrag-${art}" type="text" value="${escape(u)}" placeholder="In SharePoint: Dokument → Link kopieren → hier einfügen" style="font-size:11px;color:var(--text-dim)"></div>`; }).join("")}
     <div class="field-row">
       <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-wf-intern" ${kundenFlag(c.id || "", "intern") ? "checked" : ""} style="width:auto;margin:0"> Interner Lohn</label></div>
       <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-wf-fibu" ${kundenFlag(c.id || "", "fibu") ? "checked" : ""} style="width:auto;margin:0"> FIBU Monatsabschluss</label></div>
-      <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer" title="Eigene Datenbank beim Kunden → löst monatliche Hostingkosten aus (Budgetpositionen, Konto 4400, Betrag pro DB zentral einstellbar)"><input type="checkbox" id="f-wf-hatdb" ${kundenFlag(c.id || "", "hatDb") ? "checked" : ""} style="width:auto;margin:0"> Hat Datenbank (Hostingkosten)</label></div>
+      <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer" title="Eigene Datenbank beim Kunden → löst monatliche Hostingkosten aus (Budgetpositionen, Konto 4400, Betrag pro DB zentral einstellbar)"><input type="checkbox" id="f-wf-hatdb" ${(c.id ? kundenHatDb(c.id) : true) ? "checked" : ""} style="width:auto;margin:0"> Hat Datenbank (Hostingkosten) <span style="color:var(--text-faint);font-weight:400">— Standard ja</span></label></div>
     </div>
     ${(() => { const f = (crmKundenFlags || {})[String(c.id || "")] || {}; const emails = [...new Set((cache.userprofiles || []).map(p => (p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase()).filter(Boolean))].sort();
       // ✉ neben dem Dropdown: öffnet Outlook mit der gewählten Adresse (passt sich beim Wechsel an)
@@ -13561,6 +13587,9 @@ function editCustomer(id) {
   ]);
   // Counter initialisieren (zeigt z.B. "(2 Perioden)" wenn Historie vorhanden)
   updatePriceHistoryUI();
+  zielArrHinweis();
+  const fsr = document.getElementById("f-saasrate"); if (fsr) fsr.addEventListener("input", zielArrHinweis);
+  const fms = document.getElementById("f-minsaas"); if (fms) fms.addEventListener("input", zielArrHinweis);
 }
 
 function updateCustomerTitle() {
@@ -13728,13 +13757,13 @@ async function saveCustomer(id) {
       const alt = crmKundenFlags[key] || {};
       const apGeaendert = Object.keys(ap).some(k => (ap[k] || "") !== (alt[k] || ""));
       const apGesetzt = Object.values(ap).some(Boolean);
-      if (apGeaendert || neuIntern !== !!alt.intern || neuFibu !== !!alt.fibu || neuHatDb !== !!alt.hatDb || neuMinfee !== (alt.minfee || "") || neuApplink !== (alt.applink || "")
+      if (apGeaendert || neuIntern !== !!alt.intern || neuFibu !== !!alt.fibu || neuHatDb !== !alt.keineDb || neuMinfee !== (alt.minfee || "") || neuApplink !== (alt.applink || "")
           || neuMinSaas !== (parseFloat(alt.minSaas) || 0) || neuMinBpo !== (parseFloat(alt.minBpo) || 0)
           || neuZielExt !== (parseFloat(alt.zielExt) || 0) || neuPctFrom !== (alt.saasPctFrom || "")) {
-        if (neuIntern || neuFibu || neuHatDb || neuMinfee || neuApplink || neuMinSaas || neuMinBpo || neuZielExt || neuPctFrom || apGesetzt) {
+        if (neuIntern || neuFibu || !neuHatDb || neuMinfee || neuApplink || neuMinSaas || neuMinBpo || neuZielExt || neuPctFrom || apGesetzt) {
           crmKundenFlags[key] = { intern: neuIntern, fibu: neuFibu, minfee: neuMinfee, applink: neuApplink };
           Object.keys(ap).forEach(k => { if (ap[k]) crmKundenFlags[key][k] = ap[k]; });
-          if (neuHatDb) crmKundenFlags[key].hatDb = true;
+          if (!neuHatDb) crmKundenFlags[key].keineDb = true;
           if (neuMinSaas) crmKundenFlags[key].minSaas = neuMinSaas;
           if (neuMinBpo) crmKundenFlags[key].minBpo = neuMinBpo;
           if (neuZielExt) crmKundenFlags[key].zielExt = neuZielExt;
@@ -15092,6 +15121,8 @@ async function crmSaveKundenFlags() {
   }
 }
 function kundenFlag(custId, flag) { return !!((crmKundenFlags || {})[String(custId)] || {})[flag]; }
+/* Datenbank/Hosting: Standard JA (praktisch jeder Kunde hat eine eigene DB) — nur ein explizites «keineDb» schaltet aus. */
+function kundenHatDb(custId) { const f = (crmKundenFlags || {})[String(custId)] || {}; return !f.keineDb; }
 /* Numerische Mindesthonorare (CHF/Monat) aus den Kundenflags: minSaas / minBpo. */
 function kundenMin(custId, which) { return parseFloat(((crmKundenFlags || {})[String(custId)] || {})[which]) || 0; }
 function applyMin(betrag, min) { return min > 0 && betrag > 0 && betrag < min ? min : betrag; }
