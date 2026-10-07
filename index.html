@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.398.0"></script>
-<script src="apriko-api.js?v=1.398.0"></script>
-<script src="lohncheck.js?v=1.398.0"></script>
-<script src="personalbudget.js?v=1.398.0"></script>
-<script src="jahresbudget.js?v=1.398.0"></script>
-<script src="budgetpositionen.js?v=1.398.0"></script>
-<script src="lohnchecklistetemp.js?v=1.398.0"></script>
-<script src="apriko-endpunkte.js?v=1.398.0"></script>
+<script src="apriko-filters.js?v=1.399.0"></script>
+<script src="apriko-api.js?v=1.399.0"></script>
+<script src="lohncheck.js?v=1.399.0"></script>
+<script src="personalbudget.js?v=1.399.0"></script>
+<script src="jahresbudget.js?v=1.399.0"></script>
+<script src="budgetpositionen.js?v=1.399.0"></script>
+<script src="lohnchecklistetemp.js?v=1.399.0"></script>
+<script src="apriko-endpunkte.js?v=1.399.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1018,7 +1018,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.398.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.399.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -8530,9 +8530,9 @@ const ONB_STANDARD_AUFGABEN = [
   ["Parametrierung", "Dokumentvorlagen vom Kunden erhalten", "Kunde", -60],
   ["Parametrierung", "Instanz erstellt, Mandant & Filialen angelegt", "Apriko", -65],
   ["Parametrierung", "Lohnarten, GAV & Zuschläge parametriert", "Apriko", -55],
-  ["Parametrierung", "Sozialversicherungen (AHV/ALV/UVG/KTG/BVG/QST) erfasst", "Apriko", -55, "bpo"],
-  ["Parametrierung", "Sozialversicherungen vom internen Verantwortlichen abgenommen", "Apriko", -52, "bpo"],
-  ["Parametrierung", "Sozialversicherungen vom externen Verantwortlichen abgenommen", "Kunde", -50, "bpo"],
+  ["Parametrierung", "Sozialversicherungen (AHV/ALV/UVG/KTG/BVG/QST) erfasst", "Apriko", -55],
+  ["Parametrierung", "Sozialversicherungen vom internen Verantwortlichen abgenommen", "Apriko", -52],
+  ["Parametrierung", "Sozialversicherungen vom externen Verantwortlichen abgenommen", "Kunde", -50],
   ["Parametrierung", "Vorlagen (Verträge, Rapporte, Rechnungen) eingerichtet", "Apriko", -50],
   ["Daten", "Datenexport vom bisherigen Provider erhalten", "Kunde", -50],
   ["Daten", "Test-Datenimport durchgeführt", "Apriko", -45],
@@ -8578,6 +8578,8 @@ function onbParam() {
   const nach = (titel, vorgaenger) => { const i = o.aufgaben.findIndex(x => x.titel === titel), v = o.aufgaben.findIndex(x => x.titel === vorgaenger); if (i < 0 || v < 0 || i === v + 1) return; const [t] = o.aufgaben.splice(i, 1); const v2 = o.aufgaben.findIndex(x => x.titel === vorgaenger); o.aufgaben.splice(v2 + 1, 0, t); };
   nach("Sozialversicherungen vom internen Verantwortlichen abgenommen", "Sozialversicherungen (AHV/ALV/UVG/KTG/BVG/QST) erfasst");
   nach("Sozialversicherungen vom externen Verantwortlichen abgenommen", "Sozialversicherungen vom internen Verantwortlichen abgenommen");
+  // Sozialversicherungen werden bei allen Kunden eingerichtet (auch SaaS) — einmalig von «bpo» auf «alle» stellen
+  o.aufgaben.forEach(a => { if (/^Sozialversicherungen/.test(a.titel) && a.gilt === "bpo" && !a.giltFix) { a.gilt = "alle"; a.giltFix = true; } });
   return o;
 }
 async function onbSpeichern() { try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); } }
