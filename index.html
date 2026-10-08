@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.407.0"></script>
-<script src="apriko-api.js?v=1.407.0"></script>
-<script src="lohncheck.js?v=1.407.0"></script>
-<script src="personalbudget.js?v=1.407.0"></script>
-<script src="jahresbudget.js?v=1.407.0"></script>
-<script src="budgetpositionen.js?v=1.407.0"></script>
-<script src="lohnchecklistetemp.js?v=1.407.0"></script>
-<script src="apriko-endpunkte.js?v=1.407.0"></script>
+<script src="apriko-filters.js?v=1.408.0"></script>
+<script src="apriko-api.js?v=1.408.0"></script>
+<script src="lohncheck.js?v=1.408.0"></script>
+<script src="personalbudget.js?v=1.408.0"></script>
+<script src="jahresbudget.js?v=1.408.0"></script>
+<script src="budgetpositionen.js?v=1.408.0"></script>
+<script src="lohnchecklistetemp.js?v=1.408.0"></script>
+<script src="apriko-endpunkte.js?v=1.408.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1024,7 +1024,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.407.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.408.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -19228,6 +19228,13 @@ async function rpTtLaden(){
   if(!(typeof rpApiUse === 'function' && rpApiUse())){ rpTtStatus('Keine Apriko-Verbindung.', true); return; }
   rpTtStatus('Lade Zeiterfassung …'); rpTt.items = []; rpTt.elemente = []; rpTt.bestehend = []; rpTt.ergebnis = null;
   try {
+    // Die ID des TimeTrackingItems ist deterministisch: "TimeTrackingItem-" + Einsatz-ID (Diagnose 08.10.2026) → direkt laden
+    var direktId = 'TimeTrackingItem-' + String(e.id);
+    try {
+      var direkt = await AprikoApi.request('timetracking', '/TimeTrackingItems/' + encodeURIComponent(direktId));
+      var dIt = direkt && direkt.data ? direkt.data : direkt;
+      if(dIt && dIt.id){ rpTt.items = [dIt]; await rpTtItemLaden(dIt.id); return; }
+    } catch(dErr){ /* nicht vorhanden → Suche als Rückfall */ }
     // Mehrere Suchvarianten, weil nicht jedes Feld im Suchindex filterbar ist (vgl. initiators bei EntityChange)
     var varianten = [
       { entityTypes: 'TimeTrackingItem', pageIndex: 0, pageSize: 50, resolveReferences: false, filters: 'entityReferenceId|=|' + JSON.stringify(String(e.id)) + '|text|false|false|["G1"]' },
@@ -19239,7 +19246,7 @@ async function rpTtLaden(){
       try { var r = await AprikoApi.models.query(varianten[vi]); hits = ((r && r.results) || []).map(function(h){ try { return AprikoApi.models.hitData(h); } catch(x){ return null; } }).filter(Boolean).filter(function(it){ return String(it.entityReferenceId) === String(e.id); }); } catch(x){ hits = []; }
     }
     rpTt.items = hits;
-    if(!hits.length){ rpTtStatus('Für Einsatz ' + (e.placementNumber || e.id) + ' wurde kein TimeTrackingItem gefunden (Zeiterfassung in Apriko noch nicht angelegt?).', true); rpTtRender(); return; }
+    if(!hits.length){ rpTtStatus('Für Einsatz ' + (e.placementNumber || e.id) + ' existiert kein TimeTrackingItem (' + direktId + ' → nicht gefunden). In Apriko ist für diesen Einsatz noch keine Zeiterfassung angelegt.', true); rpTtRender(); return; }
     // passendes Item: Zeitraum des Rapports überdeckend, sonst das neueste
     var von = window.__rpZeitraum ? rpTtIso(window.__rpZeitraum.von) : '', bis = window.__rpZeitraum ? rpTtIso(window.__rpZeitraum.bis) : '';
     var pass = hits.filter(function(it){ return (!it.startDate || !bis || it.startDate <= bis) && (!it.endDate || !von || it.endDate >= von); });
