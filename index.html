@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.399.0"></script>
-<script src="apriko-api.js?v=1.399.0"></script>
-<script src="lohncheck.js?v=1.399.0"></script>
-<script src="personalbudget.js?v=1.399.0"></script>
-<script src="jahresbudget.js?v=1.399.0"></script>
-<script src="budgetpositionen.js?v=1.399.0"></script>
-<script src="lohnchecklistetemp.js?v=1.399.0"></script>
-<script src="apriko-endpunkte.js?v=1.399.0"></script>
+<script src="apriko-filters.js?v=1.401.0"></script>
+<script src="apriko-api.js?v=1.401.0"></script>
+<script src="lohncheck.js?v=1.401.0"></script>
+<script src="personalbudget.js?v=1.401.0"></script>
+<script src="jahresbudget.js?v=1.401.0"></script>
+<script src="budgetpositionen.js?v=1.401.0"></script>
+<script src="lohnchecklistetemp.js?v=1.401.0"></script>
+<script src="apriko-endpunkte.js?v=1.401.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -239,6 +239,12 @@
   .table-wrap { border: 1px solid var(--border-soft); border-radius: var(--radius); overflow-x: auto; overflow-y: hidden; }
   /* Onboarding-Matrix: eigener Scrollbereich, Kundenkopf oben und Aufgabenspalte links fixiert */
   .onb-wrap { overflow: auto; max-height: calc(100vh - 170px); }
+  /* Rapport Direkt-Import: GAV-Elemente ausblenden */
+  #view-rapport.rp-modus-neu .rp-nur-gav, #view-rapport.rp-modus-neu #rpLoad, #view-rapport.rp-modus-neu #rpFacts, #view-rapport.rp-modus-neu #rpSrc,
+  #view-rapport.rp-modus-neu #rpManualToggle, #view-rapport.rp-modus-neu #rpGavTag, #view-rapport.rp-modus-neu #rpRSpesen, #view-rapport.rp-modus-neu #rpBranche { display: none !important; }
+  #view-rapport.rp-modus-neu .rp-nur-neu { display: inline-block !important; }
+  #view-rapport.rp-modus-neu .rp-table input.rp-neu-in { width: 64px; text-align: right; }
+  #view-rapport.rp-modus-neu .rp-table input.rp-neu-txt { width: 140px; }
   .onb-matrix thead th { position: sticky; top: 0; background: var(--bg-card); z-index: 3; box-shadow: 0 1px 0 var(--border); }
   .onb-matrix thead th:first-child { left: 0; z-index: 4; }
   .onb-matrix tbody td:first-child { position: sticky; left: 0; background: var(--bg-card); z-index: 1; }
@@ -1018,7 +1024,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.399.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.401.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1038,8 +1044,13 @@
     -->
     <div class="content" id="view-rapport" hidden>
 
-      <div class="rp-toolbar">
-        <button type="button" class="rp-btn rp-btn-ghost rp-btn-sm" id="rpReset" title="Rapport-Ansicht zurücksetzen">↺ Alles zurücksetzen</button>
+      <div class="rp-toolbar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div class="bud-tabs" id="rpModusTabs">
+          <button type="button" class="bud-tab" data-modus="gav" title="Bisheriger Ablauf: Rapport auslesen, GAV-Eckwerte laden, Soll/Ist und Zuschläge berechnen">Mit GAV-Berechnung</button>
+          <button type="button" class="bud-tab" data-modus="neu" title="Neuer Ablauf: Rapport enthält bereits alle zu erfassenden Werte (Stunden, Zuschläge, Spesen …) — sie werden nur ausgelesen, geprüft und exportiert, nichts wird berechnet">Direkt-Import (ohne GAV)</button>
+        </div>
+        <span class="rp-hint" id="rpModusHint" style="margin:0"></span>
+        <button type="button" class="rp-btn rp-btn-ghost rp-btn-sm" id="rpReset" title="Rapport-Ansicht zurücksetzen" style="margin-left:auto">↺ Alles zurücksetzen</button>
       </div>
 
       <div class="rp-main-layout">
@@ -1127,7 +1138,7 @@
                   </div></div>
                 <div><label for="rpPlz">PLZ Einsatzort</label>
                   <input type="text" id="rpPlz" placeholder="z.B. 8003"></div>
-                <div id="rpBrancheWrap"><label for="rpBranche">Branche</label>
+                <div id="rpBrancheWrap" class="rp-nur-gav"><label for="rpBranche">Branche</label>
                   <select id="rpBranche">
                     <option value="bau" selected>Bauhauptgewerbe</option>
                     <option value="elektro">Elektrogewerbe (LGAV)</option>
@@ -1140,7 +1151,7 @@
                   </select></div>
               </div>
           </div>
-          <div class="rp-actions" id="rpLoadWrap"><button class="rp-btn rp-btn-dark" id="rpLoad">GAV-Eckwerte laden</button></div>
+          <div class="rp-actions" id="rpLoadWrap"><button class="rp-btn rp-btn-dark" id="rpLoad">GAV-Eckwerte laden</button><button class="rp-btn rp-btn-dark rp-nur-neu" id="rpNeuWeiter" style="display:none">Weiter zur Prüfung (ohne GAV)</button></div>
           <div id="rpManualToggle" style="display:none;margin:2px 0 6px"><a href="#" onclick="rpApiSetManual(true);return false" style="font-size:11px;color:var(--rp-grey)">GAV manuell setzen (ohne Apriko-Einsatz) …</a></div>
           <dl class="rp-facts" id="rpFacts" hidden></dl>
           <p class="rp-src" id="rpSrc" hidden></p>
@@ -15208,18 +15219,30 @@ function ansprechEmail(companyId) { return (crmAnsprech || {})[String(companyId)
 /* Workflow-Flags pro Kunde — { "<custId>": { intern: true, fibu: true } } */
 let crmKundenFlags = null;
 let crmKundenFlagsPromise = null;
+let crmKundenFlagsOk = false;   // true nur, wenn die Datei wirklich gelesen wurde (oder nachweislich noch nicht existiert)
 function crmLoadKundenFlags() {
   if (!crmKundenFlagsPromise) {
     crmKundenFlagsPromise = (async () => {
       try {
         const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_kunden_flags.json:/content`);
-        crmKundenFlags = data && typeof data === "object" ? data : {};
-      } catch (e) { crmKundenFlags = {}; }
+        crmKundenFlags = data && typeof data === "object" ? data : {}; crmKundenFlagsOk = true;
+      } catch (e) {
+        // Nur bei «Datei existiert nicht» mit leerem Stand weiterarbeiten — bei anderen Fehlern (Netz, Token)
+        // darf ein späteres Speichern die Flags aller Kunden NICHT mit {} überschreiben.
+        crmKundenFlags = {}; crmKundenFlagsOk = /404|itemNotFound/i.test(e.message || "");
+        if (!crmKundenFlagsOk) crmKundenFlagsPromise = null;   // nächster Aufruf versucht es erneut
+      }
     })();
   }
   return crmKundenFlagsPromise;
 }
 async function crmSaveKundenFlags() {
+  if (!crmKundenFlagsOk) {
+    // Vor dem Schreiben nochmals laden — Schutz gegen Datenverlust, falls das Laden beim Start fehlschlug
+    const merke = crmKundenFlags; crmKundenFlagsPromise = null; await crmLoadKundenFlags();
+    if (!crmKundenFlagsOk) throw new Error("Kundenflags konnten nicht geladen werden — Speichern abgebrochen, damit keine Flags anderer Kunden verloren gehen.");
+    Object.assign(crmKundenFlags, merke || {});   // die aktuelle Änderung auf den frisch geladenen Stand anwenden
+  }
   const path = `/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_kunden_flags.json:/content`;
   const body = JSON.stringify(crmKundenFlags || {});
   try { await graph(path, { method: "PUT", body }); }
@@ -16679,6 +16702,7 @@ async function rpApiUebernehmen(){
     tempDataHtml;
   var s3K = $('rpS3Konditionen');
   if(s3K) s3K.innerHTML = window.__rpEinsatzKonditionen;   // gleich sichtbar bei der Prüfung in Schritt 3, nicht nur oben bei Schritt 2
+  if(rpIstNeu()){ rpNeuZurPruefung(); return; }   // Direkt-Import: keine GAV-Prüfung, direkt zur Kontrolle der ausgelesenen Werte
   if(gavApi && !gavMatch && !tempDataHtml){
     toast && toast('GAV laut Einsatz „' + gavApi + '" ist in der lokalen GAV-Tabelle nicht hinterlegt — Eckwerte werden NICHT automatisch geladen (sonst würde die falsche Branche verwendet).', true);
     var srcEl = $('rpSrc'), factsEl = $('rpFacts');
@@ -16857,6 +16881,40 @@ function lock(el){ el.classList.add('rp-locked'); }
    - Input-Felder in Karte 2 leeren
    - OCR-Config verstecken, aber API-Key bleibt erhalten
    Wird vom Reset-Button in der Toolbar aufgerufen. */
+/* ---------- Modus: «gav» (bisher, mit GAV-Berechnung) oder «neu» (Direkt-Import ohne Berechnung) ----------
+   Im Direkt-Import stehen alle zu erfassenden Werte bereits auf dem Rapport: sie werden ausgelesen,
+   in der Prüftabelle korrigiert und 1:1 exportiert — keine Soll/Ist-Differenz, keine Zuschlagsberechnung. */
+var rpModus = (function(){ try { return localStorage.getItem('apriko-rapport-modus') || 'gav'; } catch(e){ return 'gav'; } })();
+function rpIstNeu(){ return rpModus === 'neu'; }
+var RP_NEU_SPALTEN = [
+  { k: 'ueberzeit', l: 'Überzeit', e: 'h' }, { k: 'zuschlag25', l: 'Zuschl. 25%', e: 'h' }, { k: 'zuschlag50', l: 'Zuschl. 50%', e: 'h' },
+  { k: 'nacht', l: 'Nacht', e: 'h' }, { k: 'samstag', l: 'Samstag', e: 'h' }, { k: 'sonntag', l: 'So/Feiertag', e: 'h' },
+  { k: 'reise', l: 'Reisezeit', e: 'h' }, { k: 'km', l: 'Km', e: 'km' }, { k: 'spesen', l: 'Spesen', e: 'CHF' }, { k: 'bemerkung', l: 'Bemerkung', e: '' }
+];
+function rpNeuAktiveSpalten(){
+  // Nur Spalten zeigen, in denen mindestens eine Zeile einen Wert hat — plus «weitere» (vom Beleg stammende Spaltentitel)
+  var akt = RP_NEU_SPALTEN.filter(function(c){ return zeilen.some(function(r){ var v = r[c.k]; return v !== undefined && v !== null && v !== '' && v !== 0; }); });
+  var weitere = {}; zeilen.forEach(function(r){ Object.keys(r.weitere || {}).forEach(function(k){ weitere[k] = true; }); });
+  Object.keys(weitere).sort().forEach(function(k){ akt.push({ k: 'w:' + k, l: k, e: '', weitere: true }); });
+  return akt;
+}
+function rpNeuWert(r, c){ return c.weitere ? ((r.weitere || {})[c.k.slice(2)]) : r[c.k]; }
+function rpNeuSetzen(r, c, v){ if(c.weitere){ r.weitere = r.weitere || {}; r.weitere[c.k.slice(2)] = v; } else r[c.k] = v; }
+function rpModusAnwenden(){
+  var view = $('view-rapport'); if(!view) return;
+  view.classList.toggle('rp-modus-neu', rpIstNeu());
+  Array.prototype.forEach.call(document.querySelectorAll('#rpModusTabs .bud-tab'), function(b){ b.classList.toggle('active', b.dataset.modus === rpModus); });
+  var hint = $('rpModusHint'); if(hint) hint.textContent = rpIstNeu() ? 'Werte werden nur ausgelesen und geprüft — keine GAV-/Soll-Berechnung.' : 'Soll/Ist, Zuschläge und Spesen werden nach GAV berechnet.';
+  var s3h = document.querySelector('#rpS3 .rp-card-head h3'); if(s3h) s3h.textContent = rpIstNeu() ? 'Prüfen und korrigieren (alle Werte vom Rapport)' : 'Prüfen und korrigieren';
+  var s4h = document.querySelector('#rpS4 .rp-card-head h3'); if(s4h) s4h.textContent = rpIstNeu() ? 'Zusammenfassung und Export' : 'Auswertung und Export';
+  var btn = $('rpConfirm'); if(btn) btn.textContent = rpIstNeu() ? 'Werte bestätigen und zusammenfassen' : 'Werte bestätigen und berechnen';
+}
+function rpModusSetzen(m){
+  if(m === rpModus) return;
+  if(zeilen.length && !confirm('Modus wechseln? Der aktuelle Rapport wird zurückgesetzt.')) return;
+  rpModus = m; try { localStorage.setItem('apriko-rapport-modus', m); } catch(e){}
+  resetRapport(); rpModusAnwenden();
+}
 function resetRapport(){
   // Object-URLs freigeben (verhindert Memory-Leaks bei vielen Uploads)
   files.forEach(function(f){
@@ -16969,7 +17027,10 @@ window.initRapport = function(){
     }
   } catch(rIe){ /* Roster-Vorladen ist Zusatznutzen, darf das Formular nie blockieren */ }
 
+  rpModusAnwenden();
   if(ready) return; ready=true;
+  Array.prototype.forEach.call(document.querySelectorAll('#rpModusTabs .bud-tab'), function(b){ b.addEventListener('click', function(){ rpModusSetzen(b.dataset.modus); }); });
+  var neuWeiter = $('rpNeuWeiter'); if(neuWeiter) neuWeiter.addEventListener('click', function(){ rpNeuZurPruefung(); });
 
   var drop=$('rpDrop'), picker=$('rpPicker');
   drop.addEventListener('click',function(){ picker.click(); });
@@ -17793,6 +17854,18 @@ function updateEnrichBtnState(){
    Zentraler Extraktions-Prompt für Arbeits-/Monatsrapporte.
    Dynamische Teile: heutiges Datum, Jahr, Jan/Feb-Sonderfall,
    Beleg-Kurzname (für die beleg-Referenz in jeder Zeile). */
+/* Direkt-Import: zusätzliche Spalten je Zeile, exakt wie auf dem Rapport — nichts berechnen, nichts ergänzen */
+function buildRapportOcrPromptNeuZusatz(){
+  return '\n\nZUSATZ (DIREKT-IMPORT): Dieser Rapport enthält bereits ALLE zu erfassenden Werte als eigene Spalten. ' +
+    'Nimm in jede Zeile des "zeilen"-Arrays zusätzlich zu "ist" (= normale Arbeitsstunden) die folgenden Felder auf, sofern die Spalte auf dem Rapport existiert und für den Tag einen Wert hat ' +
+    '(fehlende/leere Spalten weglassen oder null, NIE berechnen oder aus anderen Werten ableiten):\n' +
+    '  "ueberzeit" (Überzeit/Überstunden in h), "zuschlag25" (Stunden mit 25% Zuschlag), "zuschlag50" (Stunden mit 50% Zuschlag), "nacht" (Nachtstunden), ' +
+    '"samstag" (Samstagsstunden), "sonntag" (Sonntags-/Feiertagsstunden), "reise" (Reisezeit in h), "km" (gefahrene Kilometer), "spesen" (Spesen/Auslagen in CHF), "bemerkung" (Text).\n' +
+    '  Alle weiteren Spalten mit Werten, die zu keinem dieser Felder passen (z.B. "Pikett", "Schmutzzulage", "Verpflegung"): in ein Objekt "weitere": {"<Spaltentitel wie auf dem Rapport>": <Wert>} schreiben.\n' +
+    '  Zahlen als Dezimalzahl (8.5 nicht "8:30"). Unsichere Werte in diesen Zusatzfeldern mit "istFlag":"low" markieren.\n' +
+    'Beispielzeile: {"datum":"10.08.2026","tag":"Mo","kst":"1205","ist":8.5,"ueberzeit":1.0,"spesen":16.00,"weitere":{"Pikett":1},"kstFlag":null,"istFlag":null,"beleg":"R1"}\n' +
+    'Nur das JSON, sonst nichts.';
+}
 function buildRapportOcrPrompt(heuteStr, aktuellesJahr, istJanFeb, belegKurz){
   return (
       'Du bist ein OCR-Extraktor für Schweizer Arbeitsrapporte und Monatsrapporte aus der Personalverleih- und Baubranche. ' +
@@ -18101,6 +18174,7 @@ async function scanWithClaude(){
     var istJanFeb = (jetzt.getMonth() < 2);  // Januar oder Februar
 
     var prompt = buildRapportOcrPrompt(heuteStr, aktuellesJahr, istJanFeb, belegKurz);
+    if(rpIstNeu()) prompt += buildRapportOcrPromptNeuZusatz();
 
     // VIER-AUGEN-PRINZIP: zwei unabhängige Lesungen (zwei Modelle). Nur
     // übereinstimmende Werte gelten als sicher — alles andere wird markiert
@@ -18178,8 +18252,15 @@ async function scanWithClaude(){
         beleg: r.beleg || belegKurz,
         // Neu: absent/typ für Ferien/Krankheit/etc. Bei fehlenden Feldern fallen zurück
         absent: r.absent === true,
-        typ: r.typ ? String(r.typ).toLowerCase() : null
+        typ: r.typ ? String(r.typ).toLowerCase() : null,
+        weitere: (r.weitere && typeof r.weitere === 'object') ? r.weitere : null
       };
+    }).map(function(b, idx){
+      // Direkt-Import: Zusatzspalten 1:1 übernehmen (Zahlen normalisieren, Text belassen)
+      var r = rawZeilen[idx];
+      RP_NEU_SPALTEN.forEach(function(c){ var v = r[c.k]; if(v === undefined || v === null || v === '') return;
+        b[c.k] = c.k === 'bemerkung' ? String(v) : (typeof v === 'number' ? v : (parseFloat(String(v).replace(',', '.')) || 0)); });
+      return b;
     });
 
     // Jahres-Sanity-Check: OCR liest handschriftliche Jahreszahlen oft falsch.
@@ -18430,7 +18511,15 @@ async function rpPlzAusEinsatz(){
     return (wl && wl.zipCode) ? String(wl.zipCode) : '';
   } catch(e){ return ''; }
 }
+/* Direkt-Import: Schritt 3 ohne GAV freischalten */
+function rpNeuZurPruefung(){
+  if(!zeilen.length){ toast && toast('Zuerst einen Rapport auslesen.', true); return; }
+  gav = null;
+  unlock($('rpS3')); renderTable();
+  $('rpS3').scrollIntoView({behavior:'smooth',block:'start'});
+}
 function loadGav(){
+  if(rpIstNeu()){ rpNeuZurPruefung(); return; }
   var b=$('rpLoad'); b.disabled=true; b.textContent='Wird abgefragt …';
   // Keine PLZ erfasst → zuerst still aus dem gewählten Einsatz übernehmen (kein Bestätigungsdialog mehr)
   var plzNow = String($('rpPlz').value || '').trim();
@@ -18530,7 +18619,36 @@ function renderTable(){
     return esc(r.datum);
   }
 
+  // Direkt-Import: eigener Tabellenkopf (keine Soll/Differenz, dafür alle Spalten vom Rapport)
+  var theadEl = $('rpTbody').parentNode.querySelector('thead tr'), tfootEl = $('rpTbody').parentNode.querySelector('tfoot tr');
+  if(!theadEl.dataset.std) theadEl.dataset.std = theadEl.innerHTML;
+  if(!tfootEl.dataset.std) tfootEl.dataset.std = tfootEl.innerHTML;
+  var neuSp = rpIstNeu() ? rpNeuAktiveSpalten() : [];
+  if(rpIstNeu()){
+    theadEl.innerHTML = '<th>Datum</th><th>Tag</th><th>Kostenstelle</th><th class="rp-num">Std.</th>' + neuSp.map(function(c){ return '<th class="rp-num" title="' + esc(c.l) + (c.e ? ' (' + c.e + ')' : '') + '">' + esc(c.l) + (c.e ? '<br><span style="font-weight:400;font-size:10px">' + esc(c.e) + '</span>' : '') + '</th>'; }).join('') + '<th>Beleg</th>';
+    tfootEl.innerHTML = '<td colspan="3">Total</td><td class="rp-num" id="rpTIst">—</td>' + neuSp.map(function(c){ return '<td class="rp-num" id="rpTNeu-' + esc(c.k) + '"></td>'; }).join('') + '<td></td>';
+  } else {
+    theadEl.innerHTML = theadEl.dataset.std; tfootEl.innerHTML = tfootEl.dataset.std;
+  }
+  var neuZelle = function(r, i, c){
+    var v = rpNeuWert(r, c); var txt = c.k === 'bemerkung' || c.weitere && typeof v === 'string';
+    return '<td class="rp-num"><input type="text" ' + (txt ? 'class="rp-neu-txt"' : 'inputmode="decimal" class="rp-neu-in"') + ' value="' + esc(v === undefined || v === null ? '' : (txt ? v : (typeof v === 'number' ? nf(v) : v))) + '" data-i="' + i + '" data-f="neu:' + esc(c.k) + '"></td>';
+  };
   $('rpTbody').innerHTML = zeilen.map(function(r,i){
+    if(rpIstNeu()){
+      if(r.absent){
+        var isoD = r.datum.slice(6,10)+'-'+r.datum.slice(3,5)+'-'+r.datum.slice(0,2);
+        var typL = { ferien: '🌴 Ferien', krankheit: '🤒 Krankheit', feiertag: '🎉 Feiertag', arzt: '🩺 Arzt/Therapie', ausbildung: '🎓 Ausbildung', militaer: '🎖️ Militär/ZS', absenz: '⏸ Absenz', unfall: '🚑 Unfall' };
+        return '<tr class="rp-row-absent' + (isWeekend(isoD) ? ' rp-row-weekend' : '') + '" data-i="'+i+'"><td>'+renderDatumCell(r, i)+'</td><td>'+esc(r.tag)+'</td>' +
+          '<td style="color:var(--rp-grey);font-style:italic">' + ((r.typ && typL[r.typ]) ? typL[r.typ] : (isWeekend(isoD) ? 'Wochenende' : '—')) + '</td><td class="rp-num" style="color:var(--rp-grey)">0.00</td>' +
+          neuSp.map(function(){ return '<td></td>'; }).join('') + '<td></td></tr>';
+      }
+      return '<tr data-beleg="'+esc(r.beleg)+'" data-i="'+i+'"><td>'+renderDatumCell(r, i)+'</td><td>'+esc(r.tag)+'</td>'+
+        '<td><input type="text" value="'+esc(r.kst)+'" data-i="'+i+'" data-f="kst" title="'+esc(r.kstFlag ? (r.note || 'Unsichere Erkennung') + ' — Doppelklick = geprüft' : '')+'" class="'+(r.kstFlag?'rp-f-'+r.kstFlag:'')+'"></td>'+
+        '<td><input type="text" inputmode="decimal" class="rp-num '+(r.istFlag?'rp-f-'+r.istFlag:'')+'" value="'+nf(r.ist)+'" data-i="'+i+'" data-f="ist" title="'+esc(r.istFlag ? (r.note || 'Unsichere Erkennung') + ' — Doppelklick = geprüft' : '')+'"></td>'+
+        neuSp.map(function(c){ return neuZelle(r, i, c); }).join('') +
+        '<td style="color:var(--rp-grey);font-size:12px;white-space:nowrap">'+esc(r.beleg)+' <button type="button" class="rp-del" data-del="'+i+'" title="Zeile entfernen" style="border:none;background:transparent;color:#c62828;cursor:pointer;font-size:13px;padding:0 4px">✕</button></td></tr>';
+    }
     // Frei-Tage: keine Inputs für kst/ist, ausgegraut, mit Label je nach Grund
     if(r.absent){
       var cls = 'rp-row-absent';
@@ -18592,6 +18710,12 @@ function renderTable(){
     // Datum-Input separat behandeln (weiter unten)
     if(e.target.id === 'rpFirstDate') return;
     var i=+e.target.dataset.i, f=e.target.dataset.f;
+    if(f && f.indexOf('neu:') === 0){
+      var ck = f.slice(4); var col = { k: ck, weitere: ck.indexOf('w:') === 0 };
+      var raw = e.target.value.trim(); var num = parseFloat(raw.replace(',', '.'));
+      rpNeuSetzen(zeilen[i], col, (ck === 'bemerkung' || isNaN(num)) ? raw : num);
+      recalcRows(); return;
+    }
     if(f==='ist'){ var v=parseFloat(String(e.target.value).replace(',','.')); zeilen[i].ist=isNaN(v)?0:v; zeilen[i].istFlag=null; }
     else { zeilen[i].kst=e.target.value.trim(); zeilen[i].kstFlag=null; }
     e.target.classList.remove('rp-f-low','rp-f-mid');
@@ -18705,6 +18829,15 @@ function rpIstArbeitstag(datum){
 }
 
 function recalcRows(){
+  if(rpIstNeu()){
+    // Direkt-Import: nur Summen, keine Soll/Differenz
+    var tI = zeilen.reduce(function(a, r){ return a + (r.absent ? 0 : (r.ist || 0)); }, 0);
+    var tIe = $('rpTIst'); if(tIe) tIe.textContent = nf(tI);
+    rpNeuAktiveSpalten().forEach(function(c){ var el = document.getElementById('rpTNeu-' + c.k); if(!el) return;
+      var sum = 0, nums = 0; zeilen.forEach(function(r){ var v = rpNeuWert(r, c); if(typeof v === 'number'){ sum += v; nums++; } });
+      el.textContent = nums ? nf(sum) : ''; });
+    return;
+  }
   var s = sollOf();  // Sollzeit pro Arbeitstag (z.B. 8.00)
 
   // Vorher: alte Warn-Klassen von allen Zeilen entfernen (falls sich Ist geändert hat)
@@ -18796,6 +18929,7 @@ function countFlags(){
 }
 
 function berechnen(){
+  if(rpIstNeu()){ berechnenNeu(); return; }
   var soll=sollOf();
   // Arbeitstage sind UNIQUE Datum-Werte (nicht Zeilen!), sonst zählen wir
   // bei mehreren Buchungen am gleichen Tag den Tag mehrfach für die Sollzeit.
@@ -18884,7 +19018,53 @@ function berechnen(){
   $('rpOut').hidden=true; $('rpPeek').textContent='Vorschau anzeigen';
 }
 
+/* Direkt-Import: Zusammenfassung ohne Berechnung — Summen je Spalte und je Kostenstelle */
+function berechnenNeu(){
+  var sp = rpNeuAktiveSpalten();
+  var tIst = zeilen.reduce(function(a, r){ return a + (r.absent ? 0 : (r.ist || 0)); }, 0);
+  var summen = {}; sp.forEach(function(c){ var sum = 0, n = 0; zeilen.forEach(function(r){ var v = rpNeuWert(r, c); if(typeof v === 'number'){ sum += v; n++; } }); if(n) summen[c.k] = sum; });
+  var kst = {}; zeilen.forEach(function(r){ if(r.absent) return; var k = r.kst || 'ohne'; kst[k] = (kst[k] || 0) + (r.ist || 0); });
+  var absenzen = {}; zeilen.forEach(function(r){ if(r.absent && r.typ) absenzen[r.typ] = (absenzen[r.typ] || 0) + 1; });
+  var arbeitstage = {}; zeilen.forEach(function(r){ if(!r.absent && (r.ist || 0) > 0) arbeitstage[r.datum] = true; });
+  ergebnis = { tIst: tIst, tSoll: null, zuschlag: null, zulage: null, mittag: null, kst: kst, summen: summen, spalten: sp, absenzen: absenzen, neu: true };
+  var zeit = [['Arbeitstage', Object.keys(arbeitstage).length + '']];
+  sp.forEach(function(c){ if(summen[c.k] !== undefined) zeit.push([c.l, nf(summen[c.k]) + (c.e ? ' ' + c.e : '')]); });
+  Object.keys(absenzen).forEach(function(t){ zeit.push(['Absenz ' + t, absenzen[t] + ' Tag(e)']); });
+  zeit.push(['Arbeitsstunden total', nf(tIst) + ' h']);
+  $('rpRZeit').innerHTML = zeit.map(function(r, i){ return '<li class="' + (i === zeit.length - 1 ? 'rp-sum' : '') + '"><span>' + esc(r[0]) + '</span><span class="rp-v">' + esc(r[1]) + '</span></li>'; }).join('');
+  $('rpRSpesen').innerHTML = '';
+  $('rpRKst').innerHTML = Object.keys(kst).sort(function(a, b){ return kst[b] - kst[a]; }).map(function(k){ var p = tIst ? kst[k] / tIst * 100 : 0;
+    return '<li><span>' + esc(k) + '<span class="rp-pill">' + p.toFixed(1) + '%</span><div class="rp-bar"><i style="width:' + p + '%"></i></div></span><span class="rp-v">' + nf(kst[k]) + ' h</span></li>'; }).join('') +
+    '<li class="rp-sum"><span>Total</span><span class="rp-v">' + nf(tIst) + ' h</span></li>';
+  $('rpOut').hidden = true; $('rpPeek').textContent = 'Vorschau anzeigen';
+}
+function buildCsvNeu(){
+  var sp = rpNeuAktiveSpalten(), L = [];
+  L.push(['Datum', 'Tag', 'Kostenstelle', 'Stunden', 'Absenz'].concat(sp.map(function(c){ return c.l + (c.e ? ' (' + c.e + ')' : ''); })).join(';'));
+  zeilen.forEach(function(r){
+    L.push([r.datum, r.tag, r.kst || '', nf(r.absent ? 0 : (r.ist || 0)), r.absent ? (r.typ || 'frei') : ''].concat(sp.map(function(c){ var v = rpNeuWert(r, c); return v === undefined || v === null ? '' : (typeof v === 'number' ? nf(v) : String(v)); })).join(';'));
+  });
+  L.push(['TOTAL', '', '', nf(ergebnis.tIst), ''].concat(sp.map(function(c){ return ergebnis.summen[c.k] !== undefined ? nf(ergebnis.summen[c.k]) : ''; })).join(';'));
+  L.push(''); L.push('Mitarbeiter;' + $('rpMa').value); L.push('Einsatzbetrieb;' + $('rpKunde').value);
+  if(window.__rpZeitraum) L.push('Zeitraum;' + window.__rpZeitraum.von + ' - ' + window.__rpZeitraum.bis);
+  L.push('Modus;Direkt-Import (Werte vom Rapport, keine Berechnung)');
+  return L.join('\n');
+}
+function buildXmlNeu(){
+  function x(s){ return String(s === undefined || s === null ? '' : s).replace(/[<>&"]/g, function(c){ return { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]; }); }
+  var sp = rpNeuAktiveSpalten();
+  var o = '<?xml version="1.0" encoding="UTF-8"?>\n<Rapport modus="direktimport"' + (window.__rpZeitraum ? ' von="' + x(window.__rpZeitraum.von) + '" bis="' + x(window.__rpZeitraum.bis) + '"' : '') + '>\n';
+  o += '  <Mitarbeiter>' + x($('rpMa').value || '—') + '</Mitarbeiter>\n  <Einsatzbetrieb>' + x($('rpKunde').value || '—') + '</Einsatzbetrieb>\n  <Tage>\n';
+  zeilen.forEach(function(r){
+    o += '    <Tag datum="' + x(r.datum) + '" tag="' + x(r.tag) + '" kostenstelle="' + x(r.kst) + '"' + (r.absent ? ' absenz="' + x(r.typ || 'frei') + '"' : '') + '>\n      <Stunden>' + nf(r.absent ? 0 : (r.ist || 0)) + '</Stunden>\n';
+    sp.forEach(function(c){ var v = rpNeuWert(r, c); if(v === undefined || v === null || v === '') return; o += '      <Wert feld="' + x(c.l) + '"' + (c.e ? ' einheit="' + x(c.e) + '"' : '') + '>' + x(typeof v === 'number' ? nf(v) : v) + '</Wert>\n'; });
+    o += '    </Tag>\n';
+  });
+  o += '  </Tage>\n  <Total stunden="' + nf(ergebnis.tIst) + '"' + sp.filter(function(c){ return ergebnis.summen[c.k] !== undefined; }).map(function(c){ return ' ' + x(c.k.replace(/^w:/, '').replace(/[^A-Za-z0-9]/g, '_')) + '="' + nf(ergebnis.summen[c.k]) + '"'; }).join('') + '/>\n</Rapport>';
+  return o;
+}
 function buildCsv(){
+  if(rpIstNeu()) return buildCsvNeu();
   var soll=sollOf(), L=[];
   L.push('Datum;Tag;Kostenstelle;Soll;Ist;Differenz;Baustellenzulage;Mittagessen');
   zeilen.forEach(function(r){
@@ -18904,6 +19084,7 @@ function buildCsv(){
   return L.join('\n');
 }
 function buildXml(){
+  if(rpIstNeu()) return buildXmlNeu();
   var soll=sollOf();
   function x(s){ return String(s).replace(/[<>&]/g,function(c){
     return {'<':'&lt;','>':'&gt;','&':'&amp;'}[c]; }); }
