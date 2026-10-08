@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.402.0"></script>
-<script src="apriko-api.js?v=1.402.0"></script>
-<script src="lohncheck.js?v=1.402.0"></script>
-<script src="personalbudget.js?v=1.402.0"></script>
-<script src="jahresbudget.js?v=1.402.0"></script>
-<script src="budgetpositionen.js?v=1.402.0"></script>
-<script src="lohnchecklistetemp.js?v=1.402.0"></script>
-<script src="apriko-endpunkte.js?v=1.402.0"></script>
+<script src="apriko-filters.js?v=1.405.0"></script>
+<script src="apriko-api.js?v=1.405.0"></script>
+<script src="lohncheck.js?v=1.405.0"></script>
+<script src="personalbudget.js?v=1.405.0"></script>
+<script src="jahresbudget.js?v=1.405.0"></script>
+<script src="budgetpositionen.js?v=1.405.0"></script>
+<script src="lohnchecklistetemp.js?v=1.405.0"></script>
+<script src="apriko-endpunkte.js?v=1.405.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1024,7 +1024,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.402.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.405.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1151,6 +1151,12 @@
                   </select></div>
               </div>
           </div>
+          <div id="rpTestEinsatz" style="margin:6px 0 10px;padding:8px 10px;border:1px dashed var(--rp-line);border-radius:6px;font-size:12px">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b>🧪 Test: beliebigen Einsatz wählen</b><span style="color:var(--rp-grey)">(unabhängig vom Abgleich — der gescannte Rapport wird auf diesen Einsatz gebucht)</span>
+              <input type="text" id="rpTestEinsatzSuche" placeholder="Name, Kunde oder Einsatz-Nr …" oninput="rpTestEinsatzRender()" style="font-size:12px;padding:3px 6px;width:220px;margin-left:auto">
+              <button type="button" class="rp-btn-sm" onclick="rpTestEinsatzRender(true)">Liste laden</button></div>
+            <div id="rpTestEinsatzListe" style="margin-top:6px"></div>
+          </div>
           <div class="rp-actions" id="rpLoadWrap"><button class="rp-btn rp-btn-dark" id="rpLoad">GAV-Eckwerte laden</button><button class="rp-btn rp-btn-dark rp-nur-neu" id="rpNeuWeiter" style="display:none">Weiter zur Prüfung (ohne GAV)</button></div>
           <div id="rpManualToggle" style="display:none;margin:2px 0 6px"><a href="#" onclick="rpApiSetManual(true);return false" style="font-size:11px;color:var(--rp-grey)">GAV manuell setzen (ohne Apriko-Einsatz) …</a></div>
           <dl class="rp-facts" id="rpFacts" hidden></dl>
@@ -1214,6 +1220,12 @@
             <button class="rp-btn rp-btn-ghost" id="rpPeek">Vorschau anzeigen</button>
           </div>
           <pre class="rp-out" id="rpOut" hidden></pre>
+          <div id="rpTtBox" style="margin-top:14px;border-top:1px solid var(--rp-line);padding-top:12px">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h4 style="margin:0">Übergabe an Apriko (Zeiterfassung)</h4>
+              <button type="button" class="rp-btn rp-btn-ghost rp-btn-sm" onclick="rpTtLaden()">🔎 Zeiterfassung des Einsatzes laden</button>
+              <span class="rp-hint" id="rpTtStatus" style="margin:0"></span></div>
+            <div id="rpTtInhalt" style="margin-top:8px"></div>
+          </div>
         </div>
       </div>
 
@@ -16488,6 +16500,36 @@ async function rpApiRefreshRoster(){
   if(rpApiState.lastArgs) rpApiMatch.apply(null, rpApiState.lastArgs);
 }
 function rpApiSelectEinsatz(id){ rpApiState.einsatzId = id; rpApiRender(); }
+/* Test-Modus: alle Einsätze der Einsatzliste anzeigen und einen davon frei wählen — danach läuft
+   «Übernehmen» exakt wie beim normalen Abgleich (Konditionen, PLZ, GAV bzw. Direkt-Import). */
+async function rpTestEinsatzRender(laden){
+  var box = $('rpTestEinsatzListe'); if(!box) return;
+  if(!rpRoster && laden){ box.innerHTML = '<span style="color:var(--rp-grey)">Einsatzliste wird geladen …</span>'; try { await rpApiLoadRoster(false); } catch(e){ box.innerHTML = '<span style="color:#c62828">Einsatzliste konnte nicht geladen werden: ' + esc(e.message || e) + '</span>'; return; } }
+  if(!rpRoster){ box.innerHTML = '<span style="color:var(--rp-grey)">Noch keine Einsatzliste — «Liste laden» klicken.</span>'; return; }
+  var q = String(($('rpTestEinsatzSuche') || {}).value || '').toLowerCase().trim();
+  var alle = [];
+  Object.keys(rpRoster.mitarbeiter).forEach(function(id){ var m = rpRoster.mitarbeiter[id]; var name = [m.firstName, m.lastName].filter(Boolean).join(' ');
+    (m.placements || []).forEach(function(p){ alle.push({ e: p, employeeId: id, employeeName: name, kundeName: rpApiRosterKundeName(p.customerId) || '', zeitOk: true, kundeOk: true, score: 100 }); }); });
+  alle.sort(function(a, b){ return String(a.employeeName).localeCompare(String(b.employeeName)) || String(b.e.entryDate || '').localeCompare(String(a.e.entryDate || '')); });
+  var treffer = alle.filter(function(x){ return !q || (x.employeeName + ' ' + x.kundeName + ' ' + (x.e.placementNumber || '') + ' ' + (x.e.state || '')).toLowerCase().indexOf(q) >= 0; });
+  rpTestEinsatzKandidaten = treffer;
+  box.innerHTML = '<div style="color:var(--rp-grey);margin-bottom:4px">' + treffer.length + ' von ' + alle.length + ' Einsätzen</div>' +
+    '<select size="' + Math.min(10, Math.max(3, treffer.length)) + '" id="rpTestEinsatzSel" style="width:100%;font-size:12px;font-family:var(--font-mono, monospace)" ondblclick="rpTestEinsatzUebernehmen()">' +
+    treffer.slice(0, 300).map(function(x, i){ return '<option value="' + i + '">' + esc((x.e.placementNumber ? '#' + x.e.placementNumber + ' ' : '') + x.employeeName + ' · ' + (x.kundeName || x.e.customerId || '?') + ' · ' + (x.e.entryDate || '').slice(0, 10) + (x.e.withdrawalDate ? ' – ' + x.e.withdrawalDate.slice(0, 10) : ' – offen') + ' · ' + (x.e.state || '')) + '</option>'; }).join('') + '</select>' +
+    (treffer.length > 300 ? '<div style="color:var(--rp-grey)">… nur die ersten 300 angezeigt — Suche eingrenzen</div>' : '') +
+    '<div class="rp-actions" style="margin-top:6px"><button type="button" class="rp-btn rp-btn-dark rp-btn-sm" onclick="rpTestEinsatzUebernehmen()">Diesen Einsatz verwenden →</button></div>';
+}
+var rpTestEinsatzKandidaten = [];
+async function rpTestEinsatzUebernehmen(){
+  var sel = $('rpTestEinsatzSel'); if(!sel || sel.value === '') { toast && toast('Bitte einen Einsatz in der Liste markieren.', true); return; }
+  var x = rpTestEinsatzKandidaten[+sel.value]; if(!x) return;
+  rpApiState.einsaetze = [x]; rpApiState.einsaetzeAlle = [x]; rpApiState.einsatzId = x.e.id; rpApiState.unsicher = false; rpApiState.testModus = true;
+  if(!$('rpMa').value) $('rpMa').value = x.employeeName;
+  if(!$('rpKunde').value) $('rpKunde').value = x.kundeName || '';
+  if(typeof rpApiRender === 'function') rpApiRender();
+  toast && toast('Test-Einsatz gewählt: ' + x.employeeName + ' · ' + (x.kundeName || '') + ' — wird übernommen …');
+  await rpApiUebernehmen();
+}
 function rpApiToggleAlle(){
   rpApiState.zeigeAlle = !rpApiState.zeigeAlle;
   if(rpApiState.zeigeAlle){
@@ -16988,6 +17030,7 @@ function resetRapport(){
   var viewer = $('rpBelegViewer');
   if(viewer) viewer.innerHTML = '<div class="rp-beleg-empty">Beleg wird hier angezeigt<br><small>Klick auf eine Tabellenzeile zum Wechseln</small></div>';
   ['rpTSoll','rpTIst','rpTDiff'].forEach(function(id){ var e = $(id); if(e) e.textContent = '—'; });
+  rpTt = { items: [], itemId: null, elemente: [], mapping: {}, bestehend: [], ergebnis: null, laeuft: false }; var ttI = $('rpTtInhalt'); if(ttI) ttI.innerHTML = ''; rpTtStatus('');
   $('rpFlags').textContent = '';
 
   // Karte 4: Auswertung leeren
@@ -17477,6 +17520,21 @@ function expandUploadCard(){
 /* Legacy-Alias: früher gab's eine kleine Preview in Karte 2. Die ist jetzt
    im sticky Panel rechts, deshalb ruft der Alias einfach renderPreviewCol. */
 
+/* Kopfzeilen für die Anthropic-API. Keys ohne Workspace-Bindung («Default»-Keys der Console) verlangen
+   zusätzlich die Workspace-ID (anthropic-workspace-id) — wird einmal abgefragt und lokal gespeichert. */
+function rpAnthropicHeaders(key){
+  var h = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
+  var ws = ''; try { ws = localStorage.getItem('apriko-anthropic-workspace') || ''; } catch(e){}
+  if(ws) h['anthropic-workspace-id'] = ws;
+  return h;
+}
+function rpWorkspaceAbfragen(meldung){
+  var ws = prompt((meldung || 'Dieser API-Key ist keinem Workspace zugeordnet.') + '\n\nWorkspace-ID eingeben (Anthropic Console → Settings → Workspaces, beginnt mit "wrkspc_"):\n\nAlternativ in der Console einen neuen Key erstellen und dabei einen Workspace auswählen — dann ist keine ID nötig.', '');
+  if(ws === null) return false; ws = ws.trim();
+  try { if(ws) localStorage.setItem('apriko-anthropic-workspace', ws); else localStorage.removeItem('apriko-anthropic-workspace'); } catch(e){}
+  return !!ws;
+}
+function rpIstWorkspaceFehler(txt){ return /anthropic-workspace-id|scoped to a workspace/i.test(String(txt || '')); }
 /* API-Key managen: beim ersten Klick fragen, danach in localStorage */
 function getAnthropicKey(){
   var key = localStorage.getItem('apriko-anthropic-key');
@@ -17498,7 +17556,7 @@ function getAnthropicKey(){
 
 function clearAnthropicKey(){
   if(confirm('API-Key aus dem Browser löschen?')){
-    localStorage.removeItem('apriko-anthropic-key');
+    localStorage.removeItem('apriko-anthropic-key'); try { localStorage.removeItem('apriko-anthropic-workspace'); } catch(e){}
     updateOcrConfigVisibility();
   }
 }
@@ -17829,12 +17887,7 @@ async function enrichCompanyInfo(firma){
   try {
     var response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
+      headers: rpAnthropicHeaders(key),
       body: JSON.stringify({
         model: 'claude-sonnet-5',
         max_tokens: 2000,
@@ -18134,22 +18187,22 @@ async function callClaudeOcr(key, b64, sendAsPdf, prompt, model){
   var mediaBlock = sendAsPdf
     ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64.data } }
     : { type: 'image',    source: { type: 'base64', media_type: b64.mediaType,     data: b64.data } };
-  return fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': key,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
+  var body = JSON.stringify({
       model: model || RP_OCR_MODEL,
       max_tokens: 4000,  // Mehr Tokens für lange Monatsrapporte
       messages: [{
         role: 'user',
         content: [ mediaBlock, { type: 'text', text: prompt } ]
       }]
-    })
+    });
+  var senden = function(){ return fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: rpAnthropicHeaders(key), body: body }); };
+  return senden().then(async function(res){
+    if(res.status !== 400) return res;
+    var txt = await res.clone().text();
+    if(!rpIstWorkspaceFehler(txt)) return res;
+    // Key ohne Workspace-Bindung: Workspace-ID einmalig abfragen und denselben Aufruf wiederholen
+    if(!rpWorkspaceAbfragen('Der API-Key ist keinem Workspace zugeordnet (Anthropic: «This API key is not scoped to a workspace»).')) return res;
+    return senden();
   });
 }
 
@@ -18267,7 +18320,7 @@ async function scanWithClaude(){
       var errTxt = await response.text();
       // 401 → Key ist falsch → löschen, damit neu gefragt wird
       if(response.status === 401){
-        localStorage.removeItem('apriko-anthropic-key');
+        localStorage.removeItem('apriko-anthropic-key'); try { localStorage.removeItem('apriko-anthropic-workspace'); } catch(e){}
         updateOcrConfigVisibility();
         throw new Error('API-Key ungültig (401). Wurde gelöscht — bitte neu eingeben.');
       }
@@ -19140,6 +19193,135 @@ function buildXmlNeu(){
   o += '  </Tage>\n  <Total stunden="' + nf(ergebnis.tIst) + '"' + sp.filter(function(c){ return ergebnis.summen[c.k] !== undefined; }).map(function(c){ return ' ' + x(c.k.replace(/^w:/, '').replace(/[^A-Za-z0-9]/g, '_')) + '="' + nf(ergebnis.summen[c.k]) + '"'; }).join('') + '/>\n</Rapport>';
   return o;
 }
+/* ---------- Übergabe an Apriko: TimeTrackingItem des Einsatzes → Elemente → Einträge (DryRun zuerst) ----------
+   Datenmodell (timetracking.json): TimeTrackingItem (entityReferenceId = Einsatz) → TimeTrackingComponents →
+   TimeTrackingElements (entryType Decimal/Duration/Integer/…) → *TimeTrackingEntries je Datum/Zeile.
+   Jeder POST unterstützt ?DryRun=true — der Probelauf validiert serverseitig, ohne zu speichern. */
+var rpTt = { items: [], itemId: null, elemente: [], mapping: {}, bestehend: [], ergebnis: null, laeuft: false };
+function rpTtSpalten(){ var sp = [{ k: 'ist', l: 'Std.', e: 'h' }]; if(rpIstNeu()) sp = sp.concat(rpNeuAktiveSpalten().filter(function(c){ return c.k !== 'bemerkung'; })); return sp; }
+function rpTtEinsatz(){ var st = rpApiState; var sel = (st.einsaetze || []).filter(function(x){ return String(x.e.id) === String(st.einsatzId); })[0] || (st.einsaetze || [])[0]; return sel ? sel.e : null; }
+function rpTtIso(d){ return d && d.length === 10 && d.indexOf('.') === 2 ? d.slice(6, 10) + '-' + d.slice(3, 5) + '-' + d.slice(0, 2) : d; }
+function rpTtStatus(t, fehler){ var e = $('rpTtStatus'); if(e){ e.textContent = t || ''; e.style.color = fehler ? '#c62828' : ''; } }
+function rpTtAutoMap(spalte, elemente){
+  var n = function(x){ return String(x || '').toLowerCase(); };
+  var regeln = { ist: /normal|arbeitsz|arbeitsstund|stunden|^std|regul/, ueberzeit: /überz|ueberz|überst|ueberst|overtime/, zuschlag25: /25/, zuschlag50: /50/, nacht: /nacht|night/, samstag: /samstag|sa\b/, sonntag: /sonntag|feiertag|so\b/, reise: /reise|fahrz|wegz/, km: /\bkm\b|kilometer/, spesen: /spesen|auslag|expense/ };
+  var re = regeln[spalte.k] || new RegExp(n(spalte.l).replace(/[^a-zäöü0-9]+/g, '.*'));
+  var hit = elemente.filter(function(el){ return re.test(n(el.name)); });
+  if(spalte.k === 'ist') hit = hit.filter(function(el){ return !/überz|ueberz|zuschl|nacht|samstag|sonntag|reise|spesen/.test(n(el.name)); });
+  return hit.length ? hit[0].id : '';
+}
+async function rpTtLaden(){
+  var e = rpTtEinsatz(); if(!e){ rpTtStatus('Zuerst in Schritt 2 einen Einsatz aus Apriko übernehmen.', true); return; }
+  if(!(typeof rpApiUse === 'function' && rpApiUse())){ rpTtStatus('Keine Apriko-Verbindung.', true); return; }
+  rpTtStatus('Lade Zeiterfassung …'); rpTt.items = []; rpTt.elemente = []; rpTt.bestehend = []; rpTt.ergebnis = null;
+  try {
+    // Mehrere Suchvarianten, weil nicht jedes Feld im Suchindex filterbar ist (vgl. initiators bei EntityChange)
+    var varianten = [
+      { entityTypes: 'TimeTrackingItem', pageIndex: 0, pageSize: 50, resolveReferences: false, filters: 'entityReferenceId|=|' + JSON.stringify(String(e.id)) + '|text|false|false|["G1"]' },
+      { entityTypes: 'TimeTrackingItem', pageIndex: 0, pageSize: 50, resolveReferences: false, filters: 'entityReference|=|' + JSON.stringify(String(e.id)) + '|text|false|false|["G1"]' },
+      { entityTypes: 'TimeTrackingItem', pageIndex: 0, pageSize: 50, resolveReferences: false, query: String(e.placementNumber || e.id) }
+    ];
+    var hits = [];
+    for(var vi = 0; vi < varianten.length && !hits.length; vi++){
+      try { var r = await AprikoApi.models.query(varianten[vi]); hits = ((r && r.results) || []).map(function(h){ try { return AprikoApi.models.hitData(h); } catch(x){ return null; } }).filter(Boolean).filter(function(it){ return String(it.entityReferenceId) === String(e.id); }); } catch(x){ hits = []; }
+    }
+    rpTt.items = hits;
+    if(!hits.length){ rpTtStatus('Für Einsatz ' + (e.placementNumber || e.id) + ' wurde kein TimeTrackingItem gefunden (Zeiterfassung in Apriko noch nicht angelegt?).', true); rpTtRender(); return; }
+    // passendes Item: Zeitraum des Rapports überdeckend, sonst das neueste
+    var von = window.__rpZeitraum ? rpTtIso(window.__rpZeitraum.von) : '', bis = window.__rpZeitraum ? rpTtIso(window.__rpZeitraum.bis) : '';
+    var pass = hits.filter(function(it){ return (!it.startDate || !bis || it.startDate <= bis) && (!it.endDate || !von || it.endDate >= von); });
+    var item = (pass.length ? pass : hits).sort(function(a, b){ return String(b.startDate || '').localeCompare(String(a.startDate || '')); })[0];
+    rpTt.itemId = item.id;
+    await rpTtItemLaden(item.id);
+  } catch(err){ rpTtStatus('Fehler: ' + (err && err.message || err), true); }
+}
+async function rpTtItemLaden(itemId){
+  rpTt.itemId = itemId; rpTt.elemente = []; rpTt.bestehend = []; rpTt.ergebnis = null;
+  var voll = await AprikoApi.request('timetracking', '/TimeTrackingItems/' + encodeURIComponent(itemId));
+  var it = voll && voll.data ? voll.data : voll;
+  var elemente = [];
+  (it.timeTrackingComponents || []).forEach(function(c){ (c.timeTrackingElements || []).forEach(function(el){ elemente.push({ id: el.id, name: el.name, komponente: c.name, entryType: el.entryType, sum: el.isSumRelevant, rate: el.rate, percentage: el.percentage }); }); });
+  if(!elemente.length){
+    // Elemente nicht eingebettet → per Suche nach timeTrackingItemId
+    var r2 = await AprikoApi.models.query({ entityTypes: 'TimeTrackingElement', pageIndex: 0, pageSize: 120, resolveReferences: false, filters: 'timeTrackingItemId|=|' + JSON.stringify(String(itemId)) + '|text|false|false|["G1"]' });
+    ((r2 && r2.results) || []).forEach(function(h){ try { var el = AprikoApi.models.hitData(h); if(String(el.timeTrackingItemId) === String(itemId)) elemente.push({ id: el.id, name: el.name, komponente: '', entryType: el.entryType, sum: el.isSumRelevant }); } catch(x){} });
+  }
+  rpTt.elemente = elemente; rpTt.item = it;
+  // bestehende Einträge im Rapport-Zeitraum (Doppelerfassung vermeiden)
+  try {
+    var r3 = await AprikoApi.models.query({ entityTypes: 'TimeTrackingEntry', pageIndex: 0, pageSize: 120, resolveReferences: false, filters: 'timeTrackingItemId|=|' + JSON.stringify(String(itemId)) + '|text|false|false|["G1"]' });
+    var von = window.__rpZeitraum ? rpTtIso(window.__rpZeitraum.von) : '', bis = window.__rpZeitraum ? rpTtIso(window.__rpZeitraum.bis) : '';
+    rpTt.bestehend = ((r3 && r3.results) || []).map(function(h){ try { return AprikoApi.models.hitData(h); } catch(x){ return null; } }).filter(function(x){ return x && String(x.timeTrackingItemId) === String(itemId) && (!von || !x.date || x.date >= von) && (!bis || !x.date || x.date <= bis); });
+  } catch(x){ rpTt.bestehend = []; }
+  rpTt.mapping = {}; rpTtSpalten().forEach(function(c){ rpTt.mapping[c.k] = rpTtAutoMap(c, elemente); });
+  rpTtStatus(elemente.length + ' Elemente · ' + rpTt.bestehend.length + ' bestehende Einträge im Zeitraum');
+  rpTtRender();
+}
+function rpTtEintraege(){
+  var out = [], zaehler = {};
+  zeilen.forEach(function(r){
+    if(r.absent) return;
+    rpTtSpalten().forEach(function(c){
+      var elId = rpTt.mapping[c.k]; if(!elId) return;
+      var v = c.k === 'ist' ? (r.ist || 0) : rpNeuWert(r, c); if(typeof v !== 'number' || !(v > 0)) return;
+      var el = rpTt.elemente.filter(function(x){ return x.id === elId; })[0]; if(!el) return;
+      var datum = rpTtIso(r.datum); var key = datum + '|' + elId; zaehler[key] = (zaehler[key] || 0) + 1;
+      var pfad = el.entryType === 'DurationTimeTrackingEntry' ? '/DurationTimeTrackingEntries' : el.entryType === 'IntegerTimeTrackingEntry' ? '/IntegerTimeTrackingEntries' : '/DecimalTimeTrackingEntries';
+      var wert = el.entryType === 'IntegerTimeTrackingEntry' ? Math.round(v) : v;
+      out.push({ pfad: pfad, body: { date: datum, rowNumber: zaehler[key], timeTrackingElementId: elId, value: wert, name: r.kst ? 'KST ' + r.kst : undefined }, spalte: c.l, element: el.name, kst: r.kst || '', datum: r.datum, wert: v });
+    });
+  });
+  return out;
+}
+async function rpTtSenden(dryRun){
+  if(rpTt.laeuft) return;
+  var liste = rpTtEintraege(); if(!liste.length){ rpTtStatus('Keine Einträge — Spalten zuordnen.', true); return; }
+  var dubl = liste.filter(function(x){ return rpTt.bestehend.some(function(b){ return b.date === x.body.date && String(b.timeTrackingElementId) === String(x.body.timeTrackingElementId); }); }).length;
+  if(!dryRun && !confirm(liste.length + ' Einträge JETZT in Apriko schreiben?' + (dubl ? '\n\nACHTUNG: ' + dubl + ' davon haben am selben Tag bereits einen Eintrag im selben Element (mögliche Doppelerfassung).' : '') + '\n\nEmpfehlung: zuerst «Probelauf (DryRun)».')) return;
+  rpTt.laeuft = true; rpTt.ergebnis = []; rpTtRender(); rpTtStatus((dryRun ? 'Probelauf' : 'Schreibe') + ' 0/' + liste.length + ' …');
+  rpApiUse();
+  for(var i = 0; i < liste.length; i++){
+    var x = liste[i]; var res = { eintrag: x, ok: false, meldungen: [], id: null };
+    try {
+      var antwort = await AprikoApi.request('timetracking', x.pfad, { method: 'POST', body: x.body, query: { DryRun: dryRun ? 'true' : undefined, ReturnResult: 'true', ReturnTransmittedMessages: 'true' } });
+      res.ok = true; res.id = antwort && antwort.result && antwort.result.id || null;
+      res.meldungen = (antwort && antwort.messages || []).map(function(m){ return (m.status ? m.status + ': ' : '') + (m.value || m.key || JSON.stringify(m)); });
+    } catch(err){ res.ok = false; res.meldungen = [(err && err.message) || String(err)]; if(err && err.details) res.meldungen.push(JSON.stringify(err.details).slice(0, 300)); }
+    rpTt.ergebnis.push(res); rpTtStatus((dryRun ? 'Probelauf' : 'Schreibe') + ' ' + (i + 1) + '/' + liste.length + ' …');
+    if(!res.ok && !dryRun){ rpTtStatus('Abgebrochen bei Eintrag ' + (i + 1) + ' — ' + res.meldungen[0], true); break; }
+  }
+  rpTt.laeuft = false; rpTt.dryRun = dryRun;
+  var okN = rpTt.ergebnis.filter(function(r){ return r.ok; }).length;
+  if(rpTt.ergebnis.length === liste.length || dryRun) rpTtStatus((dryRun ? 'Probelauf: ' : 'Geschrieben: ') + okN + '/' + liste.length + ' ok');
+  rpTtRender();
+  if(!dryRun && okN === liste.length){ toast && toast(okN + ' Einträge in Apriko erfasst.'); rpStapelErledigt(); }
+}
+function rpTtRender(){
+  var box = $('rpTtInhalt'); if(!box) return;
+  if(!rpTt.itemId){ box.innerHTML = rpTt.items && rpTt.items.length === 0 && rpTt.ergebnis === null && rpTtEinsatz() ? '' : ''; return; }
+  var it = rpTt.item || {};
+  var h = '<div style="font-size:12px;color:var(--rp-grey);margin-bottom:6px">TimeTrackingItem ' + esc(it.displayName || rpTt.itemId) + ' · ' + esc(it.startDate || '?') + ' – ' + esc(it.endDate || 'offen') + ' · Status ' + esc(it.state || '') +
+    (rpTt.items.length > 1 ? ' · <select onchange="rpTtItemLaden(this.value)" style="font-size:11px">' + rpTt.items.map(function(x){ return '<option value="' + esc(x.id) + '"' + (x.id === rpTt.itemId ? ' selected' : '') + '>' + esc(x.startDate || '') + ' – ' + esc(x.endDate || 'offen') + '</option>'; }).join('') + '</select>' : '') + '</div>';
+  var sp = rpTtSpalten();
+  h += '<table class="rp-table" style="font-size:12px"><thead><tr><th>Spalte im Rapport</th><th>→ Element in Apriko</th></tr></thead><tbody>' + sp.map(function(c){
+    return '<tr><td>' + esc(c.l) + (c.e ? ' (' + esc(c.e) + ')' : '') + '</td><td><select onchange="rpTtMap(' + JSON.stringify(c.k).replace(/"/g, '&quot;') + ', this.value)" style="width:100%;font-size:12px"><option value="">— nicht übergeben —</option>' +
+      rpTt.elemente.map(function(el){ return '<option value="' + esc(el.id) + '"' + (rpTt.mapping[c.k] === el.id ? ' selected' : '') + '>' + esc((el.komponente ? el.komponente + ' › ' : '') + el.name) + ' [' + esc(String(el.entryType || '').replace('TimeTrackingEntry', '')) + ']</option>'; }).join('') + '</select></td></tr>';
+  }).join('') + '</tbody></table>';
+  var liste = rpTtEintraege();
+  var dubl = liste.filter(function(x){ return rpTt.bestehend.some(function(b){ return b.date === x.body.date && String(b.timeTrackingElementId) === String(x.body.timeTrackingElementId); }); });
+  h += '<div style="margin:8px 0;font-size:12px">' + liste.length + ' Einträge vorbereitet' + (dubl.length ? ' · <span style="color:#c62828">⚠ ' + dubl.length + ' Tage/Elemente haben bereits einen Eintrag in Apriko</span>' : '') + (rpTt.bestehend.length ? ' · ' + rpTt.bestehend.length + ' bestehende Einträge im Zeitraum' : '') + '</div>';
+  h += '<div class="rp-actions"><button type="button" class="rp-btn" onclick="rpTtSenden(true)" ' + (rpTt.laeuft || !liste.length ? 'disabled' : '') + '>🧪 Probelauf (DryRun)</button>' +
+    '<button type="button" class="rp-btn rp-btn-dark" onclick="rpTtSenden(false)" ' + (rpTt.laeuft || !liste.length || !(rpTt.ergebnis && rpTt.dryRun && rpTt.ergebnis.every(function(r){ return r.ok; })) ? 'disabled' : '') + ' title="Erst nach erfolgreichem Probelauf möglich">🚀 In Apriko schreiben</button></div>';
+  if(rpTt.ergebnis && rpTt.ergebnis.length){
+    h += '<table class="rp-table" style="font-size:11.5px;margin-top:6px"><thead><tr><th>Datum</th><th>KST</th><th>Spalte</th><th>Element</th><th class="rp-num">Wert</th><th>Ergebnis</th></tr></thead><tbody>' + rpTt.ergebnis.map(function(r){
+      return '<tr><td>' + esc(r.eintrag.datum) + '</td><td>' + esc(r.eintrag.kst) + '</td><td>' + esc(r.eintrag.spalte) + '</td><td>' + esc(r.eintrag.element) + '</td><td class="rp-num">' + nf(r.eintrag.wert) + '</td><td style="color:' + (r.ok ? '#2e7d32' : '#c62828') + '">' + (r.ok ? '✓' + (r.id ? ' ' + esc(r.id) : '') : '✕') + (r.meldungen.length ? ' <span style="color:var(--rp-grey)">' + esc(r.meldungen.join(' · ')).slice(0, 400) + '</span>' : '') + '</td></tr>';
+    }).join('') + '</tbody></table>';
+  } else if(liste.length){
+    h += '<details style="font-size:11px;color:var(--rp-grey)"><summary>Vorschau der Einträge (JSON)</summary><pre style="white-space:pre-wrap">' + esc(JSON.stringify(liste.slice(0, 5).map(function(x){ return { POST: x.pfad, body: x.body }; }), null, 1)) + (liste.length > 5 ? '\n… ' + (liste.length - 5) + ' weitere' : '') + '</pre></details>';
+  }
+  box.innerHTML = h;
+}
+function rpTtMap(k, v){ rpTt.mapping[k] = v; rpTt.ergebnis = null; rpTtRender(); }
 function buildCsv(){
   if(rpIstNeu()) return buildCsvNeu();
   var soll=sollOf(), L=[];
@@ -19264,6 +19446,8 @@ window.rpApiSetManual = rpApiSetManual;
 window.rpApiUebernehmen = rpApiUebernehmen;
 window.rpApiLoadRoster = rpApiLoadRoster;
 window.rpApiSucheAdditionalComp = rpApiSucheAdditionalComp;
+window.rpTestEinsatzRender = rpTestEinsatzRender; window.rpTestEinsatzUebernehmen = rpTestEinsatzUebernehmen;
+window.rpTtLaden = rpTtLaden; window.rpTtItemLaden = rpTtItemLaden; window.rpTtSenden = rpTtSenden; window.rpTtMap = rpTtMap;
 window.rpStapelLaden = rpStapelLaden; window.rpStapelNeuGruppieren = rpStapelNeuGruppieren; window.rpStapelVerwerfen = rpStapelVerwerfen;
 
 })();
