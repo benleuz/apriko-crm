@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.405.0"></script>
-<script src="apriko-api.js?v=1.405.0"></script>
-<script src="lohncheck.js?v=1.405.0"></script>
-<script src="personalbudget.js?v=1.405.0"></script>
-<script src="jahresbudget.js?v=1.405.0"></script>
-<script src="budgetpositionen.js?v=1.405.0"></script>
-<script src="lohnchecklistetemp.js?v=1.405.0"></script>
-<script src="apriko-endpunkte.js?v=1.405.0"></script>
+<script src="apriko-filters.js?v=1.406.0"></script>
+<script src="apriko-api.js?v=1.406.0"></script>
+<script src="lohncheck.js?v=1.406.0"></script>
+<script src="personalbudget.js?v=1.406.0"></script>
+<script src="jahresbudget.js?v=1.406.0"></script>
+<script src="budgetpositionen.js?v=1.406.0"></script>
+<script src="lohnchecklistetemp.js?v=1.406.0"></script>
+<script src="apriko-endpunkte.js?v=1.406.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1024,7 +1024,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.405.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.406.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -16055,6 +16055,14 @@ async function rpApiLoadRoster(force){
         return true;
       });
       if(aktivRows.length){
+        /* Suchtreffer (document.data) enthalten NICHT alle Felder — employeeId/customerId fehlen (siehe API-POC,
+           v1.328). Darum jeden Einsatz voll nachladen (8 parallel), sonst bleibt die Mitarbeiterliste leer. */
+        rpApiProgress('🔌 <b>Einsatzliste:</b> ' + aktivRows.length + ' aktive Einsätze — lade Details (Mitarbeiter/Kunde) …');
+        var vollPos = 0, voll = new Array(aktivRows.length);
+        await Promise.all(Array.apply(null, Array(8)).map(async function(){
+          while(vollPos < aktivRows.length){ var vi = vollPos++; try { var vr = await AprikoApi.staffing.getStaffLease(aktivRows[vi].id); voll[vi] = (vr && vr.data) ? vr.data : vr; } catch(e){ voll[vi] = aktivRows[vi]; } }
+        }));
+        aktivRows = voll.map(function(v, i){ return v || aktivRows[i]; });
         placements = aktivRows;
         ladeMethode = 'aktiv-filter';
         aktivDiagnose = aktivRows.length + ' Treffer über Aktiv-Filter (6 Einzelabfragen je Zustand, zusammengeführt)';
@@ -16504,12 +16512,15 @@ function rpApiSelectEinsatz(id){ rpApiState.einsatzId = id; rpApiRender(); }
    «Übernehmen» exakt wie beim normalen Abgleich (Konditionen, PLZ, GAV bzw. Direkt-Import). */
 async function rpTestEinsatzRender(laden){
   var box = $('rpTestEinsatzListe'); if(!box) return;
-  if(!rpRoster && laden){ box.innerHTML = '<span style="color:var(--rp-grey)">Einsatzliste wird geladen …</span>'; try { await rpApiLoadRoster(false); } catch(e){ box.innerHTML = '<span style="color:#c62828">Einsatzliste konnte nicht geladen werden: ' + esc(e.message || e) + '</span>'; return; } }
+  var leer = !rpRoster || !Object.keys(rpRoster.mitarbeiter || {}).length;
+  if(leer && laden){ box.innerHTML = '<span style="color:var(--rp-grey)">Einsatzliste wird ' + (rpRoster ? 'neu ' : '') + 'geladen (mit Details je Einsatz, kann 1–2 Minuten dauern) …</span>'; try { await rpApiLoadRoster(!!rpRoster); } catch(e){ box.innerHTML = '<span style="color:#c62828">Einsatzliste konnte nicht geladen werden: ' + esc(e.message || e) + '</span>'; return; } }
   if(!rpRoster){ box.innerHTML = '<span style="color:var(--rp-grey)">Noch keine Einsatzliste — «Liste laden» klicken.</span>'; return; }
   var q = String(($('rpTestEinsatzSuche') || {}).value || '').toLowerCase().trim();
   var alle = [];
   Object.keys(rpRoster.mitarbeiter).forEach(function(id){ var m = rpRoster.mitarbeiter[id]; var name = [m.firstName, m.lastName].filter(Boolean).join(' ');
     (m.placements || []).forEach(function(p){ alle.push({ e: p, employeeId: id, employeeName: name, kundeName: rpApiRosterKundeName(p.customerId) || '', zeitOk: true, kundeOk: true, score: 100 }); }); });
+  if(!alle.length && rpRoster.placementsImFenster === 0 && rpRoster.placementsRoh > 0) box.innerHTML = '<span style="color:#c62828">Einsatzliste enthält ' + rpRoster.placementsRoh + ' Einsätze, aber keine im Zeitfenster.</span>';
+  if(!alle.length){ box.innerHTML = '<span style="color:#c62828">Einsatzliste ohne Mitarbeitende — «Liste laden» klicken, um sie mit Details neu zu laden.</span>'; return; }
   alle.sort(function(a, b){ return String(a.employeeName).localeCompare(String(b.employeeName)) || String(b.e.entryDate || '').localeCompare(String(a.e.entryDate || '')); });
   var treffer = alle.filter(function(x){ return !q || (x.employeeName + ' ' + x.kundeName + ' ' + (x.e.placementNumber || '') + ' ' + (x.e.state || '')).toLowerCase().indexOf(q) >= 0; });
   rpTestEinsatzKandidaten = treffer;
