@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.401.0"></script>
-<script src="apriko-api.js?v=1.401.0"></script>
-<script src="lohncheck.js?v=1.401.0"></script>
-<script src="personalbudget.js?v=1.401.0"></script>
-<script src="jahresbudget.js?v=1.401.0"></script>
-<script src="budgetpositionen.js?v=1.401.0"></script>
-<script src="lohnchecklistetemp.js?v=1.401.0"></script>
-<script src="apriko-endpunkte.js?v=1.401.0"></script>
+<script src="apriko-filters.js?v=1.402.0"></script>
+<script src="apriko-api.js?v=1.402.0"></script>
+<script src="lohncheck.js?v=1.402.0"></script>
+<script src="personalbudget.js?v=1.402.0"></script>
+<script src="jahresbudget.js?v=1.402.0"></script>
+<script src="budgetpositionen.js?v=1.402.0"></script>
+<script src="lohnchecklistetemp.js?v=1.402.0"></script>
+<script src="apriko-endpunkte.js?v=1.402.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1024,7 +1024,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.401.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.402.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -16987,9 +16987,7 @@ function resetRapport(){
   if(belegTabs){ belegTabs.innerHTML = ''; belegTabs.hidden = true; }
   var viewer = $('rpBelegViewer');
   if(viewer) viewer.innerHTML = '<div class="rp-beleg-empty">Beleg wird hier angezeigt<br><small>Klick auf eine Tabellenzeile zum Wechseln</small></div>';
-  $('rpTSoll').textContent = '—';
-  $('rpTIst').textContent = '—';
-  $('rpTDiff').textContent = '—';
+  ['rpTSoll','rpTIst','rpTDiff'].forEach(function(id){ var e = $(id); if(e) e.textContent = '—'; });
   $('rpFlags').textContent = '';
 
   // Karte 4: Auswertung leeren
@@ -17119,8 +17117,9 @@ window.initRapport = function(){
     zeilen.forEach(function(r){ r.kstFlag = null; r.istFlag = null; });
     renderTable(); countFlags();
   });
-  $('rpCsv').addEventListener('click',function(){ dl(buildCsv(),'rapport.csv','text/csv;charset=utf-8'); });
-  $('rpXml').addEventListener('click',function(){ dl(buildXml(),'rapport.xml','application/xml;charset=utf-8'); });
+  var rpExportName = function(ext){ var ma = String($('rpMa').value || '').trim().replace(/[^\w.-]+/g, '_'); var z = window.__rpZeitraum ? '_' + String(window.__rpZeitraum.von || '').replace(/\./g, '-') : ''; return 'rapport' + (ma ? '_' + ma : '') + z + '.' + ext; };
+  $('rpCsv').addEventListener('click',function(){ dl(buildCsv(),rpExportName('csv'),'text/csv;charset=utf-8'); rpStapelErledigt(); });
+  $('rpXml').addEventListener('click',function(){ dl(buildXml(),rpExportName('xml'),'application/xml;charset=utf-8'); rpStapelErledigt(); });
   $('rpPeek').addEventListener('click',function(){
     var o=$('rpOut');
     if(o.hidden){ o.textContent=buildCsv()+'\n\n'+buildXml(); o.hidden=false; this.textContent='Vorschau ausblenden'; }
@@ -17128,8 +17127,86 @@ window.initRapport = function(){
   });
 };
 
+/* ---------- Stapel: ein PDF mit mehreren Rapporten wird in Einzeldokumente aufgeteilt ----------
+   Jede Seite (oder n Seiten) = ein Rapport; die Einträge werden nacheinander als normales Einzeldokument
+   geladen, ausgelesen und exportiert. Der Stapel überlebt «Alles zurücksetzen» zwischen den Rapporten. */
+var rpStapel = [], rpStapelAktiv = -1, rpStapelQuelle = null;
+async function rpStapelAufteilen(f, seitenProRapport){
+  await azLoadPdfLib();
+  var bytes = await f.arrayBuffer();
+  var src = await window.PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
+  var n = src.getPageCount(); var spr = Math.max(1, seitenProRapport || 1);
+  var out = [];
+  for(var start = 0; start < n; start += spr){
+    var idx = []; for(var k = start; k < Math.min(n, start + spr); k++) idx.push(k);
+    var doc = await window.PDFLib.PDFDocument.create();
+    var pages = await doc.copyPages(src, idx); pages.forEach(function(pg){ doc.addPage(pg); });
+    var b = await doc.save();
+    var name = f.name.replace(/\.pdf$/i, '') + (spr === 1 ? ' – Seite ' + (start + 1) : ' – Seiten ' + (start + 1) + '-' + (start + idx.length)) + '.pdf';
+    out.push({ name: name, file: new File([b], name, { type: 'application/pdf' }), seiten: idx.map(function(i){ return i + 1; }), status: 'offen' });
+  }
+  return out;
+}
+async function rpStapelStart(f, spr){
+  try {
+    rpStapelQuelle = f;
+    rpStapel = await rpStapelAufteilen(f, spr); rpStapelAktiv = -1;
+    rpStapelRender();
+    toast && toast(rpStapel.length + ' Rapporte aus «' + f.name + '» bereitgestellt — den ersten mit «Laden» öffnen.');
+  } catch(e){ toast && toast('PDF konnte nicht aufgeteilt werden: ' + e.message, true); }
+}
+async function rpStapelNeuGruppieren(spr){ if(!rpStapelQuelle) return; if(rpStapel.some(function(x){ return x.status !== 'offen'; }) && !confirm('Neu gruppieren setzt den Status aller Rapporte im Stapel zurück. Weiter?')) return; await rpStapelStart(rpStapelQuelle, spr); }
+function rpStapelLaden(i){
+  var it = rpStapel[i]; if(!it) return;
+  var aktuell = rpStapel[rpStapelAktiv];
+  if(files.length && !(aktuell && aktuell.status === 'erledigt') && !confirm('Aktuellen Rapport verwerfen und «' + it.name + '» laden?')) return;
+  resetRapport();
+  rpStapel.forEach(function(x){ if(x.status === 'in Arbeit') x.status = 'offen'; });
+  it.status = 'in Arbeit'; rpStapelAktiv = i;
+  addFiles([it.file]); rpStapelRender();
+  var drop = $('rpDrop'); if(drop) drop.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function rpStapelErledigt(){
+  if(rpStapelAktiv < 0 || !rpStapel[rpStapelAktiv]) return;
+  rpStapel[rpStapelAktiv].status = 'erledigt'; rpStapelRender();
+  var next = rpStapel.findIndex(function(x){ return x.status === 'offen'; });
+  if(next >= 0) toast && toast('Rapport exportiert — nächster im Stapel: «' + rpStapel[next].name + '» (oben «Laden»).');
+  else toast && toast('Alle Rapporte im Stapel erledigt.');
+}
+function rpStapelVerwerfen(){ if(rpStapel.length && !confirm('Stapel verwerfen?')) return; rpStapel = []; rpStapelAktiv = -1; rpStapelQuelle = null; rpStapelRender(); }
+function rpStapelRender(){
+  var box = $('rpStapelBox');
+  if(!box){ box = document.createElement('div'); box.id = 'rpStapelBox'; var drop = $('rpDrop'); if(drop && drop.parentNode) drop.parentNode.insertBefore(box, drop); else return; }
+  if(!rpStapel.length){ box.innerHTML = ''; box.hidden = true; return; }
+  var offen = rpStapel.filter(function(x){ return x.status === 'offen'; }).length, fertig = rpStapel.filter(function(x){ return x.status === 'erledigt'; }).length;
+  var next = rpStapel.findIndex(function(x){ return x.status === 'offen'; });
+  box.hidden = false;
+  box.innerHTML = '<div style="border:1px solid var(--rp-line);border-radius:6px;padding:10px 12px;margin-bottom:12px;background:var(--rp-white)">' +
+    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><b>📚 Stapel: ' + rpStapel.length + ' Rapporte</b>' +
+    '<span style="font-size:12px;color:var(--rp-grey)">' + fertig + ' erledigt · ' + offen + ' offen' + (rpStapelQuelle ? ' · aus ' + esc(rpStapelQuelle.name) : '') + '</span>' +
+    '<label style="font-size:12px;color:var(--rp-grey);margin-left:auto">Seiten pro Rapport <select onchange="rpStapelNeuGruppieren(+this.value)" style="padding:2px 4px;font-size:12px">' + [1,2,3,4].map(function(n){ return '<option value="' + n + '"' + ((rpStapel[0] && rpStapel[0].seiten.length === n) ? ' selected' : '') + '>' + n + '</option>'; }).join('') + '</select></label>' +
+    (next >= 0 ? '<button type="button" class="rp-btn rp-btn-dark rp-btn-sm" onclick="rpStapelLaden(' + next + ')">▶ Nächsten laden (' + esc(rpStapel[next].name.replace(/^.*– /, '')) + ')</button>' : '') +
+    '<button type="button" class="rp-btn rp-btn-ghost rp-btn-sm" onclick="rpStapelVerwerfen()">✕ Stapel verwerfen</button></div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:6px">' + rpStapel.map(function(x, i){
+      var farbe = x.status === 'erledigt' ? '#2e7d32' : x.status === 'in Arbeit' ? '#b26a00' : 'var(--rp-grey)';
+      var ico = x.status === 'erledigt' ? '✓' : x.status === 'in Arbeit' ? '▶' : '○';
+      return '<button type="button" onclick="rpStapelLaden(' + i + ')" title="' + esc(x.name) + '" style="font-size:12px;padding:3px 8px;border:1px solid ' + (x.status === 'in Arbeit' ? '#b26a00' : 'var(--rp-line)') + ';border-radius:4px;background:transparent;color:' + farbe + ';cursor:pointer">' + ico + ' ' + (x.seiten.length === 1 ? 'S. ' + x.seiten[0] : 'S. ' + x.seiten[0] + '-' + x.seiten[x.seiten.length - 1]) + '</button>';
+    }).join('') + '</div></div>';
+}
 async function addFiles(list){
   var added = [];
+  // Mehrseitige PDFs → Stapel (jede Seite ein Rapport); bisher wurde ohnehin nur die erste Seite ausgelesen
+  var rest = [];
+  for(var q = 0; q < list.length; q++){
+    var fq = list[q]; var isPdfQ = /\.pdf$/i.test(fq.name) || fq.type === 'application/pdf';
+    if(isPdfQ && !(rpStapelAktiv >= 0 && rpStapel[rpStapelAktiv] && rpStapel[rpStapelAktiv].file === fq)){
+      var cnt = 1;
+      try { await azLoadPdfLib(); cnt = (await window.PDFLib.PDFDocument.load(await fq.arrayBuffer(), { ignoreEncryption: true })).getPageCount(); } catch(e){ cnt = 1; }
+      if(cnt > 1){ var antwort = prompt('«' + fq.name + '» hat ' + cnt + ' Seiten. Wie viele Seiten gehören zu EINEM Rapport? (1 = jede Seite ein eigener Rapport)', '1'); if(antwort === null) continue; await rpStapelStart(fq, Math.max(1, parseInt(antwort) || 1)); continue; }
+    }
+    rest.push(fq);
+  }
+  list = rest; if(!list.length){ return; }
   for(var i=0;i<list.length;i++){
     var f = list[i];
     var url = URL.createObjectURL(f);
@@ -19187,6 +19264,7 @@ window.rpApiSetManual = rpApiSetManual;
 window.rpApiUebernehmen = rpApiUebernehmen;
 window.rpApiLoadRoster = rpApiLoadRoster;
 window.rpApiSucheAdditionalComp = rpApiSucheAdditionalComp;
+window.rpStapelLaden = rpStapelLaden; window.rpStapelNeuGruppieren = rpStapelNeuGruppieren; window.rpStapelVerwerfen = rpStapelVerwerfen;
 
 })();
 
