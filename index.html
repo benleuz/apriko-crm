@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.419.0"></script>
-<script src="apriko-api.js?v=1.419.0"></script>
-<script src="lohncheck.js?v=1.419.0"></script>
-<script src="personalbudget.js?v=1.419.0"></script>
-<script src="jahresbudget.js?v=1.419.0"></script>
-<script src="budgetpositionen.js?v=1.419.0"></script>
-<script src="lohnchecklistetemp.js?v=1.419.0"></script>
-<script src="apriko-endpunkte.js?v=1.419.0"></script>
+<script src="apriko-filters.js?v=1.420.0"></script>
+<script src="apriko-api.js?v=1.420.0"></script>
+<script src="lohncheck.js?v=1.420.0"></script>
+<script src="personalbudget.js?v=1.420.0"></script>
+<script src="jahresbudget.js?v=1.420.0"></script>
+<script src="budgetpositionen.js?v=1.420.0"></script>
+<script src="lohnchecklistetemp.js?v=1.420.0"></script>
+<script src="apriko-endpunkte.js?v=1.420.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1024,7 +1024,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.419.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.420.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1198,6 +1198,7 @@
           <ul class="rp-notes" id="rpNotes"></ul>
           <div class="rp-actions">
             <button class="rp-btn" id="rpConfirm">Werte bestätigen und berechnen</button>
+            <button class="rp-btn rp-btn-dark" id="rpDirekt" title="Berechnet, lädt die Zeiterfassung des gewählten Einsatzes, macht einen Probelauf und schreibt dann Stunden und Rapport-Beleg direkt nach Apriko — ohne Zwischenschritte">🚀 Direkt nach Apriko (Stunden + Rapport)</button>
             <button class="rp-btn rp-btn-ghost" id="rpConfirmAll" title="Bestätigt alle markierten Felder mit dem aktuell angezeigten Wert — vorher gegen den Beleg rechts prüfen, ändert nichts an den Werten selbst">✓ Alle markierten Werte wie angezeigt bestätigen</button>
             <span class="rp-hint" id="rpFlags" style="margin-top:0"></span>
           </div>
@@ -17168,6 +17169,7 @@ window.initRapport = function(){
   // Statt jedes markierte Feld einzeln per Doppelklick bestätigen zu müssen: EIN Klick bestätigt
   // alle aktuell markierten Felder mit dem gerade angezeigten Wert. Ändert keine Werte — nur die
   // Markierung fällt weg, genau wie beim Doppelklick auf ein einzelnes Feld, nur für alle auf einmal.
+  $('rpDirekt').addEventListener('click',function(){ rpTtDirekt(); });
   $('rpConfirmAll').addEventListener('click',function(){
     var betroffen = zeilen.filter(function(r){ return r.kstFlag || r.istFlag; }).length;
     if(!betroffen){ $('rpFlags').textContent = 'Alle Markierungen geprüft'; return; }
@@ -19331,11 +19333,11 @@ function rpTtEintraege(){
   });
   return out;
 }
-async function rpTtSenden(dryRun){
+async function rpTtSenden(dryRun, ohneRueckfrage){
   if(rpTt.laeuft) return;
   var liste = rpTtEintraege().filter(function(x){ return !x.uebersprungen; }); if(!liste.length){ rpTtStatus('Keine Einträge — Spalten zuordnen.', true); return; }
   var dubl = liste.filter(function(x){ return rpTt.bestehend.some(function(b){ return b.date === x.body.date && String(b.timeTrackingElementId) === String(x.body.timeTrackingElementId); }); }).length;
-  if(!dryRun && !confirm(liste.length + ' Einträge JETZT in Apriko schreiben?' + (dubl ? '\n\nACHTUNG: ' + dubl + ' davon haben am selben Tag bereits einen Eintrag im selben Element (mögliche Doppelerfassung).' : '') + '\n\nEmpfehlung: zuerst «Probelauf (DryRun)».')) return;
+  if(!dryRun && !ohneRueckfrage && !confirm(liste.length + ' Einträge JETZT in Apriko schreiben?' + (dubl ? '\n\nACHTUNG: ' + dubl + ' davon haben am selben Tag bereits einen Eintrag im selben Element (mögliche Doppelerfassung).' : '') + '\n\nEmpfehlung: zuerst «Probelauf (DryRun)».')) return;
   rpTt.laeuft = true; rpTt.ergebnis = []; rpTtRender(); rpTtStatus((dryRun ? 'Probelauf' : 'Schreibe') + ' 0/' + liste.length + ' …');
   rpApiUse();
   for(var i = 0; i < liste.length; i++){
@@ -19371,6 +19373,38 @@ async function rpTtSenden(dryRun){
   rpTtRender();
   if(!dryRun){ rpTt.geschrieben = (rpTt.geschrieben || []).concat(rpTt.ergebnis.filter(function(r){ return r.ok && r.id && !/PATCH/.test(r.meldungen[0] || ''); }).map(function(r){ return { pfad: r.eintrag.pfad, id: r.id, datum: r.eintrag.datum, element: r.eintrag.element }; })); rpTtRender(); }
   if(!dryRun && okN === liste.length){ toast && toast(okN + ' Einträge in Apriko erfasst.'); rpStapelErledigt(); }
+}
+/* Ein Klick: berechnen → Zeiterfassung laden → Probelauf → schreiben → Beleg anhängen (auf Wunsch von Beni, 08.10.2026) */
+async function rpTtDirekt(){
+  if(rpTt.laeuft) return;
+  var offen = zeilen.filter(function(r){ return r.kstFlag || r.istFlag; }).length;
+  if(offen > 0){ var erst = document.querySelector('#rpTbody input.rp-f-low, #rpTbody input.rp-f-mid'); if(erst){ erst.focus(); erst.scrollIntoView({ behavior: 'smooth', block: 'center' }); } $('rpFlags').textContent = '⛔ ' + offen + ' markierte Felder noch nicht geprüft — zuerst prüfen (oder «Alle markierten Werte bestätigen»)'; return; }
+  var e = rpTtEinsatz(); if(!e){ $('rpFlags').textContent = '⛔ Kein Einsatz gewählt — zuerst in Schritt 2 einen Einsatz aus Apriko übernehmen.'; return; }
+  if(!(typeof rpApiUse === 'function' && rpApiUse())){ $('rpFlags').textContent = '⛔ Keine Apriko-Verbindung.'; return; }
+  if(!files.length){ $('rpFlags').textContent = '⛔ Kein Rapport-Beleg geladen.'; return; }
+  var tage = zeilen.filter(function(r){ return !r.absent && (r.ist || 0) > 0; }).length;
+  if(!confirm('Direkt nach Apriko schreiben?\n\nEinsatz ' + (e.placementNumber || e.id) + ' · ' + tage + ' Tage mit Stunden · Beleg: ' + files.map(function(f){ return f.name; }).join(', ') + '\n\nAblauf: Probelauf → Stunden schreiben → Rapport als Dokument anhängen. Es wird nichts gelöscht oder überschrieben (bestehende Einträge am selben Tag werden ergänzt/angepasst).')) return;
+  berechnen(); unlock($('rpS4'));
+  var box = $('rpTtBox'); if(box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  $('rpFlags').textContent = '';
+  // 1) Zeiterfassung des Einsatzes
+  await rpTtLaden();
+  if(!rpTt.itemId){ rpTtStatus('Abgebrochen: keine Zeiterfassung (TimeTrackingItem) für diesen Einsatz gefunden.', true); return; }
+  var liste = rpTtEintraege().filter(function(x){ return !x.uebersprungen; });
+  if(!liste.length){ rpTtStatus('Abgebrochen: keine Einträge vorbereitet — Spalten-Zuordnung prüfen.', true); return; }
+  // 2) Probelauf
+  await rpTtSenden(true);
+  var pOk = rpTt.ergebnis && rpTt.ergebnis.length === liste.length && rpTt.ergebnis.every(function(r){ return r.ok; });
+  if(!pOk){ var fe = (rpTt.ergebnis || []).filter(function(r){ return !r.ok; })[0]; rpTtStatus('Abgebrochen: Probelauf nicht fehlerfrei' + (fe ? ' — ' + fe.eintrag.datum + ' ' + fe.eintrag.element + ': ' + (fe.meldungen[0] || '') : '') + '. Nichts geschrieben.', true); return; }
+  // 3) Echt schreiben
+  await rpTtSenden(false, true);
+  var okN = (rpTt.ergebnis || []).filter(function(r){ return r.ok; }).length;
+  if(okN !== liste.length){ rpTtStatus('Stunden: ' + okN + '/' + liste.length + ' geschrieben — Beleg wird NICHT angehängt (siehe Tabelle).', true); return; }
+  // 4) Beleg anhängen
+  await rpTtBelegAnhaengen(false);
+  var st = $('rpTtStatus'); var belegOk = st && /Beleg angehängt: (\d+)\/(\d+)/.test(st.textContent) && RegExp.$1 === RegExp.$2;
+  rpTtStatus('✅ Fertig: ' + okN + ' Einträge geschrieben' + (belegOk ? ' · Beleg angehängt' : ' · ⚠ Beleg konnte nicht angehängt werden: ' + (st ? st.textContent : '')), !belegOk);
+  if(belegOk && toast) toast('Stunden und Rapport für Einsatz ' + (e.placementNumber || e.id) + ' in Apriko erfasst.');
 }
 function rpTtRender(){
   var box = $('rpTtInhalt'); if(!box) return;
@@ -19639,7 +19673,7 @@ window.rpApiUebernehmen = rpApiUebernehmen;
 window.rpApiLoadRoster = rpApiLoadRoster;
 window.rpApiSucheAdditionalComp = rpApiSucheAdditionalComp;
 window.rpTestEinsatzRender = rpTestEinsatzRender; window.rpTestEinsatzUebernehmen = rpTestEinsatzUebernehmen;
-window.rpTtDiagnose = rpTtDiagnose; window.rpTtBelegAnhaengen = rpTtBelegAnhaengen; window.rpTtEintraegeAnzeigen = rpTtEintraegeAnzeigen; window.rpTtManuellLaden = rpTtManuellLaden;
+window.rpTtDiagnose = rpTtDiagnose; window.rpTtDirekt = rpTtDirekt; window.rpTtBelegAnhaengen = rpTtBelegAnhaengen; window.rpTtEintraegeAnzeigen = rpTtEintraegeAnzeigen; window.rpTtManuellLaden = rpTtManuellLaden;
 window.rpTtLaden = rpTtLaden; window.rpTtItemLaden = rpTtItemLaden; window.rpTtSenden = rpTtSenden; window.rpTtMap = rpTtMap;
 window.rpStapelLaden = rpStapelLaden; window.rpStapelNeuGruppieren = rpStapelNeuGruppieren; window.rpStapelVerwerfen = rpStapelVerwerfen;
 
