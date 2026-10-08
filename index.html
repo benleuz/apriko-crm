@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.410.0"></script>
-<script src="apriko-api.js?v=1.410.0"></script>
-<script src="lohncheck.js?v=1.410.0"></script>
-<script src="personalbudget.js?v=1.410.0"></script>
-<script src="jahresbudget.js?v=1.410.0"></script>
-<script src="budgetpositionen.js?v=1.410.0"></script>
-<script src="lohnchecklistetemp.js?v=1.410.0"></script>
-<script src="apriko-endpunkte.js?v=1.410.0"></script>
+<script src="apriko-filters.js?v=1.411.0"></script>
+<script src="apriko-api.js?v=1.411.0"></script>
+<script src="lohncheck.js?v=1.411.0"></script>
+<script src="personalbudget.js?v=1.411.0"></script>
+<script src="jahresbudget.js?v=1.411.0"></script>
+<script src="budgetpositionen.js?v=1.411.0"></script>
+<script src="lohnchecklistetemp.js?v=1.411.0"></script>
+<script src="apriko-endpunkte.js?v=1.411.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1024,7 +1024,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.410.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.411.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -19266,7 +19266,7 @@ async function rpTtItemLaden(itemId){
   var voll = await AprikoApi.request('timetracking', '/TimeTrackingItems/' + encodeURIComponent(itemId));
   var it = voll && voll.data ? voll.data : voll;
   var elemente = [];
-  (it.timeTrackingComponents || []).forEach(function(c){ (c.timeTrackingElements || []).forEach(function(el){ elemente.push({ id: el.id, name: el.name, komponente: c.name, entryType: el.entryType, sum: el.isSumRelevant, rate: el.rate, percentage: el.percentage }); }); });
+  (it.timeTrackingComponents || []).forEach(function(c){ (c.timeTrackingElements || []).forEach(function(el){ elemente.push({ id: el.id, name: el.name, anzeige: el.displayName || '', komponente: c.name, entryType: el.entryType, sum: el.isSumRelevant, rate: el.rate, percentage: el.percentage, periodisch: /periodisch/i.test(String(el.displayName || '') + ' ' + String(el.name || '')) || !!c.canBeAddedOnlyOnce }); }); });
   if(!elemente.length){
     // Elemente nicht eingebettet → per Suche nach timeTrackingItemId
     var r2 = await AprikoApi.models.query({ entityTypes: 'TimeTrackingElement', pageIndex: 0, pageSize: 120, resolveReferences: false, filters: 'timeTrackingItemId|=|' + JSON.stringify(String(itemId)) + '|text|false|false|["G1"]' });
@@ -19284,15 +19284,20 @@ async function rpTtItemLaden(itemId){
   rpTtRender();
 }
 function rpTtEintraege(){
-  var out = [], zaehler = {};
+  var out = [], zaehler = {}, periodisch = {};
+  var it = rpTt.item || {}; var pVon = (it.startDate || '').slice(0, 10), pBis = (it.endDate || '').slice(0, 10);
+  var imItem = function(d){ return (!pVon || d >= pVon) && (!pBis || d <= pBis); };
   zeilen.forEach(function(r){
     if(r.absent) return;
+    if(!imItem(rpTtIso(r.datum))){ out.push({ uebersprungen: 'ausserhalb Gültigkeit des Items (' + (pVon || '?') + ' – ' + (pBis || 'offen') + ')', datum: r.datum, kst: r.kst || '', spalte: '—', element: '', wert: r.ist || 0, anzeige: '' }); return; }
     rpTtSpalten().forEach(function(c){
       var elId = rpTt.mapping[c.k]; if(!elId) return;
       var v = c.k === 'ist' ? (r.ist || 0) : rpNeuWert(r, c); if(typeof v !== 'number' || !(v > 0)) return;
       var el = rpTt.elemente.filter(function(x){ return x.id === elId; })[0]; if(!el) return;
       var datum = rpTtIso(r.datum); var key = datum + '|' + elId; zaehler[key] = (zaehler[key] || 0) + 1;
       var typ = el.entryType || 'DecimalTimeTrackingEntry';
+      // Periodische Elemente (ein Eintrag für die ganze Periode): Werte über alle Tage sammeln, am Schluss ein Eintrag
+      if(el.periodisch){ var pk = elId; if(!periodisch[pk]) periodisch[pk] = { el: el, c: c, tage: 0, summe: 0, erster: datum }; periodisch[pk].tage++; periodisch[pk].summe += (c.k === 'spesen' ? 1 : v); if(datum < periodisch[pk].erster) periodisch[pk].erster = datum; return; }
       // Spesen/Zulagen: Betrag ist am Element hinterlegt — es wird nur die Anzahl (1 pro Tag) übergeben, nie der CHF-Betrag
       if(c.k === 'spesen'){ if(zaehler[key] > 1) return; v = 1; }
       var body = { date: datum, rowNumber: zaehler[key], timeTrackingElementId: elId, name: r.kst ? 'KST ' + r.kst : undefined };
@@ -19312,11 +19317,21 @@ function rpTtEintraege(){
       out.push({ pfad: pfad, body: body, spalte: c.l, element: el.name, elementId: elId, typ: typ, kst: r.kst || '', datum: r.datum, wert: v, anzeige: anzeige });
     });
   });
+  Object.keys(periodisch).forEach(function(k){
+    var q = periodisch[k], el = q.el, typ = el.entryType || 'DecimalTimeTrackingEntry';
+    var body = { date: q.erster, rowNumber: 1, timeTrackingElementId: el.id }; var pfad = '/DecimalTimeTrackingEntries', anz = '';
+    if(typ === 'BoolTimeTrackingEntry'){ pfad = '/BoolTimeTrackingEntries'; body.value = true; anz = 'ja (Periode, ' + q.tage + ' Tage)'; }
+    else if(typ === 'IntegerTimeTrackingEntry'){ pfad = '/IntegerTimeTrackingEntries'; body.value = Math.round(q.summe); anz = body.value + ' (Periode)'; }
+    else if(typ === 'DurationTimeTrackingEntry'){ pfad = '/DurationTimeTrackingEntries'; body.value = q.summe; anz = nf(q.summe) + ' (Periode)'; }
+    else if(typ === 'StartEndTimeTrackingEntry'){ pfad = '/StartEndTimeTrackingEntries'; var st = rpTtStartZeit(); body.from = q.erster + 'T' + st + ':00'; body.to = q.erster + 'T' + rpTtZeitPlus(st, q.summe) + ':00'; anz = nf(q.summe) + ' h (Periode)'; }
+    else { body.value = q.summe; anz = nf(q.summe) + ' (Periode)'; }
+    out.push({ pfad: pfad, body: body, spalte: q.c.l, element: el.name + ' (periodisch)', elementId: el.id, typ: typ, kst: '', datum: q.erster.split('-').reverse().join('.'), wert: q.summe, anzeige: anz });
+  });
   return out;
 }
 async function rpTtSenden(dryRun){
   if(rpTt.laeuft) return;
-  var liste = rpTtEintraege(); if(!liste.length){ rpTtStatus('Keine Einträge — Spalten zuordnen.', true); return; }
+  var liste = rpTtEintraege().filter(function(x){ return !x.uebersprungen; }); if(!liste.length){ rpTtStatus('Keine Einträge — Spalten zuordnen.', true); return; }
   var dubl = liste.filter(function(x){ return rpTt.bestehend.some(function(b){ return b.date === x.body.date && String(b.timeTrackingElementId) === String(x.body.timeTrackingElementId); }); }).length;
   if(!dryRun && !confirm(liste.length + ' Einträge JETZT in Apriko schreiben?' + (dubl ? '\n\nACHTUNG: ' + dubl + ' davon haben am selben Tag bereits einen Eintrag im selben Element (mögliche Doppelerfassung).' : '') + '\n\nEmpfehlung: zuerst «Probelauf (DryRun)».')) return;
   rpTt.laeuft = true; rpTt.ergebnis = []; rpTtRender(); rpTtStatus((dryRun ? 'Probelauf' : 'Schreibe') + ' 0/' + liste.length + ' …');
@@ -19340,7 +19355,7 @@ async function rpTtSenden(dryRun){
         } catch(err2){ err0 = err2; }
       }
       var err = err0; res.ok = false; var msg = (err && err.message) || String(err); var regeln = (msg.match(/\[BusinessRuleViolation\][^\[·]+/g) || []).map(function(x){ return x.replace('[BusinessRuleViolation] ', '').replace(/^.*ITranslatableMessages\./, '').trim(); });
-      res.meldungen = regeln.length ? regeln.map(function(k){ return ({ ElementTypeMismatch: 'Eintragstyp passt nicht zum Element', OnlyOneEntryCanBeAdded: 'Nur ein Eintrag pro Tag erlaubt', TimeSheetLocked: 'Periode gesperrt' })[k] || k; }) : [msg]; if(err && err.details && !regeln.length) res.meldungen.push(JSON.stringify(err.details).slice(0, 300)); }
+      res.meldungen = regeln.length ? regeln.map(function(k){ return ({ ElementTypeMismatch: 'Eintragstyp passt nicht zum Element', OnlyOneEntryCanBeAdded: 'Nur ein Eintrag erlaubt', TimeSheetLocked: 'Periode gesperrt', EntryMustBeWithinTheValidityPeriodOfTheItem: 'Datum ausserhalb der Gültigkeit des Items' })[k] || k; }) : [msg]; if(err && err.details && !regeln.length) res.meldungen.push(JSON.stringify(err.details).slice(0, 300)); }
     rpTt.ergebnis.push(res); rpTtStatus((dryRun ? 'Probelauf' : 'Schreibe') + ' ' + (i + 1) + '/' + liste.length + ' …');
     if(!res.ok && !dryRun){ rpTtStatus('Abgebrochen bei Eintrag ' + (i + 1) + ' — ' + res.meldungen[0], true); break; }
   }
@@ -19360,11 +19375,11 @@ function rpTtRender(){
   if(rpTt.elemente.some(function(el){ return el.entryType === 'StartEndTimeTrackingEntry'; })) h += '<div style="font-size:12px;margin-bottom:6px">⏱ Start/Ende-Elemente: Uhrzeiten vom Rapport (Von/Bis), sonst ab Standard-Arbeitsbeginn <input type="text" value="' + esc(rpTtStartZeit()) + '" onchange="try{localStorage.setItem(\'apriko-rapport-arbeitsbeginn\',this.value)}catch(e){};rpTt.ergebnis=null;rpTtRender()" style="width:56px;font-size:12px;padding:2px 4px"> fortlaufend (Std. zuerst, danach Überzeit/Zuschläge).</div>';
   h += '<table class="rp-table" style="font-size:12px"><thead><tr><th>Spalte im Rapport</th><th>→ Element in Apriko</th></tr></thead><tbody>' + sp.map(function(c){
     return '<tr><td>' + esc(c.l) + (c.e ? ' (' + esc(c.e) + ')' : '') + '</td><td><select onchange="rpTtMap(' + JSON.stringify(c.k).replace(/"/g, '&quot;') + ', this.value)" style="width:100%;font-size:12px"><option value="">— nicht übergeben —</option>' +
-      rpTt.elemente.map(function(el){ return '<option value="' + esc(el.id) + '"' + (rpTt.mapping[c.k] === el.id ? ' selected' : '') + '>' + esc((el.komponente ? el.komponente + ' › ' : '') + el.name) + ' [' + esc(String(el.entryType || '').replace('TimeTrackingEntry', '')) + ']</option>'; }).join('') + '</select></td></tr>';
+      rpTt.elemente.map(function(el){ return '<option value="' + esc(el.id) + '"' + (rpTt.mapping[c.k] === el.id ? ' selected' : '') + '>' + esc((el.komponente ? el.komponente + ' › ' : '') + el.name) + ' [' + esc(String(el.entryType || '').replace('TimeTrackingEntry', '')) + (el.periodisch ? ', periodisch' : '') + ']</option>'; }).join('') + '</select></td></tr>';
   }).join('') + '</tbody></table>';
-  var liste = rpTtEintraege();
+  var alleE = rpTtEintraege(), ausser = alleE.filter(function(x){ return x.uebersprungen; }); var liste = alleE.filter(function(x){ return !x.uebersprungen; });
   var dubl = liste.filter(function(x){ return rpTt.bestehend.some(function(b){ return b.date === x.body.date && String(b.timeTrackingElementId) === String(x.body.timeTrackingElementId); }); });
-  h += '<div style="margin:8px 0;font-size:12px">' + liste.length + ' Einträge vorbereitet' + (dubl.length ? ' · <span style="color:#c62828">⚠ ' + dubl.length + ' Tage/Elemente haben bereits einen Eintrag in Apriko</span>' : '') + (rpTt.bestehend.length ? ' · ' + rpTt.bestehend.length + ' bestehende Einträge im Zeitraum' : '') + '</div>';
+  h += '<div style="margin:8px 0;font-size:12px">' + liste.length + ' Einträge vorbereitet' + (ausser.length ? ' · <span style="color:#b26a00">⚠ ' + ausser.length + ' Tag(e) ausserhalb der Gültigkeit des Items (' + esc((it.startDate || '?') + ' – ' + (it.endDate || 'offen')) + ') werden übersprungen: ' + esc(ausser.map(function(x){ return x.datum; }).filter(function(v, i, a){ return a.indexOf(v) === i; }).join(', ')) + '</span>' : '') + (dubl.length ? ' · <span style="color:#c62828">⚠ ' + dubl.length + ' Tage/Elemente haben bereits einen Eintrag in Apriko</span>' : '') + (rpTt.bestehend.length ? ' · ' + rpTt.bestehend.length + ' bestehende Einträge im Zeitraum' : '') + '</div>';
   h += '<div class="rp-actions"><button type="button" class="rp-btn" onclick="rpTtSenden(true)" ' + (rpTt.laeuft || !liste.length ? 'disabled' : '') + '>🧪 Probelauf (DryRun)</button>' +
     '<button type="button" class="rp-btn rp-btn-dark" onclick="rpTtSenden(false)" ' + (rpTt.laeuft || !liste.length || !(rpTt.ergebnis && rpTt.dryRun && rpTt.ergebnis.every(function(r){ return r.ok; })) ? 'disabled' : '') + ' title="Erst nach erfolgreichem Probelauf möglich">🚀 In Apriko schreiben</button></div>';
   if(rpTt.ergebnis && rpTt.ergebnis.length){
