@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.412.0"></script>
-<script src="apriko-api.js?v=1.412.0"></script>
-<script src="lohncheck.js?v=1.412.0"></script>
-<script src="personalbudget.js?v=1.412.0"></script>
-<script src="jahresbudget.js?v=1.412.0"></script>
-<script src="budgetpositionen.js?v=1.412.0"></script>
-<script src="lohnchecklistetemp.js?v=1.412.0"></script>
-<script src="apriko-endpunkte.js?v=1.412.0"></script>
+<script src="apriko-filters.js?v=1.413.0"></script>
+<script src="apriko-api.js?v=1.413.0"></script>
+<script src="lohncheck.js?v=1.413.0"></script>
+<script src="personalbudget.js?v=1.413.0"></script>
+<script src="jahresbudget.js?v=1.413.0"></script>
+<script src="budgetpositionen.js?v=1.413.0"></script>
+<script src="lohnchecklistetemp.js?v=1.413.0"></script>
+<script src="apriko-endpunkte.js?v=1.413.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1024,7 +1024,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.412.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.413.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1224,6 +1224,7 @@
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h4 style="margin:0">Übergabe an Apriko (Zeiterfassung)</h4>
               <button type="button" class="rp-btn rp-btn-ghost rp-btn-sm" onclick="rpTtLaden()">🔎 Zeiterfassung des Einsatzes laden</button>
               <button type="button" class="rp-btn rp-btn-ghost rp-btn-sm" onclick="rpTtDiagnose()" title="Zeigt die ersten TimeTrackingItems der Instanz mit ihren Referenzen — um zu sehen, worauf die Zeiterfassung wirklich verweist">🔬 Diagnose</button>
+              <button type="button" class="rp-btn rp-btn-ghost rp-btn-sm" onclick="rpTtEintraegeAnzeigen()" title="Alle bestehenden Einträge des geladenen Items (Datum, Element, Typ, Wert) — Listen-Endpunkte seitenweise durchsucht">📄 Einträge des Items</button>
               <input type="text" id="rpTtManuell" placeholder="TimeTrackingItem-ID manuell" style="font-size:11px;padding:3px 6px;width:260px"><button type="button" class="rp-btn-sm" onclick="rpTtManuellLaden()">Laden</button>
               <span class="rp-hint" id="rpTtStatus" style="margin:0"></span></div>
             <div id="rpTtInhalt" style="margin-top:8px"></div>
@@ -19266,7 +19267,7 @@ async function rpTtItemLaden(itemId){
   var voll = await AprikoApi.request('timetracking', '/TimeTrackingItems/' + encodeURIComponent(itemId));
   var it = voll && voll.data ? voll.data : voll;
   var elemente = [];
-  (it.timeTrackingComponents || []).forEach(function(c){ (c.timeTrackingElements || []).forEach(function(el){ elemente.push({ id: el.id, name: el.name, anzeige: el.displayName || '', komponente: c.name, entryType: el.entryType, sum: el.isSumRelevant, rate: el.rate, percentage: el.percentage, periodisch: /periodisch/i.test(String(el.displayName || '') + ' ' + String(el.name || '')) || !!c.canBeAddedOnlyOnce }); }); });
+  (it.timeTrackingComponents || []).forEach(function(c){ (c.timeTrackingElements || []).forEach(function(el){ elemente.push({ id: el.id, name: el.name, anzeige: el.displayName || '', komponente: c.name, entryType: el.entryType, sum: el.isSumRelevant, rate: el.rate, percentage: el.percentage, periodisch: !!c.canBeAddedOnlyOnce, hinweis: String(el.displayName || '') }); }); });
   if(!elemente.length){
     // Elemente nicht eingebettet → per Suche nach timeTrackingItemId
     var r2 = await AprikoApi.models.query({ entityTypes: 'TimeTrackingElement', pageIndex: 0, pageSize: 120, resolveReferences: false, filters: 'timeTrackingItemId|=|' + JSON.stringify(String(itemId)) + '|text|false|false|["G1"]' });
@@ -19393,6 +19394,34 @@ function rpTtRender(){
   box.innerHTML = h;
 }
 function rpTtMap(k, v){ rpTt.mapping[k] = v; rpTt.ergebnis = null; rpTtRender(); }
+/* Diagnose: alle Einträge des Items über die Listen-Endpunkte je Typ einsammeln (begrenzt auf 40 Seiten je Typ) */
+async function rpTtEintraegeAnzeigen(){
+  if(!rpTt.itemId){ rpTtStatus('Zuerst die Zeiterfassung des Einsatzes laden.', true); return; }
+  rpApiUse(); var box = $('rpTtInhalt'); rpTtStatus('Sammle Einträge …');
+  var typen = ['BoolTimeTrackingEntries', 'StartEndTimeTrackingEntries', 'DecimalTimeTrackingEntries', 'DurationTimeTrackingEntries', 'IntegerTimeTrackingEntries'];
+  var alle = [], gesamt = {};
+  for(var t = 0; t < typen.length; t++){
+    var n = 0;
+    for(var pg = 0; pg < 40; pg++){
+      try { var lr = await AprikoApi.request('timetracking', '/' + typen[t], { query: { pageIndex: pg, pageSize: 100 } });
+        var items = (lr && (lr.items || lr.value || lr.data || lr.results)) || (Array.isArray(lr) ? lr : []); if(items.length && items[0].data) items = items.map(function(x){ return x.data; });
+        if(!items.length) break; n += items.length;
+        items.forEach(function(b){ if(String(b.timeTrackingItemId) === String(rpTt.itemId)) alle.push(Object.assign({ _typ: typen[t] }, b)); });
+        if(items.length < 100) break;
+      } catch(x){ break; }
+    }
+    gesamt[typen[t]] = n; rpTtStatus('Sammle Einträge … ' + typen[t] + ': ' + n + ' durchsucht');
+  }
+  rpTt.bestehend = alle;
+  var elName = function(id){ var e = rpTt.elemente.filter(function(x){ return x.id === id; })[0]; return e ? e.name : id; };
+  alle.sort(function(a, b){ return String(a.date || '').localeCompare(String(b.date || '')) || String(a.timeTrackingElementId).localeCompare(String(b.timeTrackingElementId)); });
+  box.innerHTML = '<div style="font-size:12px;margin-bottom:6px">' + alle.length + ' Einträge zu diesem Item gefunden (durchsucht: ' + Object.keys(gesamt).map(function(k){ return k.replace('TimeTrackingEntries', '') + ' ' + gesamt[k]; }).join(', ') + ')</div>' +
+    (alle.length ? '<table class="rp-table" style="font-size:11px"><thead><tr><th>Datum</th><th>Element</th><th>Typ</th><th>Zeile</th><th>Wert / von–bis</th><th>Status</th><th>ID</th></tr></thead><tbody>' + alle.map(function(b){
+      return '<tr><td>' + esc(String(b.date || '').slice(0, 10)) + '</td><td>' + esc(elName(b.timeTrackingElementId)) + '</td><td>' + esc(b._typ.replace('TimeTrackingEntries', '')) + '</td><td>' + esc(b.rowNumber) + '</td><td>' + esc(b.from ? String(b.from).slice(11, 16) + '–' + String(b.to || '').slice(11, 16) : String(b.value)) + '</td><td>' + esc(b.state || '') + '</td><td style="font-family:monospace;font-size:10px">' + esc(b.id) + '</td></tr>'; }).join('') + '</tbody></table>' : '') +
+    '<details style="font-size:11px;margin-top:6px"><summary>Rohdaten (erste 3)</summary><pre style="white-space:pre-wrap">' + esc(JSON.stringify(alle.slice(0, 3), null, 1)) + '</pre></details>' +
+    '<div class="rp-actions" style="margin-top:8px"><button type="button" class="rp-btn rp-btn-sm" onclick="rpTtRender()">← zurück zur Zuordnung</button></div>';
+  rpTtStatus(alle.length + ' bestehende Einträge geladen');
+}
 /* Bestehenden Eintrag zu Element + Datum finden: zuerst im geladenen Bestand, sonst per Suche (Element-ID als Filter) */
 async function rpTtBestehendenEintrag(elementId, datum){
   var hit = (rpTt.bestehend || []).filter(function(b){ return String(b.timeTrackingElementId) === String(elementId) && String(b.date || '').slice(0, 10) === datum; })[0];
@@ -19573,7 +19602,7 @@ window.rpApiUebernehmen = rpApiUebernehmen;
 window.rpApiLoadRoster = rpApiLoadRoster;
 window.rpApiSucheAdditionalComp = rpApiSucheAdditionalComp;
 window.rpTestEinsatzRender = rpTestEinsatzRender; window.rpTestEinsatzUebernehmen = rpTestEinsatzUebernehmen;
-window.rpTtDiagnose = rpTtDiagnose; window.rpTtManuellLaden = rpTtManuellLaden;
+window.rpTtDiagnose = rpTtDiagnose; window.rpTtEintraegeAnzeigen = rpTtEintraegeAnzeigen; window.rpTtManuellLaden = rpTtManuellLaden;
 window.rpTtLaden = rpTtLaden; window.rpTtItemLaden = rpTtItemLaden; window.rpTtSenden = rpTtSenden; window.rpTtMap = rpTtMap;
 window.rpStapelLaden = rpStapelLaden; window.rpStapelNeuGruppieren = rpStapelNeuGruppieren; window.rpStapelVerwerfen = rpStapelVerwerfen;
 
