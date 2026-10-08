@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.414.0"></script>
-<script src="apriko-api.js?v=1.414.0"></script>
-<script src="lohncheck.js?v=1.414.0"></script>
-<script src="personalbudget.js?v=1.414.0"></script>
-<script src="jahresbudget.js?v=1.414.0"></script>
-<script src="budgetpositionen.js?v=1.414.0"></script>
-<script src="lohnchecklistetemp.js?v=1.414.0"></script>
-<script src="apriko-endpunkte.js?v=1.414.0"></script>
+<script src="apriko-filters.js?v=1.417.0"></script>
+<script src="apriko-api.js?v=1.417.0"></script>
+<script src="lohncheck.js?v=1.417.0"></script>
+<script src="personalbudget.js?v=1.417.0"></script>
+<script src="jahresbudget.js?v=1.417.0"></script>
+<script src="budgetpositionen.js?v=1.417.0"></script>
+<script src="lohnchecklistetemp.js?v=1.417.0"></script>
+<script src="apriko-endpunkte.js?v=1.417.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1024,7 +1024,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.414.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.417.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -19301,9 +19301,10 @@ function rpTtEintraege(){
       if(el.periodisch){ var pk = elId; if(!periodisch[pk]) periodisch[pk] = { el: el, c: c, tage: 0, summe: 0, erster: datum }; periodisch[pk].tage++; periodisch[pk].summe += (c.k === 'spesen' ? 1 : v); if(datum < periodisch[pk].erster) periodisch[pk].erster = datum; return; }
       // Spesen/Zulagen: Betrag ist am Element hinterlegt — es wird nur die Anzahl (1 pro Tag) übergeben, nie der CHF-Betrag
       if(c.k === 'spesen'){ if(zaehler[key] > 1) return; v = 1; }
-      var body = { date: datum, rowNumber: zaehler[key], timeTrackingElementId: elId, name: r.kst ? 'KST ' + r.kst : undefined };
+      // rowNumber ist 0-basiert: die erste (Standard-)Zeile eines Elements ist 0 — mit 1 landeten die Einträge in einer zweiten Zeile (Test 08.10.2026)
+      var body = { date: datum, rowNumber: zaehler[key] - 1, timeTrackingElementId: elId, name: r.kst ? 'KST ' + r.kst : undefined };
       var pfad = '/DecimalTimeTrackingEntries', anzeige = nf(v);
-      if(typ === 'BoolTimeTrackingEntry'){ pfad = '/BoolTimeTrackingEntries'; body.value = true; body.rowNumber = 1; anzeige = 'ja'; if(zaehler[key] > 1) return; }
+      if(typ === 'BoolTimeTrackingEntry'){ pfad = '/BoolTimeTrackingEntries'; body.value = true; body.rowNumber = 0; anzeige = 'ja'; if(zaehler[key] > 1) return; }
       else if(typ === 'IntegerTimeTrackingEntry'){ pfad = '/IntegerTimeTrackingEntries'; body.value = Math.round(v); }
       else if(typ === 'DurationTimeTrackingEntry'){ pfad = '/DurationTimeTrackingEntries'; body.value = v; }
       else if(typ === 'StartEndTimeTrackingEntry'){
@@ -19320,7 +19321,7 @@ function rpTtEintraege(){
   });
   Object.keys(periodisch).forEach(function(k){
     var q = periodisch[k], el = q.el, typ = el.entryType || 'DecimalTimeTrackingEntry';
-    var body = { date: q.erster, rowNumber: 1, timeTrackingElementId: el.id }; var pfad = '/DecimalTimeTrackingEntries', anz = '';
+    var body = { date: q.erster, rowNumber: 0, timeTrackingElementId: el.id }; var pfad = '/DecimalTimeTrackingEntries', anz = '';
     if(typ === 'BoolTimeTrackingEntry'){ pfad = '/BoolTimeTrackingEntries'; body.value = true; anz = 'ja (Periode, ' + q.tage + ' Tage)'; }
     else if(typ === 'IntegerTimeTrackingEntry'){ pfad = '/IntegerTimeTrackingEntries'; body.value = Math.round(q.summe); anz = body.value + ' (Periode)'; }
     else if(typ === 'DurationTimeTrackingEntry'){ pfad = '/DurationTimeTrackingEntries'; body.value = q.summe; anz = nf(q.summe) + ' (Periode)'; }
@@ -19342,7 +19343,10 @@ async function rpTtSenden(dryRun){
     try {
       var antwort = await AprikoApi.request('timetracking', x.pfad, { method: 'POST', body: x.body, query: { DryRun: dryRun ? 'true' : undefined, ReturnResult: 'true', ReturnTransmittedMessages: 'true' } });
       res.ok = true; res.id = antwort && antwort.result && antwort.result.id || null;
-      res.meldungen = (antwort && antwort.messages || []).map(function(m){ return (m.status ? m.status + ': ' : '') + (m.value || m.key || JSON.stringify(m)); });
+      var msgs = (antwort && antwort.messages || []);
+      var mod = msgs.filter(function(m){ return m.status === 'Modified'; }).length;
+      res.meldungen = msgs.filter(function(m){ return m.status && m.status !== 'Created' && m.status !== 'Modified'; }).map(function(m){ return m.status + ': ' + (m.value || m.key || ''); });
+      if(mod) res.meldungen.unshift((dryRun ? 'würde ' : '') + 'erstellt' + (mod ? ' · ' + mod + ' Objekte angepasst (Komponente/Item)' : ''));
     } catch(err0){
       // «Nur ein Eintrag pro Tag»: der Eintrag existiert bereits (z.B. vorbelegtes Bool-Element) → bestehenden Eintrag suchen und per PATCH setzen
       if(/OnlyOneEntryCanBeAdded/.test(String(err0 && err0.message || ''))){
@@ -19365,6 +19369,7 @@ async function rpTtSenden(dryRun){
   var okN = rpTt.ergebnis.filter(function(r){ return r.ok; }).length;
   if(rpTt.ergebnis.length === liste.length || dryRun) rpTtStatus((dryRun ? 'Probelauf: ' : 'Geschrieben: ') + okN + '/' + liste.length + ' ok');
   rpTtRender();
+  if(!dryRun){ rpTt.geschrieben = (rpTt.geschrieben || []).concat(rpTt.ergebnis.filter(function(r){ return r.ok && r.id && !/PATCH/.test(r.meldungen[0] || ''); }).map(function(r){ return { pfad: r.eintrag.pfad, id: r.id, datum: r.eintrag.datum, element: r.eintrag.element }; })); rpTtRender(); }
   if(!dryRun && okN === liste.length){ toast && toast(okN + ' Einträge in Apriko erfasst.'); rpStapelErledigt(); }
 }
 function rpTtRender(){
@@ -19384,6 +19389,8 @@ function rpTtRender(){
   h += '<div style="margin:8px 0;font-size:12px">' + liste.length + ' Einträge vorbereitet' + (ausser.length ? ' · <span style="color:#b26a00">⚠ ' + ausser.length + ' Tag(e) ausserhalb der Gültigkeit des Items (' + esc((it.startDate || '?') + ' – ' + (it.endDate || 'offen')) + ') werden übersprungen: ' + esc(ausser.map(function(x){ return x.datum; }).filter(function(v, i, a){ return a.indexOf(v) === i; }).join(', ')) + '</span>' : '') + (dubl.length ? ' · <span style="color:#c62828">⚠ ' + dubl.length + ' Tage/Elemente haben bereits einen Eintrag in Apriko</span>' : '') + (rpTt.bestehend.length ? ' · ' + rpTt.bestehend.length + ' bestehende Einträge im Zeitraum' : '') + '</div>';
   h += '<div class="rp-actions"><button type="button" class="rp-btn" onclick="rpTtSenden(true)" ' + (rpTt.laeuft || !liste.length ? 'disabled' : '') + '>🧪 Probelauf (DryRun)</button>' +
     '<button type="button" class="rp-btn rp-btn-dark" onclick="rpTtSenden(false)" ' + (rpTt.laeuft || !liste.length || !(rpTt.ergebnis && rpTt.dryRun && rpTt.ergebnis.every(function(r){ return r.ok; })) ? 'disabled' : '') + ' title="Erst nach erfolgreichem Probelauf möglich">🚀 In Apriko schreiben</button></div>';
+  h += '<div class="rp-actions" style="margin-top:-6px"><button type="button" class="rp-btn rp-btn-ghost rp-btn-sm" onclick="rpTtBelegAnhaengen(true)" title="Rapport-Datei(en) als Dokument «WorkReport» ans Item hängen — Probelauf">📎 Beleg anhängen (Probelauf)</button><button type="button" class="rp-btn rp-btn-ghost rp-btn-sm" onclick="rpTtBelegAnhaengen(false)">📎 Beleg anhängen</button>' +
+    ((rpTt.geschrieben || []).length ? '<button type="button" class="rp-btn rp-btn-ghost rp-btn-sm" style="color:#c62828" onclick="rpTtRueckgaengig()" title="Die in dieser Sitzung geschriebenen Einträge wieder löschen">↩ ' + rpTt.geschrieben.length + ' geschriebene Einträge löschen</button>' : '') + '</div>';
   if(rpTt.ergebnis && rpTt.ergebnis.length){
     h += '<table class="rp-table" style="font-size:11.5px;margin-top:6px"><thead><tr><th>Datum</th><th>KST</th><th>Spalte</th><th>Element</th><th class="rp-num">Wert</th><th>Ergebnis</th></tr></thead><tbody>' + rpTt.ergebnis.map(function(r){
       return '<tr><td>' + esc(r.eintrag.datum) + '</td><td>' + esc(r.eintrag.kst) + '</td><td>' + esc(r.eintrag.spalte) + '</td><td>' + esc(r.eintrag.element) + '</td><td class="rp-num">' + esc(r.eintrag.anzeige || nf(r.eintrag.wert)) + '</td><td style="color:' + (r.ok ? '#2e7d32' : '#c62828') + '">' + (r.ok ? '✓' + (r.id ? ' ' + esc(r.id) : '') : '✕') + (r.meldungen.length ? ' <span style="color:var(--rp-grey)">' + esc(r.meldungen.join(' · ')).slice(0, 400) + '</span>' : '') + '</td></tr>';
@@ -19394,6 +19401,32 @@ function rpTtRender(){
   box.innerHTML = h;
 }
 function rpTtMap(k, v){ rpTt.mapping[k] = v; rpTt.ergebnis = null; rpTtRender(); }
+/* Rückgängig: die in dieser Sitzung geschriebenen Einträge wieder löschen (DELETE je ID) */
+async function rpTtRueckgaengig(){
+  var l = rpTt.geschrieben || []; if(!l.length) return;
+  if(!confirm(l.length + ' in dieser Sitzung geschriebene Einträge in Apriko LÖSCHEN?')) return;
+  rpApiUse(); var ok = 0, fehler = [];
+  for(var i = 0; i < l.length; i++){ try { await AprikoApi.request('timetracking', l[i].pfad + '/' + encodeURIComponent(l[i].id), { method: 'DELETE' }); ok++; } catch(e){ fehler.push(l[i].datum + ' ' + l[i].element + ': ' + (e && e.message || e)); } }
+  rpTt.geschrieben = l.filter(function(x, i){ return fehler.some(function(f){ return f.indexOf(x.datum + ' ' + x.element) === 0; }); });
+  rpTt.ergebnis = null; rpTtRender(); rpTtStatus(ok + ' Einträge gelöscht' + (fehler.length ? ' · ' + fehler.length + ' Fehler: ' + fehler[0] : ''), fehler.length > 0);
+}
+/* Rapport-Beleg als Dokument ans TimeTrackingItem hängen (PDF/Bild, base64) */
+async function rpTtBelegAnhaengen(dryRun){
+  if(!rpTt.itemId || !files.length){ rpTtStatus('Kein Item oder kein Beleg geladen.', true); return; }
+  rpApiUse(); var it = rpTt.item || {}; var von = window.__rpZeitraum ? rpTtIso(window.__rpZeitraum.von) : it.startDate, bis = window.__rpZeitraum ? rpTtIso(window.__rpZeitraum.bis) : (it.endDate || von);
+  if(it.startDate && von < it.startDate) von = it.startDate; if(it.endDate && bis > it.endDate) bis = it.endDate;
+  var n = 0, meld = [];
+  for(var i = 0; i < files.length; i++){
+    var f = files[i]; var blob = f.blob || f.ocrBlob; if(!blob) continue;
+    try {
+      var b64 = await new Promise(function(ok, err){ var rd = new FileReader(); rd.onload = function(){ ok(String(rd.result).split(',')[1]); }; rd.onerror = err; rd.readAsDataURL(blob); });
+      var body = { timeTrackingItemId: rpTt.itemId, name: f.name, startDate: von, endDate: bis, documentType: 'WorkReport', file: b64 };
+      var a = await AprikoApi.request('timetracking', '/TimeTrackingItemDocuments', { method: 'POST', body: body, query: { DryRun: dryRun ? 'true' : undefined, ReturnResult: 'true', ReturnTransmittedMessages: 'true' } });
+      n++; meld.push(f.name + ' ✓' + (a && a.result && a.result.id ? ' ' + a.result.id : ''));
+    } catch(e){ meld.push(f.name + ' ✕ ' + (e && e.message || e)); }
+  }
+  rpTtStatus((dryRun ? 'Beleg-Probelauf: ' : 'Beleg angehängt: ') + n + '/' + files.length + ' — ' + meld.join(' · '), n < files.length);
+}
 /* Diagnose: alle Einträge des Items über die Listen-Endpunkte je Typ einsammeln (begrenzt auf 40 Seiten je Typ) */
 async function rpTtEintraegeAnzeigen(){
   if(!rpTt.itemId){ rpTtStatus('Zuerst die Zeiterfassung des Einsatzes laden.', true); return; }
@@ -19602,7 +19635,7 @@ window.rpApiUebernehmen = rpApiUebernehmen;
 window.rpApiLoadRoster = rpApiLoadRoster;
 window.rpApiSucheAdditionalComp = rpApiSucheAdditionalComp;
 window.rpTestEinsatzRender = rpTestEinsatzRender; window.rpTestEinsatzUebernehmen = rpTestEinsatzUebernehmen;
-window.rpTtDiagnose = rpTtDiagnose; window.rpTtEintraegeAnzeigen = rpTtEintraegeAnzeigen; window.rpTtManuellLaden = rpTtManuellLaden;
+window.rpTtDiagnose = rpTtDiagnose; window.rpTtRueckgaengig = rpTtRueckgaengig; window.rpTtBelegAnhaengen = rpTtBelegAnhaengen; window.rpTtEintraegeAnzeigen = rpTtEintraegeAnzeigen; window.rpTtManuellLaden = rpTtManuellLaden;
 window.rpTtLaden = rpTtLaden; window.rpTtItemLaden = rpTtItemLaden; window.rpTtSenden = rpTtSenden; window.rpTtMap = rpTtMap;
 window.rpStapelLaden = rpStapelLaden; window.rpStapelNeuGruppieren = rpStapelNeuGruppieren; window.rpStapelVerwerfen = rpStapelVerwerfen;
 
