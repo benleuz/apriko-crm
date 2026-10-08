@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.413.0"></script>
-<script src="apriko-api.js?v=1.413.0"></script>
-<script src="lohncheck.js?v=1.413.0"></script>
-<script src="personalbudget.js?v=1.413.0"></script>
-<script src="jahresbudget.js?v=1.413.0"></script>
-<script src="budgetpositionen.js?v=1.413.0"></script>
-<script src="lohnchecklistetemp.js?v=1.413.0"></script>
-<script src="apriko-endpunkte.js?v=1.413.0"></script>
+<script src="apriko-filters.js?v=1.414.0"></script>
+<script src="apriko-api.js?v=1.414.0"></script>
+<script src="lohncheck.js?v=1.414.0"></script>
+<script src="personalbudget.js?v=1.414.0"></script>
+<script src="jahresbudget.js?v=1.414.0"></script>
+<script src="budgetpositionen.js?v=1.414.0"></script>
+<script src="lohnchecklistetemp.js?v=1.414.0"></script>
+<script src="apriko-endpunkte.js?v=1.414.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1024,7 +1024,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.413.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.414.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -19267,7 +19267,7 @@ async function rpTtItemLaden(itemId){
   var voll = await AprikoApi.request('timetracking', '/TimeTrackingItems/' + encodeURIComponent(itemId));
   var it = voll && voll.data ? voll.data : voll;
   var elemente = [];
-  (it.timeTrackingComponents || []).forEach(function(c){ (c.timeTrackingElements || []).forEach(function(el){ elemente.push({ id: el.id, name: el.name, anzeige: el.displayName || '', komponente: c.name, entryType: el.entryType, sum: el.isSumRelevant, rate: el.rate, percentage: el.percentage, periodisch: !!c.canBeAddedOnlyOnce, hinweis: String(el.displayName || '') }); }); });
+  (it.timeTrackingComponents || []).forEach(function(c){ (c.timeTrackingElements || []).forEach(function(el){ elemente.push({ id: el.id, name: el.name, anzeige: el.displayName || '', komponente: c.name, entryType: el.entryType, sum: el.isSumRelevant, rate: el.rate, percentage: el.percentage, periodisch: false, hatEintrag: !!el.hasEntry, nurEinmal: !!c.canBeAddedOnlyOnce, hinweis: String(el.displayName || '') }); }); });
   if(!elemente.length){
     // Elemente nicht eingebettet → per Suche nach timeTrackingItemId
     var r2 = await AprikoApi.models.query({ entityTypes: 'TimeTrackingElement', pageIndex: 0, pageSize: 120, resolveReferences: false, filters: 'timeTrackingItemId|=|' + JSON.stringify(String(itemId)) + '|text|false|false|["G1"]' });
@@ -19377,7 +19377,7 @@ function rpTtRender(){
   if(rpTt.elemente.some(function(el){ return el.entryType === 'StartEndTimeTrackingEntry'; })) h += '<div style="font-size:12px;margin-bottom:6px">⏱ Start/Ende-Elemente: Uhrzeiten vom Rapport (Von/Bis), sonst ab Standard-Arbeitsbeginn <input type="text" value="' + esc(rpTtStartZeit()) + '" onchange="try{localStorage.setItem(\'apriko-rapport-arbeitsbeginn\',this.value)}catch(e){};rpTt.ergebnis=null;rpTtRender()" style="width:56px;font-size:12px;padding:2px 4px"> fortlaufend (Std. zuerst, danach Überzeit/Zuschläge).</div>';
   h += '<table class="rp-table" style="font-size:12px"><thead><tr><th>Spalte im Rapport</th><th>→ Element in Apriko</th></tr></thead><tbody>' + sp.map(function(c){
     return '<tr><td>' + esc(c.l) + (c.e ? ' (' + esc(c.e) + ')' : '') + '</td><td><select onchange="rpTtMap(' + JSON.stringify(c.k).replace(/"/g, '&quot;') + ', this.value)" style="width:100%;font-size:12px"><option value="">— nicht übergeben —</option>' +
-      rpTt.elemente.map(function(el){ return '<option value="' + esc(el.id) + '"' + (rpTt.mapping[c.k] === el.id ? ' selected' : '') + '>' + esc((el.komponente ? el.komponente + ' › ' : '') + el.name) + ' [' + esc(String(el.entryType || '').replace('TimeTrackingEntry', '')) + (el.periodisch ? ', periodisch' : '') + ']</option>'; }).join('') + '</select></td></tr>';
+      rpTt.elemente.map(function(el){ return '<option value="' + esc(el.id) + '"' + (rpTt.mapping[c.k] === el.id ? ' selected' : '') + '>' + esc((el.komponente ? el.komponente + ' › ' : '') + el.name) + ' [' + esc(String(el.entryType || '').replace('TimeTrackingEntry', '')) + (el.periodisch ? ', periodisch' : '') + (el.hatEintrag ? ', hat Einträge' : ', leer') + ']</option>'; }).join('') + '</select></td></tr>';
   }).join('') + '</tbody></table>';
   var alleE = rpTtEintraege(), ausser = alleE.filter(function(x){ return x.uebersprungen; }); var liste = alleE.filter(function(x){ return !x.uebersprungen; });
   var dubl = liste.filter(function(x){ return rpTt.bestehend.some(function(b){ return b.date === x.body.date && String(b.timeTrackingElementId) === String(x.body.timeTrackingElementId); }); });
