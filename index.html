@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.406.0"></script>
-<script src="apriko-api.js?v=1.406.0"></script>
-<script src="lohncheck.js?v=1.406.0"></script>
-<script src="personalbudget.js?v=1.406.0"></script>
-<script src="jahresbudget.js?v=1.406.0"></script>
-<script src="budgetpositionen.js?v=1.406.0"></script>
-<script src="lohnchecklistetemp.js?v=1.406.0"></script>
-<script src="apriko-endpunkte.js?v=1.406.0"></script>
+<script src="apriko-filters.js?v=1.407.0"></script>
+<script src="apriko-api.js?v=1.407.0"></script>
+<script src="lohncheck.js?v=1.407.0"></script>
+<script src="personalbudget.js?v=1.407.0"></script>
+<script src="jahresbudget.js?v=1.407.0"></script>
+<script src="budgetpositionen.js?v=1.407.0"></script>
+<script src="lohnchecklistetemp.js?v=1.407.0"></script>
+<script src="apriko-endpunkte.js?v=1.407.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1024,7 +1024,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.406.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.407.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1223,6 +1223,8 @@
           <div id="rpTtBox" style="margin-top:14px;border-top:1px solid var(--rp-line);padding-top:12px">
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h4 style="margin:0">Übergabe an Apriko (Zeiterfassung)</h4>
               <button type="button" class="rp-btn rp-btn-ghost rp-btn-sm" onclick="rpTtLaden()">🔎 Zeiterfassung des Einsatzes laden</button>
+              <button type="button" class="rp-btn rp-btn-ghost rp-btn-sm" onclick="rpTtDiagnose()" title="Zeigt die ersten TimeTrackingItems der Instanz mit ihren Referenzen — um zu sehen, worauf die Zeiterfassung wirklich verweist">🔬 Diagnose</button>
+              <input type="text" id="rpTtManuell" placeholder="TimeTrackingItem-ID manuell" style="font-size:11px;padding:3px 6px;width:260px"><button type="button" class="rp-btn-sm" onclick="rpTtManuellLaden()">Laden</button>
               <span class="rp-hint" id="rpTtStatus" style="margin:0"></span></div>
             <div id="rpTtInhalt" style="margin-top:8px"></div>
           </div>
@@ -19333,6 +19335,26 @@ function rpTtRender(){
   box.innerHTML = h;
 }
 function rpTtMap(k, v){ rpTt.mapping[k] = v; rpTt.ergebnis = null; rpTtRender(); }
+async function rpTtManuellLaden(){ var id = String(($('rpTtManuell') || {}).value || '').trim(); if(!id) return; if(!(typeof rpApiUse === 'function' && rpApiUse())){ rpTtStatus('Keine Apriko-Verbindung.', true); return; } rpTtStatus('Lade Item …'); try { rpTt.items = [{ id: id }]; await rpTtItemLaden(id); } catch(e){ rpTtStatus('Fehler: ' + (e && e.message || e), true); } }
+/* Diagnose: Wie sehen TimeTrackingItems auf dieser Instanz aus, worauf zeigt entityReferenceId? */
+async function rpTtDiagnose(){
+  if(!(typeof rpApiUse === 'function' && rpApiUse())){ rpTtStatus('Keine Apriko-Verbindung.', true); return; }
+  var box = $('rpTtInhalt'); var e = rpTtEinsatz(); rpTtStatus('Diagnose läuft …');
+  try {
+    var r = await AprikoApi.request('timetracking', '/TimeTrackingItems', { query: { pageIndex: 0, pageSize: 25 } });
+    var items = (r && (r.items || r.value || r.data || r.results)) || (Array.isArray(r) ? r : []);
+    if(items.length && items[0].data) items = items.map(function(x){ return x.data; });
+    var ref = e ? String(e.id) : '';
+    var html = '<div style="font-size:12px;margin-bottom:6px">GET /timetracking/TimeTrackingItems — ' + items.length + ' Einträge (erste Seite)' + (r && typeof r.totalCount === 'number' ? ' von ' + r.totalCount : '') + (ref ? ' · gesuchter Einsatz: <code>' + esc(ref) + '</code>' : '') + '</div>';
+    html += '<table class="rp-table" style="font-size:11px"><thead><tr><th>ID</th><th>displayName</th><th>entityReferenceId</th><th>Zeitraum</th><th>Status</th><th></th></tr></thead><tbody>' + items.map(function(it){
+      var treffer = ref && String(it.entityReferenceId || '') === ref;
+      return '<tr' + (treffer ? ' style="background:#e8f5e9"' : '') + '><td style="font-family:monospace">' + esc(it.id || '') + '</td><td>' + esc(it.displayName || '') + '</td><td style="font-family:monospace">' + esc(it.entityReferenceId || '') + '</td><td>' + esc(it.startDate || '') + ' – ' + esc(it.endDate || 'offen') + '</td><td>' + esc(it.state || '') + '</td><td><button type="button" class="rp-btn-sm" onclick="rpTtItemLaden(' + JSON.stringify(String(it.id)).replace(/"/g, '&quot;') + ')">verwenden</button></td></tr>';
+    }).join('') + '</tbody></table>';
+    if(items.length) html += '<details style="font-size:11px;margin-top:6px"><summary>Rohdaten erstes Item</summary><pre style="white-space:pre-wrap">' + esc(JSON.stringify(items[0], null, 1).slice(0, 4000)) + '</pre></details>';
+    if(!items.length) html += '<div style="font-size:12px;color:var(--rp-grey)">Antwort-Struktur: ' + esc(JSON.stringify(r).slice(0, 600)) + '</div>';
+    box.innerHTML = html; rpTtStatus('Diagnose: ' + items.length + ' Items geladen');
+  } catch(err){ rpTtStatus('Diagnose fehlgeschlagen: ' + (err && err.message || err), true); }
+}
 function buildCsv(){
   if(rpIstNeu()) return buildCsvNeu();
   var soll=sollOf(), L=[];
@@ -19458,6 +19480,7 @@ window.rpApiUebernehmen = rpApiUebernehmen;
 window.rpApiLoadRoster = rpApiLoadRoster;
 window.rpApiSucheAdditionalComp = rpApiSucheAdditionalComp;
 window.rpTestEinsatzRender = rpTestEinsatzRender; window.rpTestEinsatzUebernehmen = rpTestEinsatzUebernehmen;
+window.rpTtDiagnose = rpTtDiagnose; window.rpTtManuellLaden = rpTtManuellLaden;
 window.rpTtLaden = rpTtLaden; window.rpTtItemLaden = rpTtItemLaden; window.rpTtSenden = rpTtSenden; window.rpTtMap = rpTtMap;
 window.rpStapelLaden = rpStapelLaden; window.rpStapelNeuGruppieren = rpStapelNeuGruppieren; window.rpStapelVerwerfen = rpStapelVerwerfen;
 
