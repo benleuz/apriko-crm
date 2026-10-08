@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.408.0"></script>
-<script src="apriko-api.js?v=1.408.0"></script>
-<script src="lohncheck.js?v=1.408.0"></script>
-<script src="personalbudget.js?v=1.408.0"></script>
-<script src="jahresbudget.js?v=1.408.0"></script>
-<script src="budgetpositionen.js?v=1.408.0"></script>
-<script src="lohnchecklistetemp.js?v=1.408.0"></script>
-<script src="apriko-endpunkte.js?v=1.408.0"></script>
+<script src="apriko-filters.js?v=1.409.0"></script>
+<script src="apriko-api.js?v=1.409.0"></script>
+<script src="lohncheck.js?v=1.409.0"></script>
+<script src="personalbudget.js?v=1.409.0"></script>
+<script src="jahresbudget.js?v=1.409.0"></script>
+<script src="budgetpositionen.js?v=1.409.0"></script>
+<script src="lohnchecklistetemp.js?v=1.409.0"></script>
+<script src="apriko-endpunkte.js?v=1.409.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1024,7 +1024,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.408.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.409.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -16944,7 +16944,8 @@ function rpIstNeu(){ return rpModus === 'neu'; }
 var RP_NEU_SPALTEN = [
   { k: 'ueberzeit', l: 'Überzeit', e: 'h' }, { k: 'zuschlag25', l: 'Zuschl. 25%', e: 'h' }, { k: 'zuschlag50', l: 'Zuschl. 50%', e: 'h' },
   { k: 'nacht', l: 'Nacht', e: 'h' }, { k: 'samstag', l: 'Samstag', e: 'h' }, { k: 'sonntag', l: 'So/Feiertag', e: 'h' },
-  { k: 'reise', l: 'Reisezeit', e: 'h' }, { k: 'km', l: 'Km', e: 'km' }, { k: 'spesen', l: 'Spesen', e: 'CHF' }, { k: 'bemerkung', l: 'Bemerkung', e: '' }
+  { k: 'reise', l: 'Reisezeit', e: 'h' }, { k: 'km', l: 'Km', e: 'km' }, { k: 'spesen', l: 'Spesen', e: 'CHF' },
+  { k: 'von', l: 'Von', e: '', txt: true }, { k: 'bis', l: 'Bis', e: '', txt: true }, { k: 'pause', l: 'Pause', e: 'h' }, { k: 'bemerkung', l: 'Bemerkung', e: '', txt: true }
 ];
 function rpNeuAktiveSpalten(){
   // Nur Spalten zeigen, in denen mindestens eine Zeile einen Wert hat — plus «weitere» (vom Beleg stammende Spaltentitel)
@@ -18003,7 +18004,8 @@ function buildRapportOcrPromptNeuZusatz(){
     'Nimm in jede Zeile des "zeilen"-Arrays zusätzlich zu "ist" (= normale Arbeitsstunden) die folgenden Felder auf, sofern die Spalte auf dem Rapport existiert und für den Tag einen Wert hat ' +
     '(fehlende/leere Spalten weglassen oder null, NIE berechnen oder aus anderen Werten ableiten):\n' +
     '  "ueberzeit" (Überzeit/Überstunden in h), "zuschlag25" (Stunden mit 25% Zuschlag), "zuschlag50" (Stunden mit 50% Zuschlag), "nacht" (Nachtstunden), ' +
-    '"samstag" (Samstagsstunden), "sonntag" (Sonntags-/Feiertagsstunden), "reise" (Reisezeit in h), "km" (gefahrene Kilometer), "spesen" (Spesen/Auslagen in CHF), "bemerkung" (Text).\n' +
+    '"samstag" (Samstagsstunden), "sonntag" (Sonntags-/Feiertagsstunden), "reise" (Reisezeit in h), "km" (gefahrene Kilometer), "spesen" (Spesen/Auslagen in CHF), ' +
+    '"von" und "bis" (Arbeitsbeginn/-ende als "HH:MM", falls auf dem Rapport Uhrzeiten stehen), "pause" (Pause in h), "bemerkung" (Text).\n' +
     '  Alle weiteren Spalten mit Werten, die zu keinem dieser Felder passen (z.B. "Pikett", "Schmutzzulage", "Verpflegung"): in ein Objekt "weitere": {"<Spaltentitel wie auf dem Rapport>": <Wert>} schreiben.\n' +
     '  Zahlen als Dezimalzahl (8.5 nicht "8:30"). Unsichere Werte in diesen Zusatzfeldern mit "istFlag":"low" markieren.\n' +
     'Beispielzeile: {"datum":"10.08.2026","tag":"Mo","kst":"1205","ist":8.5,"ueberzeit":1.0,"spesen":16.00,"weitere":{"Pikett":1},"kstFlag":null,"istFlag":null,"beleg":"R1"}\n' +
@@ -18402,7 +18404,7 @@ async function scanWithClaude(){
       // Direkt-Import: Zusatzspalten 1:1 übernehmen (Zahlen normalisieren, Text belassen)
       var r = rawZeilen[idx];
       RP_NEU_SPALTEN.forEach(function(c){ var v = r[c.k]; if(v === undefined || v === null || v === '') return;
-        b[c.k] = c.k === 'bemerkung' ? String(v) : (typeof v === 'number' ? v : (parseFloat(String(v).replace(',', '.')) || 0)); });
+        b[c.k] = c.txt ? String(v) : (typeof v === 'number' ? v : (parseFloat(String(v).replace(',', '.')) || 0)); });
       return b;
     });
 
@@ -18774,7 +18776,7 @@ function renderTable(){
     theadEl.innerHTML = theadEl.dataset.std; tfootEl.innerHTML = tfootEl.dataset.std;
   }
   var neuZelle = function(r, i, c){
-    var v = rpNeuWert(r, c); var txt = c.k === 'bemerkung' || c.weitere && typeof v === 'string';
+    var v = rpNeuWert(r, c); var txt = c.txt || c.weitere && typeof v === 'string';
     return '<td class="rp-num"><input type="text" ' + (txt ? 'class="rp-neu-txt"' : 'inputmode="decimal" class="rp-neu-in"') + ' value="' + esc(v === undefined || v === null ? '' : (txt ? v : (typeof v === 'number' ? nf(v) : v))) + '" data-i="' + i + '" data-f="neu:' + esc(c.k) + '"></td>';
   };
   $('rpTbody').innerHTML = zeilen.map(function(r,i){
@@ -18856,7 +18858,8 @@ function renderTable(){
     if(f && f.indexOf('neu:') === 0){
       var ck = f.slice(4); var col = { k: ck, weitere: ck.indexOf('w:') === 0 };
       var raw = e.target.value.trim(); var num = parseFloat(raw.replace(',', '.'));
-      rpNeuSetzen(zeilen[i], col, (ck === 'bemerkung' || isNaN(num)) ? raw : num);
+      var defTxt = RP_NEU_SPALTEN.some(function(c){ return c.k === ck && c.txt; });
+      rpNeuSetzen(zeilen[i], col, (defTxt || isNaN(num)) ? raw : num);
       recalcRows(); return;
     }
     if(f==='ist'){ var v=parseFloat(String(e.target.value).replace(',','.')); zeilen[i].ist=isNaN(v)?0:v; zeilen[i].istFlag=null; }
@@ -19211,7 +19214,10 @@ function buildXmlNeu(){
    TimeTrackingElements (entryType Decimal/Duration/Integer/…) → *TimeTrackingEntries je Datum/Zeile.
    Jeder POST unterstützt ?DryRun=true — der Probelauf validiert serverseitig, ohne zu speichern. */
 var rpTt = { items: [], itemId: null, elemente: [], mapping: {}, bestehend: [], ergebnis: null, laeuft: false };
-function rpTtSpalten(){ var sp = [{ k: 'ist', l: 'Std.', e: 'h' }]; if(rpIstNeu()) sp = sp.concat(rpNeuAktiveSpalten().filter(function(c){ return c.k !== 'bemerkung'; })); return sp; }
+function rpTtSpalten(){ var sp = [{ k: 'ist', l: 'Std.', e: 'h' }]; if(rpIstNeu()) sp = sp.concat(rpNeuAktiveSpalten().filter(function(c){ return !c.txt && c.k !== 'pause'; })); return sp; }
+/* Start/Ende-Elemente brauchen Uhrzeiten: vom Rapport (von/bis), sonst ab Standard-Arbeitsbeginn fortlaufend gelegt */
+function rpTtStartZeit(){ var v = ''; try { v = localStorage.getItem('apriko-rapport-arbeitsbeginn') || ''; } catch(e){} return /^\d{1,2}:\d{2}$/.test(v) ? v : '07:00'; }
+function rpTtZeitPlus(hhmm, stunden){ var m = /^(\d{1,2}):(\d{2})$/.exec(hhmm); var min = (m ? (+m[1]) * 60 + (+m[2]) : 420) + Math.round(stunden * 60); min = Math.max(0, Math.min(23 * 60 + 59, min)); return ('0' + Math.floor(min / 60)).slice(-2) + ':' + ('0' + (min % 60)).slice(-2); }
 function rpTtEinsatz(){ var st = rpApiState; var sel = (st.einsaetze || []).filter(function(x){ return String(x.e.id) === String(st.einsatzId); })[0] || (st.einsaetze || [])[0]; return sel ? sel.e : null; }
 function rpTtIso(d){ return d && d.length === 10 && d.indexOf('.') === 2 ? d.slice(6, 10) + '-' + d.slice(3, 5) + '-' + d.slice(0, 2) : d; }
 function rpTtStatus(t, fehler){ var e = $('rpTtStatus'); if(e){ e.textContent = t || ''; e.style.color = fehler ? '#c62828' : ''; } }
@@ -19286,9 +19292,21 @@ function rpTtEintraege(){
       var v = c.k === 'ist' ? (r.ist || 0) : rpNeuWert(r, c); if(typeof v !== 'number' || !(v > 0)) return;
       var el = rpTt.elemente.filter(function(x){ return x.id === elId; })[0]; if(!el) return;
       var datum = rpTtIso(r.datum); var key = datum + '|' + elId; zaehler[key] = (zaehler[key] || 0) + 1;
-      var pfad = el.entryType === 'DurationTimeTrackingEntry' ? '/DurationTimeTrackingEntries' : el.entryType === 'IntegerTimeTrackingEntry' ? '/IntegerTimeTrackingEntries' : '/DecimalTimeTrackingEntries';
-      var wert = el.entryType === 'IntegerTimeTrackingEntry' ? Math.round(v) : v;
-      out.push({ pfad: pfad, body: { date: datum, rowNumber: zaehler[key], timeTrackingElementId: elId, value: wert, name: r.kst ? 'KST ' + r.kst : undefined }, spalte: c.l, element: el.name, kst: r.kst || '', datum: r.datum, wert: v });
+      var typ = el.entryType || 'DecimalTimeTrackingEntry';
+      var body = { date: datum, rowNumber: zaehler[key], timeTrackingElementId: elId, name: r.kst ? 'KST ' + r.kst : undefined };
+      var pfad = '/DecimalTimeTrackingEntries', anzeige = nf(v);
+      if(typ === 'BoolTimeTrackingEntry'){ pfad = '/BoolTimeTrackingEntries'; body.value = true; body.rowNumber = 1; anzeige = 'ja'; if(zaehler[key] > 1) return; }
+      else if(typ === 'IntegerTimeTrackingEntry'){ pfad = '/IntegerTimeTrackingEntries'; body.value = Math.round(v); }
+      else if(typ === 'DurationTimeTrackingEntry'){ pfad = '/DurationTimeTrackingEntries'; body.value = v; }
+      else if(typ === 'StartEndTimeTrackingEntry'){
+        pfad = '/StartEndTimeTrackingEntries';
+        // Uhrzeiten: Std. nimmt von/bis vom Rapport (falls vorhanden), alles andere wird fortlaufend nach dem Tagesende gelegt
+        var tagKey = datum + '|zeit'; var start = zaehler[tagKey] || (c.k === 'ist' && r.von ? r.von : rpTtStartZeit());
+        if(c.k === 'ist' && r.von && r.bis && zaehler[key] === 1){ start = r.von; var ende = r.bis; } else { var ende = rpTtZeitPlus(start, v + (c.k === 'ist' && r.pause ? r.pause : 0)); }
+        zaehler[tagKey] = ende;
+        body.from = datum + 'T' + start + ':00'; body.to = datum + 'T' + ende + ':00'; anzeige = start + '–' + ende + ' (' + nf(v) + ' h)';
+      } else { body.value = v; }
+      out.push({ pfad: pfad, body: body, spalte: c.l, element: el.name, kst: r.kst || '', datum: r.datum, wert: v, anzeige: anzeige });
     });
   });
   return out;
@@ -19306,7 +19324,8 @@ async function rpTtSenden(dryRun){
       var antwort = await AprikoApi.request('timetracking', x.pfad, { method: 'POST', body: x.body, query: { DryRun: dryRun ? 'true' : undefined, ReturnResult: 'true', ReturnTransmittedMessages: 'true' } });
       res.ok = true; res.id = antwort && antwort.result && antwort.result.id || null;
       res.meldungen = (antwort && antwort.messages || []).map(function(m){ return (m.status ? m.status + ': ' : '') + (m.value || m.key || JSON.stringify(m)); });
-    } catch(err){ res.ok = false; res.meldungen = [(err && err.message) || String(err)]; if(err && err.details) res.meldungen.push(JSON.stringify(err.details).slice(0, 300)); }
+    } catch(err){ res.ok = false; var msg = (err && err.message) || String(err); var regeln = (msg.match(/\[BusinessRuleViolation\][^\[·]+/g) || []).map(function(x){ return x.replace('[BusinessRuleViolation] ', '').replace(/^.*ITranslatableMessages\./, '').trim(); });
+      res.meldungen = regeln.length ? regeln.map(function(k){ return ({ ElementTypeMismatch: 'Eintragstyp passt nicht zum Element', OnlyOneEntryCanBeAdded: 'Nur ein Eintrag pro Tag erlaubt', TimeSheetLocked: 'Periode gesperrt' })[k] || k; }) : [msg]; if(err && err.details && !regeln.length) res.meldungen.push(JSON.stringify(err.details).slice(0, 300)); }
     rpTt.ergebnis.push(res); rpTtStatus((dryRun ? 'Probelauf' : 'Schreibe') + ' ' + (i + 1) + '/' + liste.length + ' …');
     if(!res.ok && !dryRun){ rpTtStatus('Abgebrochen bei Eintrag ' + (i + 1) + ' — ' + res.meldungen[0], true); break; }
   }
@@ -19323,6 +19342,7 @@ function rpTtRender(){
   var h = '<div style="font-size:12px;color:var(--rp-grey);margin-bottom:6px">TimeTrackingItem ' + esc(it.displayName || rpTt.itemId) + ' · ' + esc(it.startDate || '?') + ' – ' + esc(it.endDate || 'offen') + ' · Status ' + esc(it.state || '') +
     (rpTt.items.length > 1 ? ' · <select onchange="rpTtItemLaden(this.value)" style="font-size:11px">' + rpTt.items.map(function(x){ return '<option value="' + esc(x.id) + '"' + (x.id === rpTt.itemId ? ' selected' : '') + '>' + esc(x.startDate || '') + ' – ' + esc(x.endDate || 'offen') + '</option>'; }).join('') + '</select>' : '') + '</div>';
   var sp = rpTtSpalten();
+  if(rpTt.elemente.some(function(el){ return el.entryType === 'StartEndTimeTrackingEntry'; })) h += '<div style="font-size:12px;margin-bottom:6px">⏱ Start/Ende-Elemente: Uhrzeiten vom Rapport (Von/Bis), sonst ab Standard-Arbeitsbeginn <input type="text" value="' + esc(rpTtStartZeit()) + '" onchange="try{localStorage.setItem(\'apriko-rapport-arbeitsbeginn\',this.value)}catch(e){};rpTt.ergebnis=null;rpTtRender()" style="width:56px;font-size:12px;padding:2px 4px"> fortlaufend (Std. zuerst, danach Überzeit/Zuschläge).</div>';
   h += '<table class="rp-table" style="font-size:12px"><thead><tr><th>Spalte im Rapport</th><th>→ Element in Apriko</th></tr></thead><tbody>' + sp.map(function(c){
     return '<tr><td>' + esc(c.l) + (c.e ? ' (' + esc(c.e) + ')' : '') + '</td><td><select onchange="rpTtMap(' + JSON.stringify(c.k).replace(/"/g, '&quot;') + ', this.value)" style="width:100%;font-size:12px"><option value="">— nicht übergeben —</option>' +
       rpTt.elemente.map(function(el){ return '<option value="' + esc(el.id) + '"' + (rpTt.mapping[c.k] === el.id ? ' selected' : '') + '>' + esc((el.komponente ? el.komponente + ' › ' : '') + el.name) + ' [' + esc(String(el.entryType || '').replace('TimeTrackingEntry', '')) + ']</option>'; }).join('') + '</select></td></tr>';
@@ -19334,7 +19354,7 @@ function rpTtRender(){
     '<button type="button" class="rp-btn rp-btn-dark" onclick="rpTtSenden(false)" ' + (rpTt.laeuft || !liste.length || !(rpTt.ergebnis && rpTt.dryRun && rpTt.ergebnis.every(function(r){ return r.ok; })) ? 'disabled' : '') + ' title="Erst nach erfolgreichem Probelauf möglich">🚀 In Apriko schreiben</button></div>';
   if(rpTt.ergebnis && rpTt.ergebnis.length){
     h += '<table class="rp-table" style="font-size:11.5px;margin-top:6px"><thead><tr><th>Datum</th><th>KST</th><th>Spalte</th><th>Element</th><th class="rp-num">Wert</th><th>Ergebnis</th></tr></thead><tbody>' + rpTt.ergebnis.map(function(r){
-      return '<tr><td>' + esc(r.eintrag.datum) + '</td><td>' + esc(r.eintrag.kst) + '</td><td>' + esc(r.eintrag.spalte) + '</td><td>' + esc(r.eintrag.element) + '</td><td class="rp-num">' + nf(r.eintrag.wert) + '</td><td style="color:' + (r.ok ? '#2e7d32' : '#c62828') + '">' + (r.ok ? '✓' + (r.id ? ' ' + esc(r.id) : '') : '✕') + (r.meldungen.length ? ' <span style="color:var(--rp-grey)">' + esc(r.meldungen.join(' · ')).slice(0, 400) + '</span>' : '') + '</td></tr>';
+      return '<tr><td>' + esc(r.eintrag.datum) + '</td><td>' + esc(r.eintrag.kst) + '</td><td>' + esc(r.eintrag.spalte) + '</td><td>' + esc(r.eintrag.element) + '</td><td class="rp-num">' + esc(r.eintrag.anzeige || nf(r.eintrag.wert)) + '</td><td style="color:' + (r.ok ? '#2e7d32' : '#c62828') + '">' + (r.ok ? '✓' + (r.id ? ' ' + esc(r.id) : '') : '✕') + (r.meldungen.length ? ' <span style="color:var(--rp-grey)">' + esc(r.meldungen.join(' · ')).slice(0, 400) + '</span>' : '') + '</td></tr>';
     }).join('') + '</tbody></table>';
   } else if(liste.length){
     h += '<details style="font-size:11px;color:var(--rp-grey)"><summary>Vorschau der Einträge (JSON)</summary><pre style="white-space:pre-wrap">' + esc(JSON.stringify(liste.slice(0, 5).map(function(x){ return { POST: x.pfad, body: x.body }; }), null, 1)) + (liste.length > 5 ? '\n… ' + (liste.length - 5) + ' weitere' : '') + '</pre></details>';
