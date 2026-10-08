@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.411.0"></script>
-<script src="apriko-api.js?v=1.411.0"></script>
-<script src="lohncheck.js?v=1.411.0"></script>
-<script src="personalbudget.js?v=1.411.0"></script>
-<script src="jahresbudget.js?v=1.411.0"></script>
-<script src="budgetpositionen.js?v=1.411.0"></script>
-<script src="lohnchecklistetemp.js?v=1.411.0"></script>
-<script src="apriko-endpunkte.js?v=1.411.0"></script>
+<script src="apriko-filters.js?v=1.412.0"></script>
+<script src="apriko-api.js?v=1.412.0"></script>
+<script src="lohncheck.js?v=1.412.0"></script>
+<script src="personalbudget.js?v=1.412.0"></script>
+<script src="jahresbudget.js?v=1.412.0"></script>
+<script src="budgetpositionen.js?v=1.412.0"></script>
+<script src="lohnchecklistetemp.js?v=1.412.0"></script>
+<script src="apriko-endpunkte.js?v=1.412.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1024,7 +1024,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.411.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.412.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -19349,6 +19349,7 @@ async function rpTtSenden(dryRun){
           var best = await rpTtBestehendenEintrag(x.elementId, x.body.date);
           if(!best) throw new Error('Nur ein Eintrag pro Tag erlaubt — bestehender Eintrag nicht gefunden (Suche nach Element/Datum lieferte nichts)');
           var patch = { version: best.version }; if('value' in x.body) patch.value = x.body.value; if(x.body.from){ patch.from = x.body.from; patch.to = x.body.to; }
+          if(typeof best.version !== 'number'){ try { var bv = await AprikoApi.request('timetracking', x.pfad + '/' + encodeURIComponent(best.id)); var bd = bv && bv.data ? bv.data : bv; if(bd && typeof bd.version === 'number') patch.version = bd.version; } catch(xv){} }
           var typPfad = x.pfad; var a2 = await AprikoApi.request('timetracking', typPfad + '/' + encodeURIComponent(best.id), { method: 'PATCH', body: patch, query: { DryRun: dryRun ? 'true' : undefined, ReturnResult: 'true', ReturnTransmittedMessages: 'true' } });
           res.ok = true; res.id = best.id; res.meldungen = ['bestehender Eintrag aktualisiert (PATCH)'].concat((a2 && a2.messages || []).map(function(m){ return m.value || m.key || ''; }).filter(Boolean));
           rpTt.ergebnis.push(res); rpTtStatus((dryRun ? 'Probelauf' : 'Schreibe') + ' ' + (i + 1) + '/' + liste.length + ' …'); continue;
@@ -19404,6 +19405,26 @@ async function rpTtBestehendenEintrag(elementId, datum){
       var m = rows.filter(function(b){ return String(b.timeTrackingElementId) === String(elementId) && String(b.date || '').slice(0, 10) === datum; })[0];
       if(m){ rpTt.bestehend.push(m); return m; }
     } catch(x){}
+  }
+  // Volltext mit der Element-ID (IDs sind oft als Token im Index)
+  try {
+    var rq = await AprikoApi.models.query({ entityTypes: 'TimeTrackingEntry', pageIndex: 0, pageSize: 120, resolveReferences: false, query: String(elementId) });
+    var rows2 = ((rq && rq.results) || []).map(function(h){ try { return AprikoApi.models.hitData(h); } catch(x){ return null; } }).filter(Boolean);
+    var m2 = rows2.filter(function(b){ return String(b.timeTrackingElementId) === String(elementId) && (!b.date || String(b.date).slice(0, 10) === datum || (rpTt.elemente.some(function(e){ return e.id === elementId && e.periodisch; }))); })[0];
+    if(m2){ rpTt.bestehend.push(m2); return m2; }
+  } catch(x){}
+  // Letzter Weg: Listen-Endpunkt des passenden Typs seitenweise durchsuchen (begrenzt), nach Item + Element
+  var el = rpTt.elemente.filter(function(e){ return e.id === elementId; })[0]; var typ = el && el.entryType || 'TimeTrackingEntry';
+  var pfad = '/' + (typ === 'TimeTrackingEntry' ? 'TimeTrackingEntries' : typ.replace('Entry', 'Entries'));
+  for(var pg = 0; pg < 40; pg++){
+    try {
+      var lr = await AprikoApi.request('timetracking', pfad, { query: { pageIndex: pg, pageSize: 100 } });
+      var items = (lr && (lr.items || lr.value || lr.data || lr.results)) || (Array.isArray(lr) ? lr : []); if(items.length && items[0].data) items = items.map(function(x){ return x.data; });
+      if(!items.length) break;
+      var m3 = items.filter(function(b){ return String(b.timeTrackingElementId) === String(elementId) && (el && el.periodisch || String(b.date || '').slice(0, 10) === datum); })[0];
+      if(m3){ rpTt.bestehend.push(m3); return m3; }
+      if(items.length < 100) break;
+    } catch(x){ break; }
   }
   return null;
 }
