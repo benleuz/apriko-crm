@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.417.0"></script>
-<script src="apriko-api.js?v=1.417.0"></script>
-<script src="lohncheck.js?v=1.417.0"></script>
-<script src="personalbudget.js?v=1.417.0"></script>
-<script src="jahresbudget.js?v=1.417.0"></script>
-<script src="budgetpositionen.js?v=1.417.0"></script>
-<script src="lohnchecklistetemp.js?v=1.417.0"></script>
-<script src="apriko-endpunkte.js?v=1.417.0"></script>
+<script src="apriko-filters.js?v=1.419.0"></script>
+<script src="apriko-api.js?v=1.419.0"></script>
+<script src="lohncheck.js?v=1.419.0"></script>
+<script src="personalbudget.js?v=1.419.0"></script>
+<script src="jahresbudget.js?v=1.419.0"></script>
+<script src="budgetpositionen.js?v=1.419.0"></script>
+<script src="lohnchecklistetemp.js?v=1.419.0"></script>
+<script src="apriko-endpunkte.js?v=1.419.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1024,7 +1024,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.417.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.419.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -19390,7 +19390,7 @@ function rpTtRender(){
   h += '<div class="rp-actions"><button type="button" class="rp-btn" onclick="rpTtSenden(true)" ' + (rpTt.laeuft || !liste.length ? 'disabled' : '') + '>🧪 Probelauf (DryRun)</button>' +
     '<button type="button" class="rp-btn rp-btn-dark" onclick="rpTtSenden(false)" ' + (rpTt.laeuft || !liste.length || !(rpTt.ergebnis && rpTt.dryRun && rpTt.ergebnis.every(function(r){ return r.ok; })) ? 'disabled' : '') + ' title="Erst nach erfolgreichem Probelauf möglich">🚀 In Apriko schreiben</button></div>';
   h += '<div class="rp-actions" style="margin-top:-6px"><button type="button" class="rp-btn rp-btn-ghost rp-btn-sm" onclick="rpTtBelegAnhaengen(true)" title="Rapport-Datei(en) als Dokument «WorkReport» ans Item hängen — Probelauf">📎 Beleg anhängen (Probelauf)</button><button type="button" class="rp-btn rp-btn-ghost rp-btn-sm" onclick="rpTtBelegAnhaengen(false)">📎 Beleg anhängen</button>' +
-    ((rpTt.geschrieben || []).length ? '<button type="button" class="rp-btn rp-btn-ghost rp-btn-sm" style="color:#c62828" onclick="rpTtRueckgaengig()" title="Die in dieser Sitzung geschriebenen Einträge wieder löschen">↩ ' + rpTt.geschrieben.length + ' geschriebene Einträge löschen</button>' : '') + '</div>';
+    ((rpTt.geschrieben || []).length ? '<span style="font-size:11px;color:#666;align-self:center">' + rpTt.geschrieben.length + ' in dieser Sitzung geschrieben</span>' : '') + '</div>';
   if(rpTt.ergebnis && rpTt.ergebnis.length){
     h += '<table class="rp-table" style="font-size:11.5px;margin-top:6px"><thead><tr><th>Datum</th><th>KST</th><th>Spalte</th><th>Element</th><th class="rp-num">Wert</th><th>Ergebnis</th></tr></thead><tbody>' + rpTt.ergebnis.map(function(r){
       return '<tr><td>' + esc(r.eintrag.datum) + '</td><td>' + esc(r.eintrag.kst) + '</td><td>' + esc(r.eintrag.spalte) + '</td><td>' + esc(r.eintrag.element) + '</td><td class="rp-num">' + esc(r.eintrag.anzeige || nf(r.eintrag.wert)) + '</td><td style="color:' + (r.ok ? '#2e7d32' : '#c62828') + '">' + (r.ok ? '✓' + (r.id ? ' ' + esc(r.id) : '') : '✕') + (r.meldungen.length ? ' <span style="color:var(--rp-grey)">' + esc(r.meldungen.join(' · ')).slice(0, 400) + '</span>' : '') + '</td></tr>';
@@ -19402,14 +19402,7 @@ function rpTtRender(){
 }
 function rpTtMap(k, v){ rpTt.mapping[k] = v; rpTt.ergebnis = null; rpTtRender(); }
 /* Rückgängig: die in dieser Sitzung geschriebenen Einträge wieder löschen (DELETE je ID) */
-async function rpTtRueckgaengig(){
-  var l = rpTt.geschrieben || []; if(!l.length) return;
-  if(!confirm(l.length + ' in dieser Sitzung geschriebene Einträge in Apriko LÖSCHEN?')) return;
-  rpApiUse(); var ok = 0, fehler = [];
-  for(var i = 0; i < l.length; i++){ try { await AprikoApi.request('timetracking', l[i].pfad + '/' + encodeURIComponent(l[i].id), { method: 'DELETE' }); ok++; } catch(e){ fehler.push(l[i].datum + ' ' + l[i].element + ': ' + (e && e.message || e)); } }
-  rpTt.geschrieben = l.filter(function(x, i){ return fehler.some(function(f){ return f.indexOf(x.datum + ' ' + x.element) === 0; }); });
-  rpTt.ergebnis = null; rpTtRender(); rpTtStatus(ok + ' Einträge gelöscht' + (fehler.length ? ' · ' + fehler.length + ' Fehler: ' + fehler[0] : ''), fehler.length > 0);
-}
+/* Kein Rückgängig/DELETE gegen Apriko — Löschen ist grundsätzlich verboten. */
 /* Rapport-Beleg als Dokument ans TimeTrackingItem hängen (PDF/Bild, base64) */
 async function rpTtBelegAnhaengen(dryRun){
   if(!rpTt.itemId || !files.length){ rpTtStatus('Kein Item oder kein Beleg geladen.', true); return; }
@@ -19419,10 +19412,21 @@ async function rpTtBelegAnhaengen(dryRun){
   for(var i = 0; i < files.length; i++){
     var f = files[i]; var blob = f.blob || f.ocrBlob; if(!blob) continue;
     try {
-      var b64 = await new Promise(function(ok, err){ var rd = new FileReader(); rd.onload = function(){ ok(String(rd.result).split(',')[1]); }; rd.onerror = err; rd.readAsDataURL(blob); });
-      var body = { timeTrackingItemId: rpTt.itemId, name: f.name, startDate: von, endDate: bis, documentType: 'WorkReport', file: b64 };
+      if(!AprikoApi.files || !AprikoApi.files.upload) throw new Error('apriko-api.js ist veraltet (files.upload fehlt) — bitte neue Version auf GitHub laden');
+      // 1) Datei in den Files-Service hochladen → BinaryFile-ID
+      rpTtStatus('Lade ' + f.name + ' hoch …');
+      var up = await AprikoApi.files.upload(blob, f.name, { dryRun: dryRun });
+      var fileId = up && (up.result && up.result.id || up.id);
+      if(!fileId){
+        if(dryRun){ n++; meld.push(f.name + ' ✓ Upload-Probelauf ok (Dokument wird erst beim echten Lauf angehängt)'); continue; }
+        throw new Error('Upload lieferte keine Datei-ID: ' + JSON.stringify(up).slice(0, 200));
+      }
+      // 2) Dokument mit Referenz auf die Datei ans TimeTrackingItem hängen
+      var body = { timeTrackingItemId: rpTt.itemId, name: f.name, startDate: von, endDate: bis, documentType: 'WorkReport', file: fileId };
       var a = await AprikoApi.request('timetracking', '/TimeTrackingItemDocuments', { method: 'POST', body: body, query: { DryRun: dryRun ? 'true' : undefined, ReturnResult: 'true', ReturnTransmittedMessages: 'true' } });
-      n++; meld.push(f.name + ' ✓' + (a && a.result && a.result.id ? ' ' + a.result.id : ''));
+      var docId = a && a.result && a.result.id;
+      if(!dryRun && docId){ rpTt.geschrieben = rpTt.geschrieben || []; rpTt.geschrieben.push({ pfad: '/TimeTrackingItemDocuments', id: docId, datum: 'Beleg', element: f.name }); }
+      n++; meld.push(f.name + ' ✓' + (docId ? ' ' + docId : ''));
     } catch(e){ meld.push(f.name + ' ✕ ' + (e && e.message || e)); }
   }
   rpTtStatus((dryRun ? 'Beleg-Probelauf: ' : 'Beleg angehängt: ') + n + '/' + files.length + ' — ' + meld.join(' · '), n < files.length);
@@ -19635,7 +19639,7 @@ window.rpApiUebernehmen = rpApiUebernehmen;
 window.rpApiLoadRoster = rpApiLoadRoster;
 window.rpApiSucheAdditionalComp = rpApiSucheAdditionalComp;
 window.rpTestEinsatzRender = rpTestEinsatzRender; window.rpTestEinsatzUebernehmen = rpTestEinsatzUebernehmen;
-window.rpTtDiagnose = rpTtDiagnose; window.rpTtRueckgaengig = rpTtRueckgaengig; window.rpTtBelegAnhaengen = rpTtBelegAnhaengen; window.rpTtEintraegeAnzeigen = rpTtEintraegeAnzeigen; window.rpTtManuellLaden = rpTtManuellLaden;
+window.rpTtDiagnose = rpTtDiagnose; window.rpTtBelegAnhaengen = rpTtBelegAnhaengen; window.rpTtEintraegeAnzeigen = rpTtEintraegeAnzeigen; window.rpTtManuellLaden = rpTtManuellLaden;
 window.rpTtLaden = rpTtLaden; window.rpTtItemLaden = rpTtItemLaden; window.rpTtSenden = rpTtSenden; window.rpTtMap = rpTtMap;
 window.rpStapelLaden = rpStapelLaden; window.rpStapelNeuGruppieren = rpStapelNeuGruppieren; window.rpStapelVerwerfen = rpStapelVerwerfen;
 

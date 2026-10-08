@@ -130,7 +130,13 @@
       headers: { Authorization: "Bearer " + token, Accept: "application/json" }
     };
     if (cfg.target) init.headers["X-Apriko-Target"] = cfg.target;
-    if (opts.body !== undefined) {
+    if (String(init.method || "GET").toUpperCase() === "DELETE") {
+      throw new Error("DELETE gegen Apriko ist gesperrt (Löschen verboten).");
+    }
+    if (opts.formData !== undefined) {
+      /* Datei-Upload (multipart/form-data): Content-Type setzt der Browser inkl. Boundary selbst */
+      init.body = opts.formData;
+    } else if (opts.body !== undefined) {
       init.headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(opts.body);
     }
@@ -312,6 +318,15 @@
     }
   };
 
+  /* Datei hochladen → BinaryFile (id dient als Referenz für Dokumente, z.B. TimeTrackingItemDocument.file) */
+  var files = {
+    upload: function (blob, name, opts) {
+      var fd = new FormData();
+      fd.append("file", blob, name || "datei");
+      return request("files", "/Files/Upload", { method: "POST", formData: fd,
+        query: { ReturnResult: "true", DryRun: opts && opts.dryRun ? "true" : undefined, strictPdfAccuracy: "false" } });
+    }
+  };
   var models = {
     query: queryPaged,
     queryAll: queryAll,
@@ -460,6 +475,7 @@
     payrollaccounting: payrollaccounting,
     receivableaccounting: receivableaccounting,
     models: models,
+    files: files,
     extractMessages: extractMessages
   };
 
