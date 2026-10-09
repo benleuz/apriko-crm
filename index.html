@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.464.0"></script>
-<script src="apriko-api.js?v=1.464.0"></script>
-<script src="lohncheck.js?v=1.464.0"></script>
-<script src="personalbudget.js?v=1.464.0"></script>
-<script src="jahresbudget.js?v=1.464.0"></script>
-<script src="budgetpositionen.js?v=1.464.0"></script>
-<script src="lohnchecklistetemp.js?v=1.464.0"></script>
-<script src="apriko-endpunkte.js?v=1.464.0"></script>
+<script src="apriko-filters.js?v=1.466.0"></script>
+<script src="apriko-api.js?v=1.466.0"></script>
+<script src="lohncheck.js?v=1.466.0"></script>
+<script src="personalbudget.js?v=1.466.0"></script>
+<script src="jahresbudget.js?v=1.466.0"></script>
+<script src="budgetpositionen.js?v=1.466.0"></script>
+<script src="lohnchecklistetemp.js?v=1.466.0"></script>
+<script src="apriko-endpunkte.js?v=1.466.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1027,7 +1027,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.464.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.466.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -4653,10 +4653,21 @@ function renderFbMonate(el, ctx) {
   const alleIst = fbIstAlle(year);
   const perioden = [...new Set(alleIst.map(d => fbPeriodeMonate(d.p)))];
   const cumKey = (k, n) => perioden.includes(n) ? alleIst.filter(d => d.z === k && fbPeriodeMonate(d.p) === n).reduce((s, d) => s + (parseFloat(d.v) || 0), 0) * (FB_AUFWAND.has(k) ? -1 : 1) : null;
+  // Monatswerte bevorzugt aus den Buchungen (Journal mit Datum → exakt je Monat); YTD-Differenz nur als Rückfall
+  const buch = fbBuchAll(year);                       // "Gesellschaft|Konto" → { bez, buch: [[datum, text, betrag], …] }
+  const buchMonate = {};                              // key → [12] Summen aus Buchungen (P&L-Vorzeichen: Haben − Soll)
+  const buchKonten = {};                              // key → Anzahl Konten mit Buchungen
+  let buchLetzterMonat = 0;
+  alleIst.filter(d => d.z && fbPeriodeMonate(d.p) === N).forEach(d => {
+    const e = buch[(d.g || "") + "|" + d.kt]; if (!e || !(e.buch || []).length) return;
+    buchMonate[d.z] = buchMonate[d.z] || Array(12).fill(0); buchKonten[d.z] = (buchKonten[d.z] || 0) + 1;
+    e.buch.forEach(b => { const m = /^\s*(\d{1,2})\.(\d{1,2})\.(\d{2,4})/.exec(String(b[0] || "")); if (!m) return; const mo = parseInt(m[2], 10) - 1; if (mo < 0 || mo > 11) return; buchMonate[d.z][mo] += parseFloat(b[2]) || 0; if (mo + 1 > buchLetzterMonat) buchLetzterMonat = mo + 1; });
+  });
+  const ausBuch = k => !!buchMonate[k];
   const monCache = {};
-  const monArr = k => monCache[k] || (monCache[k] = fbMonatswerte(N, n => cumKey(k, n), profil(k)));
+  const monArr = k => monCache[k] || (monCache[k] = ausBuch(k) ? buchMonate[k] : fbMonatswerte(N, n => cumKey(k, n), profil(k)));
   const monIst = (k, i) => monArr(k)[i] || 0;
-  const monEcht = i => perioden.includes(i + 1) && (i === 0 || perioden.includes(i));
+  const monEcht = i => (buchLetzterMonat >= i + 1 && Object.keys(buchMonate).length > 0) || (perioden.includes(i + 1) && (i === 0 || perioden.includes(i)));
   const jahrIst = k => {
     const bh1 = bh1of(k);
     const jahr = profil(k).reduce((s,v) => s + v, 0);
@@ -4717,7 +4728,7 @@ function renderFbMonate(el, ctx) {
       <thead>
         <tr>
           <th style="min-width:230px;position:sticky;left:0;background:var(--bg-card);z-index:3;box-shadow:2px 0 0 var(--border)" rowspan="2">Position</th>
-          ${MKV.map((m, i) => `<th colspan="3" style="text-align:center;${i % 2 ? "background:var(--bg-hover);" : ""}" title="${monEcht(i) ? "exakter Monatswert (YTD-Differenz)" : "saisonal aus YTD verteilt (Vormonats-Stand fehlt)"}">${m}${monEcht(i) ? "" : " ~"}</th>`).join("")}
+          ${MKV.map((m, i) => `<th colspan="3" style="text-align:center;${i % 2 ? "background:var(--bg-hover);" : ""}" title="${monEcht(i) ? "exakter Monatswert (aus Buchungen bzw. YTD-Differenz)" : "saisonal aus YTD verteilt (Vormonats-Stand fehlt, keine Buchungen)"}">${m}${monEcht(i) ? "" : " ~"}</th>`).join("")}
           <th colspan="3" style="text-align:center;border-left:2px solid var(--border)">Jahr</th>
         </tr>
         <tr>
@@ -4753,7 +4764,12 @@ function renderFbMonate(el, ctx) {
         }).join("")}
       </tbody>
     </table></div>
-    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">B = Budget · I = Ist des Monats = YTD-Stand − Vormonats-YTD-Stand (exakt, wenn beide Stände importiert sind; Monate mit «~» sind aus dem YTD saisonal nach der Budget-Monatskurve verteilt, weil ein Zwischenstand fehlt) · Δ = Abweichung · Jahr-Hochrechnung = Ist ${fbPeriodeLabel(N)} × Budget-Jahr ÷ Budget-${fbPeriodeLabel(N)}. Angezeigt werden nur die importierten Monate (${fbPeriodeLabel(N)}).</div>
+    <details style="margin-top:8px;font-size:11px"><summary style="cursor:pointer;color:var(--text-dim)">🔬 YTD-Stände je Position und importierter Periode (Diagnose, wenn Monate leer bleiben)</summary>
+      <div style="color:var(--text-faint);margin:4px 0">Buchungen: ${Object.keys(buchMonate).length ? Object.keys(buchMonate).length + " Positionen mit Buchungsjournal (Monate exakt bis " + FB_MK[buchLetzterMonat - 1] + ") — Positionen ohne Buchungen über YTD-Differenz" : "keine Buchungen für " + year + " geladen — Monate aus YTD-Differenzen"}.</div>
+      <div style="color:var(--text-faint);margin:4px 0">Importierte Perioden: ${perioden.slice().sort((a, b) => a - b).map(n => "Jan–" + FB_MK[n - 1] + " (" + alleIst.filter(d => fbPeriodeMonate(d.p) === n).length + " Konten, davon " + alleIst.filter(d => fbPeriodeMonate(d.p) === n && d.z).length + " zugeordnet)").join(" · ")}. Monatswert = Differenz der Stände; ist eine Position in einer Periode 0, fehlt sie dort oder die Konten sind keiner Position zugeordnet.</div>
+      <table style="font-size:10.5px"><tr><th style="text-align:left">Position</th>${perioden.slice().sort((a, b) => a - b).map(n => `<th style="text-align:right">YTD Jan–${FB_MK[n - 1]}</th>`).join("")}</tr>
+      ${rowsOut.filter(r => r.art === "d").map(r => `<tr><td>${escape(r.label)}${ausBuch(r.key) ? ` <span style="color:var(--accent)" title="Monate aus ${buchKonten[r.key]} Konto-Journal(en)">📒</span>` : ""}</td>${perioden.slice().sort((a, b) => a - b).map(n => `<td style="text-align:right;font-family:var(--font-mono)">${fmt(cumKey(r.key, n))}</td>`).join("")}</tr>`).join("")}</table></details>
+    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">B = Budget · I = Ist des Monats — aus dem Buchungsjournal (exakt, wenn Buchungen importiert sind), sonst YTD-Stand − Vormonats-YTD-Stand; Monate mit «~» sind aus dem YTD saisonal nach der Budget-Monatskurve verteilt · Δ = Abweichung · Jahr-Hochrechnung = Ist ${fbPeriodeLabel(N)} × Budget-Jahr ÷ Budget-${fbPeriodeLabel(N)}. Angezeigt werden nur die importierten Monate (${fbPeriodeLabel(N)}).</div>
   `;
 }
 
