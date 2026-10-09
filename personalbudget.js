@@ -63,6 +63,7 @@ async function paDecryptAll() {
   }
   if (migriert) { await reload("Budget"); await paDecryptAll(); toast(migriert + " Lohnzeilen verschlüsselt — in SharePoint sind sie jetzt unlesbar."); }
   paState.entschluesselt = true;
+  try { for (const y of paYears()) await paSummenSpeichern(y); } catch (e) {}
 }
 async function paRowObj(y, pl) { return { cfg: "pa", t: "row", y, e: await paEncrypt({ n: pl.n, g: pl.g, l: pl.l, p: pl.p, s: pl.s, w: pl.w }) }; }
 /* Reihenfolge bleibt beim Editieren stabil (kein Springen der Zeilen); neu sortiert wird nur beim
@@ -75,6 +76,22 @@ function paItems(t) {
   return cache.budget.map(it => { const d = fbParse(it, "pa"); if (!d || d.t !== t) return null;
     if (t === "row" && d.e) { const pl = paPlain[it.id]; return pl ? Object.assign({}, d, { n: pl.n, g: pl.g, l: pl.l, p: pl.p, s: pl.s, w: pl.w }) : null; }   // noch nicht entschlüsselt → ausblenden
     return d; }).filter(Boolean);
+}
+/* Sind die Lohnzeilen des Jahres in dieser Sitzung lesbar? (entsperrt und entschlüsselt, oder gar keine verschlüsselten Zeilen) */
+function paVerfuegbar(year) {
+  const verschl = cache.budget.some(it => { const d = fbParse(it, "pa"); return d && d.t === "row" && d.y == year && d.e; });
+  return !verschl || (paState.unlocked && paState.entschluesselt && !paRowsVerschluesseltOffen());
+}
+/* Aggregierte Summen je Gesellschaft (ohne Personenbezug) — unverschlüsselt gespeichert, damit Jahresbudget/Budgetpositionen
+   auch ohne entsperrtes Personalbudget rechnen können: {"cfg":"pa","t":"sum","y":2027,"s":{"Apriko AG":{jahr,agB,spesen,wb,n,fte},…}} */
+function paSummenItem(year) { return paItems("sum").find(x => x.y == year) || null; }
+async function paSummenSpeichern(year) {
+  if (!paVerfuegbar(year)) return;
+  const sums = paSums(paRows(year), paAg(year)); const s = {};
+  PA_GES.forEach(g => { const o = sums[g] || {}; s[g] = { jahr: Math.round(o.jahr || 0), agB: Math.round(o.agB || 0), spesen: Math.round(o.spesen || 0), wb: Math.round(o.wb || 0), n: o.n || 0, fte: Math.round((o.fte || 0) * 100) / 100 }; });
+  const alt = paSummenItem(year);
+  if (alt && JSON.stringify(alt.s) === JSON.stringify(s)) return;
+  try { await fbSaveItem({ cfg: "pa", t: "sum", y: year, s }, alt ? alt.id : null); if (!alt) await reload("Budget"); } catch (e) { console.warn("Personal-Summen nicht gespeichert", e); }
 }
 function paRowsVerschluesseltOffen() { return cache.budget.filter(it => { const d = fbParse(it, "pa"); return d && d.t === "row" && d.e && !paPlain[it.id]; }).length; }
 function paRows(year) { return paItems("row").filter(r => r.y == year); }
@@ -105,7 +122,7 @@ function paSums(rows, ag) {
   return out;
 }
 
-async function paSave(obj, id) { paState.busy = true; try { await fbSaveItem(obj, id); if (!id) await reload("Budget"); await paDecryptAll(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); } paState.busy = false; render(); }
+async function paSave(obj, id) { paState.busy = true; try { await fbSaveItem(obj, id); if (!id) await reload("Budget"); await paDecryptAll(); await paSummenSpeichern(paState.year); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); } paState.busy = false; render(); }
 async function paSetField(id, field, value) {
   const r = paItems("row").find(x => x.id == id); if (!r) return;
   const pl = { n: r.n, g: r.g, l: r.l, p: r.p, s: r.s, w: r.w };
@@ -122,7 +139,7 @@ async function paDeleteRow(id) {
   const r = paItems("row").find(x => x.id == id); if (!r) return;
   if (!confirm("Zeile «" + (r.n || "ohne Name") + "» löschen?")) return;
   paState.busy = true; render();
-  try { await deleteItem("Budget", id); await reload("Budget"); } catch (e) { toast("Löschen fehlgeschlagen: " + e.message, true); }
+  try { await deleteItem("Budget", id); await reload("Budget"); await paDecryptAll(); await paSummenSpeichern(paState.year); } catch (e) { toast("Löschen fehlgeschlagen: " + e.message, true); }
   paState.busy = false; render();
 }
 async function paSetAg(v) { const c = paCfg(paState.year); await paSave({ cfg: "pa", t: "cfg", y: paState.year, ag: paNum(v), ...(c && c.kt ? { kt: c.kt } : {}) }, c ? c.id : null); }   // Konten-Zuordnung mitnehmen

@@ -19,7 +19,7 @@
    budgetRows, budgetChfOf, budgetIsSaaS, budgetErloes, BUDGET_MONTH_FIELDS,
    deleteItem, reload, escape, toast, render, currentView. */
 
-const JB_VERSION = "1.121.0";
+const JB_VERSION = "1.469.0";
 const JB_GES = ["Apriko AG", "Maverix AG"];
 const JB_PERSONAL = new Set(["SW_Lohn", "SW_SV", "SW_UebrPA", "BO_Lohn", "BO_SV", "BO_UebrPA"]);
 const JB_ERTRAG = new Set(["SW_Ertrag", "BO_Ertrag"]);
@@ -44,14 +44,24 @@ function jbNum(v) { const n = parseFloat(String(v == null ? "" : v).replace(/['�
 function jbItems(year) { return cache.budget.map(it => fbParse(it, "jb")).filter(d => d && d.y == year); }
 /* Hochrechnung Basisjahr: «M<n>» ist ein YTD-Stand über n Monate (z.B. M7 = Jan–Jul) → Faktor 12/n; ein reiner Monatswert wäre «M» ohne Zahl. */
 /* Personalaufwand-Basis je Key: direkt aus dem Personalbudget (paSums), sonst aus den fb-Positionen des Jahres */
-function jbPersonalBasis(year) {
-  const out = {};
+function jbPersonalSummen(year) {
+  // 1) Personalbudget entsperrt → live; 2) sonst gespeicherte Summen je Gesellschaft (unverschlüsselt, ohne Personenbezug)
   if (typeof paSums === "function" && typeof paRows === "function" && typeof paAg === "function") {
     try {
-      const sums = paSums(paRows(year), paAg(year));
-      Object.entries(PA_FB_KEYS || {}).forEach(([g, k]) => { const sg = sums[g] || {}; out[k.lohn] = sg.jahr || 0; out[k.sv] = sg.agB || 0; out[k.uebr] = (sg.spesen || 0) + (sg.wb || 0); });
-      return out;
+      if (typeof paVerfuegbar !== "function" || paVerfuegbar(year)) { const sums = paSums(paRows(year), paAg(year)); if (paRows(year).length) return { quelle: "live", sums }; }
+      const si = typeof paSummenItem === "function" ? paSummenItem(year) : null;
+      if (si && si.s) return { quelle: "gespeichert", sums: si.s };
     } catch (e) {}
+  }
+  return null;
+}
+function jbPersonalGesperrt(year) { const q = jbPersonalSummen(year); return typeof paVerfuegbar === "function" && !paVerfuegbar(year) ? (q ? "gespeichert" : "gesperrt") : ""; }
+function jbPersonalBasis(year) {
+  const out = {};
+  const q = jbPersonalSummen(year);
+  if (q) {
+    Object.entries(PA_FB_KEYS || {}).forEach(([g, k]) => { const sg = q.sums[g] || {}; out[k.lohn] = sg.jahr || 0; out[k.sv] = sg.agB || 0; out[k.uebr] = (sg.spesen || 0) + (sg.wb || 0); });
+    return out;
   }
   const fbY = {}; cache.budget.forEach(it => { const d = fbParse(it, "fb"); if (d && d.y == year && Array.isArray(d.m)) fbY[d.k] = d.m; });
   JB_PERSONAL.forEach(k => { out[k] = (fbY[k] || []).reduce((s, x) => s + (x || 0), 0); });
@@ -60,9 +70,10 @@ function jbPersonalBasis(year) {
 /* Teilbeträge eines Personal-Keys je Spalte des Personalbudgets mit dem dort gewählten FIBU-Konto */
 function jbPersonalTeile(year, k) {
   const g = JB_PA_GES[k], teile = [];
-  if (typeof paSums === "function" && typeof paRows === "function" && typeof paAg === "function") {
+  const q = jbPersonalSummen(year);
+  if (q) {
     try {
-      const sg = paSums(paRows(year), paAg(year))[g] || {};
+      const sg = q.sums[g] || {};
       const kk = typeof paKonten === "function" ? paKonten(year, g) : {};
       if (k.endsWith("Lohn")) teile.push({ t: "Jahreslohn", v: sg.jahr || 0, kt: kk.lohn || "" });
       else if (k.endsWith("SV")) teile.push({ t: "Arbeitgeberbeiträge", v: sg.agB || 0, kt: kk.ag || "" });
@@ -369,7 +380,9 @@ function renderJahresbudget(el) {
     return "";
   }).join("");
 
+  const persStatus = jbPersonalGesperrt(y);
   el.innerHTML = `
+    ${persStatus === "gesperrt" ? `<div style="margin-bottom:10px;padding:8px 12px;border:1px solid var(--warn);border-radius:6px;font-size:12px;color:var(--text-dim)">🔒 Der Personalaufwand ist verschlüsselt und in dieser Sitzung nicht entsperrt — Lohn/AG-Beiträge/übriger PA werden mit 0 gerechnet. Einmal im Menü «Budget Personalaufwand» das Passwort eingeben; danach bleiben die Summen je Gesellschaft hier gespeichert.</div>` : persStatus === "gespeichert" ? `<div style="margin-bottom:10px;padding:6px 12px;border:1px solid var(--border);border-radius:6px;font-size:11px;color:var(--text-faint)">🔒 Personalaufwand aus den gespeicherten Summen des Personalbudgets (Personalbudget nicht entsperrt — Änderungen dort erscheinen hier nach dem nächsten Entsperren).</div>` : ""}
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
       <label style="font-size:12px;color:var(--text-dim)">Budgetjahr <select onchange="jbSetYear(this.value)" style="padding:4px 6px;font-size:12px;margin-left:4px">${years.map(v => `<option ${v === y ? "selected" : ""}>${v}</option>`).join("")}<option value="${Math.max(...years) + 1}">${Math.max(...years) + 1} (neu)</option></select></label>
       <span style="font-size:12px;color:var(--text-dim)">Basis: Ist ${basis}${m.hasIst ? "" : ` <span style="color:var(--danger)">— keine Ist-Daten ${basis} im Budgetvergleich importiert</span>`}</span>
