@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.432.0"></script>
-<script src="apriko-api.js?v=1.432.0"></script>
-<script src="lohncheck.js?v=1.432.0"></script>
-<script src="personalbudget.js?v=1.432.0"></script>
-<script src="jahresbudget.js?v=1.432.0"></script>
-<script src="budgetpositionen.js?v=1.432.0"></script>
-<script src="lohnchecklistetemp.js?v=1.432.0"></script>
-<script src="apriko-endpunkte.js?v=1.432.0"></script>
+<script src="apriko-filters.js?v=1.433.0"></script>
+<script src="apriko-api.js?v=1.433.0"></script>
+<script src="lohncheck.js?v=1.433.0"></script>
+<script src="personalbudget.js?v=1.433.0"></script>
+<script src="jahresbudget.js?v=1.433.0"></script>
+<script src="budgetpositionen.js?v=1.433.0"></script>
+<script src="lohnchecklistetemp.js?v=1.433.0"></script>
+<script src="apriko-endpunkte.js?v=1.433.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1026,7 +1026,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.432.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.433.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -13692,11 +13692,11 @@ function kundenKontakteHtml(c) {
 const INTERN_ROLLEN = [["ansprech", "Ansprechperson"], ["apLohn", "Lohn"], ["apLohnBackup", "Lohn Backup"], ["apLohnIntern", "Lohn intern"], ["apFibu", "FIBU"], ["apFibuBackup", "FIBU Backup"]];
 function internRolleWert(c, key) { if (key === "ansprech") return String(ansprechEmail(c.CompanyId) || "").toLowerCase(); const f = (crmKundenFlags || {})[String(c.id)] || {}; return String(f[key] || "").toLowerCase(); }
 function internPersonen(c) {
-  const set = new Set();
+  const set = new Set(); const aus = e => !!mitarbeiterDaten(e).austritt && !INTERN_ROLLEN.some(([k]) => internRolleWert(c, k) === e);
   (cache.userprofiles || []).forEach(p => { const e = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase(); if (e) set.add(e); });
   Object.keys(bgParam().zuweisung || {}).forEach(e => set.add(e));
   INTERN_ROLLEN.forEach(([k]) => { const e = internRolleWert(c, k); if (e) set.add(e); });
-  return [...set].sort();
+  return [...set].filter(e => !aus(e)).sort();
 }
 async function internRolleSetzen(custId, key, email) {
   const c = cache.customers.find(x => x.id == custId); if (!c) return;
@@ -13757,10 +13757,79 @@ function internPersonenAlle() {
   Object.keys(crmMitarbeiter || {}).forEach(e => set.add(e));
   return [...set].sort((a, b) => mitarbeiterName(a).localeCompare(mitarbeiterName(b), "de"));
 }
+/* ---- Import Personalstammliste (PDF, Spalten Nachname/Vorname/Geburtsdatum/Abteilung/Eintrittsdatum/Austrittsdatum/Monatslohn …) ----
+   Lohnspalten werden bewusst NICHT gelesen und nirgends gespeichert. */
+function maNorm(t) { return String(t || "").toLowerCase().replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/é|è|ê/g, "e").replace(/[^a-z]/g, ""); }
+function maDatumIso(t) { const m = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(String(t || "").trim()); return m ? m[3] + "-" + ("0" + m[2]).slice(-2) + "-" + ("0" + m[1]).slice(-2) : ""; }
+async function maParseStammliste(ab) {
+  await kaLoadPdfJs();
+  const doc = await window.pdfjsLib.getDocument({ data: ab }).promise; const rows = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p); const tc = await page.getTextContent();
+    const items = tc.items.filter(i => i.str && i.str.trim()).map(i => ({ s: i.str.trim(), x: i.transform[4], y: Math.round(i.transform[5]) }));
+    // Zeilen nach y gruppieren (Toleranz 3pt)
+    const lines = []; items.sort((a, b) => b.y - a.y || a.x - b.x).forEach(it => { const l = lines.find(L => Math.abs(L.y - it.y) <= 3); if (l) l.items.push(it); else lines.push({ y: it.y, items: [it] }); });
+    lines.forEach(l => l.items.sort((a, b) => a.x - b.x));
+    const head = lines.find(l => l.items.some(i => /^Nachname$/i.test(i.s)) && l.items.some(i => /^Vorname$/i.test(i.s)));
+    if (!head) continue;
+    const cols = ["Nachname", "Vorname", "Geburtsdatum", "Abteilung", "Eintrittsdatum", "Austrittsdatum"].map(n => { const h = head.items.find(i => i.s.toLowerCase().startsWith(n.toLowerCase())); return h ? { n, x: h.x } : null; }).filter(Boolean);
+    const lohnX = (head.items.find(i => /^Monatslohn/i.test(i.s)) || {}).x || Infinity;
+    const colOf = x => { let best = null; cols.forEach(c => { if (x >= c.x - 4 && (!best || c.x > best.x)) best = c; }); return best ? best.n : null; };
+    lines.filter(l => l.y < head.y).forEach(l => {
+      const z = {}; l.items.forEach(i => { if (i.x >= lohnX - 4) return; const c = colOf(i.x); if (!c) return; z[c] = (z[c] ? z[c] + " " : "") + i.s; });
+      if (!z.Nachname || !z.Vorname) return; if (!maDatumIso(z.Geburtsdatum) && !maDatumIso(z.Eintrittsdatum)) return;
+      rows.push({ name: z.Nachname, vorname: z.Vorname, geburtstag: maDatumIso(z.Geburtsdatum), abteilung: z.Abteilung || "", eintritt: maDatumIso(z.Eintrittsdatum), austritt: maDatumIso(z.Austrittsdatum) });
+    });
+  }
+  return rows;
+}
+let maImportRows = [];
+async function maImportStammliste(input) {
+  const files = Array.from(input.files || []); input.value = ""; if (!files.length) return;
+  await crmLoadMitarbeiter();
+  let rows = [];
+  try { for (const f of files) rows = rows.concat(await maParseStammliste(await f.arrayBuffer())); }
+  catch (e) { toast("PDF konnte nicht gelesen werden: " + e.message, true); return; }
+  // Doppelte (gleiche Person in mehreren Listen) zusammenführen — jüngste Angaben gewinnen
+  const uniq = {}; rows.forEach(r => { const k = maNorm(r.name) + "|" + maNorm(r.vorname); uniq[k] = Object.assign({}, uniq[k] || {}, Object.fromEntries(Object.entries(r).filter(([, v]) => v))); });
+  rows = Object.values(uniq).sort((a, b) => a.name.localeCompare(b.name, "de"));
+  if (!rows.length) { toast("Keine Personen gefunden — ist es eine Personalstammliste mit Spalten Nachname/Vorname/…?", true); return; }
+  const personen = internPersonenAlle();
+  rows.forEach(r => {
+    const vn = maNorm(r.vorname.split(/[\s-]/)[0]), nn = maNorm(r.name);
+    r.email = personen.find(e => { const m = mitarbeiterDaten(e); const ev = maNorm(m.vorname || mitarbeiterVornameAusEmail(e)), en = maNorm(m.name || mitarbeiterNachnameAusEmail(e)); return ev === vn && (!en || en === nn || !mitarbeiterDaten(e).name); })
+      || personen.find(e => maNorm(e.split("@")[0]) === vn + nn || maNorm(e.split("@")[0]) === vn) || "";
+    r.neu = !r.email; if (r.neu) r.email = vn + "@apriko.com";
+    r.aktiv = !r.austritt;
+  });
+  maImportRows = rows;
+  modalBreit && modalBreit();
+  showModal("Personalstammliste importieren — " + rows.length + " Personen", `
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px">Zuordnung zu bestehenden Benutzern über Vorname/Name; neue Personen bekommen eine vorgeschlagene E-Mail (bitte prüfen). Lohnangaben werden nicht übernommen. Ausgetretene sind standardmässig abgewählt.</div>
+    <table class="table" style="font-size:12px"><thead><tr><th></th><th>Nachname</th><th>Vorname</th><th>Geburtstag</th><th>Eintritt</th><th>Austritt</th><th>Abteilung</th><th>Benutzer / E-Mail</th></tr></thead><tbody>
+    ${rows.map((r, i) => `<tr><td><input type="checkbox" class="ma-imp-cb" data-i="${i}" ${r.aktiv ? "checked" : ""} style="width:auto"></td><td><strong>${escape(r.name)}</strong></td><td>${escape(r.vorname)}</td><td>${escape(datumCH(r.geburtstag) || "—")}</td><td>${escape(datumCH(r.eintritt) || "—")}</td><td>${r.austritt ? `<span style="color:var(--warn)">${escape(datumCH(r.austritt))}</span>` : "—"}</td><td style="color:var(--text-dim)">${escape(r.abteilung)}</td>
+      <td><input class="ma-imp-email" data-i="${i}" value="${escape(r.email)}" style="width:230px;padding:3px 6px;font-size:12px;${r.neu ? "border-color:var(--warn)" : ""}"> ${r.neu ? `<span style="color:var(--warn);font-size:11px">neu</span>` : `<span style="color:var(--accent);font-size:11px">zugeordnet</span>`}</td></tr>`).join("")}
+    </tbody></table>`, [
+    `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
+    `<button class="btn btn-primary" onclick="maImportUebernehmen()">Übernehmen</button>`]);
+}
+async function maImportUebernehmen() {
+  await crmLoadMitarbeiter(); let n = 0;
+  document.querySelectorAll(".ma-imp-cb:checked").forEach(cb => {
+    const i = +cb.dataset.i, r = maImportRows[i]; const email = String((document.querySelector(`.ma-imp-email[data-i="${i}"]`) || {}).value || "").trim().toLowerCase();
+    if (!r || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
+    const m = Object.assign({}, crmMitarbeiter[email] || {}, { vorname: r.vorname, name: r.name });
+    if (r.geburtstag) m.geburtstag = r.geburtstag; if (r.eintritt) m.eintritt = r.eintritt; if (r.austritt) m.austritt = r.austritt; else delete m.austritt; if (r.abteilung) m.abteilung = r.abteilung;
+    crmMitarbeiter[email] = m; n++;
+  });
+  try { await crmSaveMitarbeiter(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); return; }
+  closeModal(); render(); toast(n + " Mitarbeitende übernommen.");
+}
 function mitarbeiterTabelleHtml() {
   const p = internPersonenAlle();
-  return `<div style="margin-bottom:22px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div style="font-weight:600">Mitarbeitende</div><span style="font-size:11px;color:var(--text-faint)">Name, Geburtstag und Eintritt — werden bei den Kunden unter «Interne Ansprechpersonen» angezeigt</span></div>
-    ${p.length ? `<table class="table"><thead><tr><th>Name</th><th>E-Mail</th><th>Geburtstag</th><th>Bei Apriko seit</th><th style="width:90px;text-align:right"></th></tr></thead><tbody>${p.map(e => { const m = mitarbeiterDaten(e); return `<tr><td style="font-weight:500">${escape(mitarbeiterName(e))}</td><td style="color:var(--text-dim)">${escape(e)}</td><td>${escape(datumCH(m.geburtstag) || "—")}</td><td>${escape(datumCH(m.eintritt) || "—")}</td><td style="text-align:right"><button class="btn btn-sm" onclick="mitarbeiterBearbeiten(${tkJs(e)}, null)">Bearbeiten</button></td></tr>`; }).join("")}</tbody></table>` : `<div class="empty">Keine Benutzer.</div>`}</div>`;
+  return `<div style="margin-bottom:22px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div style="font-weight:600">Mitarbeitende</div><span style="font-size:11px;color:var(--text-faint)">Name, Geburtstag und Eintritt — werden bei den Kunden unter «Interne Ansprechpersonen» angezeigt</span>
+    <label class="btn btn-sm" style="margin-left:auto;cursor:pointer" title="Personalstammliste (PDF) einlesen: fehlende Personen anlegen, Nachname/Geburtstag/Eintritt ergänzen — Lohnspalten werden ignoriert">⇧ Personalstammliste (PDF) importieren<input type="file" accept=".pdf,application/pdf" multiple hidden onchange="maImportStammliste(this)"></label></div>
+    ${p.length ? `<table class="table"><thead><tr><th>Name</th><th>E-Mail</th><th>Geburtstag</th><th>Bei Apriko seit</th><th>Abteilung</th><th style="width:90px;text-align:right"></th></tr></thead><tbody>${p.map(e => { const m = mitarbeiterDaten(e); return `<tr${m.austritt ? ' style="opacity:.55"' : ""}><td style="font-weight:500">${escape(mitarbeiterName(e))}${m.austritt ? ` <span style="color:var(--warn);font-size:11px">ausgetreten ${escape(datumCH(m.austritt))}</span>` : ""}</td><td style="color:var(--text-dim)">${escape(e)}</td><td>${escape(datumCH(m.geburtstag) || "—")}</td><td>${escape(datumCH(m.eintritt) || "—")}</td><td style="color:var(--text-dim)">${escape(m.abteilung || "—")}</td><td style="text-align:right"><button class="btn btn-sm" onclick="mitarbeiterBearbeiten(${tkJs(e)}, null)">Bearbeiten</button></td></tr>`; }).join("")}</tbody></table>` : `<div class="empty">Keine Benutzer.</div>`}</div>`;
 }
 function kundenInternHtml(c) {
   const personen = internPersonen(c).sort((a, b) => mitarbeiterName(a).localeCompare(mitarbeiterName(b), "de"));
