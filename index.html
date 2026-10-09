@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.420.0"></script>
-<script src="apriko-api.js?v=1.420.0"></script>
-<script src="lohncheck.js?v=1.420.0"></script>
-<script src="personalbudget.js?v=1.420.0"></script>
-<script src="jahresbudget.js?v=1.420.0"></script>
-<script src="budgetpositionen.js?v=1.420.0"></script>
-<script src="lohnchecklistetemp.js?v=1.420.0"></script>
-<script src="apriko-endpunkte.js?v=1.420.0"></script>
+<script src="apriko-filters.js?v=1.423.0"></script>
+<script src="apriko-api.js?v=1.423.0"></script>
+<script src="lohncheck.js?v=1.423.0"></script>
+<script src="personalbudget.js?v=1.423.0"></script>
+<script src="jahresbudget.js?v=1.423.0"></script>
+<script src="budgetpositionen.js?v=1.423.0"></script>
+<script src="lohnchecklistetemp.js?v=1.423.0"></script>
+<script src="apriko-endpunkte.js?v=1.423.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1024,7 +1024,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.420.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.423.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1087,7 +1087,8 @@
       <div class="rp-card">
         <div class="rp-card-head"><div class="rp-step">1</div><h3>Rapporte hochladen</h3>
           <div class="rp-sub">Foto, Scan oder PDF</div>
-          <button type="button" class="rp-btn" style="margin-left:12px" onclick="rpApiShowRoster()" title="Zeigt die im Hintergrund geladene Einsatzliste (Mitarbeitende, Kunden, Einsätze der letzten 2 Monate)">📋 Einsatzliste ansehen</button></div>
+          <button type="button" class="rp-btn" style="margin-left:12px" onclick="rpApiShowRoster()" title="Zeigt die im Hintergrund geladene Einsatzliste (Mitarbeitende, Kunden, Einsätze der letzten 2 Monate)">📋 Einsatzliste ansehen</button>
+          <button type="button" class="rp-btn rp-btn-ghost" style="margin-left:6px" onclick="rpEingangPruefen(false)" title="Schaut im SharePoint-Ordner «Rapporte-Eingang» (CRM-Bibliothek) nach neuen Rapport-Dateien">📂 SharePoint-Eingang prüfen</button></div>
         <div class="rp-card-body">
           <div class="rp-drop" id="rpDrop" tabindex="0" role="button" aria-label="Dateien auswählen">
             <strong>Dateien hierhin ziehen</strong>
@@ -1561,7 +1562,7 @@ const VIEW_TITLES = {
 
 /* Views die IMMER für alle eingeloggten User zugänglich sind,
    unabhängig von AllowedViews im UserProfile. */
-const PUBLIC_VIEWS = ["einsatzdash"];
+const PUBLIC_VIEWS = [];  // keine öffentlichen Ansichten mehr — alles über Gruppen/Profile (09.10.2026)
 /* currentUser wird nach dem Login gesetzt:
    { email, isSuperAdmin, role: "Admin"|"User", allowedViews: string[] } */
 let currentUser = null;
@@ -1605,6 +1606,21 @@ async function bgZuweisen(email, gruppeId) {
   await parameterLaden(false); const b = bgParam(); const key = String(email || "").toLowerCase();
   if (gruppeId) b.zuweisung[key] = gruppeId; else delete b.zuweisung[key];
   await bgSpeichern(); render();
+}
+/* ---------- Vorschau «Ansicht als Gruppe» (nur für Admins, pro Browser-Tab; für Demos) ----------
+   Der echte Benutzer bleibt Admin — nur Menü und Zugriff werden auf die gewählte Gruppe reduziert. */
+function ansichtAlsId() { try { return sessionStorage.getItem("crm-ansicht-als") || ""; } catch (e) { return ""; } }
+function ansichtAlsSetzen(id) { try { if (id) sessionStorage.setItem("crm-ansicht-als", id); else sessionStorage.removeItem("crm-ansicht-als"); } catch (e) {} location.reload(); }
+function ansichtAlsAnwenden() {
+  const id = ansichtAlsId(); if (!id || !currentUser || !isAdmin()) return;
+  const b = bgParam(); const g = b.gruppen[id]; if (!g) { ansichtAlsSetzen(""); return; }
+  currentUser.__echt = Object.assign({}, currentUser);
+  currentUser.isSuperAdmin = false; currentUser.role = g.admin ? "Admin" : "User"; currentUser.gruppe = g.name;
+  currentUser.allowedViews = (g.views || []).slice(); if (g.admin && !currentUser.allowedViews.includes("profiles")) currentUser.allowedViews.push("profiles");
+  const bar = document.createElement("div"); bar.id = "ansicht-als-bar";
+  bar.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:9999;background:#b26a00;color:#fff;font-size:12px;padding:5px 14px;display:flex;align-items:center;gap:12px;box-shadow:0 1px 4px rgba(0,0,0,.3)";
+  bar.innerHTML = `👁 Vorschau als Benutzergruppe <b>${escape(g.name)}</b> — so sieht ein Benutzer dieser Gruppe das CRM. <button onclick="ansichtAlsSetzen('')" style="margin-left:auto;background:#fff;color:#b26a00;border:0;border-radius:4px;padding:3px 10px;font-weight:600;cursor:pointer">Zurück zur eigenen Ansicht</button>`;
+  document.body.appendChild(bar); document.body.style.paddingTop = "28px";
 }
 async function bgGruppeAnlegen() {
   const name = prompt("Name der neuen Benutzergruppe:"); if (!name) return;
@@ -1916,6 +1932,7 @@ async function startApp() {
     try { await parameterLaden(false); } catch (e) { console.warn("Parameter nicht geladen:", e.message); }
     // currentUser anhand E-Mail auflösen
     currentUser = resolveCurrentUser(account.username);
+    ansichtAlsAnwenden();
 
     if (!currentUser) {
       // Kein Zugriff → Access-Denied-Screen und Ende
@@ -2029,6 +2046,7 @@ function bindNav() {
       b.classList.add("active");
       currentView = b.dataset.view;
       render();
+      if (currentView === "rapport" && window.rpEingangPruefen) setTimeout(function(){ window.rpEingangPruefen(true); }, 300);
     };
   });
 }
@@ -14213,6 +14231,9 @@ function renderProfiles(el) {
         Hier verwaltest du, wer auf welche Bereiche des CRMs zugreifen darf.
         <b style="color:var(--text)">${escape(SUPER_ADMIN_EMAIL)}</b> hat unabhängig von diesen Einstellungen immer vollen Zugriff (Super-Admin).
       </div>
+      <div style="display:flex;align-items:center;gap:10px;margin:-8px 0 20px;font-size:12px;color:var(--text-dim)">👁 Ansicht testen als Benutzergruppe:
+        <select onchange="ansichtAlsSetzen(this.value)" style="padding:4px 8px;font-size:12px"><option value="">— eigene Ansicht —</option>${Object.entries(bgParam().gruppen).map(([id, g]) => `<option value="${escape(id)}"${ansichtAlsId() === id ? " selected" : ""}>${escape(g.name)}</option>`).join("")}</select>
+        <span style="color:var(--text-faint)">gilt nur für diesen Browser-Tab, Seite wird neu geladen — ideal zum Vorführen</span></div>
 
       ${(() => { const b = bgParam(); const grp = profileViewGroups(); const ids = Object.keys(b.gruppen);
         return `<div style="margin-bottom:22px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div style="font-weight:600">Benutzergruppen</div><span style="font-size:11px;color:var(--text-faint)">Bereiche pro Gruppe festlegen, dann unten jedem Benutzer eine Gruppe zuweisen. Individuelle Freigaben im Profil kommen zusätzlich dazu.</span><button class="btn btn-sm" style="margin-left:auto" onclick="bgGruppeAnlegen()">+ Gruppe</button></div>
@@ -17229,11 +17250,89 @@ function rpStapelLaden(i){
 function rpStapelErledigt(){
   if(rpStapelAktiv < 0 || !rpStapel[rpStapelAktiv]) return;
   rpStapel[rpStapelAktiv].status = 'erledigt'; rpStapelRender();
+  rpEingangAbschliessen(rpStapel[rpStapelAktiv]);
   var next = rpStapel.findIndex(function(x){ return x.status === 'offen'; });
   if(next >= 0) toast && toast('Rapport exportiert — nächster im Stapel: «' + rpStapel[next].name + '» (oben «Laden»).');
   else toast && toast('Alle Rapporte im Stapel erledigt.');
 }
 function rpStapelVerwerfen(){ if(rpStapel.length && !confirm('Stapel verwerfen?')) return; rpStapel = []; rpStapelAktiv = -1; rpStapelQuelle = null; rpStapelRender(); }
+/* ---- SharePoint-Eingang: Ordner «Rapporte-Eingang» in der CRM-Bibliothek (neben CRM-Budgetdaten).
+   Dateien werden NIE gelöscht — erledigte Rapporte wandern in den Unterordner «erledigt». ---- */
+var RP_EINGANG_DIR = 'Rapporte-Eingang', RP_EINGANG_ERLEDIGT = 'erledigt';
+var rpEingang = { dateien: [], geladen: {}, erledigtId: null, laeuft: false };
+async function rpEingangOrdner(){
+  try { var e = await graph('/sites/' + siteId + '/drive/root:/' + RP_EINGANG_DIR + '/' + RP_EINGANG_ERLEDIGT); if(e && e.id) return e.id; } catch(x){}
+  try { await graph('/sites/' + siteId + '/drive/root:/' + RP_EINGANG_DIR); } catch(x){ await graph('/sites/' + siteId + '/drive/root/children', { method: 'POST', body: JSON.stringify({ name: RP_EINGANG_DIR, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }) }); }
+  var e2 = await graph('/sites/' + siteId + '/drive/root:/' + RP_EINGANG_DIR + ':/children', { method: 'POST', body: JSON.stringify({ name: RP_EINGANG_ERLEDIGT, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }) });
+  return e2 && e2.id;
+}
+function rpEingangBox(){
+  var box = $('rpEingangBox');
+  if(!box){ box = document.createElement('div'); box.id = 'rpEingangBox'; box.hidden = true; var st = $('rpStapelBox'), drop = $('rpDrop'); var ref = st || drop; if(ref && ref.parentNode) ref.parentNode.insertBefore(box, ref); else return null; }
+  return box;
+}
+async function rpEingangPruefen(still){
+  if(rpEingang.laeuft) return; var box = rpEingangBox(); if(!box) return;
+  if(!siteId){ if(!still) toast && toast('SharePoint ist nicht verbunden.', true); return; }
+  rpEingang.laeuft = true;
+  try {
+    rpEingang.erledigtId = await rpEingangOrdner();
+    var r = await graph('/sites/' + siteId + '/drive/root:/' + RP_EINGANG_DIR + ':/children?$top=200&$select=id,name,size,lastModifiedDateTime,file,folder');
+    rpEingang.dateien = ((r && r.value) || []).filter(function(f){ return f.file && /\.(pdf|jpe?g|png)$/i.test(f.name); })
+      .sort(function(a, b){ return String(a.lastModifiedDateTime || '').localeCompare(String(b.lastModifiedDateTime || '')); });
+  } catch(e){ rpEingang.laeuft = false; if(!still) toast && toast('SharePoint-Eingang: ' + e.message, true); return; }
+  rpEingang.laeuft = false;
+  rpEingangRender();
+  var neu = rpEingang.dateien.filter(function(f){ return !rpEingang.geladen[f.id]; }).length;
+  if(!still) toast && toast(neu ? neu + ' neue Rapport-Datei(en) im SharePoint-Eingang.' : 'Keine neuen Rapporte im SharePoint-Eingang.');
+}
+function rpEingangRender(){
+  var box = rpEingangBox(); if(!box) return;
+  var d = rpEingang.dateien; var neu = d.filter(function(f){ return !rpEingang.geladen[f.id]; });
+  if(!d.length){ box.hidden = true; box.innerHTML = ''; return; }
+  box.hidden = false;
+  box.innerHTML = '<div style="border:1px solid var(--rp-line);border-radius:6px;padding:10px 12px;margin-bottom:12px;background:var(--rp-white)">' +
+    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><b>📂 SharePoint-Eingang: ' + neu.length + ' neue Rapport-Datei(en)</b>' +
+    '<span style="font-size:12px;color:var(--rp-grey)">Ordner «' + esc(RP_EINGANG_DIR) + '» · erledigte wandern nach «' + esc(RP_EINGANG_ERLEDIGT) + '»</span>' +
+    (neu.length ? '<button type="button" class="rp-btn rp-btn-dark rp-btn-sm" style="margin-left:auto" onclick="rpEingangLaden()">▶ Alle in den Stapel</button>' : '<span style="margin-left:auto"></span>') +
+    '<button type="button" class="rp-btn rp-btn-ghost rp-btn-sm" onclick="rpEingangPruefen(false)">↻ Aktualisieren</button></div>' +
+    '<div style="display:flex;flex-direction:column;gap:3px;font-size:12px">' + d.map(function(f){
+      var ok = rpEingang.geladen[f.id];
+      return '<div style="display:flex;align-items:center;gap:10px"><span style="color:' + (ok ? '#2e7d32' : 'inherit') + '">' + (ok ? '✓ ' : '○ ') + esc(f.name) + '</span><span style="color:var(--rp-grey)">' + Math.round((f.size || 0) / 1024) + ' KB · ' + esc(String(f.lastModifiedDateTime || '').slice(0, 10).split('-').reverse().join('.')) + '</span>' +
+        (ok ? '' : '<button type="button" class="rp-btn-sm" onclick="rpEingangLaden(' + JSON.stringify(f.id).replace(/"/g, '&quot;') + ')">→ Stapel</button>') + '</div>';
+    }).join('') + '</div></div>';
+}
+async function rpEingangLaden(nurId){
+  var liste = rpEingang.dateien.filter(function(f){ return !rpEingang.geladen[f.id] && (!nurId || f.id === nurId); });
+  if(!liste.length) return;
+  var token = await getToken(); var neu = [];
+  for(var i = 0; i < liste.length; i++){
+    var f = liste[i];
+    try {
+      var res = await fetch('https://graph.microsoft.com/v1.0/sites/' + siteId + '/drive/items/' + f.id + '/content', { headers: { Authorization: 'Bearer ' + token } });
+      if(!res.ok) throw new Error('Drive ' + res.status);
+      var blob = await res.blob(); var isPdf = /\.pdf$/i.test(f.name);
+      var file = new File([blob], f.name, { type: isPdf ? 'application/pdf' : (blob.type || 'image/jpeg') });
+      var teile = isPdf ? await rpStapelAufteilen(file, 1) : [{ name: f.name, file: file, seiten: [1], status: 'offen' }];
+      teile.forEach(function(t){ t.sp = { id: f.id, name: f.name }; });
+      neu = neu.concat(teile); rpEingang.geladen[f.id] = true;
+    } catch(e){ toast && toast('«' + f.name + '» konnte nicht geladen werden: ' + e.message, true); }
+  }
+  if(!neu.length) return;
+  if(rpStapelQuelle) rpStapelQuelle = null;
+  rpStapel = rpStapel.concat(neu); rpStapelRender(); rpEingangRender();
+  toast && toast(neu.length + ' Rapport(e) aus dem SharePoint-Eingang im Stapel — den ersten mit «Laden» öffnen.');
+}
+/* Wenn alle Rapporte einer SharePoint-Datei erledigt sind → Datei nach «erledigt» verschieben (kein Löschen) */
+async function rpEingangAbschliessen(eintrag){
+  if(!eintrag || !eintrag.sp || !rpEingang.erledigtId) return;
+  var offen = rpStapel.some(function(x){ return x.sp && x.sp.id === eintrag.sp.id && x.status !== 'erledigt'; }); if(offen) return;
+  try {
+    await graph('/sites/' + siteId + '/drive/items/' + eintrag.sp.id, { method: 'PATCH', body: JSON.stringify({ parentReference: { id: rpEingang.erledigtId }, '@microsoft.graph.conflictBehavior': 'rename' }) });
+    rpEingang.dateien = rpEingang.dateien.filter(function(f){ return f.id !== eintrag.sp.id; }); rpEingangRender();
+    toast && toast('«' + eintrag.sp.name + '» in SharePoint nach «' + RP_EINGANG_ERLEDIGT + '» verschoben.');
+  } catch(e){ toast && toast('Verschieben nach «erledigt» fehlgeschlagen: ' + e.message, true); }
+}
 function rpStapelRender(){
   var box = $('rpStapelBox');
   if(!box){ box = document.createElement('div'); box.id = 'rpStapelBox'; var drop = $('rpDrop'); if(drop && drop.parentNode) drop.parentNode.insertBefore(box, drop); else return; }
@@ -17243,14 +17342,14 @@ function rpStapelRender(){
   box.hidden = false;
   box.innerHTML = '<div style="border:1px solid var(--rp-line);border-radius:6px;padding:10px 12px;margin-bottom:12px;background:var(--rp-white)">' +
     '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><b>📚 Stapel: ' + rpStapel.length + ' Rapporte</b>' +
-    '<span style="font-size:12px;color:var(--rp-grey)">' + fertig + ' erledigt · ' + offen + ' offen' + (rpStapelQuelle ? ' · aus ' + esc(rpStapelQuelle.name) : '') + '</span>' +
+    '<span style="font-size:12px;color:var(--rp-grey)">' + fertig + ' erledigt · ' + offen + ' offen' + (rpStapelQuelle ? ' · aus ' + esc(rpStapelQuelle.name) : rpStapel.some(function(x){ return x.sp; }) ? ' · aus SharePoint-Eingang' : '') + '</span>' +
     '<label style="font-size:12px;color:var(--rp-grey);margin-left:auto">Seiten pro Rapport <select onchange="rpStapelNeuGruppieren(+this.value)" style="padding:2px 4px;font-size:12px">' + [1,2,3,4].map(function(n){ return '<option value="' + n + '"' + ((rpStapel[0] && rpStapel[0].seiten.length === n) ? ' selected' : '') + '>' + n + '</option>'; }).join('') + '</select></label>' +
     (next >= 0 ? '<button type="button" class="rp-btn rp-btn-dark rp-btn-sm" onclick="rpStapelLaden(' + next + ')">▶ Nächsten laden (' + esc(rpStapel[next].name.replace(/^.*– /, '')) + ')</button>' : '') +
     '<button type="button" class="rp-btn rp-btn-ghost rp-btn-sm" onclick="rpStapelVerwerfen()">✕ Stapel verwerfen</button></div>' +
     '<div style="display:flex;flex-wrap:wrap;gap:6px">' + rpStapel.map(function(x, i){
       var farbe = x.status === 'erledigt' ? '#2e7d32' : x.status === 'in Arbeit' ? '#b26a00' : 'var(--rp-grey)';
       var ico = x.status === 'erledigt' ? '✓' : x.status === 'in Arbeit' ? '▶' : '○';
-      return '<button type="button" onclick="rpStapelLaden(' + i + ')" title="' + esc(x.name) + '" style="font-size:12px;padding:3px 8px;border:1px solid ' + (x.status === 'in Arbeit' ? '#b26a00' : 'var(--rp-line)') + ';border-radius:4px;background:transparent;color:' + farbe + ';cursor:pointer">' + ico + ' ' + (x.seiten.length === 1 ? 'S. ' + x.seiten[0] : 'S. ' + x.seiten[0] + '-' + x.seiten[x.seiten.length - 1]) + '</button>';
+      return '<button type="button" onclick="rpStapelLaden(' + i + ')" title="' + esc(x.name) + '" style="font-size:12px;padding:3px 8px;border:1px solid ' + (x.status === 'in Arbeit' ? '#b26a00' : 'var(--rp-line)') + ';border-radius:4px;background:transparent;color:' + farbe + ';cursor:pointer">' + ico + ' ' + (x.sp ? esc(x.sp.name.replace(/\.(pdf|jpe?g|png)$/i, '')).slice(0, 22) + ' ' : '') + (x.seiten.length === 1 ? 'S. ' + x.seiten[0] : 'S. ' + x.seiten[0] + '-' + x.seiten[x.seiten.length - 1]) + '</button>';
     }).join('') + '</div></div>';
 }
 async function addFiles(list){
@@ -19675,7 +19774,7 @@ window.rpApiSucheAdditionalComp = rpApiSucheAdditionalComp;
 window.rpTestEinsatzRender = rpTestEinsatzRender; window.rpTestEinsatzUebernehmen = rpTestEinsatzUebernehmen;
 window.rpTtDiagnose = rpTtDiagnose; window.rpTtDirekt = rpTtDirekt; window.rpTtBelegAnhaengen = rpTtBelegAnhaengen; window.rpTtEintraegeAnzeigen = rpTtEintraegeAnzeigen; window.rpTtManuellLaden = rpTtManuellLaden;
 window.rpTtLaden = rpTtLaden; window.rpTtItemLaden = rpTtItemLaden; window.rpTtSenden = rpTtSenden; window.rpTtMap = rpTtMap;
-window.rpStapelLaden = rpStapelLaden; window.rpStapelNeuGruppieren = rpStapelNeuGruppieren; window.rpStapelVerwerfen = rpStapelVerwerfen;
+window.rpStapelLaden = rpStapelLaden; window.rpEingangPruefen = rpEingangPruefen; window.rpEingangLaden = rpEingangLaden; window.rpStapelNeuGruppieren = rpStapelNeuGruppieren; window.rpStapelVerwerfen = rpStapelVerwerfen;
 
 })();
 
