@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.446.0"></script>
-<script src="apriko-api.js?v=1.446.0"></script>
-<script src="lohncheck.js?v=1.446.0"></script>
-<script src="personalbudget.js?v=1.446.0"></script>
-<script src="jahresbudget.js?v=1.446.0"></script>
-<script src="budgetpositionen.js?v=1.446.0"></script>
-<script src="lohnchecklistetemp.js?v=1.446.0"></script>
-<script src="apriko-endpunkte.js?v=1.446.0"></script>
+<script src="apriko-filters.js?v=1.447.0"></script>
+<script src="apriko-api.js?v=1.447.0"></script>
+<script src="lohncheck.js?v=1.447.0"></script>
+<script src="personalbudget.js?v=1.447.0"></script>
+<script src="jahresbudget.js?v=1.447.0"></script>
+<script src="budgetpositionen.js?v=1.447.0"></script>
+<script src="lohnchecklistetemp.js?v=1.447.0"></script>
+<script src="apriko-endpunkte.js?v=1.447.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1027,7 +1027,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.446.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.447.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1999,8 +1999,8 @@ async function startApp() {
     applyPermissionsToNav();
     bindNav();
 
-    // Persönliche Startseite (pro Browser, Einstellung unter «Meine Aufgaben»)
-    try { const st = localStorage.getItem("crm-startseite"); if (st && ALL_VIEWS.includes(st) && canAccessView(st)) { currentView = st; document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x.dataset.view === st)); } } catch (e) {}
+    // Startseite: standardmässig «Meine Aufgaben» für alle; persönlich änderbar (pro Browser, Knopf auf der jeweiligen Seite)
+    if (!DEMO_ANON) { let st = "meinetasks"; try { st = localStorage.getItem("crm-startseite") || st; } catch (e) {} if (ALL_VIEWS.includes(st) && canAccessView(st)) { currentView = st; document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x.dataset.view === st)); } }
     // Falls die Standard-Ansicht (dashboard) für diesen User gesperrt ist,
     // auf die erste erlaubte View wechseln
     if (!canAccessView(currentView)) {
@@ -14660,7 +14660,7 @@ function renderMeineTasks(el) {
       <button class="${mtFilter.scope === "vonmir" ? "active" : ""}" onclick="mtFilter.scope='vonmir';render()" title="Aufgaben, die ich anderen zugewiesen habe">Von mir zugewiesen</button>
       <button class="${mtFilter.scope === "all" ? "active" : ""}" onclick="mtFilter.scope='all';render()">Alle</button>
     </div>
-    <button class="btn btn-sm ${start === "meinetasks" ? "btn-primary" : ""}" onclick="try{localStorage.setItem('crm-startseite', ${start === "meinetasks" ? "'dashboard'" : "'meinetasks'"})}catch(e){};render()" title="Diese Seite nach dem Login als Erstes anzeigen (Einstellung pro Browser)">${start === "meinetasks" ? "⭐ Startseite" : "☆ Als Startseite"}</button>
+    <button class="btn btn-sm ${(start || "meinetasks") === "meinetasks" ? "btn-primary" : ""}" onclick="try{localStorage.setItem('crm-startseite', ${(start || "meinetasks") === "meinetasks" ? "'dashboard'" : "'meinetasks'"})}catch(e){};render()" title="${(start || "meinetasks") === "meinetasks" ? "Ist deine Startseite — Klick wechselt auf das Dashboard als Startseite (nur dieser Browser)" : "Diese Seite wieder als Startseite (nur dieser Browser)"}">${(start || "meinetasks") === "meinetasks" ? "⭐ Startseite" : "☆ Als Startseite"}</button>
     <button class="btn btn-primary" onclick="mtBearbeiten(null)">+ Neue Aufgabe</button>`;
   if (mtAufgaben === null) { el.innerHTML = `<div class="empty">Lade Aufgaben …</div>`; mtLaden().then(() => { if (currentView === "meinetasks") render(); }); return; }
   const alle = mtAufgaben.slice();
