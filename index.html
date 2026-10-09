@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.463.0"></script>
-<script src="apriko-api.js?v=1.463.0"></script>
-<script src="lohncheck.js?v=1.463.0"></script>
-<script src="personalbudget.js?v=1.463.0"></script>
-<script src="jahresbudget.js?v=1.463.0"></script>
-<script src="budgetpositionen.js?v=1.463.0"></script>
-<script src="lohnchecklistetemp.js?v=1.463.0"></script>
-<script src="apriko-endpunkte.js?v=1.463.0"></script>
+<script src="apriko-filters.js?v=1.464.0"></script>
+<script src="apriko-api.js?v=1.464.0"></script>
+<script src="lohncheck.js?v=1.464.0"></script>
+<script src="personalbudget.js?v=1.464.0"></script>
+<script src="jahresbudget.js?v=1.464.0"></script>
+<script src="budgetpositionen.js?v=1.464.0"></script>
+<script src="lohnchecklistetemp.js?v=1.464.0"></script>
+<script src="apriko-endpunkte.js?v=1.464.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1027,7 +1027,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.463.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.464.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -3445,7 +3445,9 @@ function fbClassify(rows) {
 }
 /* Sucht eine Zeile mit 12 aufsteigenden Excel-Datumswerten (Monatsenden). */
 function fbFindMonthCols(rows) {
-  for (const r of rows.slice(0, 12)) {
+  const MON = ["jan", "feb", "m[aä]r", "apr", "mai", "jun", "jul", "aug", "sep", "okt", "nov", "dez"];
+  for (const r of rows.slice(0, 25)) {
+    // 1) Excel-Datumswerte (Monatsenden/-anfänge)
     const cols = [];
     r.forEach((v, i) => {
       const n = parseFloat(v);
@@ -3455,6 +3457,15 @@ function fbFindMonthCols(rows) {
       const first12 = cols.slice(0, 12);
       if (first12.every((c, j) => j === 0 || c.n > first12[j-1].n)) return first12.map(c => c.i);
     }
+    // 2) Monatsnamen als Text («Jan», «Januar», «Jan 26», «Jan-26», «01.2026», «2026-01») in aufsteigender Reihenfolge
+    const txt = [];
+    r.forEach((v, i) => {
+      const t = String(v ?? "").trim().toLowerCase(); if (!t) return;
+      let m = MON.findIndex(x => new RegExp("^" + x + "\\w*\\.?(\\s*[-/ ]?\\s*(20)?\\d{2})?$", "i").test(t));
+      if (m < 0) { const z = /^(0?[1-9]|1[0-2])[./-](20)?\d{2}$/.exec(t) || /^(20)?\d{2}[./-](0?[1-9]|1[0-2])$/.exec(t); if (z) m = parseInt(z[1] && z[1].length <= 2 && !/^20/.test(t) ? z[1] : (t.split(/[./-]/)[1])) - 1; }
+      if (m >= 0) txt.push({ i, m });
+    });
+    if (txt.length >= 12) { const seq = txt.slice(0, 12); if (seq.every((c, j) => c.m === j)) return seq.map(c => c.i); }
   }
   return null;
 }
@@ -3865,8 +3876,10 @@ async function fbMultiSelect(input) {
         const n = (sh.rows || []).filter(r => /^[3-8]\d{3}$/.test(String(r[0] || "").trim())).length;
         if (n > erMax) { erMax = n; erSheet = sh; }
       }
-      const rows = (erMax >= 5 && erSheet) ? erSheet.rows : (sheets.length ? sheets[0].rows : []);
+      let rows = (erMax >= 5 && erSheet) ? erSheet.rows : (sheets.length ? sheets[0].rows : []);
       let art = fbLooksLikeBuchungen(sheets) ? "buchungen" : fbClassify(rows);
+      // Konzern-Budget kann auf einem anderen Blatt liegen (Deckblatt davor): alle Blätter nach der Monatszeile absuchen
+      if (art === "unbekannt" || (art === "er" && /budget/i.test(f.name))) { const bs = sheets.find(sh => fbFindMonthCols(sh.rows || [])); if (bs) { rows = bs.rows; art = fbClassify(rows); } }
       const entry = { name: f.name, art, rows, sheets };
       if (art === "er" && erSheet && sheets.length > 1) entry.erBlatt = erSheet.name;
       if (art === "buchungen") {
