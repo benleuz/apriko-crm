@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.466.0"></script>
-<script src="apriko-api.js?v=1.466.0"></script>
-<script src="lohncheck.js?v=1.466.0"></script>
-<script src="personalbudget.js?v=1.466.0"></script>
-<script src="jahresbudget.js?v=1.466.0"></script>
-<script src="budgetpositionen.js?v=1.466.0"></script>
-<script src="lohnchecklistetemp.js?v=1.466.0"></script>
-<script src="apriko-endpunkte.js?v=1.466.0"></script>
+<script src="apriko-filters.js?v=1.467.0"></script>
+<script src="apriko-api.js?v=1.467.0"></script>
+<script src="lohncheck.js?v=1.467.0"></script>
+<script src="personalbudget.js?v=1.467.0"></script>
+<script src="jahresbudget.js?v=1.467.0"></script>
+<script src="budgetpositionen.js?v=1.467.0"></script>
+<script src="lohnchecklistetemp.js?v=1.467.0"></script>
+<script src="apriko-endpunkte.js?v=1.467.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1027,7 +1027,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.466.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.467.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -3747,6 +3747,17 @@ async function fbLieferantenExcel(year) {
 }
 /* Jahr einer Buchung aus dem Datum «dd.mm.yy» / «dd.mm.yyyy» (null, wenn nicht lesbar) */
 function fbBuchJahr(b) { const m = /^\s*(\d{1,2})\.(\d{1,2})\.(\d{2,4})/.exec(String((b && b[0]) || "")); if (!m) return null; return m[3].length === 2 ? 2000 + parseInt(m[3], 10) : parseInt(m[3], 10); }
+/* Monatswerte je Budget-Position aus dem Buchungsjournal (Kontenblätter): "Gesellschaft|Konto" der Ist-Zeilen → Buchungen → Summe je Monat.
+   Vorzeichen wie im Journal (Haben − Soll = Erfolgsrechnungs-Sicht). Rückgabe { monate: key→[12], konten: key→Anzahl, letzter: letzter Monat mit Buchung } */
+function fbBuchMonate(year, alleIst, N) {
+  const buch = fbBuchAll(year); const monate = {}, konten = {}; let letzter = 0;
+  (alleIst || []).filter(d => d.z && fbPeriodeMonate(d.p) === N).forEach(d => {
+    const e = buch[(d.g || "") + "|" + d.kt]; if (!e || !(e.buch || []).length) return;
+    monate[d.z] = monate[d.z] || Array(12).fill(0); konten[d.z] = (konten[d.z] || 0) + 1;
+    e.buch.forEach(b => { const m = /^\s*(\d{1,2})\.(\d{1,2})\.(\d{2,4})/.exec(String(b[0] || "")); if (!m) return; const mo = parseInt(m[2], 10) - 1; if (mo < 0 || mo > 11) return; monate[d.z][mo] += parseFloat(b[2]) || 0; if (mo + 1 > letzter) letzter = mo + 1; });
+  });
+  return { monate, konten, letzter };
+}
 function fbBuchAll(year) {
   if (!fbBuchYearCache[year]) {
     if (typeof siteId !== "undefined" && siteId) {
@@ -4460,12 +4471,15 @@ function renderFbAktMonat(el, ctx) {
   const istNowVal = k => ist.filter(d => d.z === k).reduce((s, d) => s + (parseFloat(d.v) || 0), 0) * fkt(k);
   const budBis = (k, n) => srcOf(k).reduce((sum, kk) => sum + (bud[kk] || []).slice(0, n).reduce((s, v) => s + v, 0), 0);
   const budMonat = k => srcOf(k).reduce((sum, kk) => sum + ((bud[kk] || [])[N - 1] || 0), 0);
-  // Ist des Monats: echt (Differenz der YTD-Stände) oder saisonale Schätzung
+  // Ist des Monats: aus Buchungen (exakt), sonst Differenz der YTD-Stände, sonst saisonale Schätzung
+  const bmT = fbBuchMonate(year, fbIstAlle(year), N);
   const istMonatVal = k => {
+    if (bmT.monate[k]) return bmT.monate[k][N - 1] || 0;
     if (hatPrev) return istNowVal(k) - istPrevVal(k);
     const bN = budBis(k, N), bM = budMonat(k);
     return bN ? istNowVal(k) * bM / bN : istNowVal(k) / N;
   };
+  const hatBuch = Object.keys(bmT.monate).length > 0;
   const vNow = vals.tot, vPrev = fbCompute(k => hatPrev ? istPrevVal(k) : istNowVal(k) - istMonatVal(k));
   const bNow = vals.b, bPrev = fbCompute(k => budBis(k, N - 1)), bMon = fbCompute(budMonat), iMon = fbCompute(istMonatVal);
   const MK = FB_MK;
@@ -4481,12 +4495,12 @@ function renderFbAktMonat(el, ctx) {
       const besser = aufwand ? delta < 0 : delta > 0;
       pfeil = besser ? "↗" : "↘"; farbe = besser ? "var(--accent)" : "var(--danger)"; txt = besser ? "verbessert" : "verschlechtert";
     }
-    const tip = `Abw. YTD vor ${MK[N - 1]}: ${fmt(abwYprev)} → nach ${MK[N - 1]}: ${fmt(abwY)} (${txt} um ${fmt(delta)})${hatPrev ? "" : " · Monatswert geschätzt (saisonal)"}`;
+    const tip = `Abw. YTD vor ${MK[N - 1]}: ${fmt(abwYprev)} → nach ${MK[N - 1]}: ${fmt(abwY)} (${txt} um ${fmt(delta)})${bmT.monate[k] ? " · Monatswert aus Buchungen" : hatPrev ? "" : " · Monatswert geschätzt (saisonal)"}`;
     const pct = bNow[k] ? (abwY / Math.abs(bNow[k]) * 100) : null;
     return `<tr>
       <td style="${style}padding-left:${(row.indent || 0) * 14 + 4}px">${escape(row.label)}</td>
       <td style="text-align:right;font-family:var(--font-mono);${style}">${fmt(bMon[k])}</td>
-      <td style="text-align:right;font-family:var(--font-mono);${style}${hatPrev ? "" : "font-style:italic;"}">${fmt(iMon[k])}</td>
+      <td style="text-align:right;font-family:var(--font-mono);${style}${(hatPrev || bmT.monate[k] || row.art !== "d") ? "" : "font-style:italic;"}">${fmt(iMon[k])}</td>
       <td style="text-align:right;font-family:var(--font-mono);${style}color:${fbAbwColor(k, abwM, bMon[k])}">${fmt(abwM)}</td>
       <td style="text-align:right;font-family:var(--font-mono);border-left:2px solid var(--border);${style}">${fmt(bNow[k])}</td>
       <td style="text-align:right;font-family:var(--font-mono);${style}">${fmt(vNow[k])}</td>
@@ -4654,15 +4668,7 @@ function renderFbMonate(el, ctx) {
   const perioden = [...new Set(alleIst.map(d => fbPeriodeMonate(d.p)))];
   const cumKey = (k, n) => perioden.includes(n) ? alleIst.filter(d => d.z === k && fbPeriodeMonate(d.p) === n).reduce((s, d) => s + (parseFloat(d.v) || 0), 0) * (FB_AUFWAND.has(k) ? -1 : 1) : null;
   // Monatswerte bevorzugt aus den Buchungen (Journal mit Datum → exakt je Monat); YTD-Differenz nur als Rückfall
-  const buch = fbBuchAll(year);                       // "Gesellschaft|Konto" → { bez, buch: [[datum, text, betrag], …] }
-  const buchMonate = {};                              // key → [12] Summen aus Buchungen (P&L-Vorzeichen: Haben − Soll)
-  const buchKonten = {};                              // key → Anzahl Konten mit Buchungen
-  let buchLetzterMonat = 0;
-  alleIst.filter(d => d.z && fbPeriodeMonate(d.p) === N).forEach(d => {
-    const e = buch[(d.g || "") + "|" + d.kt]; if (!e || !(e.buch || []).length) return;
-    buchMonate[d.z] = buchMonate[d.z] || Array(12).fill(0); buchKonten[d.z] = (buchKonten[d.z] || 0) + 1;
-    e.buch.forEach(b => { const m = /^\s*(\d{1,2})\.(\d{1,2})\.(\d{2,4})/.exec(String(b[0] || "")); if (!m) return; const mo = parseInt(m[2], 10) - 1; if (mo < 0 || mo > 11) return; buchMonate[d.z][mo] += parseFloat(b[2]) || 0; if (mo + 1 > buchLetzterMonat) buchLetzterMonat = mo + 1; });
-  });
+  const bm = fbBuchMonate(year, alleIst, N); const buchMonate = bm.monate, buchKonten = bm.konten, buchLetzterMonat = bm.letzter;
   const ausBuch = k => !!buchMonate[k];
   const monCache = {};
   const monArr = k => monCache[k] || (monCache[k] = ausBuch(k) ? buchMonate[k] : fbMonatswerte(N, n => cumKey(k, n), profil(k)));
