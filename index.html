@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.456.0"></script>
-<script src="apriko-api.js?v=1.456.0"></script>
-<script src="lohncheck.js?v=1.456.0"></script>
-<script src="personalbudget.js?v=1.456.0"></script>
-<script src="jahresbudget.js?v=1.456.0"></script>
-<script src="budgetpositionen.js?v=1.456.0"></script>
-<script src="lohnchecklistetemp.js?v=1.456.0"></script>
-<script src="apriko-endpunkte.js?v=1.456.0"></script>
+<script src="apriko-filters.js?v=1.460.0"></script>
+<script src="apriko-api.js?v=1.460.0"></script>
+<script src="lohncheck.js?v=1.460.0"></script>
+<script src="personalbudget.js?v=1.460.0"></script>
+<script src="jahresbudget.js?v=1.460.0"></script>
+<script src="budgetpositionen.js?v=1.460.0"></script>
+<script src="lohnchecklistetemp.js?v=1.460.0"></script>
+<script src="apriko-endpunkte.js?v=1.460.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1027,7 +1027,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.456.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.460.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1851,6 +1851,61 @@ async function bootstrap() {
   }
 }
 
+/* =====================================================================
+   Konfliktsicheres Speichern gemeinsamer JSON-Dateien (parameter.json, crm_kunden_flags.json, …)
+   Problem: Mehrere Personen bearbeiten dieselbe Datei; wer mit altem Stand speichert, überschreibt die anderen.
+   Lösung: Beim Laden wird eine BASIS-Kopie gemerkt. Beim Speichern wird die Datei frisch gelesen und nur das,
+   was ICH seit der Basis geändert habe (3-Wege-Vergleich Basis → meine Kopie), auf den frischen Stand übertragen.
+   Zusätzlich ETag-Prüfung (If-Match): hat jemand in der Zwischenzeit geschrieben, wird gemerged und erneut versucht.
+   ===================================================================== */
+const jsonBasis = {};   // pfad → JSON-String der zuletzt geladenen/gespeicherten Fassung
+function jsonBasisMerken(pfad, data) { try { jsonBasis[pfad] = JSON.stringify(data || {}); } catch (e) {} }
+function jsonIstObj(v) { return v && typeof v === "object" && !Array.isArray(v); }
+function jsonMerge3(frisch, basis, meine) {
+  if (!jsonIstObj(meine) || !jsonIstObj(basis) || !jsonIstObj(frisch)) return meine;
+  const out = Object.assign({}, frisch);
+  new Set([...Object.keys(basis), ...Object.keys(meine)]).forEach(k => {
+    const inB = k in basis, inM = k in meine, inF = k in frisch;
+    const gleich = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    if (inB && !inM) { if (!inF || gleich(basis[k], frisch[k])) delete out[k]; return; }          // ich habe gelöscht, niemand sonst hat's verändert
+    if (!inB && inM) { out[k] = inF && jsonIstObj(frisch[k]) && jsonIstObj(meine[k]) ? jsonMerge3(frisch[k], {}, meine[k]) : meine[k]; return; }  // ich habe neu angelegt
+    if (gleich(basis[k], meine[k])) return;                                                      // ich habe nichts geändert → frischer Stand bleibt
+    if (inF && jsonIstObj(basis[k]) && jsonIstObj(meine[k]) && jsonIstObj(frisch[k])) out[k] = jsonMerge3(frisch[k], basis[k], meine[k]);
+    else out[k] = meine[k];                                                                       // Blatt/Array: meine Änderung gewinnt
+  });
+  return out;
+}
+/* Speichert `meine` konfliktsicher nach `pfad` (relativ zur Bibliothek, z.B. "CRM-Budgetdaten/parameter.json").
+   Rückgabe: der tatsächlich gespeicherte (gemergte) Stand — den Aufrufer in seine Variable übernehmen! */
+async function jsonMergeSpeichern(pfad, meine, opts) {
+  const url = `/sites/${siteId}/drive/root:/${pfad}`;
+  const basis = jsonBasis[pfad] ? JSON.parse(jsonBasis[pfad]) : null;
+  let letzterFehler = null;
+  for (let versuch = 0; versuch < 4; versuch++) {
+    let meta = null, frisch = null;
+    try { meta = await graph(url); } catch (e) { meta = null; }
+    if (meta) { try { const d = await graph(url + ":/content", { cache: "no-store" }); frisch = d && typeof d === "object" ? d : null; } catch (e) { frisch = null; } }
+    const ergebnis = (frisch && basis) ? jsonMerge3(frisch, basis, meine) : (frisch && !basis && opts && opts.ohneBasisMergen ? Object.assign({}, frisch, meine) : meine);
+    const headers = meta && meta.eTag ? { "If-Match": meta.eTag } : {};
+    try {
+      await graph(url + ":/content", { method: "PUT", body: JSON.stringify(ergebnis), headers });
+      jsonBasisMerken(pfad, ergebnis);
+      return ergebnis;
+    } catch (e) {
+      letzterFehler = e;
+      if (/412|precondition/i.test(e.message)) { await new Promise(r => setTimeout(r, 300 + Math.random() * 500)); continue; }   // jemand hat dazwischen gespeichert → neu mergen
+      if (!meta && /404|itemNotFound/i.test(e.message)) {
+        // Ordner/Datei existiert noch nicht
+        const ordner = pfad.split("/").slice(0, -1).join("/");
+        if (ordner) { try { await graph(`/sites/${siteId}/drive/root/children`, { method: "POST", body: JSON.stringify({ name: ordner, folder: {}, "@microsoft.graph.conflictBehavior": "replace" }) }); } catch (e2) {} }
+        await graph(url + ":/content", { method: "PUT", body: JSON.stringify(ergebnis) });
+        jsonBasisMerken(pfad, ergebnis); return ergebnis;
+      }
+      throw e;
+    }
+  }
+  throw new Error("Speichern nach 4 Versuchen nicht möglich (gleichzeitige Änderungen): " + (letzterFehler && letzterFehler.message));
+}
 /* ---------- Soft-Delete: Kunden/Firmen/Kontakte werden nie aus SharePoint gelöscht, sondern in crm_geloescht.json markiert.
    Markierte Einträge werden beim Laden ausgefiltert und bleiben in cacheGeloescht für die Wiederherstellung (Admin). ---------- */
 let crmGeloescht = null;            // { customers: { "<id>": { am, von, titel } }, companies: {…}, contacts: {…} }
@@ -1860,10 +1915,11 @@ async function crmLoadGeloescht() {
   if (crmGeloescht !== null) return crmGeloescht;
   try { const d = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_geloescht.json:/content`, { cache: "no-store" }); crmGeloescht = d && typeof d === "object" ? d : {}; }
   catch (e) { crmGeloescht = {}; }
+  jsonBasisMerken(FB_BUCH_DIR + "/crm_geloescht.json", crmGeloescht);
   return crmGeloescht;
 }
 async function crmSaveGeloescht() {
-  await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_geloescht.json:/content`, { method: "PUT", body: JSON.stringify(crmGeloescht || {}) });
+  crmGeloescht = await jsonMergeSpeichern(FB_BUCH_DIR + "/crm_geloescht.json", crmGeloescht || {});
 }
 function geloeschtFiltern(name, items) {
   if (!SOFT_DELETE_LISTS.includes(name)) return items;
@@ -1890,8 +1946,16 @@ function geloeschteHtml() {
 function geloeschteAnzeigen() { modalBreit && modalBreit(); showModal("Gelöschte Einträge", `<div style="font-size:12px;color:var(--text-dim);margin-bottom:10px">Gelöschte Kunden, Firmen und Kontakte bleiben in SharePoint erhalten und sind nur ausgeblendet. Wiederherstellen bringt sie samt allen Verknüpfungen zurück.</div>${geloeschteHtml()}`, [`<button class="btn" onclick="closeModal()">Schliessen</button>`]); }
 async function loadList(name) {
   if (SOFT_DELETE_LISTS.includes(name) && crmGeloescht === null) await crmLoadGeloescht();
-  const data = await graph(`/sites/${siteId}/lists/${listIds[name]}/items?expand=fields&$top=999`);
-  const items = geloeschtFiltern(name, data.value.map(item => ({ id: item.id, ...item.fields })));
+  // Alle Seiten lesen — SharePoint liefert max. 999 pro Antwort, grössere Listen (Aktivitäten, Kontakte) wären sonst stillschweigend abgeschnitten
+  let data = await graph(`/sites/${siteId}/lists/${listIds[name]}/items?expand=fields&$top=999`);
+  let roh = data.value || [];
+  for (let guard = 0; data["@odata.nextLink"] && guard < 50; guard++) {
+    const token = await getToken();
+    const res = await fetch(data["@odata.nextLink"], { headers: { Authorization: "Bearer " + token, Accept: "application/json" } });
+    if (!res.ok) break;
+    data = await res.json(); roh = roh.concat(data.value || []);
+  }
+  const items = geloeschtFiltern(name, roh.map(item => ({ id: item.id, ...item.fields })));
   if (DEMO_ANON && name === "Companies") items.forEach(it => { if (it.Title) it.Title = anonKunde(it.Title); });
   if (DEMO_ANON && name === "Customers") items.forEach(it => {
     if (!it.Title) return;
@@ -2013,6 +2077,7 @@ async function startApp() {
     render();
     crmLoadMitarbeiter().then(() => { if (currentView === "meinetasks") render(); });
     setTimeout(feierHinweisZeigen, 800);
+    mehrbenutzerStart();
   } catch (e) {
     console.error(e);
     document.getElementById("view-content").innerHTML =
@@ -2020,6 +2085,42 @@ async function startApp() {
   }
 }
 
+/* =====================================================================
+   Mehrbenutzer-Betrieb: Daten anderer Benutzer regelmässig nachladen und auf neue CRM-Versionen hinweisen
+   - alle 3 Minuten (nur wenn der Tab sichtbar ist und kein Dialog offen): SharePoint-Listen + Aufgaben still neu laden, Ansicht auffrischen
+   - alle 10 Minuten: prüfen, ob auf GitHub Pages eine neue index.html liegt (ETag) → Hinweisbalken «Neu laden»
+   ===================================================================== */
+let mbEtag = null, mbTimer = null;
+function mehrbenutzerStart() {
+  if (mbTimer) return;
+  fetch(location.pathname, { method: "HEAD", cache: "no-store" }).then(r => { mbEtag = r.headers.get("etag") || r.headers.get("last-modified") || null; }).catch(() => {});
+  mbTimer = setInterval(mehrbenutzerTick, 60000);
+}
+let mbLetzteDaten = Date.now(), mbLetzteVersion = Date.now(), mbLaeuft = false;
+async function mehrbenutzerTick() {
+  if (document.hidden || mbLaeuft || !currentUser) return;
+  const modalOffen = document.getElementById("modal").classList.contains("open");
+  if (Date.now() - mbLetzteDaten > 180000 && !modalOffen) {
+    mbLaeuft = true; mbLetzteDaten = Date.now();
+    try {
+      for (const l of ["Companies", "Contacts", "Deals", "Activities", "Customers", "MonthlyRevenue"]) { if (listIds[l]) await reload(l); }
+      if (mtAufgaben !== null) { try { await mtLaden(true); } catch (e) {} }
+      const tippt = /^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || "");
+      if (!document.getElementById("modal").classList.contains("open") && !tippt && !["rapport", "apipoc", "tickets", "abacus", "lohncheck", "auszpdf"].includes(currentView)) render();
+    } catch (e) { console.warn("Auto-Aktualisierung:", e.message); }
+    mbLaeuft = false;
+  }
+  if (Date.now() - mbLetzteVersion > 600000) {
+    mbLetzteVersion = Date.now();
+    try { const r = await fetch(location.pathname, { method: "HEAD", cache: "no-store" }); const et = r.headers.get("etag") || r.headers.get("last-modified") || null;
+      if (mbEtag && et && et !== mbEtag && !document.getElementById("mb-version-bar")) {
+        const bar = document.createElement("div"); bar.id = "mb-version-bar";
+        bar.style.cssText = "position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:9999;background:var(--accent);color:#111;font-size:13px;font-weight:600;padding:10px 18px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.4);display:flex;gap:14px;align-items:center";
+        bar.innerHTML = `🔄 Eine neue CRM-Version ist verfügbar. <button onclick="location.reload(true)" style="background:#111;color:#fff;border:0;border-radius:5px;padding:5px 12px;font-weight:600;cursor:pointer">Jetzt neu laden</button><span onclick="this.parentNode.remove()" style="cursor:pointer;opacity:.7">✕</span>`;
+        document.body.appendChild(bar);
+      } } catch (e) {}
+  }
+}
 /* Sidebar-Buttons filtern: nur AllowedViews werden angezeigt.
    Profile-Menü nur für Admins sichtbar. */
 function applyPermissionsToNav() {
@@ -8772,6 +8873,7 @@ async function onbDrop(ev, zielId) {
   const i = o.aufgaben.findIndex(x => x.id === id); if (i < 0) return;
   const [a] = o.aufgaben.splice(i, 1);
   let j = o.aufgaben.findIndex(x => x.id === zielId); if (j < 0) { o.aufgaben.splice(i, 0, a); return; }
+  const ziel = o.aufgaben[j]; if (ziel && ziel.phase && a.phase !== ziel.phase) a.phase = ziel.phase;   // in andere Phase gezogen → Phase übernehmen
   if (!oben) j++;
   o.aufgaben.splice(j, 0, a);
   await onbSpeichern(); render();
@@ -8801,6 +8903,19 @@ async function onbNotiz(custId, aufgabeId, text) {
   if (text && text.trim()) k.notizen[aufgabeId] = text.trim(); else delete k.notizen[aufgabeId];
   await onbSpeichern();
 }
+function onbLinkIn(text) { const m = String(text || "").match(/https?:\/\/[^\s<>"]+/); return m ? m[0] : ""; }
+function onbNotizDialog(custId, aufgabeId) {
+  const o = onbParam(); const k = o.kunden[custId]; const a = o.aufgaben.find(x => x.id === aufgabeId); if (!k || !a) return;
+  const c = cache.customers.find(x => String(x.id) === String(custId));
+  const notiz = (k.notizen || {})[aufgabeId] || ""; const link = onbLinkIn(notiz);
+  showModal("Notiz — " + escape(a.titel), `
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px">${escape(c ? c.Title : custId)} · Phase ${escape(a.phase)}</div>
+    <div class="field"><label>Notiz / Link (Links werden automatisch anklickbar)</label><textarea id="f-onb-notiz" rows="4" placeholder="z.B. Ticket https://apriko.zendesk.com/agent/tickets/123 oder Bemerkung">${escape(notiz)}</textarea></div>
+    ${link ? `<div style="font-size:12px"><a href="${escape(link)}" target="_blank" rel="noopener" style="color:var(--accent-2)">🔗 ${escape(link)} ↗</a></div>` : ""}`, [
+    `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
+    `<button class="btn btn-primary" onclick="onbNotiz(${tkJs(String(custId))}, ${tkJs(aufgabeId)}, document.getElementById('f-onb-notiz').value).then(() => { closeModal(); render(); })">Speichern</button>`]);
+  setTimeout(() => { const t = document.getElementById("f-onb-notiz"); if (t) t.focus(); }, 50);
+}
 /* Interaktive Checkliste eines Kunden (auch zum Ausdrucken / an den Kunden abgeben) */
 function onbKundeChecklisteHtml(id, c, k, o, heute, print) {
   const erl = k.erledigt || {}, notizen = k.notizen || {};
@@ -8822,7 +8937,7 @@ function onbKundeChecklisteHtml(id, c, k, o, heute, print) {
       <input type="checkbox" id="${cid}" ${e ? "checked" : ""} onchange="onbToggle('${id}','${a.id}')" style="width:16px;height:16px;margin-top:2px;accent-color:var(--accent);cursor:pointer;flex-shrink:0">
       <div style="flex:1">
         <label for="${cid}" style="display:block;cursor:pointer;${e ? "color:var(--text-dim)" : ""}">${escape(a.titel)} <span style="font-size:10px;color:${zust(a.zustaendig)}">${escape(a.zustaendig)}</span>${faellig ? ` <span style="font-size:10px;color:${ueber ? "var(--danger)" : "var(--text-faint)"}">· fällig ${onbFmtDatum(faellig)}${ueber ? " (überfällig)" : ""}</span>` : ""}${e ? ` <span style="font-size:10px;color:var(--text-faint)">· erledigt ${onbFmtTs(e.am)} ${escape((e.von || "").split("@")[0])}</span>` : ""}</label>
-        ${print ? (notizen[a.id] ? `<div style="font-size:10.5px;color:var(--text-dim)">${escape(notizen[a.id])}</div>` : "") : `<input value="${escape(notizen[a.id] || "")}" placeholder="Bemerkung (optional)" onblur="onbNotiz('${id}','${a.id}',this.value)" style="width:100%;margin-top:3px;background:transparent;border:1px solid ${notizen[a.id] ? "var(--border)" : "transparent"};border-bottom:1px dashed var(--border);color:var(--text-dim);padding:2px 6px;border-radius:3px;font-family:inherit;font-size:10.5px">`}
+        ${print ? (notizen[a.id] ? `<div style="font-size:10.5px;color:var(--text-dim)">${escape(notizen[a.id])}</div>` : "") : `${onbLinkIn(notizen[a.id]) ? `<a href="${escape(onbLinkIn(notizen[a.id]))}" target="_blank" rel="noopener" style="font-size:10.5px;color:var(--accent-2);margin-top:3px;display:inline-block">🔗 ${escape(onbLinkIn(notizen[a.id]).replace(/^https?:\/\//, "").slice(0, 60))} ↗</a>` : ""}<input value="${escape(notizen[a.id] || "")}" placeholder="Bemerkung oder Link (optional)" onblur="onbNotiz('${id}','${a.id}',this.value)" style="width:100%;margin-top:3px;background:transparent;border:1px solid ${notizen[a.id] ? "var(--border)" : "transparent"};border-bottom:1px dashed var(--border);color:var(--text-dim);padding:2px 6px;border-radius:3px;font-family:inherit;font-size:10.5px">`}
       </div></div>`;
   });
   return html + `</div>`;
@@ -8868,17 +8983,20 @@ async function renderOnboarding(el) {
   </thead>`;
   const zeilen = o.aufgaben.map((a, i) => {
     const phasenTitel = (i === 0 || o.aufgaben[i - 1].phase !== a.phase) ? `<tr><td colspan="${3 + kunden.length}" style="background:var(--bg);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);padding:8px 8px 4px;position:sticky;left:0">${escape(a.phase)}</td></tr>` : "";
-    return phasenTitel + `<tr>
-      <td style="position:sticky;left:0;background:var(--bg-card);z-index:1;font-size:12px">${escape(a.titel)}</td>
+    return phasenTitel + `<tr data-onb-id="${a.id}" ondragover="onbDragOver(event)" ondragleave="onbDragLeave(event)" ondrop="onbDrop(event,'${a.id}')">
+      <td style="position:sticky;left:0;background:var(--bg-card);z-index:1;font-size:12px"><span draggable="true" ondragstart="onbDragStart(event,'${a.id}')" ondragend="onbDragEnd(event)" title="Ziehen zum Verschieben der Aufgabe" style="cursor:grab;color:var(--text-faint);margin-right:6px;user-select:none">⠿</span>${escape(a.titel)}</td>
       <td style="font-size:10px;color:${zustFarbe(a.zustaendig)}">${escape(a.zustaendig)}</td>
       <td style="text-align:right;font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">${a.tage >= 0 ? "+" : ""}${a.tage}</td>
       ${kunden.map(({ id, c, k }) => {
         if (!onbGilt(a, c)) return `<td style="border-left:1px solid var(--border);text-align:center;color:var(--text-faint);font-size:10px" title="gilt nicht für ${escape(c.Segment || "diesen Kunden")}">—</td>`;
         const e = (k.erledigt || {})[a.id]; const faellig = onbFaellig(k.goLive, a.tage); const ueber = !e && faellig && faellig < heute;
-        const tip = e ? `Erledigt ${onbFmtTs(e.am)} · ${e.von || "?"}` : (faellig ? `Fällig ${onbFmtDatum(faellig)}${ueber ? " — überfällig" : ""}` : "Offen");
+        const notiz = (k.notizen || {})[a.id] || "";
+        const tip = (e ? `Erledigt ${onbFmtTs(e.am)} · ${e.von || "?"}` : (faellig ? `Fällig ${onbFmtDatum(faellig)}${ueber ? " — überfällig" : ""}` : "Offen")) + (notiz ? "\n📝 " + notiz : "");
         const kurz = d => d ? d.slice(8, 10) + "." + d.slice(5, 7) + "." : "";
+        const link = onbLinkIn(notiz);
         return `<td style="border-left:1px solid var(--border);padding:3px 6px;${ueber ? "background:rgba(255,80,80,0.12);" : ""}" title="${escape(tip)}">
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:10px;white-space:nowrap;color:${e ? "var(--accent-2)" : (ueber ? "var(--danger)" : "var(--text-faint)")}"><input type="checkbox" ${e ? "checked" : ""} onchange="onbToggle('${id}','${a.id}')" style="width:auto;margin:0;cursor:pointer">${e ? kurz(e.am) + " " + escape((e.von || "").split("@")[0].slice(0, 10)) : (faellig ? kurz(faellig) : "")}</label></td>`;
+          <div style="display:flex;align-items:center;gap:4px"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:10px;white-space:nowrap;color:${e ? "var(--accent-2)" : (ueber ? "var(--danger)" : "var(--text-faint)")}"><input type="checkbox" ${e ? "checked" : ""} onchange="onbToggle('${id}','${a.id}')" style="width:auto;margin:0;cursor:pointer">${e ? kurz(e.am) + " " + escape((e.von || "").split("@")[0].slice(0, 10)) : (faellig ? kurz(faellig) : "")}</label>
+          <span onclick="onbNotizDialog('${id}','${a.id}')" title="${notiz ? escape(notiz) : "Notiz / Link erfassen"}" style="cursor:pointer;font-size:11px;margin-left:auto;opacity:${notiz ? "1" : ".35"}">📝</span>${link ? `<a href="${escape(link)}" target="_blank" rel="noopener" title="${escape(link)}" style="font-size:11px;text-decoration:none">🔗</a>` : ""}</div></td>`;
       }).join("")}
     </tr>`;
   }).join("");
@@ -8906,7 +9024,7 @@ async function renderOnboarding(el) {
   el.innerHTML = `
     <div class="print-only" style="font-size:11px;color:#666;margin-bottom:8px">Apriko AG · Onboarding-Übersicht · Stand ${new Date().toLocaleDateString("de-CH")}</div>
     <div class="card" style="padding:14px 16px">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px" class="no-print">Häkchen setzen = erledigt (Datum · Person erscheint daneben, Details beim Überfahren). Rot = überfällig gemäss Go-Live-Datum. «—» = Aufgabe gilt nicht für diesen Kundentyp. Zuständigkeit: <span style="color:var(--accent)">Apriko</span> · <span style="color:var(--warn)">Kunde</span> · <span style="color:var(--accent-3)">beide</span>.</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px" class="no-print">Häkchen setzen = erledigt (Datum · Person erscheint daneben, Details beim Überfahren). 📝 = Notiz oder Link zur Aufgabe, 🔗 öffnet den Link. Reihenfolge der Aufgaben: am ⠿ ziehen. Rot = überfällig gemäss Go-Live-Datum. «—» = Aufgabe gilt nicht für diesen Kundentyp. Zuständigkeit: <span style="color:var(--accent)">Apriko</span> · <span style="color:var(--warn)">Kunde</span> · <span style="color:var(--accent-3)">beide</span>.</div>
       ${kunden.length ? `<div class="table-wrap onb-wrap"><table class="onb-matrix" style="font-size:12px;border-collapse:collapse">${kopf}<tbody>${zeilen}</tbody></table></div>` : `<div class="empty">Noch keine Kunden im Onboarding — oben rechts einen Kunden hinzufügen.${kundenIds.length ? `<br><span style="color:var(--warn)">Hinweis: In parameter.json sind ${kundenIds.length} Onboarding-Einträge vorhanden (IDs ${escape(kundenIds.join(", "))}), aber kein passender Kunde im Kundenstamm (gelöscht?). Admin → Kunden → «🗑 Gelöschte» prüfen.</span>` : `<br><span style="color:var(--text-faint)">parameter.json geladen ${crmParameterGeladen ? new Date(crmParameterGeladen).toLocaleTimeString("de-CH") : "—"} · onboarding.kunden ist leer. Falls hier vorher Kunden standen: SharePoint → CRM-Budgetdaten → parameter.json → Versionsverlauf → frühere Version wiederherstellen.</span>`}</div>`}
     </div>
     ${bearbeiten}`;
@@ -9578,18 +9696,13 @@ async function parameterLaden(force) {
   crmParameter = data;
   window.crmParameter = data;
   crmParameterGeladen = Date.now();
+  jsonBasisMerken(PARAMETER_PFAD, data);
   return data;
 }
 let crmParameterGeladen = 0;
 async function parameterSpeichern() {
-  const body = JSON.stringify(crmParameter || {});
-  try { await graph(`/sites/${siteId}/drive/root:/${PARAMETER_PFAD}:/content`, { method: "PUT", body }); }
-  catch (e) {
-    if (!/404|itemNotFound|400/i.test(e.message)) throw e;
-    await graph(`/sites/${siteId}/drive/root/children`, { method: "POST", body: JSON.stringify({ name: "CRM-Budgetdaten", folder: {}, "@microsoft.graph.conflictBehavior": "replace" }) });
-    await graph(`/sites/${siteId}/drive/root:/${PARAMETER_PFAD}:/content`, { method: "PUT", body });
-  }
-  window.crmParameter = crmParameter;
+  const ergebnis = await jsonMergeSpeichern(PARAMETER_PFAD, crmParameter || {});
+  crmParameter = ergebnis; window.crmParameter = ergebnis; crmParameterGeladen = Date.now();
   toast("Parameter gespeichert");
 }
 function paramUzRow(i, r) {
@@ -16013,13 +16126,13 @@ function crmLoadStamm() {
         const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_firmen_stamm.json:/content`);
         crmStamm = data && typeof data === "object" ? data : {};
       } catch (e) { crmStamm = {}; }
+      jsonBasisMerken(FB_BUCH_DIR + "/crm_firmen_stamm.json", crmStamm);
     })();
   }
   return crmStammPromise;
 }
 async function crmSaveStamm() {
-  await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_firmen_stamm.json:/content`,
-    { method: "PUT", body: JSON.stringify(crmStamm || {}) });
+  crmStamm = await jsonMergeSpeichern(FB_BUCH_DIR + "/crm_firmen_stamm.json", crmStamm || {});
 }
 /* Interne Mitarbeitende (Apriko) — { "<email>": { vorname, name, geburtstag: "YYYY-MM-DD", eintritt: "YYYY-MM-DD" } } */
 let crmMitarbeiter = null;
@@ -16029,12 +16142,13 @@ function crmLoadMitarbeiter() {
     crmMitarbeiterPromise = (async () => {
       try { const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_mitarbeiter.json:/content`, { cache: "no-store" }); crmMitarbeiter = data && typeof data === "object" ? data : {}; }
       catch (e) { crmMitarbeiter = {}; }
+      jsonBasisMerken(FB_BUCH_DIR + "/crm_mitarbeiter.json", crmMitarbeiter);
     })();
   }
   return crmMitarbeiterPromise;
 }
 async function crmSaveMitarbeiter() {
-  await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_mitarbeiter.json:/content`, { method: "PUT", body: JSON.stringify(crmMitarbeiter || {}) });
+  crmMitarbeiter = await jsonMergeSpeichern(FB_BUCH_DIR + "/crm_mitarbeiter.json", crmMitarbeiter || {});
 }
 let crmAnsprech = null;
 let crmAnsprechPromise = null;
@@ -16045,22 +16159,13 @@ function crmLoadAnsprech() {
         const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_firmen_ansprech.json:/content`);
         crmAnsprech = data && typeof data === "object" ? data : {};
       } catch (e) { crmAnsprech = {}; }
+      jsonBasisMerken(FB_BUCH_DIR + "/crm_firmen_ansprech.json", crmAnsprech);
     })();
   }
   return crmAnsprechPromise;
 }
 async function crmSaveAnsprech() {
-  const path = `/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_firmen_ansprech.json:/content`;
-  const body = JSON.stringify(crmAnsprech || {});
-  try { await graph(path, { method: "PUT", body }); }
-  catch (e) {
-    if (!/404|itemNotFound|400/i.test(e.message)) throw e;
-    await graph(`/sites/${siteId}/drive/root/children`, {
-      method: "POST",
-      body: JSON.stringify({ name: FB_BUCH_DIR, folder: {}, "@microsoft.graph.conflictBehavior": "replace" })
-    });
-    await graph(path, { method: "PUT", body });
-  }
+  crmAnsprech = await jsonMergeSpeichern(FB_BUCH_DIR + "/crm_firmen_ansprech.json", crmAnsprech || {});
 }
 function ansprechEmail(companyId) { return (crmAnsprech || {})[String(companyId)] || ""; }
 
@@ -16073,7 +16178,7 @@ function crmLoadKundenFlags() {
     crmKundenFlagsPromise = (async () => {
       try {
         const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_kunden_flags.json:/content`);
-        crmKundenFlags = data && typeof data === "object" ? data : {}; crmKundenFlagsOk = true;
+        crmKundenFlags = data && typeof data === "object" ? data : {}; crmKundenFlagsOk = true; jsonBasisMerken(FB_BUCH_DIR + "/crm_kunden_flags.json", crmKundenFlags);
       } catch (e) {
         // Nur bei «Datei existiert nicht» mit leerem Stand weiterarbeiten — bei anderen Fehlern (Netz, Token)
         // darf ein späteres Speichern die Flags aller Kunden NICHT mit {} überschreiben.
@@ -16091,17 +16196,7 @@ async function crmSaveKundenFlags() {
     if (!crmKundenFlagsOk) throw new Error("Kundenflags konnten nicht geladen werden — Speichern abgebrochen, damit keine Flags anderer Kunden verloren gehen.");
     Object.assign(crmKundenFlags, merke || {});   // die aktuelle Änderung auf den frisch geladenen Stand anwenden
   }
-  const path = `/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_kunden_flags.json:/content`;
-  const body = JSON.stringify(crmKundenFlags || {});
-  try { await graph(path, { method: "PUT", body }); }
-  catch (e) {
-    if (!/404|itemNotFound|400/i.test(e.message)) throw e;
-    await graph(`/sites/${siteId}/drive/root/children`, {
-      method: "POST",
-      body: JSON.stringify({ name: FB_BUCH_DIR, folder: {}, "@microsoft.graph.conflictBehavior": "replace" })
-    });
-    await graph(path, { method: "PUT", body });
-  }
+  crmKundenFlags = await jsonMergeSpeichern(FB_BUCH_DIR + "/crm_kunden_flags.json", crmKundenFlags || {});
 }
 function kundenFlag(custId, flag) { return !!((crmKundenFlags || {})[String(custId)] || {})[flag]; }
 /* Datenbank/Hosting: Standard JA (praktisch jeder Kunde hat eine eigene DB) — nur ein explizites «keineDb» schaltet aus. */
