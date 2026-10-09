@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.445.0"></script>
-<script src="apriko-api.js?v=1.445.0"></script>
-<script src="lohncheck.js?v=1.445.0"></script>
-<script src="personalbudget.js?v=1.445.0"></script>
-<script src="jahresbudget.js?v=1.445.0"></script>
-<script src="budgetpositionen.js?v=1.445.0"></script>
-<script src="lohnchecklistetemp.js?v=1.445.0"></script>
-<script src="apriko-endpunkte.js?v=1.445.0"></script>
+<script src="apriko-filters.js?v=1.446.0"></script>
+<script src="apriko-api.js?v=1.446.0"></script>
+<script src="lohncheck.js?v=1.446.0"></script>
+<script src="personalbudget.js?v=1.446.0"></script>
+<script src="jahresbudget.js?v=1.446.0"></script>
+<script src="budgetpositionen.js?v=1.446.0"></script>
+<script src="lohnchecklistetemp.js?v=1.446.0"></script>
+<script src="apriko-endpunkte.js?v=1.446.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1027,7 +1027,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.445.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.446.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1851,9 +1851,47 @@ async function bootstrap() {
   }
 }
 
+/* ---------- Soft-Delete: Kunden/Firmen/Kontakte werden nie aus SharePoint gelöscht, sondern in crm_geloescht.json markiert.
+   Markierte Einträge werden beim Laden ausgefiltert und bleiben in cacheGeloescht für die Wiederherstellung (Admin). ---------- */
+let crmGeloescht = null;            // { customers: { "<id>": { am, von, titel } }, companies: {…}, contacts: {…} }
+const cacheGeloescht = {};
+const SOFT_DELETE_LISTS = ["Customers", "Companies", "Contacts"];
+async function crmLoadGeloescht() {
+  if (crmGeloescht !== null) return crmGeloescht;
+  try { const d = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_geloescht.json:/content`, { cache: "no-store" }); crmGeloescht = d && typeof d === "object" ? d : {}; }
+  catch (e) { crmGeloescht = {}; }
+  return crmGeloescht;
+}
+async function crmSaveGeloescht() {
+  await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_geloescht.json:/content`, { method: "PUT", body: JSON.stringify(crmGeloescht || {}) });
+}
+function geloeschtFiltern(name, items) {
+  if (!SOFT_DELETE_LISTS.includes(name)) return items;
+  const key = name.toLowerCase(); const g = (crmGeloescht || {})[key] || {};
+  cacheGeloescht[key] = items.filter(it => g[String(it.id)]);
+  return items.filter(it => !g[String(it.id)]);
+}
+async function softDelete(listName, id, titel) {
+  await crmLoadGeloescht(); const key = listName.toLowerCase();
+  crmGeloescht[key] = crmGeloescht[key] || {};
+  crmGeloescht[key][String(id)] = { am: new Date().toISOString(), von: myEmail(), titel: titel || "" };
+  await crmSaveGeloescht(); await reload(listName);
+}
+async function softRestore(listName, id) {
+  await crmLoadGeloescht(); const key = listName.toLowerCase();
+  if (crmGeloescht[key]) delete crmGeloescht[key][String(id)];
+  await crmSaveGeloescht(); await reload(listName); render(); toast("Wiederhergestellt");
+}
+function geloeschteHtml() {
+  const bloecke = [["Customers", "Kunden"], ["Companies", "Firmen"], ["Contacts", "Kontakte"]].map(([ln, label]) => { const key = ln.toLowerCase(); const l = cacheGeloescht[key] || []; const g = (crmGeloescht || {})[key] || {};
+    return `<div style="margin-bottom:12px"><div style="font-weight:600;font-size:12px;margin-bottom:4px">${label} (${l.length})</div>${l.length ? l.map(it => `<div style="display:flex;align-items:center;gap:10px;font-size:12px;padding:3px 0;border-bottom:1px solid var(--border-soft)"><span style="flex:1">${escape(it.Title || ("#" + it.id))}</span><span style="color:var(--text-faint);font-size:11px">gelöscht ${escape(datumCH(String((g[String(it.id)] || {}).am || "").slice(0, 10)))} von ${escape(mitarbeiterName((g[String(it.id)] || {}).von || "") || "?")}</span><button class="btn btn-sm" onclick="softRestore(${tkJs(ln)}, ${it.id})">↩ Wiederherstellen</button></div>`).join("") : `<div style="font-size:12px;color:var(--text-faint)">—</div>`}</div>`; }).join("");
+  return bloecke;
+}
+function geloeschteAnzeigen() { modalBreit && modalBreit(); showModal("Gelöschte Einträge", `<div style="font-size:12px;color:var(--text-dim);margin-bottom:10px">Gelöschte Kunden, Firmen und Kontakte bleiben in SharePoint erhalten und sind nur ausgeblendet. Wiederherstellen bringt sie samt allen Verknüpfungen zurück.</div>${geloeschteHtml()}`, [`<button class="btn" onclick="closeModal()">Schliessen</button>`]); }
 async function loadList(name) {
+  if (SOFT_DELETE_LISTS.includes(name) && crmGeloescht === null) await crmLoadGeloescht();
   const data = await graph(`/sites/${siteId}/lists/${listIds[name]}/items?expand=fields&$top=999`);
-  const items = data.value.map(item => ({ id: item.id, ...item.fields }));
+  const items = geloeschtFiltern(name, data.value.map(item => ({ id: item.id, ...item.fields })));
   if (DEMO_ANON && name === "Companies") items.forEach(it => { if (it.Title) it.Title = anonKunde(it.Title); });
   if (DEMO_ANON && name === "Customers") items.forEach(it => {
     if (!it.Title) return;
@@ -13546,6 +13584,7 @@ function renderCustomers(el) {
       </button>
     </div>
     <input class="search-input" placeholder="Suchen..." oninput="filterTable(this.value, 'cust-row')">
+    ${isAdmin() ? `<button class="btn" onclick="geloeschteAnzeigen()" title="Gelöschte Kunden, Firmen und Kontakte ansehen und wiederherstellen">🗑 Gelöschte${(cacheGeloescht.customers || []).length + (cacheGeloescht.companies || []).length + (cacheGeloescht.contacts || []).length ? " (" + ((cacheGeloescht.customers || []).length + (cacheGeloescht.companies || []).length + (cacheGeloescht.contacts || []).length) + ")" : ""}</button>` : ""}
     <label class="btn" style="cursor:pointer" title="Tabelle «Kundenumgebungen» (HTML-Export) einlesen: Link, Ansprechperson, interne Zuständigkeiten (LoBu/FiBu), Workflows ergänzen — nur leere Felder werden gefüllt">⇧ Kundenumgebungen (HTML)<input type="file" accept=".html,.htm,text/html" hidden onchange="kuImport(this)"></label>
     <button class="btn btn-primary" onclick="newCustomer()">+ Neuer Kunde</button>
   `;
@@ -13722,7 +13761,7 @@ function openCustomer(id) {
     </div>
     <div style="margin-top:14px"><button class="btn btn-sm" onclick="closeModal();filters.revenueMode='customer';filters.revenueCustomerId=${id};currentView='revenue';document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));document.querySelector('nav button[data-view=revenue]').classList.add('active');render()">In Umsätze-Tab öffnen</button></div>
   `, [
-    `<button class="btn btn-danger" onclick="deleteCustomer(${id})">Löschen</button>`,
+    isAdmin() ? `<button class="btn btn-danger" onclick="deleteCustomer(${id})">Löschen</button>` : "",
     c.CompanyId ? `<button class="btn" onclick="closeModal();ofDialog(${c.CompanyId})">📄 Offerte erstellen</button>` : "",
     `<button class="btn" onclick="editCustomer(${id})">Bearbeiten</button>`
   ]);
@@ -14428,12 +14467,11 @@ async function saveCustomer(id) {
 }
 
 async function deleteCustomer(id) {
-  if (!confirm("Kunde wirklich löschen? Die zugehörigen Monatsumsätze bleiben erhalten, sind aber nicht mehr zugeordnet.")) return;
-  try {
-    await deleteItem("Customers", id);
-    await reload("Customers");
-    closeModal(); render(); toast("Gelöscht");
-  } catch (e) { toast(e.message, true); }
+  if (!isAdmin()) { toast("Kunden löschen dürfen nur Admins.", true); return; }
+  const c = cache.customers.find(x => x.id == id);
+  if (!confirm("Kunde «" + ((c && c.Title) || id) + "» löschen? Er wird nur ausgeblendet und kann unter Kunden → «Gelöschte» wiederhergestellt werden.")) return;
+  try { await softDelete("Customers", id, c && c.Title); closeModal(); render(); toast("Gelöscht (wiederherstellbar)"); }
+  catch (e) { toast(e.message, true); }
 }
 
 /* ---------- Companies ---------- */
@@ -15150,7 +15188,7 @@ function openCompany(id) {
     <div style="margin-top:12px"><button class="btn btn-sm" onclick="newActivity('Company', ${id})">+ Aktivität</button></div>
     ${typeof ofHistorieHtml === "function" ? ofHistorieHtml(id) : ""}
   `, [
-    `<button class="btn btn-danger" onclick="deleteCompany(${id})">Löschen</button>`,
+    isAdmin() ? `<button class="btn btn-danger" onclick="deleteCompany(${id})">Löschen</button>` : "",
     `<button class="btn" onclick="closeModal();ofDialog(${id})">📄 Offerte erstellen</button>`,
     `<button class="btn" onclick="editCompany(${id})">Bearbeiten</button>`
   ]);
@@ -15466,12 +15504,11 @@ async function saveCompany(id) {
   } catch (e) { toast(e.message, true); }
 }
 async function deleteCompany(id) {
-  if (!confirm("Firma wirklich löschen? Verknüpfte Kontakte und Deals bleiben bestehen.")) return;
-  try {
-    await deleteItem("Companies", id);
-    await reload("Companies");
-    closeModal(); render(); toast("Gelöscht");
-  } catch (e) { toast(e.message, true); }
+  if (!isAdmin()) { toast("Firmen löschen dürfen nur Admins.", true); return; }
+  const c = cache.companies.find(x => x.id == id);
+  if (!confirm("Firma «" + ((c && c.Title) || id) + "» löschen? Sie wird nur ausgeblendet (Kontakte und Deals bleiben) und kann unter Kunden → «Gelöschte» wiederhergestellt werden.")) return;
+  try { await softDelete("Companies", id, c && c.Title); closeModal(); render(); toast("Gelöscht (wiederherstellbar)"); }
+  catch (e) { toast(e.message, true); }
 }
 
 function newContact() { editContact(null); }
@@ -15528,9 +15565,7 @@ async function deleteContact(id, zurueckKundeId) {
   const k = cache.contacts.find(x => x.id == id);
   if (!confirm("Kontakt «" + ((k && k.Title) || id) + "» wirklich löschen?")) return;
   try {
-    await deleteItem("Contacts", id);
-    if (k && k.CompanyId) { try { await kontaktTagsSetzen(k.CompanyId, id, []); } catch (e) {} }
-    await reload("Contacts");
+    await softDelete("Contacts", id, k && k.Title);
     const zk = zurueckKundeId || kontaktZurueckKunde; kontaktZurueckKunde = null;
     closeModal(); toast("Gelöscht");
     if (zk) openCustomer(zk); else render();
