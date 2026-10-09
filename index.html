@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.447.0"></script>
-<script src="apriko-api.js?v=1.447.0"></script>
-<script src="lohncheck.js?v=1.447.0"></script>
-<script src="personalbudget.js?v=1.447.0"></script>
-<script src="jahresbudget.js?v=1.447.0"></script>
-<script src="budgetpositionen.js?v=1.447.0"></script>
-<script src="lohnchecklistetemp.js?v=1.447.0"></script>
-<script src="apriko-endpunkte.js?v=1.447.0"></script>
+<script src="apriko-filters.js?v=1.448.0"></script>
+<script src="apriko-api.js?v=1.448.0"></script>
+<script src="lohncheck.js?v=1.448.0"></script>
+<script src="personalbudget.js?v=1.448.0"></script>
+<script src="jahresbudget.js?v=1.448.0"></script>
+<script src="budgetpositionen.js?v=1.448.0"></script>
+<script src="lohnchecklistetemp.js?v=1.448.0"></script>
+<script src="apriko-endpunkte.js?v=1.448.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1027,7 +1027,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.447.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.448.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -9181,8 +9181,8 @@ function tkAufwandHtml(zeilen, kunden) {
       <div style="font-size:11px;color:var(--text-faint);margin-top:6px">CHF/Std. = Umsatz (SaaS + BPO im Zeitraum) ÷ gebuchte Stunden · ≥ 200 gut · 100–200 mittel · &lt; 100 kritisch. Tooltip zeigt die Leistungen.</div></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="card" style="padding:12px 14px"><div style="font-weight:600;margin-bottom:6px">Stunden je Mitarbeiter/in</div>
-        <table style="font-size:12px;width:100%"><tr style="color:var(--text-dim)"><th style="text-align:left">Mitarbeiter/in</th><th style="text-align:right">Stunden</th><th style="text-align:right">intern</th><th style="text-align:left">Top-Kunden</th></tr>
-        ${maRows.map(([n, r]) => `<tr><td style="padding:3px 6px 3px 0">${escape(n)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt1(r.std)}</td><td style="text-align:right;font-family:var(--font-mono);color:var(--text-faint)">${fmt1(r.intern)}</td><td style="font-size:11px;color:var(--text-dim)">${Object.entries(r.kunden).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, h]) => escape(k) + " " + fmt1(h)).join(", ")}</td></tr>`).join("")}</table></div>
+        <table style="font-size:12px;width:100%"><tr style="color:var(--text-dim)"><th style="text-align:left">Mitarbeiter/in</th><th style="text-align:right">Stunden</th><th style="text-align:right;padding-left:10px" title="davon auf Apriko AG / interne Arbeitszeit gebucht">davon intern</th><th style="text-align:right;padding-left:10px">auf Kunden</th><th style="text-align:left;padding-left:14px">Top-Kunden (h)</th></tr>
+        ${maRows.map(([n, r]) => { const kd = r.std - r.intern; return `<tr><td style="padding:3px 6px 3px 0">${escape(n)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt1(r.std)}</td><td style="text-align:right;font-family:var(--font-mono);color:var(--text-faint);padding-left:10px">${fmt1(r.intern)}</td><td style="text-align:right;font-family:var(--font-mono);padding-left:10px">${fmt1(kd)}</td><td style="font-size:11px;color:var(--text-dim);padding-left:14px">${Object.entries(r.kunden).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, h]) => escape(String(k).replace(/\s+-\s+(SaaS|BPO|Nur).*$/i, "")) + " " + fmt1(h)).join(" · ") || "—"}</td></tr>`; }).join("")}</table></div>
       <div class="card" style="padding:12px 14px"><div style="font-weight:600;margin-bottom:6px">Nicht zugeordnet</div>
         ${ohne.length ? `<div style="font-size:12px;color:var(--text-dim)">Diese Clockodo-Kunden wurden keinem CRM-Kunden zugeordnet — in «Tickets × Ertrag → Kunden-Zuordnung» oder per Namensangleichung lösbar:</div><ul style="font-size:12px;margin:6px 0 0 16px">${ohne.map(r => `<li>${escape(r.name)} · ${fmt1(r.std)} h <select onchange="tkZuordnungSetzen(${tkJs(r.name)}, this.value)" style="padding:1px 4px;font-size:11px;max-width:220px"><option value="">zuordnen …</option>${cache.customers.slice().sort((a, b) => (a.Title || "").localeCompare(b.Title || "")).map(c => `<option value="${c.id}">${escape(c.Title)}</option>`).join("")}</select></li>`).join("")}</ul>` : `<div style="font-size:12px;color:var(--text-faint)">Alle Kundenstunden zugeordnet.</div>`}
         ${intern.length ? `<div style="font-size:11px;color:var(--text-faint);margin-top:8px">Intern (Apriko): ${fmt1(internStd)} h</div>` : ""}</div>
