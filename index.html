@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.450.0"></script>
-<script src="apriko-api.js?v=1.450.0"></script>
-<script src="lohncheck.js?v=1.450.0"></script>
-<script src="personalbudget.js?v=1.450.0"></script>
-<script src="jahresbudget.js?v=1.450.0"></script>
-<script src="budgetpositionen.js?v=1.450.0"></script>
-<script src="lohnchecklistetemp.js?v=1.450.0"></script>
-<script src="apriko-endpunkte.js?v=1.450.0"></script>
+<script src="apriko-filters.js?v=1.451.0"></script>
+<script src="apriko-api.js?v=1.451.0"></script>
+<script src="lohncheck.js?v=1.451.0"></script>
+<script src="personalbudget.js?v=1.451.0"></script>
+<script src="jahresbudget.js?v=1.451.0"></script>
+<script src="budgetpositionen.js?v=1.451.0"></script>
+<script src="lohnchecklistetemp.js?v=1.451.0"></script>
+<script src="apriko-endpunkte.js?v=1.451.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1027,7 +1027,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.450.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.451.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -8236,8 +8236,9 @@ function abaStammIndex() {
    - umkontierung {von: nach}: Apriko-Standardkonto → Konto im Kontenplan des Mandanten (z.B. 4400 → 5400)
    - kontierung {code: {soll, haben}}: Lohnart-Kontierung, wenn der Stamm keine hat oder abweicht
      (Konten in der Richtung eines POSITIVEN Betrags — negative Beträge werden generell vertauscht)
-   - aggregat {code: [codes]}: Lohnart enthält andere Lohnarten (1005 Stundenlohn enthält 1000/1160/1161/1200
-     im Lohnkontoblatt) → nur der Rest wird gebucht
+   - aggregat {code: [codes]}: Lohnart enthält andere Lohnarten (1005 Stundenlohn enthielt bis Sept. 2026 1000/1160/1161/1200
+     im Lohnkontoblatt) → nur der Rest wird gebucht. Seit Okt. 2026 liefert Apriko 1005 mit dem effektiven Betrag;
+     das wird automatisch erkannt (Aggregat < Summe der Teile → kein Abzug), siehe abaBuchungen()
    - zusatz {code: {soll, haben}}: Zusatzbuchung mit demselben Betrag (BVG-Korrektur AN 5091 → AG-Spiegel 2272/5472)
    - nichtBuchen [muster]: Totale/Basen/Umbuchungen (8610–8720, 9xxx …), «86*» = Präfix
    - erzwungen / ausgeschlossen [codes]: manuelle Ein-/Ausschlüsse aus der Oberfläche; durchlauf: Durchlaufkonto */
@@ -8353,12 +8354,22 @@ function abaBuchungen() {
   const ns = { lohnart: sett.negSaldoLohnart || "8995", soll: sett.negSaldoSoll || "1142", haben: sett.negSaldoHaben || "1091", auszahlung: sett.negSaldoAuszahlung || "8900" };
   // Auszahlung (nur Anzeige, z.B. 8900) um den negativen Gehaltssaldo erhöhen: 310'122.26 + 9'148.55 = 319'270.81
   if (summen[ns.lohnart] && summen[ns.lohnart].betrag < 0 && summen[ns.auszahlung]) { summen[ns.auszahlung].betrag += Math.abs(summen[ns.lohnart].betrag); summen[ns.auszahlung].aggregatInfo = "inkl. negativer Gehaltssaldo " + ns.lohnart; }
-  // Aggregat-Regeln: enthaltene Lohnarten vom Aggregat abziehen (nur der Rest wird gebucht)
+  // Aggregat-Regeln: enthaltene Lohnarten vom Aggregat abziehen (nur der Rest wird gebucht).
+  // Seit Okt. 2026 führt Apriko die LoA 1005 (Stundenlohn) nicht mehr als Aggregat, sondern mit dem effektiven Betrag
+  // (z.B. 1'520.00 statt 618'268.01). Erkennung: ist das «Aggregat» kleiner als die Summe seiner Teile, ist es bereits
+  // der effektive Betrag → kein Abzug. Alte Lohnkontoblätter (1005 ≥ Teile) werden weiterhin wie bisher behandelt.
+  abaState.aggregatHinweise = [];
   Object.keys(pa.aggregat).forEach(code => {
     if (!summen[code]) return;
     const teile = pa.aggregat[code].filter(c => summen[c]);
     if (!teile.length) return;
-    summen[code].betrag -= teile.reduce((a, c) => a + summen[c].betrag, 0);
+    const summeTeile = teile.reduce((a, c) => a + summen[c].betrag, 0);
+    if (summen[code].betrag + 0.005 < summeTeile) {
+      summen[code].aggregatInfo = "effektiver Betrag (kein Aggregat — neue LoA-Logik)";
+      abaState.aggregatHinweise.push("Lohnart " + code + ": Betrag " + summen[code].betrag.toLocaleString("de-CH", { minimumFractionDigits: 2 }) + " ist kleiner als " + teile.join("+") + " (" + summeTeile.toLocaleString("de-CH", { minimumFractionDigits: 2 }) + ") → wird als effektiver Betrag gebucht, kein Abzug.");
+      return;
+    }
+    summen[code].betrag -= summeTeile;
     summen[code].aggregatInfo = "abzüglich " + teile.join("/");
   });
   const out = Object.values(summen).sort((a, b) => parseInt(a.code) - parseInt(b.code)).filter(b => {
@@ -8606,6 +8617,7 @@ function renderAbacus(el) {
           <td style="font-size:11px;color:${b.ok ? (abaNurAnzeige(b) ? "var(--text-dim)" : "var(--accent-2)") : "var(--danger)"}">${b.ok ? (abaNurAnzeige(b) ? `<span title="Konto ${escape(abaAnzeigeNurKonten().join(", "))}: wird angezeigt und abgestimmt, aber nicht ins Abacus-XML geschrieben">👁 nur Anzeige</span>` : "✓") : "Konto fehlt"} ${b.zusatz ? "" : `<a href="#" onclick="abaErzwingen('${escape(b.code)}', false);return false;" style="color:var(--text-faint);font-size:10px" title="Diese Lohnart nicht buchen">✕</a>`}</td>
         </tr>`; }).join("")}</tbody>
       </table></div>
+      ${(abaState.aggregatHinweise || []).length ? `<div style="margin-top:10px;padding:8px 12px;border:1px solid var(--accent);border-radius:6px;font-size:11.5px;color:var(--text-dim)">ℹ ${abaState.aggregatHinweise.map(escape).join("<br>")}</div>` : ""}
       ${(abaState.ausgelassen || []).length ? `<details style="margin-top:10px"><summary style="font-size:11px;color:var(--text-dim);cursor:pointer">${abaState.ausgelassen.length} Lohnarten nicht gebucht (Basen, Info, manuell ausgeschlossen)</summary>
         <table style="font-size:11px;margin-top:6px"><tbody>${abaState.ausgelassen.map(x => `<tr><td style="font-family:var(--font-mono)">${escape(x.code)}</td><td>${escape(x.bezeichnung)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(x.betrag)}</td><td style="color:var(--text-faint)">${escape(x.grund)}</td><td><a href="#" onclick="abaErzwingen('${escape(x.code)}', ${x.grund === "manuell ausgeschlossen" ? "null" : "true"});return false;" style="color:var(--accent-3)">${x.grund === "manuell ausgeschlossen" ? "wieder automatisch" : "doch buchen"}</a></td></tr>`).join("")}</tbody></table></details>` : ""}
       ${abaState.xml ? `<details style="margin-top:10px"><summary style="font-size:11px;color:var(--text-dim);cursor:pointer">XML-Vorschau</summary><pre style="font-size:10px;max-height:320px;overflow:auto;background:var(--bg);padding:8px;border-radius:4px">${escape(abaState.xml)}</pre></details>` : ""}
