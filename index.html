@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.434.0"></script>
-<script src="apriko-api.js?v=1.434.0"></script>
-<script src="lohncheck.js?v=1.434.0"></script>
-<script src="personalbudget.js?v=1.434.0"></script>
-<script src="jahresbudget.js?v=1.434.0"></script>
-<script src="budgetpositionen.js?v=1.434.0"></script>
-<script src="lohnchecklistetemp.js?v=1.434.0"></script>
-<script src="apriko-endpunkte.js?v=1.434.0"></script>
+<script src="apriko-filters.js?v=1.437.0"></script>
+<script src="apriko-api.js?v=1.437.0"></script>
+<script src="lohncheck.js?v=1.437.0"></script>
+<script src="personalbudget.js?v=1.437.0"></script>
+<script src="jahresbudget.js?v=1.437.0"></script>
+<script src="budgetpositionen.js?v=1.437.0"></script>
+<script src="lohnchecklistetemp.js?v=1.437.0"></script>
+<script src="apriko-endpunkte.js?v=1.437.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -959,6 +959,7 @@
       <div class="nav-group" data-group="crm">
         <div class="nav-group-h" onclick="toggleNavGroup('crm')">CRM <span class="nav-caret">▾</span></div>
         <div class="nav-group-items">
+          <button data-view="meinetasks"><span class="ic">☑</span> Meine Aufgaben</button>
           <button data-view="dashboard" class="active"><span class="ic">◇</span> Dashboard</button>
           <button data-view="pipeline"><span class="ic">▦</span> Pipeline</button>
           <button data-view="customers"><span class="ic">★</span> Kunden</button>
@@ -1026,7 +1027,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.434.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.437.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1545,12 +1546,12 @@ const EXTRA_VIEWS_BY_EMAIL = {
   "leutrim@apriko.com": ["abacus"],
   "nicolas@apriko.com": ["abacus"]
 };
-const ALL_VIEWS = ["dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","onboarding","onbparam","lohncheck","parameter","apipoc","abacus","auszpdf","uzcheck","grad360","tickets","profiles"];
+const ALL_VIEWS = ["meinetasks","dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","onboarding","onbparam","lohncheck","parameter","apipoc","abacus","auszpdf","uzcheck","grad360","tickets","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
 const VIEW_TITLES = {
-  dashboard: "Dashboard", pipeline: "Pipeline",
+  meinetasks: "Meine Aufgaben", dashboard: "Dashboard", pipeline: "Pipeline",
   customers: "Kunden", companies: "Firmen", contacts: "Kontakte", tasks: "Aufgaben",
   revenue: "Umsätze", stats: "Statistik", budget: "Ertragsbudget", budgetvgl: "Budgetvergleich", personalbudget: "Budget Personalaufwand", jahresbudget: "Jahresbudget", budgetpos: "Budgetpositionen (Erfassung & Jahresübersicht)",
   bpocheck: "Lohn Checkliste Temp", clintern: "Lohn Checkliste intern", clfibu: "FIBU Checkliste Monatsabschluss",
@@ -1564,7 +1565,7 @@ const VIEW_TITLES = {
 
 /* Views die IMMER für alle eingeloggten User zugänglich sind,
    unabhängig von AllowedViews im UserProfile. */
-const PUBLIC_VIEWS = [];  // keine öffentlichen Ansichten mehr — alles über Gruppen/Profile (09.10.2026)
+const PUBLIC_VIEWS = ["meinetasks"];  // persönliche Aufgaben/Notizen: für alle eingeloggten Benutzer; alles andere über Gruppen/Profile
 /* currentUser wird nach dem Login gesetzt:
    { email, isSuperAdmin, role: "Admin"|"User", allowedViews: string[] } */
 let currentUser = null;
@@ -1960,6 +1961,8 @@ async function startApp() {
     applyPermissionsToNav();
     bindNav();
 
+    // Persönliche Startseite (pro Browser, Einstellung unter «Meine Aufgaben»)
+    try { const st = localStorage.getItem("crm-startseite"); if (st && ALL_VIEWS.includes(st) && canAccessView(st)) { currentView = st; document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x.dataset.view === st)); } } catch (e) {}
     // Falls die Standard-Ansicht (dashboard) für diesen User gesperrt ist,
     // auf die erste erlaubte View wechseln
     if (!canAccessView(currentView)) {
@@ -1970,6 +1973,7 @@ async function startApp() {
     }
 
     render();
+    crmLoadMitarbeiter().then(() => { if (currentView === "meinetasks") render(); });
     setTimeout(feierHinweisZeigen, 800);
   } catch (e) {
     console.error(e);
@@ -2136,6 +2140,7 @@ function render() {
   else if (currentView === "companies") renderCompanies(content);
   else if (currentView === "contacts") renderContacts(content);
   else if (currentView === "tasks") renderTasks(content);
+  else if (currentView === "meinetasks") renderMeineTasks(content);
   else if (currentView === "profiles") renderProfiles(content);
   openNavGroupFor(currentView);
 }
@@ -13639,6 +13644,18 @@ function openCustomer(id) {
 /* ---------- Ansprechpersonen beim Kunden = Kontakte der Firma, mit Funktionen (Tags) ----------
    Tags liegen in crm_firmen_stamm.json: crmStamm[companyId].kontaktTags = { contactId: ["Entscheidungsträger", ...] } */
 const KONTAKT_TAGS = ["Entscheidungsträger", "User", "Lohn", "FIBU", "IT"];
+/* Vorname/Nachname eines Kontakts: gespeichert in crmStamm[comp].kontaktNamen[id]; Title bleibt «Vorname Nachname» (SharePoint) */
+function kontaktNamen(k) {
+  const st = (crmStamm && k && k.CompanyId && crmStamm[String(k.CompanyId)]) || {}; const n = (st.kontaktNamen || {})[String(k && k.id)];
+  if (n && (n.vorname || n.name)) return { vorname: n.vorname || "", name: n.name || "" };
+  const t = String((k && k.Title) || "").trim().split(/\s+/); return t.length > 1 ? { vorname: t[0], name: t.slice(1).join(" ") } : { vorname: "", name: t[0] || "" };
+}
+async function kontaktNamenSetzen(compId, contactId, vorname, name) {
+  await crmLoadStamm(); const key = String(compId); const st = Object.assign({}, crmStamm[key] || {}); st.kontaktNamen = Object.assign({}, st.kontaktNamen || {});
+  if (vorname || name) st.kontaktNamen[String(contactId)] = { vorname, name }; else delete st.kontaktNamen[String(contactId)];
+  if (!Object.keys(st.kontaktNamen).length) delete st.kontaktNamen;
+  if (Object.keys(st).length) crmStamm[key] = st; else delete crmStamm[key];
+}
 function kontaktTags(compId, contactId) { const st = (crmStamm && crmStamm[String(compId)]) || {}; return ((st.kontaktTags || {})[String(contactId)] || []).slice(); }
 async function kontaktTagsSetzen(compId, contactId, tags) {
   await crmLoadStamm(); const key = String(compId); const st = Object.assign({}, crmStamm[key] || {}); st.kontaktTags = Object.assign({}, st.kontaktTags || {});
@@ -13668,7 +13685,7 @@ function stammEmailsOhneKontakt(compId) {
 }
 function kundenKontakteHtml(c) {
   const compId = c.CompanyId; if (!compId) return "";
-  const ks = cache.contacts.filter(k => String(k.CompanyId) === String(compId)).sort((a, b) => String(a.Title || "").localeCompare(String(b.Title || ""), "de"));
+  const ks = cache.contacts.filter(k => String(k.CompanyId) === String(compId)).sort((a, b) => { const x = kontaktNamen(a), y = kontaktNamen(b); return x.name.localeCompare(y.name, "de") || x.vorname.localeCompare(y.vorname, "de"); });
   const offen = stammEmailsOhneKontakt(compId);
   const chip = (k, tag) => { const on = kontaktTags(compId, k.id).includes(tag); return `<span onclick="kontaktTagToggle(${compId}, ${k.id}, ${tkJs(tag)}, ${c.id})" title="${on ? "Funktion entfernen" : "als " + escape(tag) + " markieren"}" style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;margin:1px 2px 1px 0;cursor:pointer;border:1px solid ${on ? "var(--accent)" : "var(--border)"};background:${on ? "rgba(184,233,134,0.15)" : "transparent"};color:${on ? "var(--accent)" : "var(--text-faint)"}">${escape(tag)}</span>`; };
   return `<div style="margin-top:18px;border-top:1px solid var(--border-soft);padding-top:12px">
@@ -13678,9 +13695,9 @@ function kundenKontakteHtml(c) {
       ${offen.length ? `<button class="btn btn-sm" onclick="kontakteAusStamm(${compId}, ${c.id})" title="${escape(offen.map(o => o.email + " (" + o.tags.join(", ") + ")").join(", "))}">⤵ ${offen.length} E-Mail(s) aus Entscheidungsträger/User übernehmen</button>` : ""}
       <span style="font-size:11px;color:var(--text-faint)">Funktion per Klick auf die Chips setzen</span>
     </div>
-    ${ks.length ? `<div class="table-wrap"><table style="font-size:12.5px"><thead><tr><th>Name Vorname</th><th>Funktion</th><th>Telefon direkt</th><th>E-Mail</th><th style="width:80px"></th></tr></thead><tbody>
+    ${ks.length ? `<div class="table-wrap"><table style="font-size:12.5px"><thead><tr><th>Nachname Vorname</th><th>Funktion</th><th>Telefon direkt</th><th>E-Mail</th><th style="width:80px"></th></tr></thead><tbody>
       ${ks.map(k => `<tr>
-        <td><a href="#" onclick="event.preventDefault();closeModal();openContact(${k.id})" style="color:var(--text);text-decoration:none"><strong>${escape(k.Title || "")}</strong></a>${k.Role ? `<div style="color:var(--text-faint);font-size:11px">${escape(k.Role)}</div>` : ""}</td>
+        <td><a href="#" onclick="event.preventDefault();closeModal();openContact(${k.id})" style="color:var(--text);text-decoration:none"><strong>${escape(kontaktNamen(k).name)}</strong> ${escape(kontaktNamen(k).vorname)}</a>${k.Role ? `<div style="color:var(--text-faint);font-size:11px">${escape(k.Role)}</div>` : ""}</td>
         <td>${KONTAKT_TAGS.map(t => chip(k, t)).join("")}</td>
         <td>${k.Phone ? `<a href="tel:${escape(String(k.Phone).replace(/\s+/g, ""))}" style="color:var(--text)">${escape(k.Phone)}</a>` : `<span style="color:var(--text-faint)">—</span>`}</td>
         <td>${k.Email ? `<a href="mailto:${escape(k.Email)}">${escape(k.Email)}</a>` : `<span style="color:var(--text-faint)">—</span>`}</td>
@@ -13860,17 +13877,23 @@ function mitarbeiterTabelleHtml() {
     <button class="btn btn-sm" onclick="feierHinweisZeigen(true)" title="Geburtstage und Jubiläen der nächsten 2 Tage anzeigen (erscheint sonst automatisch einmal pro Tag nach dem Login)">🎂 Anstehende Feiern</button></div>
     ${p.length ? `<table class="table"><thead><tr><th>Name</th><th>E-Mail</th><th>Geburtstag</th><th>Bei Apriko seit</th><th>Abteilung</th><th style="width:90px;text-align:right"></th></tr></thead><tbody>${p.map(e => { const m = mitarbeiterDaten(e); return `<tr${m.austritt ? ' style="opacity:.55"' : ""}><td style="font-weight:500">${escape(mitarbeiterName(e))}${m.austritt ? ` <span style="color:var(--warn);font-size:11px">ausgetreten ${escape(datumCH(m.austritt))}</span>` : ""}</td><td style="color:var(--text-dim)">${escape(e)}</td><td>${escape(datumCH(m.geburtstag) || "—")}</td><td>${escape(datumCH(m.eintritt) || "—")}</td><td style="color:var(--text-dim)">${escape(m.abteilung || "—")}</td><td style="text-align:right"><button class="btn btn-sm" onclick="mitarbeiterBearbeiten(${tkJs(e)}, null)">Bearbeiten</button></td></tr>`; }).join("")}</tbody></table>` : `<div class="empty">Keine Benutzer.</div>`}</div>`;
 }
+let internZusatz = {};   // custId → [emails], die ohne Rolle (noch) angezeigt werden sollen
+function internPersonHinzufuegen(custId, email) { if (!email) return; internZusatz[custId] = (internZusatz[custId] || []).concat([email]); openCustomer(custId); }
 function kundenInternHtml(c) {
-  const personen = internPersonen(c).sort((a, b) => mitarbeiterName(a).localeCompare(mitarbeiterName(b), "de"));
+  const alle = internPersonen(c);
+  const mitRolle = alle.filter(e => INTERN_ROLLEN.some(([k]) => internRolleWert(c, k) === e));
+  const personen = [...new Set(mitRolle.concat(internZusatz[c.id] || []))].sort((a, b) => mitarbeiterName(a).localeCompare(mitarbeiterName(b), "de"));
+  const uebrig = alle.filter(e => !personen.includes(e));
   const chip = (e, key, label) => { const on = internRolleWert(c, key) === e; return `<span onclick="internRolleSetzen(${c.id}, ${tkJs(key)}, ${tkJs(e)})" title="${on ? "Rolle entfernen" : escape(label) + " auf diese Person setzen"}" style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;margin:1px 2px 1px 0;cursor:pointer;border:1px solid ${on ? "var(--accent-2)" : "var(--border)"};background:${on ? "rgba(120,180,255,0.12)" : "transparent"};color:${on ? "var(--accent-2)" : "var(--text-faint)"}">${escape(label)}</span>`; };
   const belegt = INTERN_ROLLEN.filter(([k]) => internRolleWert(c, k)).length;
   return `<div style="margin-top:18px;border-top:1px solid var(--border-soft);padding-top:12px">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
       <h3 style="margin:0;font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Interne Ansprechpersonen Apriko (${belegt}/${INTERN_ROLLEN.length} Rollen besetzt)</h3>
-      <span style="font-size:11px;color:var(--text-faint)">Pro Rolle genau eine Person — Klick auf den Chip setzt sie, nochmals Klick entfernt sie. Personen = Benutzer mit Profil/Gruppe.</span>
+      ${uebrig.length ? `<select onchange="internPersonHinzufuegen(${c.id}, this.value)" style="padding:4px 8px;font-size:12px"><option value="">+ Person hinzufügen …</option>${uebrig.map(e => `<option value="${escape(e)}">${escape(mitarbeiterName(e))}</option>`).join("")}</select>` : ""}
+      <span style="font-size:11px;color:var(--text-faint)">Pro Rolle genau eine Person — Klick auf den Chip setzt sie, nochmals Klick entfernt sie.</span>
     </div>
-    ${personen.length ? `<div class="table-wrap"><table style="font-size:12.5px"><thead><tr><th>Mitarbeiter/in</th><th>Rolle bei diesem Kunden</th><th>E-Mail</th><th style="width:40px"></th></tr></thead><tbody>
-      ${personen.map(e => `<tr><td><strong>${escape(mitarbeiterName(e))}</strong>${mitarbeiterInfoZeile(e) ? `<div style="color:var(--text-faint);font-size:11px">${escape(mitarbeiterInfoZeile(e))}</div>` : ""}</td><td>${INTERN_ROLLEN.map(([k, l]) => chip(e, k, l)).join("")}</td><td><a href="mailto:${escape(e)}?subject=${encodeURIComponent((c.Title || "") + " — ")}">${escape(e)}</a></td><td><button class="btn btn-sm" onclick="mitarbeiterBearbeiten(${tkJs(e)}, ${c.id})" title="Name, Geburtstag, Eintritt">✎</button></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty" style="padding:10px;font-size:12px">Keine internen Benutzer gefunden (Admin → Profile).</div>`}
+    ${personen.length ? `<div class="table-wrap"><table style="font-size:12.5px"><thead><tr><th>Mitarbeiter/in</th><th>Rolle bei diesem Kunden</th><th>E-Mail</th></tr></thead><tbody>
+      ${personen.map(e => `<tr><td><strong>${escape(mitarbeiterName(e))}</strong></td><td>${INTERN_ROLLEN.map(([k, l]) => chip(e, k, l)).join("")}</td><td><a href="mailto:${escape(e)}?subject=${encodeURIComponent((c.Title || "") + " — ")}">${escape(e)}</a></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty" style="padding:10px;font-size:12px">Noch niemand zugeteilt — oben «+ Person hinzufügen» und dann die Rolle per Chip setzen.</div>`}
   </div>`;
 }
 function nameAusEmail(e) { const l = String(e || "").split("@")[0]; return l.split(/[._-]+/).filter(Boolean).map(x => x.charAt(0).toUpperCase() + x.slice(1)).join(" "); }
@@ -13886,7 +13909,8 @@ async function kontakteAusStamm(compId, custId) {
     for (const id of liste) {
       for (const o of stammEmailsOhneKontakt(id)) {
         let k = o.kontakt;
-        if (!k) { const res = await createItem("Contacts", { Title: nameAusEmail(o.email), Email: o.email, CompanyId: parseInt(id) }); await reload("Contacts"); k = cache.contacts.find(x => String(x.Email || "").toLowerCase() === o.email && String(x.CompanyId) === String(id)) || (res && res.id ? { id: res.id } : null); neu++; }
+        if (!k) { const res = await createItem("Contacts", { Title: nameAusEmail(o.email), Email: o.email, CompanyId: parseInt(id) }); await reload("Contacts"); k = cache.contacts.find(x => String(x.Email || "").toLowerCase() === o.email && String(x.CompanyId) === String(id)) || (res && res.id ? { id: res.id } : null); neu++;
+          if (k && k.id) { const t = nameAusEmail(o.email).split(" "); await kontaktNamenSetzen(id, k.id, t.length > 1 ? t[0] : "", t.length > 1 ? t.slice(1).join(" ") : t[0]); } }
         else markiert++;
         if (k && k.id) { const t = kontaktTags(id, k.id); o.tags.forEach(tag => { if (!t.includes(tag)) t.push(tag); }); await kontaktTagsSetzen(id, k.id, t); }
       }
@@ -14344,6 +14368,138 @@ function winPctBadge(pct) {
   return `<span style="font-family:var(--font-mono);color:${color};font-weight:600">${pct.toLocaleString("de-CH",{maximumFractionDigits:0})}%</span>`;
 }
 
+/* =====================================================================
+   Meine Aufgaben — persönliches Aufgabenboard (Ersatz für ClickUp) + private Notizen
+   Daten: crm_aufgaben.json (alle Aufgaben, je Zeile id/owner) und crm_notizen.json ({ email: text }).
+   Speichern = frisch laden, meine Änderung einmischen, schreiben (kein Überschreiben fremder Aufgaben).
+   ===================================================================== */
+const MT_STATUS = ["Todo", "In Progress", "On Hold", "Done"];
+const MT_PRIO = ["Hoch", "Mittel", "Tief"];
+const MT_PRIO_FARBE = { Hoch: "var(--danger)", Mittel: "var(--warn)", Tief: "var(--text-faint)" };
+let mtAufgaben = null, mtNotizen = null, mtLaedt = null;
+const mtFilter = { scope: "mine", doneZeigen: false };
+async function mtLaden(force) {
+  if (mtAufgaben && !force) return;
+  if (!mtLaedt || force) mtLaedt = (async () => {
+    try { const d = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_aufgaben.json:/content`, { cache: "no-store" }); mtAufgaben = Array.isArray(d) ? d : []; } catch (e) { mtAufgaben = []; }
+    try { const n = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_notizen.json:/content`, { cache: "no-store" }); mtNotizen = n && typeof n === "object" ? n : {}; } catch (e) { mtNotizen = {}; }
+  })();
+  await mtLaedt;
+}
+async function mtSpeichernAufgabe(aufgabe, loeschen) {
+  // frisch laden und nur diese Aufgabe einmischen
+  let aktuell = [];
+  try { const d = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_aufgaben.json:/content`, { cache: "no-store" }); aktuell = Array.isArray(d) ? d : []; } catch (e) { aktuell = []; }
+  const i = aktuell.findIndex(x => x.id === aufgabe.id);
+  if (loeschen) { if (i >= 0) aktuell.splice(i, 1); } else if (i >= 0) aktuell[i] = aufgabe; else aktuell.push(aufgabe);
+  await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_aufgaben.json:/content`, { method: "PUT", body: JSON.stringify(aktuell) });
+  mtAufgaben = aktuell;
+}
+async function mtSpeichernNotiz(text) {
+  let n = {}; try { const d = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_notizen.json:/content`, { cache: "no-store" }); n = d && typeof d === "object" ? d : {}; } catch (e) {}
+  if (text) n[myEmail()] = text; else delete n[myEmail()];
+  await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_notizen.json:/content`, { method: "PUT", body: JSON.stringify(n) });
+  mtNotizen = n;
+}
+function mtPersonen() { const set = new Set(internPersonenAlle().filter(e => !mitarbeiterDaten(e).austritt)); set.add(myEmail()); return [...set].sort((a, b) => mitarbeiterName(a).localeCompare(mitarbeiterName(b), "de")); }
+function mtNeuId() { return "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+function renderMeineTasks(el) {
+  const me = myEmail();
+  let start = ""; try { start = localStorage.getItem("crm-startseite") || ""; } catch (e) {}
+  document.getElementById("view-actions").innerHTML = `
+    <div class="scope-toggle">
+      <button class="${mtFilter.scope === "mine" ? "active" : ""}" onclick="mtFilter.scope='mine';render()">Meine</button>
+      <button class="${mtFilter.scope === "vonmir" ? "active" : ""}" onclick="mtFilter.scope='vonmir';render()" title="Aufgaben, die ich anderen zugewiesen habe">Von mir zugewiesen</button>
+      <button class="${mtFilter.scope === "all" ? "active" : ""}" onclick="mtFilter.scope='all';render()">Alle</button>
+    </div>
+    <button class="btn btn-sm ${start === "meinetasks" ? "btn-primary" : ""}" onclick="try{localStorage.setItem('crm-startseite', ${start === "meinetasks" ? "'dashboard'" : "'meinetasks'"})}catch(e){};render()" title="Diese Seite nach dem Login als Erstes anzeigen (Einstellung pro Browser)">${start === "meinetasks" ? "⭐ Startseite" : "☆ Als Startseite"}</button>
+    <button class="btn btn-primary" onclick="mtBearbeiten(null)">+ Neue Aufgabe</button>`;
+  if (mtAufgaben === null) { el.innerHTML = `<div class="empty">Lade Aufgaben …</div>`; mtLaden().then(() => { if (currentView === "meinetasks") render(); }); return; }
+  const alle = mtAufgaben.slice();
+  const liste = alle.filter(t => mtFilter.scope === "all" ? true : mtFilter.scope === "vonmir" ? (t.erstelltVon === me && t.owner !== me) : (t.owner === me || (!t.owner && t.erstelltVon === me)));
+  const prioRang = p => MT_PRIO.indexOf(p) < 0 ? 1 : MT_PRIO.indexOf(p);
+  const sortiert = l => l.sort((a, b) => prioRang(a.prio) - prioRang(b.prio) || (a.faellig || "9999").localeCompare(b.faellig || "9999") || (b.geaendert || "").localeCompare(a.geaendert || ""));
+  const heute = new Date().toISOString().slice(0, 10);
+  const karte = t => {
+    const ueber = t.faellig && t.status !== "Done" && t.faellig < heute, heuteF = t.faellig === heute && t.status !== "Done";
+    return `<div class="card" onclick="mtBearbeiten(${tkJs(t.id)})" style="padding:10px 12px;cursor:pointer;border-left:3px solid ${MT_PRIO_FARBE[t.prio] || "var(--border)"};${t.status === "Done" ? "opacity:.6" : ""}">
+      <div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1;font-weight:600;font-size:13px;${t.status === "Done" ? "text-decoration:line-through" : ""}">${escape(t.titel)}</div>
+        <select onclick="event.stopPropagation()" onchange="event.stopPropagation();mtStatusSetzen(${tkJs(t.id)}, this.value)" style="font-size:11px;padding:2px 4px" title="Status ändern">${MT_STATUS.map(st => `<option ${st === t.status ? "selected" : ""}>${st}</option>`).join("")}</select></div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:4px;display:flex;gap:8px;flex-wrap:wrap">
+        <span style="color:${MT_PRIO_FARBE[t.prio] || "inherit"}">● ${escape(t.prio || "Mittel")}</span>
+        ${t.faellig ? `<span style="${ueber ? "color:var(--danger);font-weight:600" : heuteF ? "color:var(--warn);font-weight:600" : ""}">${ueber ? "Überfällig " : heuteF ? "Heute " : "Fällig "}${escape(datumCH(t.faellig))}</span>` : ""}
+        ${t.owner && t.owner !== me ? `<span style="color:var(--accent-2)">@${escape(mitarbeiterName(t.owner))}</span>` : ""}
+        ${t.erstelltVon && t.erstelltVon !== me && t.owner === me ? `<span>von ${escape(mitarbeiterName(t.erstelltVon))}</span>` : ""}
+      </div>
+      ${t.kommentar ? `<div style="font-size:11.5px;color:var(--text-dim);margin-top:6px;white-space:pre-wrap;max-height:60px;overflow:hidden">${escape(t.kommentar)}</div>` : ""}
+    </div>`;
+  };
+  const spalten = MT_STATUS.map(st => { const l = sortiert(liste.filter(t => (t.status || "Todo") === st)); return { st, l }; });
+  const notiz = (mtNotizen || {})[me] || "";
+  el.innerHTML = `
+    <div style="padding:16px 20px">
+      <div style="display:flex;gap:8px;margin-bottom:14px"><input id="mt-schnell" placeholder="Neue Aufgabe eingeben und Enter drücken … (landet unter Todo, Priorität Mittel, zuständig: ich)" style="flex:1;padding:9px 12px" onkeydown="if(event.key==='Enter'){mtSchnell(this.value);this.value='';}"></div>
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:start">
+        ${spalten.map(({ st, l }) => `<div><div style="display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);margin-bottom:8px"><span style="width:8px;height:8px;border-radius:50%;background:${st === "Done" ? "var(--accent)" : st === "In Progress" ? "var(--accent-2)" : st === "On Hold" ? "var(--warn)" : "var(--text-faint)"}"></span>${escape(st)} <span style="color:var(--text-faint)">${l.length}</span>${st === "Done" && l.length ? `<button class="btn btn-sm" style="margin-left:auto;font-size:10px" onclick="mtFilter.doneZeigen=!mtFilter.doneZeigen;render()">${mtFilter.doneZeigen ? "ausblenden" : "anzeigen"}</button>` : ""}</div>
+          <div style="display:flex;flex-direction:column;gap:8px">${(st === "Done" && !mtFilter.doneZeigen ? [] : l).map(karte).join("") || `<div style="font-size:12px;color:var(--text-faint);padding:8px;border:1px dashed var(--border);border-radius:6px;text-align:center">${st === "Done" && l.length ? l.length + " erledigt" : "—"}</div>`}</div></div>`).join("")}
+      </div>
+      <div style="margin-top:22px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim)">Meine Notizen</div><span id="mt-notiz-status" style="font-size:11px;color:var(--text-faint)">privat · speichert automatisch</span></div>
+        <textarea id="mt-notiz" style="width:100%;min-height:160px;padding:10px 12px;font-family:inherit;font-size:13px;line-height:1.5" placeholder="Freie Notizen — nur für dich sichtbar …" oninput="mtNotizGeaendert()" onblur="mtNotizSpeichern()">${escape(notiz)}</textarea>
+      </div>
+    </div>`;
+}
+let mtNotizTimer = null;
+function mtNotizGeaendert() { const st = document.getElementById("mt-notiz-status"); if (st) st.textContent = "… ungespeichert"; clearTimeout(mtNotizTimer); mtNotizTimer = setTimeout(mtNotizSpeichern, 1500); }
+async function mtNotizSpeichern() {
+  clearTimeout(mtNotizTimer); const ta = document.getElementById("mt-notiz"); if (!ta) return;
+  const text = ta.value; if (text === ((mtNotizen || {})[myEmail()] || "")) { const st0 = document.getElementById("mt-notiz-status"); if (st0) st0.textContent = "privat · gespeichert"; return; }
+  try { await mtSpeichernNotiz(text); const st = document.getElementById("mt-notiz-status"); if (st) st.textContent = "privat · gespeichert " + new Date().toLocaleTimeString("de-CH", { hour: "2-digit", minute: "2-digit" }); }
+  catch (e) { toast("Notiz konnte nicht gespeichert werden: " + e.message, true); }
+}
+async function mtSchnell(text) {
+  text = String(text || "").trim(); if (!text) return;
+  const jetzt = new Date().toISOString();
+  const t = { id: mtNeuId(), titel: text, prio: "Mittel", status: "Todo", owner: myEmail(), erstelltVon: myEmail(), erstellt: jetzt, geaendert: jetzt };
+  try { await mtSpeichernAufgabe(t); render(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+}
+async function mtStatusSetzen(id, status) {
+  const t = (mtAufgaben || []).find(x => x.id === id); if (!t) return;
+  t.status = status; t.geaendert = new Date().toISOString(); if (status === "Done") t.erledigt = t.geaendert; else delete t.erledigt;
+  try { await mtSpeichernAufgabe(t); render(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+}
+function mtBearbeiten(id) {
+  const t = id ? (mtAufgaben || []).find(x => x.id === id) : { prio: "Mittel", status: "Todo", owner: myEmail() }; if (!t) return;
+  const personen = mtPersonen(); if (t.owner && !personen.includes(t.owner)) personen.push(t.owner);
+  showModal(id ? "Aufgabe bearbeiten" : "Neue Aufgabe", `
+    <div class="field"><label>Titel *</label><input id="f-mt-titel" value="${escape(t.titel || "")}"></div>
+    <div class="field-row">
+      <div class="field"><label>Priorität</label><select id="f-mt-prio">${MT_PRIO.map(p => `<option ${p === (t.prio || "Mittel") ? "selected" : ""}>${p}</option>`).join("")}</select></div>
+      <div class="field"><label>Status</label><select id="f-mt-status">${MT_STATUS.map(st => `<option ${st === (t.status || "Todo") ? "selected" : ""}>${st}</option>`).join("")}</select></div>
+      <div class="field"><label>Fällig</label><input id="f-mt-faellig" type="date" value="${escape(t.faellig || "")}"></div>
+    </div>
+    <div class="field"><label>Zuständig</label><select id="f-mt-owner">${personen.map(e => `<option value="${escape(e)}" ${e === t.owner ? "selected" : ""}>${escape(mitarbeiterName(e))}${e === myEmail() ? " (ich)" : ""}</option>`).join("")}</select></div>
+    <div class="field"><label>Kommentar</label><textarea id="f-mt-kommentar" rows="4">${escape(t.kommentar || "")}</textarea></div>
+    ${id ? `<div style="font-size:11px;color:var(--text-faint)">Erstellt ${escape(datumCH((t.erstellt || "").slice(0, 10)))} von ${escape(mitarbeiterName(t.erstelltVon || ""))}${t.erledigt ? " · erledigt " + escape(datumCH(t.erledigt.slice(0, 10))) : ""}</div>` : ""}`, [
+    id ? `<button class="btn btn-danger" onclick="mtLoeschen(${tkJs(id)})" style="margin-right:auto">Löschen</button>` : "",
+    `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
+    `<button class="btn btn-primary" onclick="mtSpeichern(${id ? tkJs(id) : "null"})">Speichern</button>`]);
+  setTimeout(() => { const i = document.getElementById("f-mt-titel"); if (i) i.focus(); }, 50);
+}
+async function mtSpeichern(id) {
+  const titel = val("f-mt-titel").trim(); if (!titel) { toast("Titel erforderlich", true); return; }
+  const jetzt = new Date().toISOString();
+  const alt = id ? (mtAufgaben || []).find(x => x.id === id) : null;
+  const t = Object.assign({}, alt || { id: mtNeuId(), erstellt: jetzt, erstelltVon: myEmail() }, { titel, prio: val("f-mt-prio"), status: val("f-mt-status"), faellig: val("f-mt-faellig") || undefined, owner: val("f-mt-owner"), kommentar: val("f-mt-kommentar").trim() || undefined, geaendert: jetzt });
+  if (t.status === "Done") { if (!t.erledigt) t.erledigt = jetzt; } else delete t.erledigt;
+  Object.keys(t).forEach(k => { if (t[k] === undefined) delete t[k]; });
+  try { await mtSpeichernAufgabe(t); closeModal(); render(); toast(id ? "Gespeichert" : "Aufgabe erstellt" + (t.owner !== myEmail() ? " — zugewiesen an " + mitarbeiterName(t.owner) : "")); }
+  catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+}
+async function mtLoeschen(id) {
+  const t = (mtAufgaben || []).find(x => x.id === id); if (!t || !confirm("Aufgabe «" + t.titel + "» löschen?")) return;
+  try { await mtSpeichernAufgabe(t, true); closeModal(); render(); toast("Gelöscht"); } catch (e) { toast("Löschen fehlgeschlagen: " + e.message, true); }
+}
 /* ---------- Contacts ---------- */
 function renderContacts(el) {
   document.getElementById("view-actions").innerHTML = `
@@ -15109,7 +15265,10 @@ function editContact(id, compIdVorgabe, zurueckKundeId) {
     .sort((a,b) => (a.Title||"").localeCompare(b.Title||""))
     .map(co => `<option value="${co.id}" ${c.CompanyId==co.id?"selected":""}>${escape(co.Title)}</option>`).join("");
   showModal(id ? "Kontakt bearbeiten" : "Neuer Kontakt", `
-    <div class="field"><label>Name Vorname *</label><input id="f-title" value="${escape(c.Title||"")}" placeholder="Muster Max"></div>
+    ${(() => { const n = id ? kontaktNamen(c) : { vorname: "", name: "" }; return `<div class="field-row">
+      <div class="field"><label>Vorname *</label><input id="f-vorname" value="${escape(n.vorname)}" placeholder="Max"></div>
+      <div class="field"><label>Nachname *</label><input id="f-nachname" value="${escape(n.name)}" placeholder="Muster"></div>
+    </div>`; })()}
     <div class="field"><label>Firma</label><select id="f-company"><option value="">—</option>${companyOptions}</select></div>
     <div class="field"><label>Funktion beim Kunden</label><div style="display:flex;gap:14px;flex-wrap:wrap;padding:4px 0">${KONTAKT_TAGS.map(t => `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="checkbox" class="f-ktag" value="${escape(t)}" ${tagsJetzt.includes(t) ? "checked" : ""} style="width:auto;margin:0">${escape(t)}</label>`).join("")}</div></div>
     <div class="field-row">
@@ -15126,12 +15285,13 @@ function editContact(id, compIdVorgabe, zurueckKundeId) {
 }
 async function saveContact(id) {
   const compId = val("f-company");
+  const vorname = val("f-vorname").trim(), nachname = val("f-nachname").trim();
   const data = {
-    Title: val("f-title"), Role: val("f-role"), Phone: val("f-phone"),
+    Title: [vorname, nachname].filter(Boolean).join(" "), Role: val("f-role"), Phone: val("f-phone"),
     Email: val("f-email"), Notes: val("f-notes"),
     CompanyId: compId ? parseInt(compId) : null
   };
-  if (!data.Title) return toast("Name erforderlich", true);
+  if (!vorname || !nachname) return toast("Vorname und Nachname erforderlich", true);
   const tags = Array.from(document.querySelectorAll(".f-ktag:checked")).map(cb => cb.value);
   try {
     let kid = id;
@@ -15139,7 +15299,7 @@ async function saveContact(id) {
     else { const res = await createItem("Contacts", data); kid = res && res.id; }
     await reload("Contacts");
     if (!kid && !id) { const k = cache.contacts.filter(x => x.Title === data.Title && String(x.CompanyId) === String(data.CompanyId)).sort((a, b) => b.id - a.id)[0]; kid = k && k.id; }
-    if (kid && data.CompanyId) await kontaktTagsSetzen(data.CompanyId, kid, tags);
+    if (kid && data.CompanyId) { await kontaktNamenSetzen(data.CompanyId, kid, vorname, nachname); await kontaktTagsSetzen(data.CompanyId, kid, tags); }
     closeModal(); toast("Gespeichert");
     const zk = kontaktZurueckKunde; kontaktZurueckKunde = null;
     if (zk) openCustomer(zk); else render();
