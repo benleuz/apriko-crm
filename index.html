@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.451.0"></script>
-<script src="apriko-api.js?v=1.451.0"></script>
-<script src="lohncheck.js?v=1.451.0"></script>
-<script src="personalbudget.js?v=1.451.0"></script>
-<script src="jahresbudget.js?v=1.451.0"></script>
-<script src="budgetpositionen.js?v=1.451.0"></script>
-<script src="lohnchecklistetemp.js?v=1.451.0"></script>
-<script src="apriko-endpunkte.js?v=1.451.0"></script>
+<script src="apriko-filters.js?v=1.452.0"></script>
+<script src="apriko-api.js?v=1.452.0"></script>
+<script src="lohncheck.js?v=1.452.0"></script>
+<script src="personalbudget.js?v=1.452.0"></script>
+<script src="jahresbudget.js?v=1.452.0"></script>
+<script src="budgetpositionen.js?v=1.452.0"></script>
+<script src="lohnchecklistetemp.js?v=1.452.0"></script>
+<script src="apriko-endpunkte.js?v=1.452.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1027,7 +1027,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.451.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.452.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -14705,6 +14705,7 @@ function renderMeineTasks(el) {
         ${t.faellig ? `<span style="${ueber ? "color:var(--danger);font-weight:600" : heuteF ? "color:var(--warn);font-weight:600" : ""}">${ueber ? "Überfällig " : heuteF ? "Heute " : "Fällig "}${escape(datumCH(t.faellig))}</span>` : ""}
         ${t.owner && t.owner !== me ? `<span style="color:var(--accent-2)">@${escape(mitarbeiterName(t.owner))}</span>` : ""}
         ${t.erstelltVon && t.erstelltVon !== me && t.owner === me ? `<span>von ${escape(mitarbeiterName(t.erstelltVon))}</span>` : ""}
+        ${t.link ? `<a href="${escape(t.link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent-2);text-decoration:none" title="${escape(t.link)}">${/github\.com/i.test(t.link) ? "⌥ GitHub" + ((t.link.match(/\/(issues|pull)\/(\d+)/) || [])[2] ? " #" + (t.link.match(/\/(issues|pull)\/(\d+)/) || [])[2] : "") : "🔗 Link"} ↗</a>` : ""}
       </div>
       ${t.kommentar ? `<div style="font-size:11.5px;color:var(--text-dim);margin-top:6px;white-space:pre-wrap;max-height:60px;overflow:hidden">${escape(t.kommentar)}</div>` : ""}
     </div>`;
@@ -14754,6 +14755,7 @@ function mtBearbeiten(id) {
       <div class="field"><label>Fällig</label><input id="f-mt-faellig" type="date" value="${escape(t.faellig || "")}"></div>
     </div>
     <div class="field"><label>Zuständig</label><select id="f-mt-owner">${personen.map(e => `<option value="${escape(e)}" ${e === t.owner ? "selected" : ""}>${escape(mitarbeiterName(e))}${e === myEmail() ? " (ich)" : ""}</option>`).join("")}</select></div>
+    <div class="field"><label>Link (optional, z.B. GitHub-Issue)</label><input id="f-mt-link" value="${escape(t.link || "")}" placeholder="https://github.com/…/issues/123"></div>
     <div class="field"><label>Kommentar</label><textarea id="f-mt-kommentar" rows="4">${escape(t.kommentar || "")}</textarea></div>
     ${id ? `<div style="font-size:11px;color:var(--text-faint)">Erstellt ${escape(datumCH((t.erstellt || "").slice(0, 10)))} von ${escape(mitarbeiterName(t.erstelltVon || ""))}${t.erledigt ? " · erledigt " + escape(datumCH(t.erledigt.slice(0, 10))) : ""}</div>` : ""}`, [
     id ? `<button class="btn btn-danger" onclick="mtLoeschen(${tkJs(id)})" style="margin-right:auto">Löschen</button>` : "",
@@ -14765,7 +14767,7 @@ async function mtSpeichern(id) {
   const titel = val("f-mt-titel").trim(); if (!titel) { toast("Titel erforderlich", true); return; }
   const jetzt = new Date().toISOString();
   const alt = id ? (mtAufgaben || []).find(x => x.id === id) : null;
-  const t = Object.assign({}, alt || { id: mtNeuId(), erstellt: jetzt, erstelltVon: myEmail() }, { titel, prio: val("f-mt-prio"), status: val("f-mt-status"), faellig: val("f-mt-faellig") || undefined, owner: val("f-mt-owner"), kommentar: val("f-mt-kommentar").trim() || undefined, geaendert: jetzt });
+  const t = Object.assign({}, alt || { id: mtNeuId(), erstellt: jetzt, erstelltVon: myEmail() }, { titel, prio: val("f-mt-prio"), status: val("f-mt-status"), faellig: val("f-mt-faellig") || undefined, owner: val("f-mt-owner"), kommentar: val("f-mt-kommentar").trim() || undefined, link: (normalizeUrl(val("f-mt-link").trim()) || val("f-mt-link").trim()) || undefined, geaendert: jetzt });
   if (t.status === "Done") { if (!t.erledigt) t.erledigt = jetzt; } else delete t.erledigt;
   Object.keys(t).forEach(k => { if (t[k] === undefined) delete t[k]; });
   try { await mtSpeichernAufgabe(t); closeModal(); render(); toast(id ? "Gespeichert" : "Aufgabe erstellt" + (t.owner !== myEmail() ? " — zugewiesen an " + mitarbeiterName(t.owner) : "")); }
