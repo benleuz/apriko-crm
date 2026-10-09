@@ -19,7 +19,7 @@
    budgetRows, budgetChfOf, budgetIsSaaS, budgetErloes, BUDGET_MONTH_FIELDS,
    deleteItem, reload, escape, toast, render, currentView. */
 
-const JB_VERSION = "1.469.0";
+const JB_VERSION = "1.470.0";
 const JB_GES = ["Apriko AG", "Maverix AG"];
 const JB_PERSONAL = new Set(["SW_Lohn", "SW_SV", "SW_UebrPA", "BO_Lohn", "BO_SV", "BO_UebrPA"]);
 const JB_ERTRAG = new Set(["SW_Ertrag", "BO_Ertrag"]);
@@ -307,11 +307,12 @@ function renderJahresbudget(el) {
   const q = jbState.q.trim().toLowerCase();
   const hit = r => !q || (r.g + " " + r.kt + " " + r.b + " " + r.note + " " + (FB_LABELS[r.key] || "")).toLowerCase().includes(q);
   const hit2 = r => hit(r) || (r.pos || []).some(p => ((p.t || "") + " " + (p.n || "")).toLowerCase().includes(q));
-  const visible = r => hit2(r) && (!jbState.onlyChanged || jbRowOpen(r));
+  const gesOkJ = r => jbState.mGes === "all" || jbSameGes(r.g, jbState.mGes);
+  const visible = r => gesOkJ(r) && hit2(r) && (!jbState.onlyChanged || jbRowOpen(r));
 
-  // Positionswerte (Budget & Hochrechnung) → EBITDA-Kette
-  const sumBud = k => (m.byKey[k] || []).reduce((s, r) => s + jbRowBudget(r), 0) * jbErSign(k);
-  const sumHoch = k => (m.byKey[k] || []).reduce((s, r) => s + (r.hoch || 0), 0) * jbErSign(k);
+  // Positionswerte (Budget & Hochrechnung) → EBITDA-Kette — gefiltert nach Gesellschaft (Total / Apriko / Maverix)
+  const sumBud = k => (m.byKey[k] || []).filter(gesOkJ).reduce((s, r) => s + jbRowBudget(r), 0) * jbErSign(k);
+  const sumHoch = k => (m.byKey[k] || []).filter(gesOkJ).reduce((s, r) => s + (r.hoch || 0), 0) * jbErSign(k);
   const vb = fbCompute(sumBud), vh = fbCompute(sumHoch);
   const gesBud = g => k => (m.byKey[k] || []).filter(r => jbSameGes(r.g, g)).reduce((s, r) => s + jbRowBudget(r), 0) * jbErSign(k);
   const vg = {}; JB_GES.forEach(g => vg[g] = fbCompute(gesBud(g)));
@@ -385,14 +386,15 @@ function renderJahresbudget(el) {
     ${persStatus === "gesperrt" ? `<div style="margin-bottom:10px;padding:8px 12px;border:1px solid var(--warn);border-radius:6px;font-size:12px;color:var(--text-dim)">🔒 Der Personalaufwand ist verschlüsselt und in dieser Sitzung nicht entsperrt — Lohn/AG-Beiträge/übriger PA werden mit 0 gerechnet. Einmal im Menü «Budget Personalaufwand» das Passwort eingeben; danach bleiben die Summen je Gesellschaft hier gespeichert.</div>` : persStatus === "gespeichert" ? `<div style="margin-bottom:10px;padding:6px 12px;border:1px solid var(--border);border-radius:6px;font-size:11px;color:var(--text-faint)">🔒 Personalaufwand aus den gespeicherten Summen des Personalbudgets (Personalbudget nicht entsperrt — Änderungen dort erscheinen hier nach dem nächsten Entsperren).</div>` : ""}
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
       <label style="font-size:12px;color:var(--text-dim)">Budgetjahr <select onchange="jbSetYear(this.value)" style="padding:4px 6px;font-size:12px;margin-left:4px">${years.map(v => `<option ${v === y ? "selected" : ""}>${v}</option>`).join("")}<option value="${Math.max(...years) + 1}">${Math.max(...years) + 1} (neu)</option></select></label>
+      <div style="display:flex;gap:4px">${[["all", "Total"], ...JB_GES.map(g => [g, g])].map(([id, l]) => `<button class="btn btn-sm" style="${jbState.mGes === id ? "background:var(--accent);color:#fff" : ""}" onclick="jbState.mGes=${JSON.stringify(id).replace(/"/g, "&quot;")};render()">${escape(l)}</button>`).join("")}</div>
       <span style="font-size:12px;color:var(--text-dim)">Basis: Ist ${basis}${m.hasIst ? "" : ` <span style="color:var(--danger)">— keine Ist-Daten ${basis} im Budgetvergleich importiert</span>`}</span>
       <input type="search" id="jb-suche" placeholder="Suche Konto, Bezeichnung, Notiz …" value="${escape(jbState.q)}" style="font-size:12px;padding:4px 8px;width:240px" oninput="bpSucheTippen(this, jbState, 'q')">
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
-      <div class="card stat-card"><div class="stat-label">Ertrag netto ${y}</div><div class="stat-value">${jbFmt(vb.DLTOT)}</div><div style="font-size:11px;color:var(--text-faint)">Ertragsbudget: SaaS ${jbFmt(m.eb.saas)} · BPO ${jbFmt(m.eb.bpo)}${m.eb.erloes ? ` · Erlösmind. dort ${jbFmt(m.eb.erloes)}` : ""}</div></div>
-      <div class="card stat-card"><div class="stat-label">Personalaufwand ${y}</div><div class="stat-value">${jbFmt(vb.PA)}</div><div style="font-size:11px;color:var(--text-faint)">aus Budget Personalaufwand${vb.PA ? "" : " — noch nicht übertragen"}</div></div>
-      <div class="card stat-card"><div class="stat-label">Betriebsaufwand ${y}</div><div class="stat-value">${jbFmt(vb.BETRIEB)}</div><div style="font-size:11px;color:var(--text-faint)">Hochrechnung ${basis}: ${jbFmt(vh.BETRIEB)}${(() => { const o = Object.values(m.byKey).flat().filter(jbRowOpen).length; return o ? ` · <span style="color:var(--warn)">${o} Konten offen</span>` : " · alle Konten erfasst"; })()}</div></div>
-      <div class="card stat-card"><div class="stat-label">EBITDA ${y}</div><div class="stat-value" style="color:${vb.EBITDA < 0 ? "var(--danger)" : "inherit"}">${jbFmt(vb.EBITDA)}</div><div style="font-size:11px;color:var(--text-faint)">${JB_GES.map(g => `${g.split(" ")[0]} ${jbFmt(vg[g].EBITDA)}`).join(" · ")}</div></div>
+      <div class="card stat-card"><div class="stat-label">Ertrag netto ${y}${jbState.mGes !== "all" ? " · " + escape(jbState.mGes) : ""}</div><div class="stat-value">${jbFmt(vb.DLTOT)}</div><div style="font-size:11px;color:var(--text-faint)">Ertragsbudget: SaaS ${jbFmt(m.eb.saas)} · BPO ${jbFmt(m.eb.bpo)}${m.eb.erloes ? ` · Erlösmind. dort ${jbFmt(m.eb.erloes)}` : ""}</div></div>
+      <div class="card stat-card"><div class="stat-label">Personalaufwand ${y}${jbState.mGes !== "all" ? " · " + escape(jbState.mGes) : ""}</div><div class="stat-value">${jbFmt(vb.PA)}</div><div style="font-size:11px;color:var(--text-faint)">aus Budget Personalaufwand${vb.PA ? "" : " — noch nicht übertragen"}</div></div>
+      <div class="card stat-card"><div class="stat-label">Betriebsaufwand ${y}${jbState.mGes !== "all" ? " · " + escape(jbState.mGes) : ""}</div><div class="stat-value">${jbFmt(vb.BETRIEB)}</div><div style="font-size:11px;color:var(--text-faint)">Hochrechnung ${basis}: ${jbFmt(vh.BETRIEB)}${(() => { const o = Object.values(m.byKey).flat().filter(jbRowOpen).length; return o ? ` · <span style="color:var(--warn)">${o} Konten offen</span>` : " · alle Konten erfasst"; })()}</div></div>
+      <div class="card stat-card"><div class="stat-label">EBITDA ${y}${jbState.mGes !== "all" ? " · " + escape(jbState.mGes) : ""}</div><div class="stat-value" style="color:${vb.EBITDA < 0 ? "var(--danger)" : "inherit"}">${jbFmt(vb.EBITDA)}</div><div style="font-size:11px;color:var(--text-faint)">${JB_GES.map(g => `${g.split(" ")[0]} ${jbFmt(vg[g].EBITDA)}`).join(" · ")}</div></div>
     </div>
     <div class="card" style="padding:12px 14px;overflow-x:auto">
       <table style="width:100%;font-size:12.5px;border-collapse:collapse">
