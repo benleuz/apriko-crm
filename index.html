@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.423.0"></script>
-<script src="apriko-api.js?v=1.423.0"></script>
-<script src="lohncheck.js?v=1.423.0"></script>
-<script src="personalbudget.js?v=1.423.0"></script>
-<script src="jahresbudget.js?v=1.423.0"></script>
-<script src="budgetpositionen.js?v=1.423.0"></script>
-<script src="lohnchecklistetemp.js?v=1.423.0"></script>
-<script src="apriko-endpunkte.js?v=1.423.0"></script>
+<script src="apriko-filters.js?v=1.424.0"></script>
+<script src="apriko-api.js?v=1.424.0"></script>
+<script src="lohncheck.js?v=1.424.0"></script>
+<script src="personalbudget.js?v=1.424.0"></script>
+<script src="jahresbudget.js?v=1.424.0"></script>
+<script src="budgetpositionen.js?v=1.424.0"></script>
+<script src="lohnchecklistetemp.js?v=1.424.0"></script>
+<script src="apriko-endpunkte.js?v=1.424.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1024,7 +1024,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.423.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.424.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1619,7 +1619,7 @@ function ansichtAlsAnwenden() {
   currentUser.allowedViews = (g.views || []).slice(); if (g.admin && !currentUser.allowedViews.includes("profiles")) currentUser.allowedViews.push("profiles");
   const bar = document.createElement("div"); bar.id = "ansicht-als-bar";
   bar.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:9999;background:#b26a00;color:#fff;font-size:12px;padding:5px 14px;display:flex;align-items:center;gap:12px;box-shadow:0 1px 4px rgba(0,0,0,.3)";
-  bar.innerHTML = `👁 Vorschau als Benutzergruppe <b>${escape(g.name)}</b> — so sieht ein Benutzer dieser Gruppe das CRM. <button onclick="ansichtAlsSetzen('')" style="margin-left:auto;background:#fff;color:#b26a00;border:0;border-radius:4px;padding:3px 10px;font-weight:600;cursor:pointer">Zurück zur eigenen Ansicht</button>`;
+  bar.innerHTML = `👁 Vorschau als Benutzergruppe <b>${escape(g.name)}</b> (${currentUser.allowedViews.length} Bereiche${g.admin ? ", Admin" : ""}) — so sieht ein Benutzer dieser Gruppe das CRM. <button onclick="ansichtAlsSetzen('')" style="margin-left:auto;background:#fff;color:#b26a00;border:0;border-radius:4px;padding:3px 10px;font-weight:600;cursor:pointer">Zurück zur eigenen Ansicht</button>`;
   document.body.appendChild(bar); document.body.style.paddingTop = "28px";
 }
 async function bgGruppeAnlegen() {
@@ -9409,7 +9409,8 @@ let crmParameter = null;
 async function parameterLaden(force) {
   if (!force && crmParameter) return crmParameter;
   let data = null;
-  try { data = await graph(`/sites/${siteId}/drive/root:/${PARAMETER_PFAD}:/content`); }
+  // cache: no-store — sonst liefert der Browser nach einem Speichern + Neuladen u.U. die alte Datei (Benutzergruppen schienen nicht zu greifen, 09.10.2026)
+  try { data = await graph(`/sites/${siteId}/drive/root:/${PARAMETER_PFAD}:/content`, { cache: "no-store" }); }
   catch (e) { data = null; }
   if (!data || typeof data !== "object") data = {};
   if (!Array.isArray(data.ueberzeit) || !data.ueberzeit.length) {
