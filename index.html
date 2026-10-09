@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.449.0"></script>
-<script src="apriko-api.js?v=1.449.0"></script>
-<script src="lohncheck.js?v=1.449.0"></script>
-<script src="personalbudget.js?v=1.449.0"></script>
-<script src="jahresbudget.js?v=1.449.0"></script>
-<script src="budgetpositionen.js?v=1.449.0"></script>
-<script src="lohnchecklistetemp.js?v=1.449.0"></script>
-<script src="apriko-endpunkte.js?v=1.449.0"></script>
+<script src="apriko-filters.js?v=1.450.0"></script>
+<script src="apriko-api.js?v=1.450.0"></script>
+<script src="lohncheck.js?v=1.450.0"></script>
+<script src="personalbudget.js?v=1.450.0"></script>
+<script src="jahresbudget.js?v=1.450.0"></script>
+<script src="budgetpositionen.js?v=1.450.0"></script>
+<script src="lohnchecklistetemp.js?v=1.450.0"></script>
+<script src="apriko-endpunkte.js?v=1.450.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1027,7 +1027,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.449.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.450.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -13776,6 +13776,14 @@ function kontaktNamen(k) {
   if (n && (n.vorname || n.name)) return { vorname: n.vorname || "", name: n.name || "" };
   const t = String((k && k.Title) || "").trim().split(/\s+/); return t.length > 1 ? { vorname: t[0], name: t.slice(1).join(" ") } : { vorname: "", name: t[0] || "" };
 }
+/* Zendesk-Link je Kontakt (crmStamm[comp].kontaktLinks[id].zendesk) */
+function kontaktZendesk(k) { const st = (crmStamm && k && k.CompanyId && crmStamm[String(k.CompanyId)]) || {}; return ((st.kontaktLinks || {})[String(k && k.id)] || {}).zendesk || ""; }
+async function kontaktZendeskSetzen(compId, contactId, url) {
+  await crmLoadStamm(); const key = String(compId); const st = Object.assign({}, crmStamm[key] || {}); st.kontaktLinks = Object.assign({}, st.kontaktLinks || {});
+  if (url) st.kontaktLinks[String(contactId)] = Object.assign({}, st.kontaktLinks[String(contactId)] || {}, { zendesk: url }); else { const l = Object.assign({}, st.kontaktLinks[String(contactId)] || {}); delete l.zendesk; if (Object.keys(l).length) st.kontaktLinks[String(contactId)] = l; else delete st.kontaktLinks[String(contactId)]; }
+  if (!Object.keys(st.kontaktLinks).length) delete st.kontaktLinks;
+  if (Object.keys(st).length) crmStamm[key] = st; else delete crmStamm[key];
+}
 async function kontaktNamenSetzen(compId, contactId, vorname, name) {
   await crmLoadStamm(); const key = String(compId); const st = Object.assign({}, crmStamm[key] || {}); st.kontaktNamen = Object.assign({}, st.kontaktNamen || {});
   if (vorname || name) st.kontaktNamen[String(contactId)] = { vorname, name }; else delete st.kontaktNamen[String(contactId)];
@@ -13826,7 +13834,7 @@ function kundenKontakteHtml(c) {
         <td><a href="#" onclick="event.preventDefault();closeModal();openContact(${k.id})" style="color:var(--text);text-decoration:none"><strong>${escape(kontaktNamen(k).name)}</strong> ${escape(kontaktNamen(k).vorname)}</a>${k.Role ? `<div style="color:var(--text-faint);font-size:11px">${escape(k.Role)}</div>` : ""}</td>
         <td>${KONTAKT_TAGS.map(t => chip(k, t)).join("")}</td>
         <td>${k.Phone ? `<a href="tel:${escape(String(k.Phone).replace(/\s+/g, ""))}" style="color:var(--text)">${escape(k.Phone)}</a>` : `<span style="color:var(--text-faint)">—</span>`}</td>
-        <td>${k.Email ? `<a href="mailto:${escape(k.Email)}">${escape(k.Email)}</a>` : `<span style="color:var(--text-faint)">—</span>`}</td>
+        <td>${k.Email ? `<a href="mailto:${escape(k.Email)}">${escape(k.Email)}</a>` : `<span style="color:var(--text-faint)">—</span>`}${kontaktZendesk(k) ? ` <a href="${escape(kontaktZendesk(k))}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Tickets dieser Person in Zendesk" style="text-decoration:none;margin-left:6px">🎫</a>` : ""}</td>
         <td style="white-space:nowrap"><button class="btn btn-sm" onclick="editContact(${k.id}, ${compId}, ${c.id})" title="Bearbeiten">✎</button> <button class="btn btn-sm" style="color:var(--danger)" onclick="deleteContact(${k.id}, ${c.id})" title="Kontakt löschen">✕</button></td>
       </tr>`).join("")}</tbody></table></div>` : `<div class="empty" style="padding:10px;font-size:12px">Noch keine Ansprechpersonen — mit «+ Kontakt erfassen» anlegen${offen.length ? " oder die E-Mails übernehmen" : ""}.</div>`}
   </div>`;
@@ -14093,8 +14101,10 @@ async function kuImport(input) {
     if (ap && kunde.CompanyId) {
       const mail = ((r[ci.ap].links.find(h => /^mailto:/i.test(h)) || "").replace(/^mailto:/i, "").split("?")[0]) || ((r[ci.ap].text.match(/[\w.+-]+@[\w.-]+\.\w+/) || [])[0] || "");
       const apName = r[ci.ap].text.replace(/[\w.+-]+@[\w.-]+\.\w+/g, "").replace(/[<>()\[\]]/g, "").trim();
-      const vorhanden = cache.contacts.some(k => String(k.CompanyId) === String(kunde.CompanyId) && (maNorm(k.Title) === maNorm(apName) || (mail && String(k.Email || "").toLowerCase() === mail.toLowerCase())));
-      if (!vorhanden && apName) aend.push({ art: "kontakt", label: "Kontakt anlegen", wert: apName + (mail ? " <" + mail + ">" : " — keine E-Mail im Export"), name: apName, mail });
+      const zendesk = r[ci.ap].links.find(h => /zendesk\.com/i.test(h)) || "";
+      const vorh = cache.contacts.find(k => String(k.CompanyId) === String(kunde.CompanyId) && (maNorm(k.Title) === maNorm(apName) || (mail && String(k.Email || "").toLowerCase() === mail.toLowerCase())));
+      if (!vorh && apName) aend.push({ art: "kontakt", label: "Kontakt anlegen", wert: apName + (mail ? " <" + mail + ">" : "") + (zendesk ? " · Zendesk-Link" : ""), name: apName, mail, zendesk });
+      else if (vorh && zendesk && !kontaktZendesk(vorh)) aend.push({ art: "zendesk", label: "Zendesk-Link", wert: apName, kontaktId: vorh.id, zendesk });
     }
     // interne Rollen
     const rolle = (idx, key, label, backupKey, backupLabel) => {
@@ -14136,7 +14146,7 @@ async function kuImport(input) {
 }
 async function kuImportUebernehmen() {
   const idx = [...document.querySelectorAll(".ku-cb:checked")].map(cb => +cb.dataset.i);
-  let n = 0, kontakte = 0, flagsGeaendert = false, kundenGeaendert = false;
+  let n = 0, kontakte = 0, flagsGeaendert = false, kundenGeaendert = false, stammGeaendert = false;
   try {
     for (const i of idx) {
       const p = kuImportPlan[i]; if (!p || !p.kunde) continue; const key = String(p.kunde.id);
@@ -14149,13 +14159,15 @@ async function kuImportUebernehmen() {
         else if (a.art === "kontakt") {
           const t = a.name.trim().split(/\s+/); const vorname = t.length > 1 ? t[0] : "", nachname = t.length > 1 ? t.slice(1).join(" ") : t[0];
           const res = await createItem("Contacts", { Title: a.name.trim(), Email: a.mail || "", CompanyId: parseInt(p.kunde.CompanyId) });
-          if (res && res.id) await kontaktNamenSetzen(p.kunde.CompanyId, res.id, vorname, nachname);
+          if (res && res.id) { await kontaktNamenSetzen(p.kunde.CompanyId, res.id, vorname, nachname); if (a.zendesk) await kontaktZendeskSetzen(p.kunde.CompanyId, res.id, a.zendesk); }
           kontakte++; n++;
         }
+        else if (a.art === "zendesk") { await kontaktZendeskSetzen(p.kunde.CompanyId, a.kontaktId, a.zendesk); stammGeaendert = true; n++; }
       }
     }
     if (flagsGeaendert) await crmSaveKundenFlags();
-    if (kontakte) { await crmSaveStamm(); await reload("Contacts"); }
+    if (kontakte || stammGeaendert) await crmSaveStamm();
+    if (kontakte) await reload("Contacts");
     if (kundenGeaendert) await reload("Customers");
   } catch (e) { toast("Fehler beim Übernehmen: " + e.message, true); }
   closeModal(); render(); toast(n + " Ergänzungen übernommen" + (kontakte ? " (" + kontakte + " Kontakte angelegt)" : "") + ".");
@@ -15219,6 +15231,7 @@ function openContact(id) {
       <dt>Funktion</dt><dd>${c.CompanyId && kontaktTags(c.CompanyId, c.id).length ? kontaktTags(c.CompanyId, c.id).map(t => `<span style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;margin-right:3px;border:1px solid var(--accent);background:rgba(184,233,134,0.15);color:var(--accent)">${escape(t)}</span>`).join("") : "—"}</dd>
       <dt>Rolle / Titel</dt><dd>${escape(c.Role||"—")}</dd>
       <dt>E-Mail</dt><dd>${c.Email ? `<a href="mailto:${escape(c.Email)}">${escape(c.Email)}</a>` : "—"}</dd>
+      <dt>Zendesk</dt><dd>${kontaktZendesk(c) ? `<a href="${escape(kontaktZendesk(c))}" target="_blank" rel="noopener" style="color:var(--accent-2)">Tickets in Zendesk ↗</a>` : "—"}</dd>
       <dt>Telefon</dt><dd>${escape(c.Phone||"—")}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
     </dl>
@@ -15534,7 +15547,10 @@ function editContact(id, compIdVorgabe, zurueckKundeId) {
       <div class="field"><label>Rolle / Titel (frei)</label><input id="f-role" value="${escape(c.Role||"")}" placeholder="z.B. Geschäftsführer"></div>
       <div class="field"><label>Telefon direkt</label><input id="f-phone" value="${escape(c.Phone||"")}" placeholder="+41 61 …"></div>
     </div>
-    <div class="field"><label>E-Mail</label><input id="f-email" value="${escape(c.Email||"")}"></div>
+    <div class="field-row">
+      <div class="field"><label>E-Mail</label><input id="f-email" value="${escape(c.Email||"")}"></div>
+      <div class="field"><label>Zendesk-Link</label><input id="f-zendesk" value="${escape(id ? kontaktZendesk(c) : "")}" placeholder="https://apriko.zendesk.com/agent/users/…"></div>
+    </div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
   `, [
     id ? `<button class="btn btn-danger" onclick="deleteContact(${id})" style="margin-right:auto">Löschen</button>` : "",
@@ -15558,7 +15574,7 @@ async function saveContact(id) {
     else { const res = await createItem("Contacts", data); kid = res && res.id; }
     await reload("Contacts");
     if (!kid && !id) { const k = cache.contacts.filter(x => x.Title === data.Title && String(x.CompanyId) === String(data.CompanyId)).sort((a, b) => b.id - a.id)[0]; kid = k && k.id; }
-    if (kid && data.CompanyId) { await kontaktNamenSetzen(data.CompanyId, kid, vorname, nachname); await kontaktTagsSetzen(data.CompanyId, kid, tags); }
+    if (kid && data.CompanyId) { await kontaktNamenSetzen(data.CompanyId, kid, vorname, nachname); await kontaktZendeskSetzen(data.CompanyId, kid, val("f-zendesk").trim()); await kontaktTagsSetzen(data.CompanyId, kid, tags); }
     closeModal(); toast("Gespeichert");
     const zk = kontaktZurueckKunde; kontaktZurueckKunde = null;
     if (zk) openCustomer(zk); else render();
