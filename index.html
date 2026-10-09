@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.442.0"></script>
-<script src="apriko-api.js?v=1.442.0"></script>
-<script src="lohncheck.js?v=1.442.0"></script>
-<script src="personalbudget.js?v=1.442.0"></script>
-<script src="jahresbudget.js?v=1.442.0"></script>
-<script src="budgetpositionen.js?v=1.442.0"></script>
-<script src="lohnchecklistetemp.js?v=1.442.0"></script>
-<script src="apriko-endpunkte.js?v=1.442.0"></script>
+<script src="apriko-filters.js?v=1.444.0"></script>
+<script src="apriko-api.js?v=1.444.0"></script>
+<script src="lohncheck.js?v=1.444.0"></script>
+<script src="personalbudget.js?v=1.444.0"></script>
+<script src="jahresbudget.js?v=1.444.0"></script>
+<script src="budgetpositionen.js?v=1.444.0"></script>
+<script src="lohnchecklistetemp.js?v=1.444.0"></script>
+<script src="apriko-endpunkte.js?v=1.444.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1027,7 +1027,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.442.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.444.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -13940,10 +13940,13 @@ async function kontakteAusStamm(compId, custId) {
    Es werden nur bestehende Felder bedient: App-Link, Kontakt (Ansprechperson), interne Rollen Lohn/Lohn Backup/FIBU/FIBU Backup/Lohn intern,
    Workflows «Interner Lohn» / «FIBU Monatsabschluss». Keine neuen Felder. Bestehende Werte werden nicht überschrieben. */
 let kuImportPlan = [];
+const KU_SPITZNAMEN = { rodi: "rodrigo", leo: "leutrim", beni: "benjamin", nico: "nicolas" };   // med = med@apriko.com, kein Mapping
 function kuPersonZuEmail(vorname) {
-  const v = maNorm(vorname); if (!v) return "";
+  let v = maNorm(vorname); if (!v) return ""; v = KU_SPITZNAMEN[v] || v;
   const alle = internPersonenAlle();
-  return alle.find(e => maNorm(mitarbeiterDaten(e).vorname || mitarbeiterVornameAusEmail(e)) === v) || alle.find(e => maNorm(e.split("@")[0]).startsWith(v)) || "";
+  return alle.find(e => maNorm(mitarbeiterDaten(e).vorname || mitarbeiterVornameAusEmail(e)) === v)
+    || alle.find(e => maNorm(mitarbeiterDaten(e).vorname || mitarbeiterVornameAusEmail(e)).startsWith(v))
+    || alle.find(e => maNorm(e.split("@")[0]).startsWith(v)) || "";
 }
 function kuParsePersonen(txt) { const m = /^\s*([^()]+?)\s*(?:\(([^)]*)\))?\s*$/.exec(String(txt || "").trim()); return m ? { haupt: (m[1] || "").trim(), backup: (m[2] || "").trim() } : { haupt: "", backup: "" }; }
 async function kuImport(input) {
@@ -13962,9 +13965,10 @@ async function kuImport(input) {
   rows.slice(hi + 1).forEach(r => {
     const name = ci.name >= 0 && r[ci.name] ? r[ci.name].text : ""; if (!name) return;
     const n = tkNormName(name);
-    const kunde = cache.customers.find(c => { const comp = cache.companies.find(x => x.id == c.CompanyId); const t = tkNormName(comp && comp.Title), t2 = tkNormName(c.Title); return n && (t === n || t2 === n || (t && (t.includes(n) || n.includes(t)))); });
+    const treffer = cache.customers.filter(c => { const comp = cache.companies.find(x => x.id == c.CompanyId); const t = tkNormName(comp && comp.Title), t2 = tkNormName(c.Title); return n && (t === n || t2 === n || (t && (t.includes(n) || n.includes(t)))); });
+    const kunde = treffer.find(c => (c.Status || "Aktiv") === "Aktiv") || null;
     const aend = [];
-    if (!kunde) { plan.push({ name, kunde: null, aend }); return; }
+    if (!kunde) { plan.push({ name, kunde: null, aend, inaktiv: treffer.length > 0 }); return; }
     const flags = (crmKundenFlags || {})[String(kunde.id)] || {};
     // Link
     const link = ci.link >= 0 && r[ci.link] ? (r[ci.link].links[0] || r[ci.link].text) : "";
@@ -14006,9 +14010,9 @@ async function kuImport(input) {
   const mitAend = plan.filter(p => p.kunde && p.aend.some(a => a.art !== "warn")).length;
   modalBreit && modalBreit(true);
   showModal("Kundenumgebungen importieren — " + plan.length + " Zeilen, " + mitAend + " Kunden mit Ergänzungen", `
-    <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px">Nur leere Felder werden ergänzt, nichts wird überschrieben. Spalten ohne eigenes Feld (Payroll bis, SMTP, Rapport, Abrechnungsperiode, Portalzugriffe, Services) landen als Block in den Notes des Kunden.</div>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px">Nur aktive Kunden, nur leere Felder werden ergänzt, nichts wird überschrieben. Kurznamen: Rodi = Rodrigo, Leo = Leutrim. Spalten ohne eigenes Feld (Payroll bis, SMTP, Rapport, Abrechnungsperiode, Portalzugriffe, Services) landen als Block in den Notes des Kunden.</div>
     <table class="table" style="font-size:12px"><thead><tr><th></th><th>Unternehmung (HTML)</th><th>Kunde im CRM</th><th>Ergänzungen</th></tr></thead><tbody>
-    ${plan.map((p, i) => `<tr><td><input type="checkbox" class="ku-cb" data-i="${i}" ${p.kunde && p.aend.some(a => a.art !== "warn") ? "checked" : "disabled"} style="width:auto"></td><td><strong>${escape(p.name)}</strong></td><td>${p.kunde ? escape(p.kunde.Title) : `<span style="color:var(--warn)">nicht gefunden</span>`}</td>
+    ${plan.map((p, i) => `<tr><td><input type="checkbox" class="ku-cb" data-i="${i}" ${p.kunde && p.aend.some(a => a.art !== "warn") ? "checked" : "disabled"} style="width:auto"></td><td><strong>${escape(p.name)}</strong></td><td>${p.kunde ? escape(p.kunde.Title) : `<span style="color:var(--warn)">${p.inaktiv ? "nur inaktiver Kunde — übersprungen" : "nicht gefunden"}</span>`}</td>
       <td>${p.kunde ? (p.aend.length ? p.aend.map(a => `<div style="${a.art === "warn" ? "color:var(--warn)" : ""}">${a.art === "warn" ? "⚠ " : "+ "}${escape(a.label)}: ${escape(a.wert)}</div>`).join("") : `<span style="color:var(--text-faint)">nichts zu ergänzen</span>`) : ""}</td></tr>`).join("")}
     </tbody></table>`, [
     `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
