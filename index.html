@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.452.0"></script>
-<script src="apriko-api.js?v=1.452.0"></script>
-<script src="lohncheck.js?v=1.452.0"></script>
-<script src="personalbudget.js?v=1.452.0"></script>
-<script src="jahresbudget.js?v=1.452.0"></script>
-<script src="budgetpositionen.js?v=1.452.0"></script>
-<script src="lohnchecklistetemp.js?v=1.452.0"></script>
-<script src="apriko-endpunkte.js?v=1.452.0"></script>
+<script src="apriko-filters.js?v=1.455.0"></script>
+<script src="apriko-api.js?v=1.455.0"></script>
+<script src="lohncheck.js?v=1.455.0"></script>
+<script src="personalbudget.js?v=1.455.0"></script>
+<script src="jahresbudget.js?v=1.455.0"></script>
+<script src="budgetpositionen.js?v=1.455.0"></script>
+<script src="lohnchecklistetemp.js?v=1.455.0"></script>
+<script src="apriko-endpunkte.js?v=1.455.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1027,7 +1027,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.452.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.455.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1612,7 +1612,7 @@ async function bgSchnellFreischalten() {
   await bgZuweisen(email, gruppe); toast(email + " freigeschaltet (" + ((bgParam().gruppen[gruppe] || {}).name || gruppe) + ").");
 }
 async function bgZuweisen(email, gruppeId) {
-  await parameterLaden(false); const b = bgParam(); const key = String(email || "").toLowerCase();
+  await parameterLaden(true); const b = bgParam(); const key = String(email || "").toLowerCase();
   if (gruppeId) b.zuweisung[key] = gruppeId; else delete b.zuweisung[key];
   await bgSpeichern(); render();
 }
@@ -1633,12 +1633,12 @@ function ansichtAlsAnwenden() {
 }
 async function bgGruppeAnlegen() {
   const name = prompt("Name der neuen Benutzergruppe:"); if (!name) return;
-  await parameterLaden(false); const b = bgParam(); const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || ("g" + Date.now());
+  await parameterLaden(true); const b = bgParam(); const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || ("g" + Date.now());
   if (b.gruppen[id]) { toast("Gruppe existiert bereits.", true); return; }
   b.gruppen[id] = { name, admin: false, views: ["dashboard"] }; await bgSpeichern(); bgGruppeBearbeiten(id);
 }
 async function bgGruppeLoeschen(id) {
-  await parameterLaden(false); const b = bgParam(); const g = b.gruppen[id]; if (!g) return;
+  await parameterLaden(true); const b = bgParam(); const g = b.gruppen[id]; if (!g) return;
   const n = Object.values(b.zuweisung).filter(x => x === id).length;
   if (!confirm("Gruppe «" + g.name + "» löschen?" + (n ? " " + n + " Benutzer verlieren dadurch die Gruppenrechte." : ""))) return;
   delete b.gruppen[id]; Object.keys(b.zuweisung).forEach(k => { if (b.zuweisung[k] === id) delete b.zuweisung[k]; });
@@ -1657,7 +1657,7 @@ function bgGruppeBearbeiten(id) {
     `<button class="btn btn-primary" onclick="bgGruppeSpeichern(${tkJs(id)})">Speichern</button>`]);
 }
 async function bgGruppeSpeichern(id) {
-  await parameterLaden(false); const b = bgParam(); const g = b.gruppen[id]; if (!g) return;
+  await parameterLaden(true); const b = bgParam(); const g = b.gruppen[id]; if (!g) return;
   g.name = (document.getElementById("bg-name").value || g.name).trim(); g.admin = document.getElementById("bg-admin").checked;
   g.views = Array.from(document.querySelectorAll(".profile-view-cb:checked")).map(cb => cb.value);
   if (g.admin && !g.views.includes("profiles")) g.views.push("profiles");
@@ -2098,6 +2098,8 @@ function bindNav() {
       currentView = b.dataset.view;
       render();
       if (currentView === "rapport" && window.rpEingangPruefen) setTimeout(function(){ window.rpEingangPruefen(true); }, 300);
+      // Seiten, die auf parameter.json beruhen und von mehreren Personen gepflegt werden: beim Öffnen frisch laden (max. alle 20 s)
+      if (["onboarding", "profiles", "parameter", "tickets", "abacus", "grad360"].includes(currentView) && Date.now() - crmParameterGeladen > 20000 && siteId) { parameterLaden(true).then(() => { if (currentView === b.dataset.view) render(); }).catch(() => {}); }
     };
   });
 }
@@ -2594,7 +2596,7 @@ function budgetDbProMonat(year) {
 }
 function hostingProDb() { const v = crmParameter && crmParameter.hostingDb && parseFloat(crmParameter.hostingDb.proDb); return (v || v === 0) ? v : 500; }
 async function hostingProDbSet(v) {
-  await parameterLaden(false);
+  await parameterLaden(true);
   crmParameter.hostingDb = crmParameter.hostingDb || {}; crmParameter.hostingDb.proDb = parseFloat(v) || 0;
   try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
   render();
@@ -8154,7 +8156,7 @@ function abaSettings() {
 }
 async function abaSettingSet(k, v) {
   if (abaState.kunde) {
-    await parameterLaden(false);
+    await parameterLaden(true);
     const a = abaParam(); a.mandant = a.mandant || {}; a.mandant[k] = v;
     await abaParamSpeichern(); render(); return;
   }
@@ -8296,7 +8298,7 @@ function abaNichtBuchen(code, pa) {
 }
 function abaUmkonto(konto, pa) { return konto && pa.umkontierung[konto] ? pa.umkontierung[konto] : konto; }
 async function abaStandardLaden() {
-  await parameterLaden(false);
+  await parameterLaden(true);
   const ziel = abaState.kunde ? "den gewählten Kunden" : "die Vorlage";
   if (!confirm("Regelwerk für " + ziel + " auf den Helva-Standard (Buchungsmaske Juli 2026) zurücksetzen? Eigene Umkontierungen/Kontierungen gehen verloren.")) return;
   const std = JSON.parse(JSON.stringify(ABA_HELVA_STANDARD)); std.standardGeladen = "Helva Juli 2026";
@@ -8308,7 +8310,7 @@ async function abaParamSpeichern() {
   try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
 }
 async function abaErzwingen(code, ja) {
-  await parameterLaden(false);
+  await parameterLaden(true);
   const a = abaParam();
   a.erzwungen = a.erzwungen.filter(c => c !== code); a.ausgeschlossen = a.ausgeschlossen.filter(c => c !== code);
   if (ja === true) a.erzwungen.push(code); else if (ja === false) a.ausgeschlossen.push(code);
@@ -8316,7 +8318,7 @@ async function abaErzwingen(code, ja) {
   await abaParamSpeichern(); render();
 }
 async function abaDurchlaufSetzen(v) {
-  await parameterLaden(false);
+  await parameterLaden(true);
   abaParam().durchlauf = String(v || "").trim();
   await abaParamSpeichern(); render();
 }
@@ -8410,7 +8412,7 @@ function abaBuchungen() {
 }
 /* Kontierung pro Lohnart ergänzen/überschreiben — persistent in parameter.json (abacus.kontierung) */
 async function abaOverride(code, feld, wert) {
-  await parameterLaden(false);
+  await parameterLaden(true);
   const a = abaParam();
   a.kontierung[code] = a.kontierung[code] || {};
   a.kontierung[code][feld] = String(wert || "").trim();
@@ -8704,24 +8706,24 @@ function onbFaellig(goLive, tage) { if (!goLive) return ""; const d = new Date(g
 /* --- Kunden --- */
 async function onbKundeHinzu(custId) {
   custId = String(custId || "").trim(); if (!custId) return;
-  await parameterLaden(false);
+  await parameterLaden(true);
   const o = onbParam();
   if (!o.kunden[custId]) o.kunden[custId] = { verantwortlich: onbUserEmail(), goLive: "", erledigt: {}, hinzu: new Date().toISOString() };
   await onbSpeichern(); render();
 }
 async function onbKundeEntfernen(custId) {
-  await parameterLaden(false);
+  await parameterLaden(true);
   const o = onbParam(); const c = cache.customers.find(x => String(x.id) === String(custId));
   if (!confirm(`«${c ? c.Title : custId}» aus dem Onboarding entfernen? Erledigt-Status geht verloren.`)) return;
   delete o.kunden[custId]; await onbSpeichern(); render();
 }
 async function onbKundeFeld(custId, feld, wert) {
-  await parameterLaden(false);
+  await parameterLaden(true);
   const k = onbParam().kunden[custId]; if (!k) return;
   k[feld] = wert; await onbSpeichern(); render();
 }
 async function onbToggle(custId, aufgabeId) {
-  await parameterLaden(false);
+  await parameterLaden(true);
   const k = onbParam().kunden[custId]; if (!k) return;
   k.erledigt = k.erledigt || {};
   if (k.erledigt[aufgabeId]) delete k.erledigt[aufgabeId];
@@ -8730,20 +8732,20 @@ async function onbToggle(custId, aufgabeId) {
 }
 /* --- Aufgaben (Spalten) --- */
 async function onbAufgabeFeld(id, feld, wert) {
-  await parameterLaden(false);
+  await parameterLaden(true);
   const a = onbParam().aufgaben.find(x => x.id === id); if (!a) return;
   a[feld] = feld === "tage" ? (parseInt(wert) || 0) : wert;
   await onbSpeichern(); render();
 }
 async function onbAufgabeNeu() {
-  await parameterLaden(false);
+  await parameterLaden(true);
   const o = onbParam();
   const id = "a" + Date.now().toString(36);
   o.aufgaben.push({ id, phase: o.aufgaben.length ? o.aufgaben[o.aufgaben.length - 1].phase : "Neu", titel: "Neue Aufgabe", zustaendig: "Apriko", tage: 0 });
   await onbSpeichern(); render();
 }
 async function onbAufgabeLoeschen(id) {
-  await parameterLaden(false);
+  await parameterLaden(true);
   const o = onbParam(); const a = o.aufgaben.find(x => x.id === id);
   if (!a || !confirm(`Aufgabe «${a.titel}» für alle Kunden löschen?`)) return;
   o.aufgaben = o.aufgaben.filter(x => x.id !== id);
@@ -8751,14 +8753,31 @@ async function onbAufgabeLoeschen(id) {
   await onbSpeichern(); render();
 }
 async function onbAufgabeVerschieben(id, richtung) {
-  await parameterLaden(false);
+  await parameterLaden(true);
   const o = onbParam(); const i = o.aufgaben.findIndex(x => x.id === id); const j = i + richtung;
   if (i < 0 || j < 0 || j >= o.aufgaben.length) return;
   [o.aufgaben[i], o.aufgaben[j]] = [o.aufgaben[j], o.aufgaben[i]];
   await onbSpeichern(); render();
 }
+/* Drag & Drop der Aufgabenzeilen (Bearbeiten-Modus): Zeile vor/hinter die Zielzeile verschieben */
+let onbDragId = null;
+function onbDragStart(ev, id) { onbDragId = id; ev.dataTransfer.effectAllowed = "move"; try { ev.dataTransfer.setData("text/plain", id); } catch (e) {} const tr = ev.currentTarget.closest("tr"); if (tr) { tr.style.opacity = ".4"; try { ev.dataTransfer.setDragImage(tr, 10, 10); } catch (e) {} } }
+function onbDragOver(ev) { if (!onbDragId) return; ev.preventDefault(); ev.dataTransfer.dropEffect = "move"; const tr = ev.currentTarget; const r = tr.getBoundingClientRect(); const oben = (ev.clientY - r.top) < r.height / 2; tr.style.boxShadow = oben ? "inset 0 2px 0 var(--accent)" : "inset 0 -2px 0 var(--accent)"; tr.dataset.onbOben = oben ? "1" : ""; }
+function onbDragLeave(ev) { ev.currentTarget.style.boxShadow = ""; }
+function onbDragEnd(ev) { document.querySelectorAll("tr[data-onb-id]").forEach(tr => { tr.style.boxShadow = ""; tr.style.opacity = ""; }); onbDragId = null; }
+async function onbDrop(ev, zielId) {
+  ev.preventDefault(); const tr = ev.currentTarget; const oben = tr.dataset.onbOben === "1"; tr.style.boxShadow = "";
+  const id = onbDragId; onbDragId = null; if (!id || id === zielId) return;
+  await parameterLaden(true); const o = onbParam();
+  const i = o.aufgaben.findIndex(x => x.id === id); if (i < 0) return;
+  const [a] = o.aufgaben.splice(i, 1);
+  let j = o.aufgaben.findIndex(x => x.id === zielId); if (j < 0) { o.aufgaben.splice(i, 0, a); return; }
+  if (!oben) j++;
+  o.aufgaben.splice(j, 0, a);
+  await onbSpeichern(); render();
+}
 async function onbStandardLaden() {
-  await parameterLaden(false);
+  await parameterLaden(true);
   if (!confirm("Aufgabenliste auf den Apriko-Standard zurücksetzen? Eigene Aufgaben gehen verloren, der Erledigt-Status bleibt nur für gleiche IDs erhalten.")) return;
   onbParam().aufgaben = ONB_STANDARD_AUFGABEN.map((a, i) => ({ id: "a" + (i + 1), phase: a[0], titel: a[1], zustaendig: a[2], tage: a[3], gilt: a[4] || "alle" }));
   await onbSpeichern(); render();
@@ -8776,7 +8795,7 @@ function onbGilt(a, c) {
   return true;
 }
 async function onbNotiz(custId, aufgabeId, text) {
-  await parameterLaden(false);
+  await parameterLaden(true);
   const k = onbParam().kunden[custId]; if (!k) return;
   k.notizen = k.notizen || {};
   if (text && text.trim()) k.notizen[aufgabeId] = text.trim(); else delete k.notizen[aufgabeId];
@@ -8866,10 +8885,10 @@ async function renderOnboarding(el) {
   const bearbeiten = !onbSpaltenBearbeiten ? "" : `
     <div class="card" style="padding:14px 16px;margin-top:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">Aufgaben — gelten für alle Kunden</h3><span><button class="btn btn-sm" onclick="onbAufgabeNeu()">+ Aufgabe</button> <a href="#" onclick="onbStandardLaden();return false;" style="font-size:11px;color:var(--text-faint);margin-left:8px">Standard laden</a></span></div>
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">Tage relativ zum Go-Live (negativ = davor). Reihenfolge mit ▲▼; die Phase gruppiert die Zeilen.</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">Tage relativ zum Go-Live (negativ = davor). Reihenfolge per Drag &amp; Drop (⠿ ziehen) oder ▲▼; die Phase gruppiert die Zeilen.</div>
       <table style="font-size:12px"><thead><tr><th></th><th>Phase</th><th>Aufgabe</th><th>Zuständig</th><th>Tage</th><th title="Für welche Kunden gilt die Aufgabe (nach Segment)">Gilt für</th><th></th></tr></thead><tbody>
-        ${o.aufgaben.map((a, i) => `<tr>
-          <td style="white-space:nowrap"><a href="#" onclick="onbAufgabeVerschieben('${a.id}',-1);return false;" style="color:var(--text-faint)">▲</a> <a href="#" onclick="onbAufgabeVerschieben('${a.id}',1);return false;" style="color:var(--text-faint)">▼</a></td>
+        ${o.aufgaben.map((a, i) => `<tr data-onb-id="${a.id}" ondragover="onbDragOver(event)" ondragleave="onbDragLeave(event)" ondrop="onbDrop(event,'${a.id}')">
+          <td style="white-space:nowrap"><span draggable="true" ondragstart="onbDragStart(event,'${a.id}')" ondragend="onbDragEnd(event)" title="Ziehen zum Verschieben" style="cursor:grab;color:var(--text-faint);font-size:14px;margin-right:4px;user-select:none">⠿</span><a href="#" onclick="onbAufgabeVerschieben('${a.id}',-1);return false;" style="color:var(--text-faint)">▲</a> <a href="#" onclick="onbAufgabeVerschieben('${a.id}',1);return false;" style="color:var(--text-faint)">▼</a></td>
           <td><input type="text" value="${escape(a.phase)}" onchange="onbAufgabeFeld('${a.id}','phase',this.value)" style="width:120px;padding:2px 5px"></td>
           <td><input type="text" value="${escape(a.titel)}" onchange="onbAufgabeFeld('${a.id}','titel',this.value)" style="width:360px;padding:2px 5px"></td>
           <td><select onchange="onbAufgabeFeld('${a.id}','zustaendig',this.value)" style="padding:2px 5px">${["Apriko", "Kunde", "beide"].map(z => `<option ${a.zustaendig === z ? "selected" : ""}>${z}</option>`).join("")}</select></td>
@@ -9086,7 +9105,7 @@ async function tkExportExcel() {
 function tkNormName(n) { return String(n || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\b(ag|gmbh|sa|sarl|sagl|kg|ltd|inc|schweiz|swiss|personal|personalberatung|jobs?|group|holding|services?)\b/g, " ").replace(/[^a-z0-9]+/g, " ").trim(); }
 function tkZuordnung() { if (!crmParameter) return {}; if (!crmParameter.ticketsZuordnung) crmParameter.ticketsZuordnung = {}; return crmParameter.ticketsZuordnung; }
 async function tkZuordnungSetzen(name, custId) {
-  await parameterLaden(false); const z = tkZuordnung(); tkMatchCache = {};
+  await parameterLaden(true); const z = tkZuordnung(); tkMatchCache = {};
   if (custId === "") delete z[name]; else z[name] = custId;   // "" = Automatik, "-" = bewusst kein Kunde
   try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
   render();
@@ -9403,13 +9422,13 @@ function g360Param() {
 }
 async function g360Speichern() { try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); } }
 async function g360Feld(id, feld, wert) {
-  await parameterLaden(false); const st = g360Param().stuecke.find(x => x.id === id); if (!st) return;
+  await parameterLaden(true); const st = g360Param().stuecke.find(x => x.id === id); if (!st) return;
   if (feld === "anteil" || feld === "provision" || feld === "ertrag") st[feld] = Math.max(0, Math.min(100, parseFloat(String(wert).replace(",", ".")) || 0)); else st[feld] = String(wert || "");
   await g360Speichern(); render();
 }
-async function g360Volumen(v) { await parameterLaden(false); g360Param().volumen = Math.max(0, parseFloat(String(v).replace(/['’\s]/g, "")) || 0); await g360Speichern(); render(); }
-async function g360Neu() { await parameterLaden(false); const g = g360Param(); const rest = Math.max(0, 100 - g.stuecke.reduce((s, x) => s + (x.anteil || 0), 0)); g.stuecke.push({ id: "s" + Date.now().toString(36), name: "Neuer Bereich", anteil: Math.min(10, rest), ertrag: 100, provision: 10, partner: "", notiz: "" }); await g360Speichern(); render(); }
-async function g360Loeschen(id) { await parameterLaden(false); const g = g360Param(); const st = g.stuecke.find(x => x.id === id); if (!st || !confirm("«" + st.name + "» entfernen?")) return; g.stuecke = g.stuecke.filter(x => x.id !== id); await g360Speichern(); render(); }
+async function g360Volumen(v) { await parameterLaden(true); g360Param().volumen = Math.max(0, parseFloat(String(v).replace(/['’\s]/g, "")) || 0); await g360Speichern(); render(); }
+async function g360Neu() { await parameterLaden(true); const g = g360Param(); const rest = Math.max(0, 100 - g.stuecke.reduce((s, x) => s + (x.anteil || 0), 0)); g.stuecke.push({ id: "s" + Date.now().toString(36), name: "Neuer Bereich", anteil: Math.min(10, rest), ertrag: 100, provision: 10, partner: "", notiz: "" }); await g360Speichern(); render(); }
+async function g360Loeschen(id) { await parameterLaden(true); const g = g360Param(); const st = g.stuecke.find(x => x.id === id); if (!st || !confirm("«" + st.name + "» entfernen?")) return; g.stuecke = g.stuecke.filter(x => x.id !== id); await g360Speichern(); render(); }
 function g360Pie(stuecke, total) {
   const R = 120, cx = 150, cy = 150; let a0 = -Math.PI / 2; const teile = [];
   stuecke.forEach((st, i) => {
@@ -9544,6 +9563,8 @@ const PARAM_GAV_LISTE = ["GAV Personalverleih", "Bauhauptgewerbe (LMV)", "Basler
   "Autogewerbe", "Carrosseriegewerbe", "Sicherheitsdienstleistungen", "Detailhandel", "Coiffeurgewerbe", "Andere"];
 const PARAM_UZ_BASEN = [["basis13", "Basis + 13. Gehalt (Grundlohn + 8.33 %)"], ["brutto", "auf Bruttolohn (Stundenlohn inkl. Ferien/Feiertage/13.)"]];
 let crmParameter = null;
+/* force=true vor JEDER Änderung: die Datei wird von mehreren Personen bearbeitet (Onboarding, Gruppen, Abacus …) —
+   mit einem veralteten Stand im Speicher würde ein Speichern die Änderungen der anderen überschreiben (09.10.2026). */
 async function parameterLaden(force) {
   if (!force && crmParameter) return crmParameter;
   let data = null;
@@ -9556,8 +9577,10 @@ async function parameterLaden(force) {
   }
   crmParameter = data;
   window.crmParameter = data;
+  crmParameterGeladen = Date.now();
   return data;
 }
+let crmParameterGeladen = 0;
 async function parameterSpeichern() {
   const body = JSON.stringify(crmParameter || {});
   try { await graph(`/sites/${siteId}/drive/root:/${PARAMETER_PFAD}:/content`, { method: "PUT", body }); }
@@ -9584,7 +9607,7 @@ function paramUzRow(i, r) {
   </tr>`;
 }
 async function paramUzSet(i, feld, wert) {
-  await parameterLaden(false);
+  await parameterLaden(true);
   const r = crmParameter.ueberzeit[i]; if (!r) return;
   if (feld === "gav" && wert === "Andere") { r.gav = "Andere"; render(); return; }
   r[feld] = wert;
@@ -9592,12 +9615,12 @@ async function paramUzSet(i, feld, wert) {
   render();
 }
 async function paramUzAdd() {
-  await parameterLaden(false);
+  await parameterLaden(true);
   crmParameter.ueberzeit.push({ gav: "Andere", basis: "basis13" });
   render();
 }
 async function paramUzDel(i) {
-  await parameterLaden(false);
+  await parameterLaden(true);
   const r = crmParameter.ueberzeit[i];
   if (!r || !confirm(`Eintrag «${r.gav}» entfernen?`)) return;
   crmParameter.ueberzeit.splice(i, 1);
@@ -9659,7 +9682,7 @@ function paramAbacusBlock() {
     </div>`;
 }
 async function paramAbaUm(von, neuVon, nach) {
-  await parameterLaden(false);
+  await parameterLaden(true);
   const a = abaParam();
   von = String(von || "").trim();
   if (neuVon !== null && neuVon !== undefined && nach === "" ) { const nv = String(neuVon).trim(); if (!nv) return; if (nv !== von && a.umkontierung[von] !== undefined) { a.umkontierung[nv] = a.umkontierung[von]; delete a.umkontierung[von]; } else if (a.umkontierung[nv] === undefined) a.umkontierung[nv] = ""; }
@@ -9668,7 +9691,7 @@ async function paramAbaUm(von, neuVon, nach) {
   await abaParamSpeichern(); render();
 }
 async function paramAbaText(feld, text) {
-  await parameterLaden(false);
+  await parameterLaden(true);
   const a = abaParam();
   const zeilen = String(text || "").split(/\n/).map(z => z.trim()).filter(Boolean);
   if (feld === "aggregat") { a.aggregat = {}; zeilen.forEach(z => { const m = /^(\d+)\s*:\s*(.+)$/.exec(z); if (m) a.aggregat[m[1]] = m[2].split(/[,\s]+/).filter(Boolean); }); }
@@ -9676,8 +9699,8 @@ async function paramAbaText(feld, text) {
   if (feld === "nichtBuchen") a.nichtBuchen = String(text || "").split(/[,\s]+/).map(x => x.trim()).filter(Boolean);
   await abaParamSpeichern(); render();
 }
-async function paramAbaKontDel(code) { await parameterLaden(false); delete abaParam().kontierung[code]; await abaParamSpeichern(); render(); }
-async function paramAbaKontNeu(code) { code = String(code || "").trim(); if (!code) return; await parameterLaden(false); const a = abaParam(); if (!a.kontierung[code]) a.kontierung[code] = { soll: "", haben: "" }; render(); }
+async function paramAbaKontDel(code) { await parameterLaden(true); delete abaParam().kontierung[code]; await abaParamSpeichern(); render(); }
+async function paramAbaKontNeu(code) { code = String(code || "").trim(); if (!code) return; await parameterLaden(true); const a = abaParam(); if (!a.kontierung[code]) a.kontierung[code] = { soll: "", haben: "" }; render(); }
 
 async function renderTarifarten(el) {
   await tarifartenLaden(false);
@@ -13853,7 +13876,7 @@ function kundenKontakteHtml(c) {
 }
 /* ---------- Interne Ansprechpersonen (Apriko) je Kunde — eine Person pro Rolle, Chips exklusiv ----------
    Ansprechperson → crm_firmen_ansprech.json (Firma); Lohn/FIBU-Rollen → crm_kunden_flags.json (Kunde) */
-const INTERN_ROLLEN = [["ansprech", "Ansprechperson"], ["apLohn", "Lohn"], ["apLohnBackup", "Lohn Backup"], ["apLohnIntern", "Lohn intern"], ["apFibu", "FIBU"], ["apFibuBackup", "FIBU Backup"]];
+const INTERN_ROLLEN = [["ansprech", "Ansprechperson"], ["apLohn", "Lohn"], ["apLohnBackup", "Lohn Backup"], ["apLohnIntern", "Lohn intern"], ["apLohnInternBackup", "Lohn intern Backup"], ["apFibu", "FIBU"], ["apFibuBackup", "FIBU Backup"]];
 function internRolleWert(c, key) { if (key === "ansprech") return String(ansprechEmail(c.CompanyId) || "").toLowerCase(); const f = (crmKundenFlags || {})[String(c.id)] || {}; return String(f[key] || "").toLowerCase(); }
 function internPersonen(c) {
   const set = new Set(); const aus = e => !!mitarbeiterDaten(e).austritt && !INTERN_ROLLEN.some(([k]) => internRolleWert(c, k) === e);
@@ -14027,6 +14050,19 @@ function mitarbeiterTabelleHtml() {
 }
 let internZusatz = {};   // custId → [emails], die ohne Rolle (noch) angezeigt werden sollen
 function internPersonHinzufuegen(custId, email) { if (!email) return; internZusatz[custId] = (internZusatz[custId] || []).concat([email]); openCustomer(custId); }
+async function internPersonEntfernen(custId, email) {
+  const c = cache.customers.find(x => x.id == custId); if (!c) return;
+  const rollen = INTERN_ROLLEN.filter(([k]) => internRolleWert(c, k) === email);
+  if (rollen.length && !confirm(mitarbeiterName(email) + " bei diesem Kunden entfernen? Rollen: " + rollen.map(r => r[1]).join(", "))) return;
+  try {
+    for (const [k] of rollen) {
+      if (k === "ansprech") { await crmLoadAnsprech(); delete crmAnsprech[String(c.CompanyId)]; await crmSaveAnsprech(); }
+      else { await crmLoadKundenFlags(); const key = String(custId); const f = Object.assign({}, crmKundenFlags[key] || {}); delete f[k]; if (Object.keys(f).length) crmKundenFlags[key] = f; else delete crmKundenFlags[key]; await crmSaveKundenFlags(); }
+    }
+  } catch (e) { toast("Entfernen fehlgeschlagen: " + e.message, true); return; }
+  internZusatz[custId] = (internZusatz[custId] || []).filter(e => e !== email);
+  openCustomer(custId);
+}
 function kundenInternHtml(c) {
   const alle = internPersonen(c);
   const mitRolle = alle.filter(e => INTERN_ROLLEN.some(([k]) => internRolleWert(c, k) === e));
@@ -14040,8 +14076,8 @@ function kundenInternHtml(c) {
       ${uebrig.length ? `<select onchange="internPersonHinzufuegen(${c.id}, this.value)" style="padding:4px 8px;font-size:12px"><option value="">+ Person hinzufügen …</option>${uebrig.map(e => `<option value="${escape(e)}">${escape(mitarbeiterName(e))}</option>`).join("")}</select>` : ""}
       <span style="font-size:11px;color:var(--text-faint)">Pro Rolle genau eine Person — Klick auf den Chip setzt sie, nochmals Klick entfernt sie.</span>
     </div>
-    ${personen.length ? `<div class="table-wrap"><table style="font-size:12.5px"><thead><tr><th>Mitarbeiter/in</th><th>Rolle bei diesem Kunden</th><th>E-Mail</th></tr></thead><tbody>
-      ${personen.map(e => `<tr><td><strong>${escape(mitarbeiterName(e))}</strong></td><td>${INTERN_ROLLEN.map(([k, l]) => chip(e, k, l)).join("")}</td><td><a href="mailto:${escape(e)}?subject=${encodeURIComponent((c.Title || "") + " — ")}">${escape(e)}</a></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty" style="padding:10px;font-size:12px">Noch niemand zugeteilt — oben «+ Person hinzufügen» und dann die Rolle per Chip setzen.</div>`}
+    ${personen.length ? `<div class="table-wrap"><table style="font-size:12.5px"><thead><tr><th>Mitarbeiter/in</th><th>Rolle bei diesem Kunden</th><th>E-Mail</th><th style="width:40px"></th></tr></thead><tbody>
+      ${personen.map(e => `<tr><td><strong>${escape(mitarbeiterName(e))}</strong></td><td>${INTERN_ROLLEN.map(([k, l]) => chip(e, k, l)).join("")}</td><td><a href="mailto:${escape(e)}?subject=${encodeURIComponent((c.Title || "") + " — ")}">${escape(e)}</a></td><td><button class="btn btn-sm" style="color:var(--danger)" onclick="internPersonEntfernen(${c.id}, ${tkJs(e)})" title="Person bei diesem Kunden entfernen (alle Rollen)">✕</button></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty" style="padding:10px;font-size:12px">Noch niemand zugeteilt — oben «+ Person hinzufügen» und dann die Rolle per Chip setzen.</div>`}
   </div>`;
 }
 function nameAusEmail(e) { const l = String(e || "").split("@")[0]; return l.split(/[._-]+/).filter(Boolean).map(x => x.charAt(0).toUpperCase() + x.slice(1)).join(" "); }
@@ -14129,7 +14165,7 @@ async function kuImport(input) {
     };
     rolle(ci.lobu, "apLohn", "Lohn", "apLohnBackup", "Lohn Backup");
     rolle(ci.fibu, "apFibu", "FIBU", "apFibuBackup", "FIBU Backup");
-    rolle(ci.intern, "apLohnIntern", "Lohn intern", null, null);
+    rolle(ci.intern, "apLohnIntern", "Lohn intern", "apLohnInternBackup", "Lohn intern Backup");
     // Workflows aus Services / LoBu Intern
     const services = ci.services >= 0 && r[ci.services] ? (r[ci.services].items.length ? r[ci.services].items : r[ci.services].text.split(/\s{2,}|·|,/).map(x => x.trim())) : [];
     if (services.some(x => /^fibu/i.test(x)) && !flags.fibu) aend.push({ art: "flag", label: "Workflow", wert: "FIBU Monatsabschluss ✓", key: "fibu" });
@@ -14282,7 +14318,7 @@ function editCustomer(id) {
     ${(() => { const f = (crmKundenFlags || {})[String(c.id || "")] || {}; const emails = [...new Set((cache.userprofiles || []).map(p => (p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase()).filter(Boolean))].sort();
       // ✉ neben dem Dropdown: öffnet Outlook mit der gewählten Adresse (passt sich beim Wechsel an)
       const sel = (id, label, cur) => `<div class="field"><label>${label}</label><div style="display:flex;gap:6px;align-items:center"><select id="${id}" style="flex:1" onchange="const a=document.getElementById('${id}-mail'); if(a){a.href='mailto:'+encodeURIComponent(this.value); a.style.visibility=this.value?'visible':'hidden';}"><option value="">—</option>${emails.map(e => `<option value="${escape(e)}" ${cur === e ? "selected" : ""}>${escape(e)}</option>`).join("")}${cur && !emails.includes(cur) ? `<option value="${escape(cur)}" selected>${escape(cur)}</option>` : ""}</select><a id="${id}-mail" href="mailto:${escape(cur)}" title="E-Mail schreiben" style="font-size:18px;text-decoration:none;visibility:${cur ? "visible" : "hidden"}">✉</a></div></div>`;
-      return `<div class="field-row">${sel("f-ap-lohn", "Ansprechperson Lohn", f.apLohn || "")}${sel("f-ap-lohn-backup", "Ansprechperson Backup Lohn", f.apLohnBackup || "")}${sel("f-ap-lohn-intern", "Ansprechperson Lohn intern", f.apLohnIntern || "")}</div>
+      return `<div class="field-row">${sel("f-ap-lohn", "Ansprechperson Lohn", f.apLohn || "")}${sel("f-ap-lohn-backup", "Ansprechperson Backup Lohn", f.apLohnBackup || "")}${sel("f-ap-lohn-intern", "Ansprechperson Lohn intern", f.apLohnIntern || "")}${sel("f-ap-lohn-intern-backup", "Backup Lohn intern", f.apLohnInternBackup || "")}</div>
     <div class="field-row">${sel("f-ap-fibu", "Ansprechperson FIBU", f.apFibu || "")}${sel("f-ap-fibu-backup", "Ansprechperson Backup FIBU", f.apFibuBackup || "")}</div>`; })()}
     <div class="field"><label>Mindesthonorar</label><textarea id="f-minfee" rows="3" placeholder="z.B. CHF 1'500/Monat, gültig ab Q3 2026">${escape(minFeeText(c.id || "", c.MinFee))}</textarea></div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
@@ -14458,7 +14494,7 @@ async function saveCustomer(id) {
       const neuMinBpo = parseFloat(val("f-minbpo")) || 0;
       const neuZielExt = parseFloat(val("f-zielext")) || 0;
       const neuPctFrom = val("f-saasmodel") === "Prozentual" ? (val("f-saaspctfrom") || "") : "";
-      const ap = { apLohn: val("f-ap-lohn"), apLohnBackup: val("f-ap-lohn-backup"), apLohnIntern: val("f-ap-lohn-intern"), apFibu: val("f-ap-fibu"), apFibuBackup: val("f-ap-fibu-backup") };
+      const ap = { apLohn: val("f-ap-lohn"), apLohnBackup: val("f-ap-lohn-backup"), apLohnIntern: val("f-ap-lohn-intern"), apLohnInternBackup: val("f-ap-lohn-intern-backup"), apFibu: val("f-ap-fibu"), apFibuBackup: val("f-ap-fibu-backup") };
       const neuFactoring = document.getElementById("f-factoring")?.checked || false;
       const neuFactoringNotiz = val("f-factoring-notiz").trim();
       const alt = crmKundenFlags[key] || {};
