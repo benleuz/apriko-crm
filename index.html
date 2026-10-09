@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.448.0"></script>
-<script src="apriko-api.js?v=1.448.0"></script>
-<script src="lohncheck.js?v=1.448.0"></script>
-<script src="personalbudget.js?v=1.448.0"></script>
-<script src="jahresbudget.js?v=1.448.0"></script>
-<script src="budgetpositionen.js?v=1.448.0"></script>
-<script src="lohnchecklistetemp.js?v=1.448.0"></script>
-<script src="apriko-endpunkte.js?v=1.448.0"></script>
+<script src="apriko-filters.js?v=1.449.0"></script>
+<script src="apriko-api.js?v=1.449.0"></script>
+<script src="lohncheck.js?v=1.449.0"></script>
+<script src="personalbudget.js?v=1.449.0"></script>
+<script src="jahresbudget.js?v=1.449.0"></script>
+<script src="budgetpositionen.js?v=1.449.0"></script>
+<script src="lohnchecklistetemp.js?v=1.449.0"></script>
+<script src="apriko-endpunkte.js?v=1.449.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1027,7 +1027,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.448.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.449.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -14068,11 +14068,13 @@ async function kuImport(input) {
   const html = await f.text(); const doc = new DOMParser().parseFromString(html, "text/html");
   const tab = [...doc.querySelectorAll("table")].find(t => /Unternehmung/i.test(t.textContent) && /Link/i.test(t.textContent));
   if (!tab) { toast("Keine Tabelle mit Spalte «Unternehmung» gefunden.", true); return; }
-  const rows = [...tab.querySelectorAll("tr")].map(tr => [...tr.children].map(td => ({ text: td.textContent.replace(/\s+/g, " ").trim(), links: [...td.querySelectorAll("a")].map(a => a.getAttribute("href") || ""), items: [...td.querySelectorAll("li")].map(li => li.textContent.trim()).filter(Boolean) })));
+  // Unsichtbare Zeichen (weiche Trennstriche, Zero-Width) aus Exporten entfernen — sonst matchen Spaltenköpfe wie «Ansprech­person» nicht
+  const sauber = t => String(t || "").replace(/[\u00ad\u200b\u200c\u200d\ufeff]/g, "").replace(/\s+/g, " ").trim();
+  const rows = [...tab.querySelectorAll("tr")].map(tr => [...tr.children].map(td => ({ text: sauber(td.textContent), links: [...td.querySelectorAll("a")].map(a => a.getAttribute("href") || ""), items: [...td.querySelectorAll("li")].map(li => sauber(li.textContent)).filter(Boolean) })));
   const hi = rows.findIndex(r => r.some(c => /^Unternehmung/i.test(c.text))); if (hi < 0) { toast("Kopfzeile nicht gefunden.", true); return; }
   const head = rows[hi].map(c => c.text.toLowerCase());
   const col = re => head.findIndex(h => re.test(h));
-  const ci = { name: col(/^unternehmung/), link: col(/^link/), ap: col(/^ansprechperson/), services: col(/^services/), lobu: col(/^lobu temp/), fibu: col(/^fibu/), intern: col(/^lobu intern/), factoring: col(/^factoring/) };
+  const ci = { name: col(/unternehmung|^firma|^kunde/), link: col(/^link|^url/), ap: col(/ansprech|kontakt/), services: col(/^services|^module|^leistung/), lobu: col(/lobu.*temp|lohn.*temp/), fibu: col(/^fibu|^fibu/), intern: col(/lobu.*intern|lohn.*intern/), factoring: col(/factoring/) };
   const notizSpalten = head.map((h, i) => ({ h: rows[hi][i].text, i })).filter(x => x.i >= 0 && !Object.values(ci).includes(x.i) && x.h);
   const plan = [];
   rows.slice(hi + 1).forEach(r => {
@@ -14089,9 +14091,10 @@ async function kuImport(input) {
     // Ansprechperson → Kontakt
     const ap = ci.ap >= 0 && r[ci.ap] ? r[ci.ap].text : "";
     if (ap && kunde.CompanyId) {
-      const mail = (r[ci.ap].links.find(h => /^mailto:/i.test(h)) || "").replace(/^mailto:/i, "").split("?")[0];
-      const vorhanden = cache.contacts.some(k => String(k.CompanyId) === String(kunde.CompanyId) && (maNorm(k.Title) === maNorm(ap) || (mail && String(k.Email || "").toLowerCase() === mail.toLowerCase())));
-      if (!vorhanden) aend.push({ art: "kontakt", label: "Kontakt anlegen", wert: ap + (mail ? " <" + mail + ">" : ""), name: ap, mail });
+      const mail = ((r[ci.ap].links.find(h => /^mailto:/i.test(h)) || "").replace(/^mailto:/i, "").split("?")[0]) || ((r[ci.ap].text.match(/[\w.+-]+@[\w.-]+\.\w+/) || [])[0] || "");
+      const apName = r[ci.ap].text.replace(/[\w.+-]+@[\w.-]+\.\w+/g, "").replace(/[<>()\[\]]/g, "").trim();
+      const vorhanden = cache.contacts.some(k => String(k.CompanyId) === String(kunde.CompanyId) && (maNorm(k.Title) === maNorm(apName) || (mail && String(k.Email || "").toLowerCase() === mail.toLowerCase())));
+      if (!vorhanden && apName) aend.push({ art: "kontakt", label: "Kontakt anlegen", wert: apName + (mail ? " <" + mail + ">" : " — keine E-Mail im Export"), name: apName, mail });
     }
     // interne Rollen
     const rolle = (idx, key, label, backupKey, backupLabel) => {
