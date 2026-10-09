@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.437.0"></script>
-<script src="apriko-api.js?v=1.437.0"></script>
-<script src="lohncheck.js?v=1.437.0"></script>
-<script src="personalbudget.js?v=1.437.0"></script>
-<script src="jahresbudget.js?v=1.437.0"></script>
-<script src="budgetpositionen.js?v=1.437.0"></script>
-<script src="lohnchecklistetemp.js?v=1.437.0"></script>
-<script src="apriko-endpunkte.js?v=1.437.0"></script>
+<script src="apriko-filters.js?v=1.442.0"></script>
+<script src="apriko-api.js?v=1.442.0"></script>
+<script src="lohncheck.js?v=1.442.0"></script>
+<script src="personalbudget.js?v=1.442.0"></script>
+<script src="jahresbudget.js?v=1.442.0"></script>
+<script src="budgetpositionen.js?v=1.442.0"></script>
+<script src="lohnchecklistetemp.js?v=1.442.0"></script>
+<script src="apriko-endpunkte.js?v=1.442.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1027,7 +1027,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.437.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.442.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -13472,6 +13472,7 @@ function renderCustomers(el) {
       </button>
     </div>
     <input class="search-input" placeholder="Suchen..." oninput="filterTable(this.value, 'cust-row')">
+    <label class="btn" style="cursor:pointer" title="Tabelle «Kundenumgebungen» (HTML-Export) einlesen: Link, Ansprechperson, interne Zuständigkeiten (LoBu/FiBu), Workflows ergänzen — nur leere Felder werden gefüllt">⇧ Kundenumgebungen (HTML)<input type="file" accept=".html,.htm,text/html" hidden onchange="kuImport(this)"></label>
     <button class="btn btn-primary" onclick="newCustomer()">+ Neuer Kunde</button>
   `;
   if (crmVertragLinks === null && typeof siteId !== "undefined" && siteId) {
@@ -13599,7 +13600,13 @@ function openCustomer(id) {
   const revs = cache.monthlyrevenue.filter(r => r.CustomerId == id);
 
   modalBreit(true);
+  if (window.__kundeTabId !== id) { window.__kundeTab = "info"; window.__kundeTabId = id; }
+  const kt = window.__kundeTab || "info";
   showModal(escape(c.Title || "Kunde"), `
+    <div style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:14px">
+      ${[["info", "Übersicht"], ["kond", "Konditionen & Verträge"]].map(([k, l]) => `<button type="button" onclick="window.__kundeTab=${tkJs(k)};openCustomer(${id})" style="background:none;border:none;border-bottom:2px solid ${kt === k ? "var(--accent)" : "transparent"};color:${kt === k ? "var(--text)" : "var(--text-dim)"};padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer">${l}</button>`).join("")}
+    </div>
+    <div ${kt === "info" ? "" : "hidden"}>
     <dl class="kv">
       <dt>Firma</dt><dd>${comp ? `<a href="#" onclick="closeModal();openCompany(${comp.id});return false">${escape(comp.Title)}</a>` : `<span style="color:var(--danger)">fehlt — bitte im Formular (✎) eine Firma zuordnen</span>`}</dd>
       ${comp ? (() => { const st = (crmStamm && crmStamm[String(comp.id)]) || {}; const mails = t => String(t || "").split(/[,;\s]+/).filter(Boolean).map(e => escape(e) + `<a href="mailto:${escape(e)}" onclick="event.stopPropagation()" title="E-Mail an ${escape(e)}" style="text-decoration:none;margin:0 6px 0 3px">✉</a>`).join(" "); const ansp = (crmAnsprech || {})[String(comp.id)] || "";
@@ -13608,10 +13615,19 @@ function openCustomer(id) {
 `; })() : ""}
       <dt>Segment</dt><dd>${escape(c.Segment||"—")}</dd>
       <dt>Status</dt><dd>${escape(c.Status||"—")}</dd>
-      <dt>Risiko</dt><dd><span style="color:${riskColor}">●</span> ${escape(c.Risk||"—")}</dd>
       <dt>Start</dt><dd>${c.StartDate ? c.StartDate.slice(0,10) : "—"}</dd>
-      <dt>Ende</dt><dd>${c.EndDate ? c.EndDate.slice(0,10) : "—"}</dd>
       <dt>Owner</dt><dd>${escape(ownerLabel(c.Owner)||"—")}</dd>
+      <dt>Link</dt><dd>${appLinkText(c.id, c.Link) ? `<a href="${escape(normalizeUrl(appLinkText(c.id, c.Link)) || appLinkText(c.id, c.Link))}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent-2);text-decoration:underline;cursor:pointer">${escape(appLinkText(c.id, c.Link))} ↗</a>` : "—"}</dd>
+      <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
+    </dl>
+    ${kundenKontakteHtml(c)}
+    ${kundenInternHtml(c)}
+    </div>
+    <div ${kt === "kond" ? "" : "hidden"}>
+    <dl class="kv">
+      <dt>SaaS-Modell</dt><dd>${saasIsPercentEver(c) ? `Prozentual${saasPctFrom(c) ? " ab " + saasPctFrom(c).slice(8,10) + "." + saasPctFrom(c).slice(5,7) + "." + saasPctFrom(c).slice(0,4) + " (davor pro Lizenz)" : ""} · ${parseFloat(c.SaaSRate || 0).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}% auf Aussenumsatz${kundenMin(c.id, "minSaas") ? ` · min. CHF ${kundenMin(c.id, "minSaas").toLocaleString("de-CH")}/Monat` : ""}` : "Pro Lizenz"}</dd>
+      <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Prozentual" && kundenMin(c.id, "minBpo") ? ` · min. CHF ${kundenMin(c.id, "minBpo").toLocaleString("de-CH")}/Monat` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}${c.BPOYtd ? ` · <span style="color:var(--accent-3)">YTD-kumulativ</span>` : ""}</dd>
+      <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Preis/Lizenz</dt><dd style="font-family:var(--font-mono)">${c.PricePerLicense ? "CHF " + parseFloat(c.PricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—"}${(() => {
         try {
           const hist = c.PriceHistory ? JSON.parse(c.PriceHistory) : [];
@@ -13622,17 +13638,14 @@ function openCustomer(id) {
         } catch(e){}
         return "";
       })()}</dd>
-      <dt>SaaS-Modell</dt><dd>${saasIsPercentEver(c) ? `Prozentual${saasPctFrom(c) ? " ab " + saasPctFrom(c).slice(8,10) + "." + saasPctFrom(c).slice(5,7) + "." + saasPctFrom(c).slice(0,4) + " (davor pro Lizenz)" : ""} · ${parseFloat(c.SaaSRate || 0).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}% auf Aussenumsatz${kundenMin(c.id, "minSaas") ? ` · min. CHF ${kundenMin(c.id, "minSaas").toLocaleString("de-CH")}/Monat` : ""}` : "Pro Lizenz"}</dd>
-      <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Prozentual" && kundenMin(c.id, "minBpo") ? ` · min. CHF ${kundenMin(c.id, "minBpo").toLocaleString("de-CH")}/Monat` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}${c.BPOYtd ? ` · <span style="color:var(--accent-3)">YTD-kumulativ</span>` : ""}</dd>
-      <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
-      <dt>Link</dt><dd>${appLinkText(c.id, c.Link) ? `<a href="${escape(normalizeUrl(appLinkText(c.id, c.Link)) || appLinkText(c.id, c.Link))}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent-2);text-decoration:underline;cursor:pointer">${escape(appLinkText(c.id, c.Link))} ↗</a>` : "—"}</dd>
+      <dt>Mindesthonorar</dt><dd style="white-space:pre-wrap">${escape(minFeeText(c.id, c.MinFee)||"—")}</dd>
+      <dt>Risiko</dt><dd><span style="color:${riskColor}">●</span> ${escape(c.Risk||"—")}</dd>
+      <dt>Ende</dt><dd>${c.EndDate ? c.EndDate.slice(0,10) : "—"}</dd>
       ${VERTRAG_ARTEN.map(([art, label]) => `<dt>${label}</dt><dd>${vertragLink(c.id, art) ? `<a href="${escape(vertragLink(c.id, art))}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${escape(vertragLink(c.id, art))}" style="color:var(--accent-2)">📄 ${escape(vertragName(vertragLink(c.id, art)))} ↗</a>` : "—"}</dd>`).join("")}
       <dt>Workflows</dt><dd>${[kundenFlag(c.id, "intern") ? "Interner Lohn ✓" : "", kundenFlag(c.id, "fibu") ? "FIBU Monatsabschluss ✓" : "", kundenHatDb(c.id) ? "Datenbank (Hosting) ✓" : ""].filter(Boolean).join(" · ") || "—"}</dd>
-      <dt>Mindesthonorar</dt><dd style="white-space:pre-wrap">${escape(minFeeText(c.id, c.MinFee)||"—")}</dd>
-      <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
+      <dt>Factoring</dt><dd>${(() => { const f = (crmKundenFlags || {})[String(c.id)] || {}; return f.factoring ? "Ja" + (f.factoringNotiz ? ` <span style="color:var(--text-dim)">· ${escape(f.factoringNotiz)}</span>` : "") : (f.factoringNotiz ? `Nein <span style="color:var(--text-dim)">· ${escape(f.factoringNotiz)}</span>` : "—"); })()}</dd>
     </dl>
-    ${kundenKontakteHtml(c)}
-    ${kundenInternHtml(c)}
+    </div>
     <div style="margin-top:14px"><button class="btn btn-sm" onclick="closeModal();filters.revenueMode='customer';filters.revenueCustomerId=${id};currentView='revenue';document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));document.querySelector('nav button[data-view=revenue]').classList.add('active');render()">In Umsätze-Tab öffnen</button></div>
   `, [
     `<button class="btn btn-danger" onclick="deleteCustomer(${id})">Löschen</button>`,
@@ -13860,10 +13873,12 @@ async function feierHinweisZeigen(erzwingen) {
   try { await crmLoadMitarbeiter(); } catch (e) { return; }
   const heuteIso = new Date().toISOString().slice(0, 10);
   if (!erzwingen) { try { if (localStorage.getItem("crm-feier-gezeigt") === heuteIso) return; } catch (e) {} }
-  const ev = feierEreignisse(2); if (!ev.length) { if (erzwingen) toast("Keine Geburtstage oder Jubiläen in den nächsten 2 Tagen."); return; }
+  const tage = erzwingen ? 7 : 2;
+  const ev = feierEreignisse(tage); if (!ev.length) { if (erzwingen) toast("Keine Geburtstage oder Jubiläen in den nächsten 7 Tagen."); return; }
   try { localStorage.setItem("crm-feier-gezeigt", heuteIso); } catch (e) {}
-  const wann = i => i === 0 ? "Heute" : i === 1 ? "Morgen" : "Übermorgen";
-  showModal("Gratulieren nicht vergessen!", `<div style="display:flex;flex-direction:column;gap:10px">${ev.map(x => `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid ${x.in === 0 ? "var(--accent)" : "var(--border)"};border-radius:8px;background:${x.in === 0 ? "rgba(184,233,134,0.08)" : "transparent"}">
+  const wtag = i => { const d = new Date(); d.setDate(d.getDate() + i); return d.toLocaleDateString("de-CH", { weekday: "short", day: "2-digit", month: "2-digit" }); };
+  const wann = i => i === 0 ? "Heute" : i === 1 ? "Morgen" : i === 2 ? "Übermorgen" : wtag(i);
+  showModal(erzwingen ? "Geburtstage & Jubiläen — nächste 7 Tage" : "Gratulieren nicht vergessen!", `<div style="display:flex;flex-direction:column;gap:10px">${ev.map(x => `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid ${x.in === 0 ? "var(--accent)" : "var(--border)"};border-radius:8px;background:${x.in === 0 ? "rgba(184,233,134,0.08)" : "transparent"}">
       <div style="font-size:24px">${x.art.slice(0, 2)}</div>
       <div style="flex:1"><div style="font-weight:600">${escape(x.name)}</div><div style="font-size:12px;color:var(--text-dim)">${escape(x.text)}</div></div>
       <div style="font-size:12px;font-weight:600;color:${x.in === 0 ? "var(--accent)" : "var(--text-dim)"}">${wann(x.in)}</div>
@@ -13874,7 +13889,7 @@ function mitarbeiterTabelleHtml() {
   const p = internPersonenAlle();
   return `<div style="margin-bottom:22px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div style="font-weight:600">Mitarbeitende</div><span style="font-size:11px;color:var(--text-faint)">Name, Geburtstag und Eintritt — werden bei den Kunden unter «Interne Ansprechpersonen» angezeigt</span>
     <label class="btn btn-sm" style="margin-left:auto;cursor:pointer" title="Personalstammliste (PDF) einlesen: fehlende Personen anlegen, Nachname/Geburtstag/Eintritt ergänzen — Lohnspalten werden ignoriert">⇧ Personalstammliste (PDF) importieren<input type="file" accept=".pdf,application/pdf" multiple hidden onchange="maImportStammliste(this)"></label>
-    <button class="btn btn-sm" onclick="feierHinweisZeigen(true)" title="Geburtstage und Jubiläen der nächsten 2 Tage anzeigen (erscheint sonst automatisch einmal pro Tag nach dem Login)">🎂 Anstehende Feiern</button></div>
+    <button class="btn btn-sm" onclick="feierHinweisZeigen(true)" title="Geburtstage und Jubiläen der nächsten 7 Tage anzeigen (erscheint sonst automatisch einmal pro Tag nach dem Login)">🎂 Anstehende Feiern</button></div>
     ${p.length ? `<table class="table"><thead><tr><th>Name</th><th>E-Mail</th><th>Geburtstag</th><th>Bei Apriko seit</th><th>Abteilung</th><th style="width:90px;text-align:right"></th></tr></thead><tbody>${p.map(e => { const m = mitarbeiterDaten(e); return `<tr${m.austritt ? ' style="opacity:.55"' : ""}><td style="font-weight:500">${escape(mitarbeiterName(e))}${m.austritt ? ` <span style="color:var(--warn);font-size:11px">ausgetreten ${escape(datumCH(m.austritt))}</span>` : ""}</td><td style="color:var(--text-dim)">${escape(e)}</td><td>${escape(datumCH(m.geburtstag) || "—")}</td><td>${escape(datumCH(m.eintritt) || "—")}</td><td style="color:var(--text-dim)">${escape(m.abteilung || "—")}</td><td style="text-align:right"><button class="btn btn-sm" onclick="mitarbeiterBearbeiten(${tkJs(e)}, null)">Bearbeiten</button></td></tr>`; }).join("")}</tbody></table>` : `<div class="empty">Keine Benutzer.</div>`}</div>`;
 }
 let internZusatz = {};   // custId → [emails], die ohne Rolle (noch) angezeigt werden sollen
@@ -13919,6 +13934,111 @@ async function kontakteAusStamm(compId, custId) {
   } catch (e) { toast("Fehler: " + e.message, true); }
   toast(neu + " Kontakte angelegt, " + markiert + " bestehende markiert — Name/Telefon bitte ergänzen.");
   if (custId) openCustomer(custId); else render();
+}
+/* ---------- Import «Kundenumgebungen» (HTML-Tabelle) → bestehende Kundenfelder ergänzen ----------
+   Spalten: Unternehmung · Link · Ansprechperson · Services · LoBu Temp (Backup) · FiBu (Backup) · LoBu Intern (Backup)
+   Es werden nur bestehende Felder bedient: App-Link, Kontakt (Ansprechperson), interne Rollen Lohn/Lohn Backup/FIBU/FIBU Backup/Lohn intern,
+   Workflows «Interner Lohn» / «FIBU Monatsabschluss». Keine neuen Felder. Bestehende Werte werden nicht überschrieben. */
+let kuImportPlan = [];
+function kuPersonZuEmail(vorname) {
+  const v = maNorm(vorname); if (!v) return "";
+  const alle = internPersonenAlle();
+  return alle.find(e => maNorm(mitarbeiterDaten(e).vorname || mitarbeiterVornameAusEmail(e)) === v) || alle.find(e => maNorm(e.split("@")[0]).startsWith(v)) || "";
+}
+function kuParsePersonen(txt) { const m = /^\s*([^()]+?)\s*(?:\(([^)]*)\))?\s*$/.exec(String(txt || "").trim()); return m ? { haupt: (m[1] || "").trim(), backup: (m[2] || "").trim() } : { haupt: "", backup: "" }; }
+async function kuImport(input) {
+  const f = (input.files || [])[0]; input.value = ""; if (!f) return;
+  await Promise.all([crmLoadStamm(), crmLoadKundenFlags(), crmLoadMitarbeiter()]);
+  const html = await f.text(); const doc = new DOMParser().parseFromString(html, "text/html");
+  const tab = [...doc.querySelectorAll("table")].find(t => /Unternehmung/i.test(t.textContent) && /Link/i.test(t.textContent));
+  if (!tab) { toast("Keine Tabelle mit Spalte «Unternehmung» gefunden.", true); return; }
+  const rows = [...tab.querySelectorAll("tr")].map(tr => [...tr.children].map(td => ({ text: td.textContent.replace(/\s+/g, " ").trim(), links: [...td.querySelectorAll("a")].map(a => a.getAttribute("href") || ""), items: [...td.querySelectorAll("li")].map(li => li.textContent.trim()).filter(Boolean) })));
+  const hi = rows.findIndex(r => r.some(c => /^Unternehmung/i.test(c.text))); if (hi < 0) { toast("Kopfzeile nicht gefunden.", true); return; }
+  const head = rows[hi].map(c => c.text.toLowerCase());
+  const col = re => head.findIndex(h => re.test(h));
+  const ci = { name: col(/^unternehmung/), link: col(/^link/), ap: col(/^ansprechperson/), services: col(/^services/), lobu: col(/^lobu temp/), fibu: col(/^fibu/), intern: col(/^lobu intern/), factoring: col(/^factoring/) };
+  const notizSpalten = head.map((h, i) => ({ h: rows[hi][i].text, i })).filter(x => x.i >= 0 && !Object.values(ci).includes(x.i) && x.h);
+  const plan = [];
+  rows.slice(hi + 1).forEach(r => {
+    const name = ci.name >= 0 && r[ci.name] ? r[ci.name].text : ""; if (!name) return;
+    const n = tkNormName(name);
+    const kunde = cache.customers.find(c => { const comp = cache.companies.find(x => x.id == c.CompanyId); const t = tkNormName(comp && comp.Title), t2 = tkNormName(c.Title); return n && (t === n || t2 === n || (t && (t.includes(n) || n.includes(t)))); });
+    const aend = [];
+    if (!kunde) { plan.push({ name, kunde: null, aend }); return; }
+    const flags = (crmKundenFlags || {})[String(kunde.id)] || {};
+    // Link
+    const link = ci.link >= 0 && r[ci.link] ? (r[ci.link].links[0] || r[ci.link].text) : "";
+    if (link && /^https?:/i.test(link) && !flags.applink && !kunde.Link) aend.push({ art: "link", label: "App-Link", wert: link });
+    // Ansprechperson → Kontakt
+    const ap = ci.ap >= 0 && r[ci.ap] ? r[ci.ap].text : "";
+    if (ap && kunde.CompanyId) {
+      const mail = (r[ci.ap].links.find(h => /^mailto:/i.test(h)) || "").replace(/^mailto:/i, "").split("?")[0];
+      const vorhanden = cache.contacts.some(k => String(k.CompanyId) === String(kunde.CompanyId) && (maNorm(k.Title) === maNorm(ap) || (mail && String(k.Email || "").toLowerCase() === mail.toLowerCase())));
+      if (!vorhanden) aend.push({ art: "kontakt", label: "Kontakt anlegen", wert: ap + (mail ? " <" + mail + ">" : ""), name: ap, mail });
+    }
+    // interne Rollen
+    const rolle = (idx, key, label, backupKey, backupLabel) => {
+      if (idx < 0 || !r[idx]) return; const p = kuParsePersonen(r[idx].text);
+      [[p.haupt, key, label], [p.backup, backupKey, backupLabel]].forEach(([vn, k, l]) => {
+        if (!vn || !k) return; const e = kuPersonZuEmail(vn);
+        if (!e) { aend.push({ art: "warn", label: l, wert: vn + " — keine Mitarbeiter/in gefunden" }); return; }
+        if (!flags[k]) aend.push({ art: "rolle", label: l, wert: mitarbeiterName(e) + " (" + e + ")", key: k, email: e });
+      });
+    };
+    rolle(ci.lobu, "apLohn", "Lohn", "apLohnBackup", "Lohn Backup");
+    rolle(ci.fibu, "apFibu", "FIBU", "apFibuBackup", "FIBU Backup");
+    rolle(ci.intern, "apLohnIntern", "Lohn intern", null, null);
+    // Workflows aus Services / LoBu Intern
+    const services = ci.services >= 0 && r[ci.services] ? (r[ci.services].items.length ? r[ci.services].items : r[ci.services].text.split(/\s{2,}|·|,/).map(x => x.trim())) : [];
+    if (services.some(x => /^fibu/i.test(x)) && !flags.fibu) aend.push({ art: "flag", label: "Workflow", wert: "FIBU Monatsabschluss ✓", key: "fibu" });
+    if (ci.intern >= 0 && r[ci.intern] && r[ci.intern].text && !flags.intern) aend.push({ art: "flag", label: "Workflow", wert: "Interner Lohn ✓", key: "intern" });
+    // Factoring
+    const fact = ci.factoring >= 0 && r[ci.factoring] ? r[ci.factoring].text : "";
+    if (fact && !/^(nein|no|-|—)$/i.test(fact) && !flags.factoring) aend.push({ art: "factoring", label: "Factoring", wert: "Ja · " + fact, notiz: /^(ja|yes|x)$/i.test(fact) ? "" : fact });
+    // Alles ohne eigenes Feld → Notes (Services-Liste, Payroll bis, SMTP, Rapport, Abrechnungsperiode, Portalzugriffe …)
+    const teile = [];
+    if (services.length) teile.push("Services: " + services.join(", "));
+    notizSpalten.forEach(x => { const c0 = r[x.i]; if (!c0) return; const t = c0.items.length ? c0.items.join(", ") : c0.text; if (t) teile.push(x.h + ": " + t); });
+    if (teile.length && !/Kundenumgebung \(Import/.test(kunde.Notes || "")) aend.push({ art: "notes", label: "Notes ergänzen", wert: teile.join(" · ").slice(0, 160) + (teile.join(" · ").length > 160 ? " …" : ""), text: "Kundenumgebung (Import " + new Date().toLocaleDateString("de-CH") + "):\n" + teile.join("\n") });
+    plan.push({ name, kunde, aend });
+  });
+  kuImportPlan = plan;
+  const mitAend = plan.filter(p => p.kunde && p.aend.some(a => a.art !== "warn")).length;
+  modalBreit && modalBreit(true);
+  showModal("Kundenumgebungen importieren — " + plan.length + " Zeilen, " + mitAend + " Kunden mit Ergänzungen", `
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px">Nur leere Felder werden ergänzt, nichts wird überschrieben. Spalten ohne eigenes Feld (Payroll bis, SMTP, Rapport, Abrechnungsperiode, Portalzugriffe, Services) landen als Block in den Notes des Kunden.</div>
+    <table class="table" style="font-size:12px"><thead><tr><th></th><th>Unternehmung (HTML)</th><th>Kunde im CRM</th><th>Ergänzungen</th></tr></thead><tbody>
+    ${plan.map((p, i) => `<tr><td><input type="checkbox" class="ku-cb" data-i="${i}" ${p.kunde && p.aend.some(a => a.art !== "warn") ? "checked" : "disabled"} style="width:auto"></td><td><strong>${escape(p.name)}</strong></td><td>${p.kunde ? escape(p.kunde.Title) : `<span style="color:var(--warn)">nicht gefunden</span>`}</td>
+      <td>${p.kunde ? (p.aend.length ? p.aend.map(a => `<div style="${a.art === "warn" ? "color:var(--warn)" : ""}">${a.art === "warn" ? "⚠ " : "+ "}${escape(a.label)}: ${escape(a.wert)}</div>`).join("") : `<span style="color:var(--text-faint)">nichts zu ergänzen</span>`) : ""}</td></tr>`).join("")}
+    </tbody></table>`, [
+    `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
+    `<button class="btn btn-primary" onclick="kuImportUebernehmen()">Übernehmen</button>`]);
+}
+async function kuImportUebernehmen() {
+  const idx = [...document.querySelectorAll(".ku-cb:checked")].map(cb => +cb.dataset.i);
+  let n = 0, kontakte = 0, flagsGeaendert = false, kundenGeaendert = false;
+  try {
+    for (const i of idx) {
+      const p = kuImportPlan[i]; if (!p || !p.kunde) continue; const key = String(p.kunde.id);
+      for (const a of p.aend) {
+        if (a.art === "link") { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}, { applink: a.wert }); flagsGeaendert = true; n++; }
+        else if (a.art === "rolle") { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}); crmKundenFlags[key][a.key] = a.email; flagsGeaendert = true; n++; }
+        else if (a.art === "flag") { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}); crmKundenFlags[key][a.key] = true; flagsGeaendert = true; n++; }
+        else if (a.art === "factoring") { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}, { factoring: true }); if (a.notiz && !crmKundenFlags[key].factoringNotiz) crmKundenFlags[key].factoringNotiz = a.notiz; flagsGeaendert = true; n++; }
+        else if (a.art === "notes") { const neu = ((p.kunde.Notes || "").trim() ? (p.kunde.Notes || "").trim() + "\n\n" : "") + a.text; await updateItem("Customers", p.kunde.id, { Notes: neu }); kundenGeaendert = true; n++; }
+        else if (a.art === "kontakt") {
+          const t = a.name.trim().split(/\s+/); const vorname = t.length > 1 ? t[0] : "", nachname = t.length > 1 ? t.slice(1).join(" ") : t[0];
+          const res = await createItem("Contacts", { Title: a.name.trim(), Email: a.mail || "", CompanyId: parseInt(p.kunde.CompanyId) });
+          if (res && res.id) await kontaktNamenSetzen(p.kunde.CompanyId, res.id, vorname, nachname);
+          kontakte++; n++;
+        }
+      }
+    }
+    if (flagsGeaendert) await crmSaveKundenFlags();
+    if (kontakte) { await crmSaveStamm(); await reload("Contacts"); }
+    if (kundenGeaendert) await reload("Customers");
+  } catch (e) { toast("Fehler beim Übernehmen: " + e.message, true); }
+  closeModal(); render(); toast(n + " Ergänzungen übernommen" + (kontakte ? " (" + kontakte + " Kontakte angelegt)" : "") + ".");
 }
 function newCustomer() { editCustomer(null); }
 function editCustomer(id) {
@@ -14011,6 +14131,10 @@ function editCustomer(id) {
       <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-wf-fibu" ${kundenFlag(c.id || "", "fibu") ? "checked" : ""} style="width:auto;margin:0"> FIBU Monatsabschluss</label></div>
       <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer" title="Eigene Datenbank beim Kunden → löst monatliche Hostingkosten aus (Budgetpositionen, Konto 4400, Betrag pro DB zentral einstellbar)"><input type="checkbox" id="f-wf-hatdb" ${(c.id ? kundenHatDb(c.id) : true) ? "checked" : ""} style="width:auto;margin:0"> Hat Datenbank (Hostingkosten) <span style="color:var(--text-faint);font-weight:400">— Standard ja</span></label></div>
     </div>
+    ${(() => { const f = (crmKundenFlags || {})[String(c.id || "")] || {}; return `<div class="field-row">
+      <div class="field" style="flex:0 0 160px"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-factoring" ${f.factoring ? "checked" : ""} style="width:auto;margin:0"> Factoring</label></div>
+      <div class="field"><label>Factoring — wer / Notiz</label><input id="f-factoring-notiz" value="${escape(f.factoringNotiz || "")}" placeholder="z.B. Partnerbank, Ansprechperson, Konditionen"></div>
+    </div>`; })()}
     ${(() => { const f = (crmKundenFlags || {})[String(c.id || "")] || {}; const emails = [...new Set((cache.userprofiles || []).map(p => (p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase()).filter(Boolean))].sort();
       // ✉ neben dem Dropdown: öffnet Outlook mit der gewählten Adresse (passt sich beim Wechsel an)
       const sel = (id, label, cur) => `<div class="field"><label>${label}</label><div style="display:flex;gap:6px;align-items:center"><select id="${id}" style="flex:1" onchange="const a=document.getElementById('${id}-mail'); if(a){a.href='mailto:'+encodeURIComponent(this.value); a.style.visibility=this.value?'visible':'hidden';}"><option value="">—</option>${emails.map(e => `<option value="${escape(e)}" ${cur === e ? "selected" : ""}>${escape(e)}</option>`).join("")}${cur && !emails.includes(cur) ? `<option value="${escape(cur)}" selected>${escape(cur)}</option>` : ""}</select><a id="${id}-mail" href="mailto:${escape(cur)}" title="E-Mail schreiben" style="font-size:18px;text-decoration:none;visibility:${cur ? "visible" : "hidden"}">✉</a></div></div>`;
@@ -14191,14 +14315,22 @@ async function saveCustomer(id) {
       const neuZielExt = parseFloat(val("f-zielext")) || 0;
       const neuPctFrom = val("f-saasmodel") === "Prozentual" ? (val("f-saaspctfrom") || "") : "";
       const ap = { apLohn: val("f-ap-lohn"), apLohnBackup: val("f-ap-lohn-backup"), apLohnIntern: val("f-ap-lohn-intern"), apFibu: val("f-ap-fibu"), apFibuBackup: val("f-ap-fibu-backup") };
+      const neuFactoring = document.getElementById("f-factoring")?.checked || false;
+      const neuFactoringNotiz = val("f-factoring-notiz").trim();
       const alt = crmKundenFlags[key] || {};
       const apGeaendert = Object.keys(ap).some(k => (ap[k] || "") !== (alt[k] || ""));
       const apGesetzt = Object.values(ap).some(Boolean);
       if (apGeaendert || neuIntern !== !!alt.intern || neuFibu !== !!alt.fibu || neuHatDb !== !alt.keineDb || neuMinfee !== (alt.minfee || "") || neuApplink !== (alt.applink || "")
           || neuMinSaas !== (parseFloat(alt.minSaas) || 0) || neuMinBpo !== (parseFloat(alt.minBpo) || 0)
-          || neuZielExt !== (parseFloat(alt.zielExt) || 0) || neuPctFrom !== (alt.saasPctFrom || "")) {
-        if (neuIntern || neuFibu || !neuHatDb || neuMinfee || neuApplink || neuMinSaas || neuMinBpo || neuZielExt || neuPctFrom || apGesetzt) {
-          crmKundenFlags[key] = { intern: neuIntern, fibu: neuFibu, minfee: neuMinfee, applink: neuApplink };
+          || neuZielExt !== (parseFloat(alt.zielExt) || 0) || neuPctFrom !== (alt.saasPctFrom || "")
+          || neuFactoring !== !!alt.factoring || neuFactoringNotiz !== (alt.factoringNotiz || "")) {
+        // Nicht vom Formular verwaltete Schlüssel (z.B. aus Importen) bleiben erhalten
+        const verwaltet = ["intern", "fibu", "minfee", "applink", "keineDb", "minSaas", "minBpo", "zielExt", "saasPctFrom", "factoring", "factoringNotiz"].concat(Object.keys(ap));
+        const rest = {}; Object.keys(alt).forEach(k => { if (!verwaltet.includes(k)) rest[k] = alt[k]; });
+        if (neuIntern || neuFibu || !neuHatDb || neuMinfee || neuApplink || neuMinSaas || neuMinBpo || neuZielExt || neuPctFrom || apGesetzt || neuFactoring || neuFactoringNotiz || Object.keys(rest).length) {
+          crmKundenFlags[key] = Object.assign(rest, { intern: neuIntern, fibu: neuFibu, minfee: neuMinfee, applink: neuApplink });
+          if (neuFactoring) crmKundenFlags[key].factoring = true;
+          if (neuFactoringNotiz) crmKundenFlags[key].factoringNotiz = neuFactoringNotiz;
           Object.keys(ap).forEach(k => { if (ap[k]) crmKundenFlags[key][k] = ap[k]; });
           if (!neuHatDb) crmKundenFlags[key].keineDb = true;
           if (neuMinSaas) crmKundenFlags[key].minSaas = neuMinSaas;
@@ -14723,6 +14855,15 @@ function renderProfiles(el) {
               </tr>
             `;
           }).join("")}
+          ${(() => { const b = bgParam(); const ohne = Object.keys(b.zuweisung).filter(e => !profiles.some(p => String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase() === e)).sort();
+            return ohne.map(e => { const g = b.gruppen[b.zuweisung[e]] || {}; return `
+              <tr>
+                <td style="font-weight:500">${escape(e)} <span style="font-size:10px;color:var(--text-faint);margin-left:4px">nur Gruppe</span></td>
+                <td>${g.admin ? `<span style="background:rgba(184,233,134,0.15);color:var(--accent);padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">Admin</span>` : `<span style="color:var(--text-dim);font-size:12px">User</span>`}</td>
+                <td><select onchange="bgZuweisen(${tkJs(e)}, this.value)" style="padding:3px 6px;font-size:12px;max-width:140px;border-color:var(--accent)"><option value="">— keine —</option>${Object.keys(b.gruppen).map(id => `<option value="${escape(id)}" ${b.zuweisung[e] === id ? "selected" : ""}>${escape(b.gruppen[id].name)}</option>`).join("")}</select></td>
+                <td style="color:var(--text-faint);font-size:12px">— nur Gruppenrechte (${escape(g.name || "?")})</td>
+                <td style="text-align:right"><button class="btn btn-sm" onclick="openProfileModal(null, ${tkJs(e)})" title="Profil anlegen, um zusätzliche Bereiche individuell freizugeben">Profil anlegen</button> <button class="btn btn-sm" style="color:var(--danger)" onclick="bgZuweisen(${tkJs(e)}, '')" title="Freischaltung entfernen">✕</button></td>
+              </tr>`; }).join(""); })()}
         </tbody>
       </table>
     </div>
@@ -14752,10 +14893,10 @@ function profileViewGridHtml(currentViews) {
         </div>`;
 }
 /* Modal für Neu/Bearbeiten */
-function openProfileModal(profileId) {
+function openProfileModal(profileId, emailVorgabe) {
   const isEdit = profileId != null;
   const profile = isEdit ? (cache.userprofiles || []).find(p => p.id == profileId) : null;
-  const currentEmail = profile ? (profile.Email || (profile.UserPerson && profile.UserPerson.email) || "") : "";
+  const currentEmail = profile ? (profile.Email || (profile.UserPerson && profile.UserPerson.email) || "") : (emailVorgabe || "");
   const currentRole = profile ? (profile.Role || "User") : "User";
   const currentViews = profile
     ? (Array.isArray(profile.AllowedViews) ? profile.AllowedViews
