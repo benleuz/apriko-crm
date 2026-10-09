@@ -10,7 +10,7 @@
    Abhängigkeiten: jahresbudget.js (jbBuild, jbSaveRow, jbFindRow, jbPos*, jbFmt, jbNum, JB_*),
    index.html (fbSaveItem, reload, escape, toast, render, FB_PLAN, FB_LABELS, FB_SRC). */
 
-const BP_VERSION = "1.127.0";
+const BP_VERSION = "1.468.0";
 /* Suche: nach jedem Tastendruck wird neu gezeichnet — Fokus und Cursor ins Suchfeld zurückholen */
 function bpSucheTippen(el, state, key) { state[key] = el.value; const pos = el.selectionStart; render(); const n = document.getElementById(el.id); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} } }
 
@@ -156,6 +156,27 @@ async function bpPosAdd(g, kt) {
   bpState.open[g + "|" + kt] = true;
   await jbSaveRow(r, { pos: (r.pos || []).concat([{ t: "", v: 0, n: "", f: "m", sm: 1 }]) });
   setTimeout(() => { const inps = document.querySelectorAll(`input[data-bp="${g}|${kt}"]`); const last = inps[inps.length - 1]; if (last) last.focus(); }, 60);
+}
+/* Hochrechnung des Vorjahres als Position übernehmen: Betrag = Hochrechnung (Jahr). Liegen Vorjahres-Buchungen vor,
+   wird nach deren Monatsmuster verteilt (automatische Monatswerte), sonst monatlich ÷12. */
+async function bpPosAusVorjahr(g, kt) {
+  const r = jbFindRow(g, kt); if (!r || !r.hoch) return;
+  const basis = bpState.year - 1;
+  const betrag = Math.round(r.hoch);
+  const bid = g + "|" + kt; const bmap = (typeof fbBuchYearCache !== "undefined" && fbBuchYearCache[basis]) || {}; const buch = (bmap[bid] && bmap[bid].buch) || null;
+  let pos = { t: "Vorjahr " + basis + " (Hochrechnung)", v: betrag, n: "übernommen am " + new Date().toLocaleDateString("de-CH"), f: "m", sm: 1 };
+  if (buch && buch.length) {
+    const bm = bpBuchMonate(buch, jbFkt(r.key)); const sum = bm.m.reduce((a, b) => a + b, 0);
+    if (sum > 0 && bm.m.filter(v => v > 0).length >= 2) {
+      // Muster des Vorjahres auf den Hochrechnungsbetrag skalieren
+      const m = bm.m.map(v => Math.round(betrag * v / sum * 100) / 100); const diff = Math.round((betrag - m.reduce((a, b) => a + b, 0)) * 100) / 100; m[11] += diff;
+      pos = { t: "Vorjahr " + basis + " (Muster Buchungen)", v: betrag, n: "nach Monatsmuster " + basis + " verteilt", f: "r", sm: 1, em: 12, auto: true, m };
+    }
+  }
+  if (jbHasPos(r) && !confirm("Konto " + kt + " hat bereits " + r.pos.length + " Position(en). Hochrechnung " + jbFmt(betrag) + " zusätzlich übernehmen?")) return;
+  bpState.open[bid] = true;
+  await jbSaveRow(r, { pos: (r.pos || []).concat([pos]) });
+  toast("Position aus " + basis + " übernommen: " + jbFmt(betrag));
 }
 async function bpAddKonto() {
   const kt = prompt("Kontonummer gemäss Abacus (z.B. 6510):"); if (!kt || !/^\d{3,5}$/.test(kt.trim())) { if (kt) toast("Ungültige Kontonummer.", true); return; }
@@ -336,7 +357,7 @@ function renderBudgetpositionen(el) {
         <td></td>
         ${kontoM.map(v => tdm(v, "font-weight:600")).join("")}
         ${tdm(kontoJahr, "font-weight:700")}
-        <td style="padding:2px 6px;white-space:nowrap"><span class="btn btn-sm" style="padding:0 6px;font-size:10px" onclick="event.stopPropagation();bpPosAdd(${gi(r.g, r.kt)})">＋ Position</span></td>
+        <td style="padding:2px 6px;white-space:nowrap"><span class="btn btn-sm" style="padding:0 6px;font-size:10px" onclick="event.stopPropagation();bpPosAdd(${gi(r.g, r.kt)})">＋ Position</span>${r.hoch ? ` <span class="btn btn-sm" style="padding:0 6px;font-size:10px" onclick="event.stopPropagation();bpPosAusVorjahr(${gi(r.g, r.kt)})" title="Hochrechnung ${basis} (${jbFmt(r.hoch)}) als Position für ${y} übernehmen — monatlich verteilt; mit den Vorjahres-Buchungen nach Monaten, wenn vorhanden">↪ ${basis} übernehmen</span>` : ""}</td>
       </tr>`;
     const posRows = (r.pos || []).map((p, i) => {
       const mo = bpMonths(p), f = p.f || "m";
