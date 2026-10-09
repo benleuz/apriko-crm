@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.455.0"></script>
-<script src="apriko-api.js?v=1.455.0"></script>
-<script src="lohncheck.js?v=1.455.0"></script>
-<script src="personalbudget.js?v=1.455.0"></script>
-<script src="jahresbudget.js?v=1.455.0"></script>
-<script src="budgetpositionen.js?v=1.455.0"></script>
-<script src="lohnchecklistetemp.js?v=1.455.0"></script>
-<script src="apriko-endpunkte.js?v=1.455.0"></script>
+<script src="apriko-filters.js?v=1.456.0"></script>
+<script src="apriko-api.js?v=1.456.0"></script>
+<script src="lohncheck.js?v=1.456.0"></script>
+<script src="personalbudget.js?v=1.456.0"></script>
+<script src="jahresbudget.js?v=1.456.0"></script>
+<script src="budgetpositionen.js?v=1.456.0"></script>
+<script src="lohnchecklistetemp.js?v=1.456.0"></script>
+<script src="apriko-endpunkte.js?v=1.456.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1027,7 +1027,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.455.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.456.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -8907,7 +8907,7 @@ async function renderOnboarding(el) {
     <div class="print-only" style="font-size:11px;color:#666;margin-bottom:8px">Apriko AG · Onboarding-Übersicht · Stand ${new Date().toLocaleDateString("de-CH")}</div>
     <div class="card" style="padding:14px 16px">
       <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px" class="no-print">Häkchen setzen = erledigt (Datum · Person erscheint daneben, Details beim Überfahren). Rot = überfällig gemäss Go-Live-Datum. «—» = Aufgabe gilt nicht für diesen Kundentyp. Zuständigkeit: <span style="color:var(--accent)">Apriko</span> · <span style="color:var(--warn)">Kunde</span> · <span style="color:var(--accent-3)">beide</span>.</div>
-      ${kunden.length ? `<div class="table-wrap onb-wrap"><table class="onb-matrix" style="font-size:12px;border-collapse:collapse">${kopf}<tbody>${zeilen}</tbody></table></div>` : `<div class="empty">Noch keine Kunden im Onboarding — oben rechts einen Kunden hinzufügen.</div>`}
+      ${kunden.length ? `<div class="table-wrap onb-wrap"><table class="onb-matrix" style="font-size:12px;border-collapse:collapse">${kopf}<tbody>${zeilen}</tbody></table></div>` : `<div class="empty">Noch keine Kunden im Onboarding — oben rechts einen Kunden hinzufügen.${kundenIds.length ? `<br><span style="color:var(--warn)">Hinweis: In parameter.json sind ${kundenIds.length} Onboarding-Einträge vorhanden (IDs ${escape(kundenIds.join(", "))}), aber kein passender Kunde im Kundenstamm (gelöscht?). Admin → Kunden → «🗑 Gelöschte» prüfen.</span>` : `<br><span style="color:var(--text-faint)">parameter.json geladen ${crmParameterGeladen ? new Date(crmParameterGeladen).toLocaleTimeString("de-CH") : "—"} · onboarding.kunden ist leer. Falls hier vorher Kunden standen: SharePoint → CRM-Budgetdaten → parameter.json → Versionsverlauf → frühere Version wiederherstellen.</span>`}</div>`}
     </div>
     ${bearbeiten}`;
 }
