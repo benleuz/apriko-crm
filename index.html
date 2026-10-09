@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.433.0"></script>
-<script src="apriko-api.js?v=1.433.0"></script>
-<script src="lohncheck.js?v=1.433.0"></script>
-<script src="personalbudget.js?v=1.433.0"></script>
-<script src="jahresbudget.js?v=1.433.0"></script>
-<script src="budgetpositionen.js?v=1.433.0"></script>
-<script src="lohnchecklistetemp.js?v=1.433.0"></script>
-<script src="apriko-endpunkte.js?v=1.433.0"></script>
+<script src="apriko-filters.js?v=1.434.0"></script>
+<script src="apriko-api.js?v=1.434.0"></script>
+<script src="lohncheck.js?v=1.434.0"></script>
+<script src="personalbudget.js?v=1.434.0"></script>
+<script src="jahresbudget.js?v=1.434.0"></script>
+<script src="budgetpositionen.js?v=1.434.0"></script>
+<script src="lohnchecklistetemp.js?v=1.434.0"></script>
+<script src="apriko-endpunkte.js?v=1.434.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1026,7 +1026,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.433.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.434.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1970,6 +1970,7 @@ async function startApp() {
     }
 
     render();
+    setTimeout(feierHinweisZeigen, 800);
   } catch (e) {
     console.error(e);
     document.getElementById("view-content").innerHTML =
@@ -13825,10 +13826,38 @@ async function maImportUebernehmen() {
   try { await crmSaveMitarbeiter(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); return; }
   closeModal(); render(); toast(n + " Mitarbeitende übernommen.");
 }
+/* ---- Geburtstage & Jubiläen: Pop-up nach dem Login (heute, morgen, übermorgen), einmal pro Tag und Browser ---- */
+function feierEreignisse(tageVoraus) {
+  const heute = new Date(); heute.setHours(0, 0, 0, 0); const out = [];
+  const tagKey = d => ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
+  const ziele = []; for (let i = 0; i <= (tageVoraus || 2); i++) { const d = new Date(heute); d.setDate(d.getDate() + i); ziele.push({ in: i, key: tagKey(d), jahr: d.getFullYear() }); }
+  Object.keys(crmMitarbeiter || {}).forEach(e => {
+    const m = crmMitarbeiter[e] || {}; if (m.austritt && m.austritt < heute.toISOString().slice(0, 10)) return;
+    const name = mitarbeiterName(e);
+    if (m.geburtstag) ziele.forEach(z => { if (m.geburtstag.slice(5, 10) === z.key) out.push({ in: z.in, art: "🎂 Geburtstag", name, text: (z.jahr - +m.geburtstag.slice(0, 4)) + ". Geburtstag", email: e }); });
+    if (m.eintritt) ziele.forEach(z => { const j = z.jahr - +m.eintritt.slice(0, 4); if (j >= 1 && m.eintritt.slice(5, 10) === z.key) out.push({ in: z.in, art: "🎉 Jubiläum", name, text: j + " Jahr" + (j > 1 ? "e" : "") + " bei Apriko", email: e }); });
+  });
+  return out.sort((a, b) => a.in - b.in || a.name.localeCompare(b.name, "de"));
+}
+async function feierHinweisZeigen(erzwingen) {
+  try { await crmLoadMitarbeiter(); } catch (e) { return; }
+  const heuteIso = new Date().toISOString().slice(0, 10);
+  if (!erzwingen) { try { if (localStorage.getItem("crm-feier-gezeigt") === heuteIso) return; } catch (e) {} }
+  const ev = feierEreignisse(2); if (!ev.length) { if (erzwingen) toast("Keine Geburtstage oder Jubiläen in den nächsten 2 Tagen."); return; }
+  try { localStorage.setItem("crm-feier-gezeigt", heuteIso); } catch (e) {}
+  const wann = i => i === 0 ? "Heute" : i === 1 ? "Morgen" : "Übermorgen";
+  showModal("Gratulieren nicht vergessen!", `<div style="display:flex;flex-direction:column;gap:10px">${ev.map(x => `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid ${x.in === 0 ? "var(--accent)" : "var(--border)"};border-radius:8px;background:${x.in === 0 ? "rgba(184,233,134,0.08)" : "transparent"}">
+      <div style="font-size:24px">${x.art.slice(0, 2)}</div>
+      <div style="flex:1"><div style="font-weight:600">${escape(x.name)}</div><div style="font-size:12px;color:var(--text-dim)">${escape(x.text)}</div></div>
+      <div style="font-size:12px;font-weight:600;color:${x.in === 0 ? "var(--accent)" : "var(--text-dim)"}">${wann(x.in)}</div>
+      <a class="btn btn-sm" href="mailto:${escape(x.email)}?subject=${encodeURIComponent(x.art.slice(3) === "Geburtstag" ? "Alles Gute zum Geburtstag!" : "Herzliche Gratulation zum Jubiläum!")}">✉</a></div>`).join("")}</div>`,
+    [`<button class="btn btn-primary" onclick="closeModal()">Danke, gesehen</button>`]);
+}
 function mitarbeiterTabelleHtml() {
   const p = internPersonenAlle();
   return `<div style="margin-bottom:22px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div style="font-weight:600">Mitarbeitende</div><span style="font-size:11px;color:var(--text-faint)">Name, Geburtstag und Eintritt — werden bei den Kunden unter «Interne Ansprechpersonen» angezeigt</span>
-    <label class="btn btn-sm" style="margin-left:auto;cursor:pointer" title="Personalstammliste (PDF) einlesen: fehlende Personen anlegen, Nachname/Geburtstag/Eintritt ergänzen — Lohnspalten werden ignoriert">⇧ Personalstammliste (PDF) importieren<input type="file" accept=".pdf,application/pdf" multiple hidden onchange="maImportStammliste(this)"></label></div>
+    <label class="btn btn-sm" style="margin-left:auto;cursor:pointer" title="Personalstammliste (PDF) einlesen: fehlende Personen anlegen, Nachname/Geburtstag/Eintritt ergänzen — Lohnspalten werden ignoriert">⇧ Personalstammliste (PDF) importieren<input type="file" accept=".pdf,application/pdf" multiple hidden onchange="maImportStammliste(this)"></label>
+    <button class="btn btn-sm" onclick="feierHinweisZeigen(true)" title="Geburtstage und Jubiläen der nächsten 2 Tage anzeigen (erscheint sonst automatisch einmal pro Tag nach dem Login)">🎂 Anstehende Feiern</button></div>
     ${p.length ? `<table class="table"><thead><tr><th>Name</th><th>E-Mail</th><th>Geburtstag</th><th>Bei Apriko seit</th><th>Abteilung</th><th style="width:90px;text-align:right"></th></tr></thead><tbody>${p.map(e => { const m = mitarbeiterDaten(e); return `<tr${m.austritt ? ' style="opacity:.55"' : ""}><td style="font-weight:500">${escape(mitarbeiterName(e))}${m.austritt ? ` <span style="color:var(--warn);font-size:11px">ausgetreten ${escape(datumCH(m.austritt))}</span>` : ""}</td><td style="color:var(--text-dim)">${escape(e)}</td><td>${escape(datumCH(m.geburtstag) || "—")}</td><td>${escape(datumCH(m.eintritt) || "—")}</td><td style="color:var(--text-dim)">${escape(m.abteilung || "—")}</td><td style="text-align:right"><button class="btn btn-sm" onclick="mitarbeiterBearbeiten(${tkJs(e)}, null)">Bearbeiten</button></td></tr>`; }).join("")}</tbody></table>` : `<div class="empty">Keine Benutzer.</div>`}</div>`;
 }
 function kundenInternHtml(c) {
