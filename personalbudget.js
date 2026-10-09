@@ -13,20 +13,70 @@
    Abhängigkeiten aus index.html: cache, fbParse, fbSaveItem, deleteItem,
    reload, escape, toast, render, showModal, closeModal, currentUser. */
 
-const PA_VERSION = "1.114.0";
+const PA_VERSION = "1.461.0";
 const PA_GES = ["Apriko AG", "Maverix AG"];
 /* Budgetvergleich rechnet Personal ÜBER KREUZ (fbZuordnung): Maverix-Löhne = SW_*, Apriko-Löhne = BO_* */
 const PA_FB_KEYS = { "Apriko AG": { lohn: "BO_Lohn", sv: "BO_SV", uebr: "BO_UebrPA" }, "Maverix AG": { lohn: "SW_Lohn", sv: "SW_SV", uebr: "SW_UebrPA" } };
 const PA_SALT = "apriko-pa-2026";
 
-const paState = { year: 2027, unlocked: sessionStorage.getItem("pa-unlocked") === "1", busy: false, pwError: "", sort: "g", order: null };
+const paState = { year: 2027, unlocked: sessionStorage.getItem("pa-unlocked") === "1" && !!sessionStorage.getItem("pa-key"), busy: false, pwError: "", sort: "g", order: null, key: null, entschluesselt: false };
+
+/* ---------- Verschlüsselung (seit 09.10.2026) ----------
+   Die Lohnzeilen liegen in SharePoint NUR noch verschlüsselt: {"cfg":"pa","t":"row","y":2027,"e":"<base64>"}.
+   Schlüssel = PBKDF2(Passwort, PA_SALT, 200'000 Runden) → AES-256-GCM. Wer die Liste «Budget» in SharePoint
+   oder auf einem synchronisierten Laufwerk öffnet, sieht nur Zufallszeichen. Der Schlüssel liegt nur im
+   Browser-Sitzungsspeicher (Tab schliessen = weg). Ohne Passwort sind die Daten NICHT wiederherstellbar. */
+const paPlain = {};   // Budget-Item-ID → entschlüsselte Felder {n,g,l,p,s,w}
+async function paDeriveKey(pw) {
+  const mat = await crypto.subtle.importKey("raw", new TextEncoder().encode(String(pw)), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "PBKDF2", salt: new TextEncoder().encode(PA_SALT + "|aes"), iterations: 200000, hash: "SHA-256" }, mat, { name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+}
+async function paKeyMerken(key) { paState.key = key; try { const raw = await crypto.subtle.exportKey("raw", key); sessionStorage.setItem("pa-key", btoa(String.fromCharCode(...new Uint8Array(raw)))); } catch (e) {} }
+async function paKeyLaden() {
+  if (paState.key) return paState.key;
+  const b64 = sessionStorage.getItem("pa-key"); if (!b64) return null;
+  try { const raw = Uint8Array.from(atob(b64), c => c.charCodeAt(0)); paState.key = await crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, true, ["encrypt", "decrypt"]); return paState.key; } catch (e) { return null; }
+}
+async function paEncrypt(obj, key) {
+  key = key || await paKeyLaden(); if (!key) throw new Error("Nicht entsperrt — Passwort eingeben.");
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(JSON.stringify(obj))));
+  const all = new Uint8Array(iv.length + ct.length); all.set(iv); all.set(ct, iv.length);
+  return btoa(String.fromCharCode(...all));
+}
+async function paDecrypt(b64, key) {
+  key = key || await paKeyLaden(); if (!key) return null;
+  try { const all = Uint8Array.from(atob(b64), c => c.charCodeAt(0)); const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: all.slice(0, 12) }, key, all.slice(12)); return JSON.parse(new TextDecoder().decode(pt)); }
+  catch (e) { return null; }
+}
+/* Alle verschlüsselten Zeilen entschlüsseln (nach Entsperren und nach jedem Nachladen); Klartext-Altbestand wird dabei einmalig verschlüsselt */
+async function paDecryptAll() {
+  const key = await paKeyLaden(); if (!key) return;
+  let migriert = 0;
+  for (const it of cache.budget) {
+    const d = fbParse(it, "pa"); if (!d || d.t !== "row") continue;
+    if (d.e) { if (!paPlain[it.id] || paPlain[it.id]._e !== d.e) { const pl = await paDecrypt(d.e, key); if (pl) paPlain[it.id] = Object.assign({ _e: d.e }, pl); } }
+    else if (d.n !== undefined) {   // Klartext-Altbestand → verschlüsseln
+      const pl = { n: d.n, g: d.g, l: d.l, p: d.p, s: d.s, w: d.w };
+      try { await fbSaveItem({ cfg: "pa", t: "row", y: d.y, e: await paEncrypt(pl, key) }, it.id); paPlain[it.id] = Object.assign({ _e: null }, pl); migriert++; } catch (e) { console.warn("Verschlüsseln fehlgeschlagen", e); }
+    }
+  }
+  if (migriert) { await reload("Budget"); await paDecryptAll(); toast(migriert + " Lohnzeilen verschlüsselt — in SharePoint sind sie jetzt unlesbar."); }
+  paState.entschluesselt = true;
+}
+async function paRowObj(y, pl) { return { cfg: "pa", t: "row", y, e: await paEncrypt({ n: pl.n, g: pl.g, l: pl.l, p: pl.p, s: pl.s, w: pl.w }) }; }
 /* Reihenfolge bleibt beim Editieren stabil (kein Springen der Zeilen); neu sortiert wird nur beim
    Hinzufügen eines Mitarbeiters, Jahreswechsel oder Klick auf eine Spaltenüberschrift. */
 function paSortRows(rows) { return rows.slice().sort((a, b) => paState.sort === "n" ? String(a.n).localeCompare(String(b.n), "de") : String(a.g).localeCompare(String(b.g)) || String(a.n).localeCompare(String(b.n), "de")); }
 function paResort() { paState.order = null; render(); }
 
 /* ---------- Daten ---------- */
-function paItems(t) { return cache.budget.map(it => fbParse(it, "pa")).filter(d => d && d.t === t); }
+function paItems(t) {
+  return cache.budget.map(it => { const d = fbParse(it, "pa"); if (!d || d.t !== t) return null;
+    if (t === "row" && d.e) { const pl = paPlain[it.id]; return pl ? Object.assign({}, d, { n: pl.n, g: pl.g, l: pl.l, p: pl.p, s: pl.s, w: pl.w }) : null; }   // noch nicht entschlüsselt → ausblenden
+    return d; }).filter(Boolean);
+}
+function paRowsVerschluesseltOffen() { return cache.budget.filter(it => { const d = fbParse(it, "pa"); return d && d.t === "row" && d.e && !paPlain[it.id]; }).length; }
 function paRows(year) { return paItems("row").filter(r => r.y == year); }
 function paCfg(year) { return paItems("cfg").find(c => c.y == year) || null; }
 function paAg(year) { const c = paCfg(year); return c && c.ag !== undefined ? parseFloat(c.ag) : 12; }
@@ -55,17 +105,17 @@ function paSums(rows, ag) {
   return out;
 }
 
-async function paSave(obj, id) { paState.busy = true; try { await fbSaveItem(obj, id); if (!id) await reload("Budget"); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); } paState.busy = false; render(); }
+async function paSave(obj, id) { paState.busy = true; try { await fbSaveItem(obj, id); if (!id) await reload("Budget"); await paDecryptAll(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); } paState.busy = false; render(); }
 async function paSetField(id, field, value) {
   const r = paItems("row").find(x => x.id == id); if (!r) return;
-  const obj = { cfg: "pa", t: "row", y: r.y, n: r.n, g: r.g, l: r.l, p: r.p, s: r.s, w: r.w };
-  if (field === "n" || field === "g") obj[field] = String(value || "").trim(); else obj[field] = paNum(value);
-  if (field === "p" && obj.p > 1) obj.p = obj.p / 100;   // 80 → 0.8
-  await paSave(obj, id);
+  const pl = { n: r.n, g: r.g, l: r.l, p: r.p, s: r.s, w: r.w };
+  if (field === "n" || field === "g") pl[field] = String(value || "").trim(); else pl[field] = paNum(value);
+  if (field === "p" && pl.p > 1) pl.p = pl.p / 100;   // 80 → 0.8
+  await paSave(await paRowObj(r.y, pl), id);
 }
 async function paAddRow() {
   paState.order = null;   // beim nächsten Render neu sortieren, neue Zeile ans Ende
-  await paSave({ cfg: "pa", t: "row", y: paState.year, n: "", g: PA_GES[0], l: 0, p: 1, s: 0, w: 0 });
+  await paSave(await paRowObj(paState.year, { n: "", g: PA_GES[0], l: 0, p: 1, s: 0, w: 0 }));
   setTimeout(() => { const inp = document.querySelector("#pa-table tr:last-child input[data-f='n']"); if (inp) inp.focus(); }, 50);
 }
 async function paDeleteRow(id) {
@@ -80,7 +130,7 @@ function paSetYear(y) { paState.year = parseInt(y, 10); paState.order = null; re
 async function paCopyYear(from) {
   if (paRows(paState.year).length && !confirm("Jahr " + paState.year + " hat bereits Zeilen. Zeilen aus " + from + " zusätzlich kopieren?")) return;
   paState.busy = true; render();
-  try { for (const r of paRows(from)) await fbSaveItem({ cfg: "pa", t: "row", y: paState.year, n: r.n, g: r.g, l: r.l, p: r.p, s: r.s, w: r.w }); if (!paCfg(paState.year)) { const cf = paCfg(from); await fbSaveItem({ cfg: "pa", t: "cfg", y: paState.year, ag: paAg(from), ...(cf && cf.kt ? { kt: cf.kt } : {}) }); } await reload("Budget"); toast(paRows(paState.year).length + " Zeilen in " + paState.year); }
+  try { for (const r of paRows(from)) await fbSaveItem(await paRowObj(paState.year, r)); if (!paCfg(paState.year)) { const cf = paCfg(from); await fbSaveItem({ cfg: "pa", t: "cfg", y: paState.year, ag: paAg(from), ...(cf && cf.kt ? { kt: cf.kt } : {}) }); } await reload("Budget"); await paDecryptAll(); toast(paRows(paState.year).length + " Zeilen in " + paState.year); }
   catch (e) { toast("Kopieren fehlgeschlagen: " + e.message, true); }
   paState.busy = false; render();
 }
@@ -92,27 +142,43 @@ async function paHash(pw) {
 }
 async function paUnlock(pw) {
   const p = paPw(); if (!p) return;
-  if (await paHash(pw) === p.h) { paState.unlocked = true; paState.pwError = ""; sessionStorage.setItem("pa-unlocked", "1"); }
+  if (await paHash(pw) === p.h) {
+    await paKeyMerken(await paDeriveKey(pw));
+    paState.unlocked = true; paState.pwError = ""; sessionStorage.setItem("pa-unlocked", "1");
+    render(); await paDecryptAll();
+  }
   else paState.pwError = "Falsches Passwort.";
   render();
 }
-function paLock() { paState.unlocked = false; sessionStorage.removeItem("pa-unlocked"); render(); }
+function paLock() { paState.unlocked = false; paState.key = null; paState.entschluesselt = false; Object.keys(paPlain).forEach(k => delete paPlain[k]); sessionStorage.removeItem("pa-unlocked"); sessionStorage.removeItem("pa-key"); render(); }
 async function paSetPassword(pw1, pw2, old) {
   const p = paPw();
-  if (p && !(currentUser && currentUser.isSuperAdmin) && (await paHash(old || "")) !== p.h) { toast("Bisheriges Passwort falsch.", true); return; }
+  const verschluesselt = cache.budget.some(it => { const d = fbParse(it, "pa"); return d && d.t === "row" && d.e; });
+  // Sobald Zeilen verschlüsselt sind, braucht auch der Super-Admin das bisherige Passwort (sonst wären die Daten nicht mehr lesbar)
+  if (p && (verschluesselt || !(currentUser && currentUser.isSuperAdmin)) && (await paHash(old || "")) !== p.h) { toast("Bisheriges Passwort falsch.", true); return; }
   if (!pw1 || pw1.length < 6) { toast("Mindestens 6 Zeichen.", true); return; }
   if (pw1 !== pw2) { toast("Passwörter stimmen nicht überein.", true); return; }
+  const neuerKey = await paDeriveKey(pw1);
+  // Alle verschlüsselten Zeilen mit dem neuen Schlüssel neu verschlüsseln
+  if (verschluesselt) {
+    const alterKey = old ? await paDeriveKey(old) : await paKeyLaden(); if (!alterKey) { toast("Bisheriger Schlüssel fehlt — zuerst entsperren.", true); return; }
+    paState.busy = true; render(); let n = 0;
+    try { for (const it of cache.budget) { const d = fbParse(it, "pa"); if (!d || d.t !== "row" || !d.e) continue; const pl = await paDecrypt(d.e, alterKey); if (!pl) continue; await fbSaveItem({ cfg: "pa", t: "row", y: d.y, e: await paEncrypt(pl, neuerKey) }, it.id); n++; } }
+    catch (e) { toast("Neu-Verschlüsseln fehlgeschlagen: " + e.message, true); paState.busy = false; render(); return; }
+    paState.busy = false; toast(n + " Zeilen mit neuem Passwort verschlüsselt.");
+  }
+  await paKeyMerken(neuerKey);
   await paSave({ cfg: "pa", t: "pw", h: await paHash(pw1) }, p ? p.id : null);
-  paState.unlocked = true; sessionStorage.setItem("pa-unlocked", "1"); closeModal(); toast("Passwort gesetzt."); render();
+  paState.unlocked = true; sessionStorage.setItem("pa-unlocked", "1"); closeModal(); toast("Passwort gesetzt."); await reload("Budget"); Object.keys(paPlain).forEach(k => delete paPlain[k]); await paDecryptAll(); render();
 }
 function paPasswordModal() {
   const p = paPw();
   showModal(p ? "Passwort ändern" : "Passwort festlegen", `
     <div style="display:grid;gap:10px;max-width:360px">
-      ${p && !(currentUser && currentUser.isSuperAdmin) ? `<label style="font-size:12px;color:var(--text-dim)">Bisheriges Passwort<input id="pa-pw-old" type="password" style="display:block;width:100%;margin-top:4px;padding:6px 8px"></label>` : ""}
+      ${p ? `<label style="font-size:12px;color:var(--text-dim)">Bisheriges Passwort<input id="pa-pw-old" type="password" style="display:block;width:100%;margin-top:4px;padding:6px 8px"></label>` : ""}
       <label style="font-size:12px;color:var(--text-dim)">Neues Passwort (min. 6 Zeichen)<input id="pa-pw-1" type="password" style="display:block;width:100%;margin-top:4px;padding:6px 8px"></label>
       <label style="font-size:12px;color:var(--text-dim)">Wiederholen<input id="pa-pw-2" type="password" style="display:block;width:100%;margin-top:4px;padding:6px 8px"></label>
-      <div style="font-size:11px;color:var(--text-faint)">Das Passwort gilt für alle berechtigten Personen gemeinsam und wird nur als Hash gespeichert. Es kann nicht angezeigt, nur neu gesetzt werden.</div>
+      <div style="font-size:11px;color:var(--text-faint)">Das Passwort gilt für alle berechtigten Personen gemeinsam. Die Lohnzeilen sind damit in SharePoint verschlüsselt (AES-256) — ohne Passwort sind sie NICHT wiederherstellbar, also sicher aufbewahren.</div>
     </div>`, [
     `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
     `<button class="btn btn-primary" onclick="paSetPassword(document.getElementById('pa-pw-1').value, document.getElementById('pa-pw-2').value, (document.getElementById('pa-pw-old')||{}).value)">Speichern</button>`
@@ -172,9 +238,9 @@ async function paImport(input) {
     for (const c of rows) {
       const g = PA_GES.find(x => x.toLowerCase().startsWith(String(c[iG] || "").toLowerCase().slice(0, 4))) || PA_GES[0];
       let p = iP >= 0 ? paNum(c[iP]) : 1; if (p > 1) p /= 100; if (!p) p = 1;
-      await fbSaveItem({ cfg: "pa", t: "row", y: paState.year, n: c[iN], g, l: paNum(c[iL]), p, s: iS >= 0 ? paNum(c[iS]) : 0, w: iW >= 0 ? paNum(c[iW]) : 0 });
+      await fbSaveItem(await paRowObj(paState.year, { n: c[iN], g, l: paNum(c[iL]), p, s: iS >= 0 ? paNum(c[iS]) : 0, w: iW >= 0 ? paNum(c[iW]) : 0 }));
     }
-    await reload("Budget"); toast(rows.length + " Zeilen importiert.");
+    await reload("Budget"); await paDecryptAll(); toast(rows.length + " Zeilen importiert.");
   } catch (e) { toast("Import fehlgeschlagen: " + e.message, true); }
   paState.busy = false; render();
 }
@@ -190,6 +256,11 @@ function renderPersonalBudget(el) {
     <button class="btn btn-sm" onclick="paPasswordModal()" title="Passwort ändern">🔑</button>
     <button class="btn btn-sm" onclick="paLock()" title="Sperren">🔒</button>` : "";
   if (paState.busy) { el.innerHTML = `<div class="full-loading"><div class="loading"></div></div>`; return; }
+  // Nach Seiten-Neuladen: Schlüssel aus der Sitzung, Zeilen entschlüsseln
+  if (paState.unlocked && (!paState.entschluesselt || paRowsVerschluesseltOffen())) {
+    if (!paState.entschluesselt) { el.innerHTML = `<div class="full-loading"><div class="loading"></div></div>`; paDecryptAll().then(() => { if (!paState.key) { paState.unlocked = false; sessionStorage.removeItem("pa-unlocked"); } render(); }); return; }
+    paDecryptAll().then(render);
+  }
 
   // Passwort-Schleuse
   if (!paState.unlocked) {
