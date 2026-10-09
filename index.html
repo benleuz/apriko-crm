@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.461.0"></script>
-<script src="apriko-api.js?v=1.461.0"></script>
-<script src="lohncheck.js?v=1.461.0"></script>
-<script src="personalbudget.js?v=1.461.0"></script>
-<script src="jahresbudget.js?v=1.461.0"></script>
-<script src="budgetpositionen.js?v=1.461.0"></script>
-<script src="lohnchecklistetemp.js?v=1.461.0"></script>
-<script src="apriko-endpunkte.js?v=1.461.0"></script>
+<script src="apriko-filters.js?v=1.462.0"></script>
+<script src="apriko-api.js?v=1.462.0"></script>
+<script src="lohncheck.js?v=1.462.0"></script>
+<script src="personalbudget.js?v=1.462.0"></script>
+<script src="jahresbudget.js?v=1.462.0"></script>
+<script src="budgetpositionen.js?v=1.462.0"></script>
+<script src="lohnchecklistetemp.js?v=1.462.0"></script>
+<script src="apriko-endpunkte.js?v=1.462.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1027,7 +1027,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.461.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.462.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -3145,10 +3145,30 @@ async function fbSaveItem(obj, existingId) {
     const alt = raw ? { Title: raw.Title, Data: raw.Data } : null;
     if (raw) { raw.Title = fields.Title; if (fields.Data !== undefined) raw.Data = fields.Data; }   // optimistisch
     try { await updateItem("Budget", existingId, fields); }
-    catch (e) { if (raw && alt) { raw.Title = alt.Title; raw.Data = alt.Data; } throw e; }
+    catch (e) {
+      if (raw && alt) { raw.Title = alt.Title; raw.Data = alt.Data; }
+      if (!/404|itemNotFound/i.test(e.message)) throw e;
+      // Eintrag existiert nicht mehr (von jemand anderem gelöscht / veralteter Cache seit dem Login):
+      // Budget-Liste neu laden, gleichen Eintrag über seinen Schlüssel suchen, sonst neu anlegen
+      await reload("Budget");
+      const ident = fbIdentitaet(obj);
+      const treffer = ident ? cache.budget.find(it => { const d = fbParse(it, obj.cfg); return d && ident.every(k => String(d[k]) === String(obj[k])); }) : null;
+      if (treffer) { await updateItem("Budget", treffer.id, fields); treffer.Title = fields.Title; if (fields.Data !== undefined) treffer.Data = fields.Data; }
+      else { await createItem("Budget", fields); await reload("Budget"); }
+    }
   } else {
     await createItem("Budget", fields);
   }
+}
+/* Schlüsselfelder, über die ein Budget-Eintrag eindeutig ist (für den Fall eines veralteten Caches) */
+function fbIdentitaet(obj) {
+  if (!obj || !obj.cfg) return null;
+  if (obj.cfg === "ist") return ["y", "p", "g", "kt"];
+  if (obj.cfg === "fb") return ["y", "k"];
+  if (obj.cfg === "erloes") return ["y", "m"];
+  if (obj.cfg === "saison") return [];
+  if (obj.cfg === "pa") return obj.t === "row" ? null : (obj.t === "pw" ? ["t"] : ["t", "y"]);
+  return null;
 }
 
 /* ---------- Minimaler XLSX-Leser (ohne Fremdbibliothek) ----------
