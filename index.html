@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.462.0"></script>
-<script src="apriko-api.js?v=1.462.0"></script>
-<script src="lohncheck.js?v=1.462.0"></script>
-<script src="personalbudget.js?v=1.462.0"></script>
-<script src="jahresbudget.js?v=1.462.0"></script>
-<script src="budgetpositionen.js?v=1.462.0"></script>
-<script src="lohnchecklistetemp.js?v=1.462.0"></script>
-<script src="apriko-endpunkte.js?v=1.462.0"></script>
+<script src="apriko-filters.js?v=1.463.0"></script>
+<script src="apriko-api.js?v=1.463.0"></script>
+<script src="lohncheck.js?v=1.463.0"></script>
+<script src="personalbudget.js?v=1.463.0"></script>
+<script src="jahresbudget.js?v=1.463.0"></script>
+<script src="budgetpositionen.js?v=1.463.0"></script>
+<script src="lohnchecklistetemp.js?v=1.463.0"></script>
+<script src="apriko-endpunkte.js?v=1.463.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1027,7 +1027,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.462.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.463.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -3113,9 +3113,13 @@ function fbN(year) {        // abgedeckte Monate des Ist-Jahres (grösste Period
 const FB_MK = ["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
 function fbPeriodeLabel(n) { return n >= 12 ? "Jahr" : (n === 6 ? "H1" : "Jan–" + FB_MK[n - 1]); }
 function fbPeriodeAusDatei(name) {
-  if (/jan[-_ –]?dez|jahresabschluss|ganzjahr/i.test(name)) return "Jahr";
-  const m = /jan[-_ –]?\s*(feb|m[aä]r|apr|mai|jun|jul|aug|sep|okt|nov|dez)/i.exec(name);
-  if (m) { const idx = ["feb","mär","apr","mai","jun","jul","aug","sep","okt","nov","dez"].indexOf(m[1].toLowerCase().replace("mar","mär")); if (idx >= 0) return "M" + (idx + 2); }
+  // tolerant: "Jan-Aug", "Jan – Aug", "Jan. bis Aug.", "Januar-August", "01-08 2026", "Jan-Dez"/"Jahresabschluss"
+  const n = String(name || "").replace(/\u00a0/g, " ");
+  if (/jan\w*\.?\s*(?:[-–_]|bis)?\s*dez|jahresabschluss|ganzjahr|01\s*[-–]\s*12/i.test(n)) return "Jahr";
+  const m = /jan\w*\.?\s*(?:[-–_]|bis)?\s*(feb|m[aä]r|apr|mai|jun|jul|aug|sep|okt|nov)\w*/i.exec(n);
+  if (m) { const idx = ["feb","mär","apr","mai","jun","jul","aug","sep","okt","nov"].indexOf(m[1].toLowerCase().replace("mar","mär")); if (idx >= 0) return "M" + (idx + 2); }
+  const z = /\b0?1\s*[-–]\s*(0?[2-9]|1[01])\b/.exec(n);
+  if (z) return "M" + parseInt(z[1]);
   return "H1";
 }
 let fbExpanded = {};        // key → true (aufgeklappte Positionen)
@@ -3882,6 +3886,8 @@ async function fbMultiSelect(input) {
         const jm = f.name.match(/20\d{2}/g);
         entry.jahr = jm ? parseInt(jm[jm.length - 1]) : filters.budgetYear;
         entry.periode = fbPeriodeAusDatei(f.name);
+        // Rückfall: Periode aus dem Blattinhalt (Kopfzeilen wie «Erfolgsrechnung Jan - Aug 2026»)
+        if (entry.periode === "H1" && !/jun/i.test(f.name)) { const kopf = rows.slice(0, 20).map(r => (r || []).map(c => String(c ?? "")).join(" ")).join(" | "); const pk = fbPeriodeAusDatei(kopf); if (pk !== "H1" || /jun/i.test(kopf)) { entry.periode = pk; entry.info = "Periode aus Blattinhalt: " + pk; } else entry.warn = "Periode nicht erkennbar — bitte rechts «YTD Jan–…» setzen"; }
         if (!/jan/i.test(f.name) && /\b(jan|feb|m[aä]r|apr|mai|jun|jul|aug|sep|okt|nov|dez)\b/i.test(f.name)) entry.warn = "Monats-ER erkannt (kein YTD «Jan-…») — bitte die kumulierte ER Jan–<Monat> verwenden";
         entry.info = rows.filter(r => /^\d{4}$/.test(String(r[0] || ""))).length + " Konten";
         const mitSaldo = rows.filter(r => /^\d{4}$/.test(String(r[0] || "")) && String(r[2] ?? "").trim() !== "").length;
