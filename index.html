@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.425.0"></script>
-<script src="apriko-api.js?v=1.425.0"></script>
-<script src="lohncheck.js?v=1.425.0"></script>
-<script src="personalbudget.js?v=1.425.0"></script>
-<script src="jahresbudget.js?v=1.425.0"></script>
-<script src="budgetpositionen.js?v=1.425.0"></script>
-<script src="lohnchecklistetemp.js?v=1.425.0"></script>
-<script src="apriko-endpunkte.js?v=1.425.0"></script>
+<script src="apriko-filters.js?v=1.429.0"></script>
+<script src="apriko-api.js?v=1.429.0"></script>
+<script src="lohncheck.js?v=1.429.0"></script>
+<script src="personalbudget.js?v=1.429.0"></script>
+<script src="jahresbudget.js?v=1.429.0"></script>
+<script src="budgetpositionen.js?v=1.429.0"></script>
+<script src="lohnchecklistetemp.js?v=1.429.0"></script>
+<script src="apriko-endpunkte.js?v=1.429.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1026,7 +1026,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.425.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.429.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -1604,6 +1604,12 @@ function bgParam() {
 }
 function bgVonEmail(email) { const b = bgParam(); const id = b.zuweisung[String(email || "").toLowerCase()]; return id && b.gruppen[id] ? Object.assign({ id }, b.gruppen[id]) : null; }
 async function bgSpeichern() { try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); } }
+async function bgSchnellFreischalten() {
+  const email = String((document.getElementById("bg-neu-email") || {}).value || "").trim().toLowerCase();
+  const gruppe = (document.getElementById("bg-neu-gruppe") || {}).value;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("Bitte eine gültige E-Mail-Adresse eingeben.", true); return; }
+  await bgZuweisen(email, gruppe); toast(email + " freigeschaltet (" + ((bgParam().gruppen[gruppe] || {}).name || gruppe) + ").");
+}
 async function bgZuweisen(email, gruppeId) {
   await parameterLaden(false); const b = bgParam(); const key = String(email || "").toLowerCase();
   if (gruppeId) b.zuweisung[key] = gruppeId; else delete b.zuweisung[key];
@@ -4775,11 +4781,11 @@ function renderDashboard(el) {
         </div>
       </div>
       <div style="padding:12px 16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <button class="btn btn-sm" onclick="crmCopyCustomerEmails('alle')" title="E-Mail-Adressen in die Zwischenablage kopieren — danach in Outlook/Gmail ins Bcc-Feld einfügen (Strg+V)">✉ An alle${emailCounts ? " (" + emailCounts.alle + ")" : ""}</button>
-        <button class="btn btn-sm" onclick="crmCopyCustomerEmails('entscheid')" title="E-Mail-Adressen in die Zwischenablage kopieren — danach in Outlook/Gmail ins Bcc-Feld einfügen (Strg+V)">✉ An Entscheidungsträger${emailCounts ? " (" + emailCounts.entscheid + ")" : ""}</button>
-        <button class="btn btn-sm" onclick="crmCopyCustomerEmails('user')" title="E-Mail-Adressen in die Zwischenablage kopieren — danach in Outlook/Gmail ins Bcc-Feld einfügen (Strg+V)">✉ An User${emailCounts ? " (" + emailCounts.user + ")" : ""}</button>
+        <button class="btn btn-sm" onclick="crmCopyCustomerEmails('alle')" title="Öffnet eine neue Mail mit allen Adressen in Bcc (zusätzlich in der Zwischenablage)">✉ An alle${emailCounts ? " (" + emailCounts.alle + ")" : ""}</button>
+        <button class="btn btn-sm" onclick="crmCopyCustomerEmails('entscheid')" title="Öffnet eine neue Mail mit allen Adressen in Bcc (zusätzlich in der Zwischenablage)">✉ An Entscheidungsträger${emailCounts ? " (" + emailCounts.entscheid + ")" : ""}</button>
+        <button class="btn btn-sm" onclick="crmCopyCustomerEmails('user')" title="Öffnet eine neue Mail mit allen Adressen in Bcc (zusätzlich in der Zwischenablage)">✉ An User${emailCounts ? " (" + emailCounts.user + ")" : ""}</button>
         <button class="btn btn-sm" onclick="crmExportCustomerEmails()" title="Excel mit ALLEN Kunden (aktuelle Auswahl) und ihren E-Mails — auch Kunden ohne Adresse, damit Lücken sichtbar sind">⇩ E-Mails exportieren</button>
-        <span style="font-size:11px;color:var(--text-faint);margin-left:4px">Kopiert die E-Mail-Adressen der Kunden (Kennzeichnung «Ist Kunde») in die Zwischenablage — danach eine neue Mail öffnen und mit Strg+V ins Bcc-Feld einfügen. Adressen werden pro Firma unter «Firma bearbeiten» gepflegt.</span>
+        <span style="font-size:11px;color:var(--text-faint);margin-left:4px">Öffnet eine neue Mail mit den Adressen der Kunden (Kennzeichnung «Ist Kunde») in Bcc. Adressen kommen aus den Kontakten mit Funktion Entscheidungsträger/User (und den alten Firmenfeldern).</span>
       </div>
     </div>
 
@@ -13592,9 +13598,7 @@ function openCustomer(id) {
       ${comp ? (() => { const st = (crmStamm && crmStamm[String(comp.id)]) || {}; const mails = t => String(t || "").split(/[,;\s]+/).filter(Boolean).map(e => escape(e) + `<a href="mailto:${escape(e)}" onclick="event.stopPropagation()" title="E-Mail an ${escape(e)}" style="text-decoration:none;margin:0 6px 0 3px">✉</a>`).join(" "); const ansp = (crmAnsprech || {})[String(comp.id)] || "";
         return `<dt>Website</dt><dd>${comp.Website ? `<a href="${escape(normalizeUrl(comp.Website) || comp.Website)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent-2)">${escape(comp.Website)} ↗</a>` : "—"}</dd>
       <dt>Adresse</dt><dd>${escape([st.strasse, [comp.City, comp.Country].filter(Boolean).join(", ")].filter(Boolean).join(" · ") || "—")}</dd>
-      <dt>Interne Ansprechperson</dt><dd style="font-size:12px">${ansp ? mails(ansp) : "—"}</dd>
-      <dt>Entscheidungsträger</dt><dd style="font-size:12px">${st.entscheid ? mails(st.entscheid) : "—"}</dd>
-      <dt>User</dt><dd style="font-size:12px">${st.user ? mails(st.user) : "—"}</dd>`; })() : ""}
+      <dt>Interne Ansprechperson</dt><dd style="font-size:12px">${ansp ? mails(ansp) : "—"}</dd>`; })() : ""}
       <dt>Segment</dt><dd>${escape(c.Segment||"—")}</dd>
       <dt>Status</dt><dd>${escape(c.Status||"—")}</dd>
       <dt>Risiko</dt><dd><span style="color:${riskColor}">●</span> ${escape(c.Risk||"—")}</dd>
@@ -13615,12 +13619,13 @@ function openCustomer(id) {
       <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Prozentual" && kundenMin(c.id, "minBpo") ? ` · min. CHF ${kundenMin(c.id, "minBpo").toLocaleString("de-CH")}/Monat` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}${c.BPOYtd ? ` · <span style="color:var(--accent-3)">YTD-kumulativ</span>` : ""}</dd>
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Link</dt><dd>${appLinkText(c.id, c.Link) ? `<a href="${escape(normalizeUrl(appLinkText(c.id, c.Link)) || appLinkText(c.id, c.Link))}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent-2);text-decoration:underline;cursor:pointer">${escape(appLinkText(c.id, c.Link))} ↗</a>` : "—"}</dd>
-      <dt>Ansprechpersonen</dt><dd style="font-size:12px">${(() => { const f = (crmKundenFlags || {})[String(c.id)] || {}; const mail = e => `<a href="mailto:${escape(e)}?subject=${encodeURIComponent((c.Title || "") + " — ")}" onclick="event.stopPropagation()" title="E-Mail an ${escape(e)}" style="text-decoration:none;margin-left:3px">✉</a>`; const zeile = arr => arr.filter(x => x[1]).map(x => x[0] + ": " + escape(x[1]) + mail(x[1])).join(" · "); const z = zeile([["Ansprechperson Lohn", f.apLohn], ["Backup Lohn", f.apLohnBackup], ["Lohn intern", f.apLohnIntern]]); const z2 = zeile([["Ansprechperson FIBU", f.apFibu], ["Backup FIBU", f.apFibuBackup]]); return [z, z2].filter(Boolean).join("<br>") || "—"; })()}</dd>
+      <dt>Apriko-intern (Lohn/FIBU)</dt><dd style="font-size:12px">${(() => { const f = (crmKundenFlags || {})[String(c.id)] || {}; const mail = e => `<a href="mailto:${escape(e)}?subject=${encodeURIComponent((c.Title || "") + " — ")}" onclick="event.stopPropagation()" title="E-Mail an ${escape(e)}" style="text-decoration:none;margin-left:3px">✉</a>`; const zeile = arr => arr.filter(x => x[1]).map(x => x[0] + ": " + escape(x[1]) + mail(x[1])).join(" · "); const z = zeile([["Ansprechperson Lohn", f.apLohn], ["Backup Lohn", f.apLohnBackup], ["Lohn intern", f.apLohnIntern]]); const z2 = zeile([["Ansprechperson FIBU", f.apFibu], ["Backup FIBU", f.apFibuBackup]]); return [z, z2].filter(Boolean).join("<br>") || "—"; })()}</dd>
       ${VERTRAG_ARTEN.map(([art, label]) => `<dt>${label}</dt><dd>${vertragLink(c.id, art) ? `<a href="${escape(vertragLink(c.id, art))}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${escape(vertragLink(c.id, art))}" style="color:var(--accent-2)">📄 ${escape(vertragName(vertragLink(c.id, art)))} ↗</a>` : "—"}</dd>`).join("")}
       <dt>Workflows</dt><dd>${[kundenFlag(c.id, "intern") ? "Interner Lohn ✓" : "", kundenFlag(c.id, "fibu") ? "FIBU Monatsabschluss ✓" : "", kundenHatDb(c.id) ? "Datenbank (Hosting) ✓" : ""].filter(Boolean).join(" · ") || "—"}</dd>
       <dt>Mindesthonorar</dt><dd style="white-space:pre-wrap">${escape(minFeeText(c.id, c.MinFee)||"—")}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
     </dl>
+    ${kundenKontakteHtml(c)}
     <div style="margin-top:14px"><button class="btn btn-sm" onclick="closeModal();filters.revenueMode='customer';filters.revenueCustomerId=${id};currentView='revenue';document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));document.querySelector('nav button[data-view=revenue]').classList.add('active');render()">In Umsätze-Tab öffnen</button></div>
   `, [
     `<button class="btn btn-danger" onclick="deleteCustomer(${id})">Löschen</button>`,
@@ -13629,6 +13634,81 @@ function openCustomer(id) {
   ]);
 }
 
+/* ---------- Ansprechpersonen beim Kunden = Kontakte der Firma, mit Funktionen (Tags) ----------
+   Tags liegen in crm_firmen_stamm.json: crmStamm[companyId].kontaktTags = { contactId: ["Entscheidungsträger", ...] } */
+const KONTAKT_TAGS = ["Entscheidungsträger", "User", "Lohn", "FIBU", "IT"];
+function kontaktTags(compId, contactId) { const st = (crmStamm && crmStamm[String(compId)]) || {}; return ((st.kontaktTags || {})[String(contactId)] || []).slice(); }
+async function kontaktTagsSetzen(compId, contactId, tags) {
+  await crmLoadStamm(); const key = String(compId); const st = Object.assign({}, crmStamm[key] || {}); st.kontaktTags = Object.assign({}, st.kontaktTags || {});
+  if (tags && tags.length) st.kontaktTags[String(contactId)] = tags; else delete st.kontaktTags[String(contactId)];
+  if (!Object.keys(st.kontaktTags).length) delete st.kontaktTags;
+  if (Object.keys(st).length) crmStamm[key] = st; else delete crmStamm[key];
+  await crmSaveStamm();
+}
+async function kontaktTagToggle(compId, contactId, tag, custId) {
+  const t = kontaktTags(compId, contactId); const i = t.indexOf(tag); if (i >= 0) t.splice(i, 1); else t.push(tag);
+  try { await kontaktTagsSetzen(compId, contactId, t); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); return; }
+  if (custId) openCustomer(custId); else render();
+}
+/* E-Mails aus den alten Feldern Entscheidungsträger/User, die noch keinem Kontakt entsprechen */
+function stammEmailsOhneKontakt(compId) {
+  const st = (crmStamm && crmStamm[String(compId)]) || {}; const out = [];
+  const vorhanden = cache.contacts.filter(k => String(k.CompanyId) === String(compId));
+  [["entscheid", "Entscheidungsträger"], ["user", "User"]].forEach(([feld, tag]) => {
+    String(st[feld] || "").split(/[,;\s]+/).map(e => e.trim().toLowerCase()).filter(Boolean).forEach(e => {
+      const k = vorhanden.find(x => String(x.Email || "").toLowerCase() === e);
+      if (k && kontaktTags(compId, k.id).includes(tag)) return;
+      let o = out.find(x => x.email === e); if (!o) { o = { email: e, tags: [], kontakt: k || null }; out.push(o); }
+      if (!o.tags.includes(tag)) o.tags.push(tag);
+    });
+  });
+  return out;
+}
+function kundenKontakteHtml(c) {
+  const compId = c.CompanyId; if (!compId) return "";
+  const ks = cache.contacts.filter(k => String(k.CompanyId) === String(compId)).sort((a, b) => String(a.Title || "").localeCompare(String(b.Title || ""), "de"));
+  const offen = stammEmailsOhneKontakt(compId);
+  const chip = (k, tag) => { const on = kontaktTags(compId, k.id).includes(tag); return `<span onclick="kontaktTagToggle(${compId}, ${k.id}, ${tkJs(tag)}, ${c.id})" title="${on ? "Funktion entfernen" : "als " + escape(tag) + " markieren"}" style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;margin:1px 2px 1px 0;cursor:pointer;border:1px solid ${on ? "var(--accent)" : "var(--border)"};background:${on ? "rgba(184,233,134,0.15)" : "transparent"};color:${on ? "var(--accent)" : "var(--text-faint)"}">${escape(tag)}</span>`; };
+  return `<div style="margin-top:18px;border-top:1px solid var(--border-soft);padding-top:12px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+      <h3 style="margin:0;font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Ansprechpersonen beim Kunden (${ks.length})</h3>
+      <button class="btn btn-sm btn-primary" onclick="editContact(null, ${compId}, ${c.id})">+ Kontakt erfassen</button>
+      ${offen.length ? `<button class="btn btn-sm" onclick="kontakteAusStamm(${compId}, ${c.id})" title="${escape(offen.map(o => o.email + " (" + o.tags.join(", ") + ")").join(", "))}">⤵ ${offen.length} E-Mail(s) aus Entscheidungsträger/User übernehmen</button>` : ""}
+      <span style="font-size:11px;color:var(--text-faint)">Funktion per Klick auf die Chips setzen</span>
+    </div>
+    ${ks.length ? `<div class="table-wrap"><table style="font-size:12.5px"><thead><tr><th>Name Vorname</th><th>Funktion</th><th>Telefon direkt</th><th>E-Mail</th><th style="width:40px"></th></tr></thead><tbody>
+      ${ks.map(k => `<tr>
+        <td><a href="#" onclick="event.preventDefault();closeModal();openContact(${k.id})" style="color:var(--text);text-decoration:none"><strong>${escape(k.Title || "")}</strong></a>${k.Role ? `<div style="color:var(--text-faint);font-size:11px">${escape(k.Role)}</div>` : ""}</td>
+        <td>${KONTAKT_TAGS.map(t => chip(k, t)).join("")}</td>
+        <td>${k.Phone ? `<a href="tel:${escape(String(k.Phone).replace(/\s+/g, ""))}" style="color:var(--text)">${escape(k.Phone)}</a>` : `<span style="color:var(--text-faint)">—</span>`}</td>
+        <td>${k.Email ? `<a href="mailto:${escape(k.Email)}">${escape(k.Email)}</a>` : `<span style="color:var(--text-faint)">—</span>`}</td>
+        <td><button class="btn btn-sm" onclick="editContact(${k.id}, ${compId}, ${c.id})" title="Bearbeiten">✎</button></td>
+      </tr>`).join("")}</tbody></table></div>` : `<div class="empty" style="padding:10px;font-size:12px">Noch keine Ansprechpersonen — mit «+ Kontakt erfassen» anlegen${offen.length ? " oder die E-Mails übernehmen" : ""}.</div>`}
+  </div>`;
+}
+function nameAusEmail(e) { const l = String(e || "").split("@")[0]; return l.split(/[._-]+/).filter(Boolean).map(x => x.charAt(0).toUpperCase() + x.slice(1)).join(" "); }
+/* Alte E-Mail-Felder → Kontakte (bestehende Kontakte mit gleicher E-Mail werden nur getaggt) */
+async function kontakteAusStamm(compId, custId) {
+  await crmLoadStamm();
+  const liste = compId != null ? [compId] : cache.companies.map(x => x.id).filter(id => stammEmailsOhneKontakt(id).length);
+  const gesamt = liste.reduce((n, id) => n + stammEmailsOhneKontakt(id).length, 0);
+  if (!gesamt) { toast("Nichts zu übernehmen."); return; }
+  if (compId == null && !confirm(gesamt + " E-Mail-Adressen aus Entscheidungsträger/User bei " + liste.length + " Firmen als Kontakte anlegen bzw. markieren?")) return;
+  let neu = 0, markiert = 0;
+  try {
+    for (const id of liste) {
+      for (const o of stammEmailsOhneKontakt(id)) {
+        let k = o.kontakt;
+        if (!k) { const res = await createItem("Contacts", { Title: nameAusEmail(o.email), Email: o.email, CompanyId: parseInt(id) }); await reload("Contacts"); k = cache.contacts.find(x => String(x.Email || "").toLowerCase() === o.email && String(x.CompanyId) === String(id)) || (res && res.id ? { id: res.id } : null); neu++; }
+        else markiert++;
+        if (k && k.id) { const t = kontaktTags(id, k.id); o.tags.forEach(tag => { if (!t.includes(tag)) t.push(tag); }); await kontaktTagsSetzen(id, k.id, t); }
+      }
+    }
+    await reload("Contacts");
+  } catch (e) { toast("Fehler: " + e.message, true); }
+  toast(neu + " Kontakte angelegt, " + markiert + " bestehende markiert — Name/Telefon bitte ergänzen.");
+  if (custId) openCustomer(custId); else render();
+}
 function newCustomer() { editCustomer(null); }
 function editCustomer(id) {
   crmLoadStamm();
@@ -14081,6 +14161,7 @@ function winPctBadge(pct) {
 function renderContacts(el) {
   document.getElementById("view-actions").innerHTML = `
     <input class="search-input" placeholder="Suchen..." oninput="filterTable(this.value, 'cont-row')">
+    <button class="btn" onclick="kontakteAusStamm(null, null)" title="E-Mails aus den alten Feldern Entscheidungsträger/User aller Firmen als Kontakte anlegen und markieren">⤵ E-Mails aus Entscheidungsträger/User übernehmen</button>
     <button class="btn btn-primary" onclick="newContact()">+ Neuer Kontakt</button>
   `;
   if (!cache.contacts.length) {
@@ -14242,7 +14323,15 @@ function renderProfiles(el) {
         return `<div style="margin-bottom:22px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div style="font-weight:600">Benutzergruppen</div><span style="font-size:11px;color:var(--text-faint)">Bereiche pro Gruppe festlegen, dann unten jedem Benutzer eine Gruppe zuweisen. Individuelle Freigaben im Profil kommen zusätzlich dazu.</span><button class="btn btn-sm" style="margin-left:auto" onclick="bgGruppeAnlegen()">+ Gruppe</button></div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">${ids.map(id => { const g = b.gruppen[id]; const n = Object.values(b.zuweisung).filter(x => x === id).length; const v = g.views || []; const alle = v.length >= ALL_VIEWS.length - 1;
           const txt = alle ? `<span style="color:var(--accent)">Alle Bereiche</span>` : grp.map(gg => { const hit = gg.views.filter(x => v.includes(x.key)); if (!hit.length) return ""; return `<div><span style="color:var(--text-faint);font-size:10px;text-transform:uppercase;letter-spacing:.04em;margin-right:4px">${escape(gg.name)}</span>${hit.length === gg.views.length ? "alle" : hit.map(x => escape(x.label)).join(", ")}</div>`; }).join("") || `<span style="color:var(--warn)">keine Bereiche</span>`;
-          return `<div class="card" style="padding:10px 12px;font-size:12px"><div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><strong>${escape(g.name)}</strong>${g.admin ? `<span style="background:rgba(184,233,134,0.15);color:var(--accent);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600">Admin</span>` : ""}<span style="color:var(--text-faint);font-size:11px">· ${n} Benutzer</span><span style="margin-left:auto"><button class="btn btn-sm" onclick="bgGruppeBearbeiten(${tkJs(id)})">Bearbeiten</button> <button class="btn btn-sm" style="color:var(--danger)" onclick="bgGruppeLoeschen(${tkJs(id)})">✕</button></span></div><div style="color:var(--text-dim);line-height:1.5">${txt}</div></div>`; }).join("")}</div></div>`; })()}
+          return `<div class="card" style="padding:10px 12px;font-size:12px"><div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><strong>${escape(g.name)}</strong>${g.admin ? `<span style="background:rgba(184,233,134,0.15);color:var(--accent);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600">Admin</span>` : ""}<span style="color:var(--text-faint);font-size:11px">· ${n} Benutzer</span><span style="margin-left:auto"><button class="btn btn-sm" onclick="bgGruppeBearbeiten(${tkJs(id)})">Bearbeiten</button> <button class="btn btn-sm" style="color:var(--danger)" onclick="bgGruppeLoeschen(${tkJs(id)})">✕</button></span></div><div style="color:var(--text-dim);line-height:1.5">${txt}</div></div>`; }).join("")}</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px;padding:10px 12px;border:1px dashed var(--border);border-radius:6px;font-size:12px">
+          <b>Benutzer schnell freischalten:</b>
+          <input id="bg-neu-email" type="email" placeholder="vorname@apriko.com" style="padding:5px 8px;font-size:12px;width:240px">
+          <select id="bg-neu-gruppe" style="padding:5px 8px;font-size:12px">${ids.map(id => `<option value="${escape(id)}"${id === "mitarbeiter" ? " selected" : ""}>${escape(b.gruppen[id].name)}</option>`).join("")}</select>
+          <button class="btn btn-sm btn-primary" onclick="bgSchnellFreischalten()">Freischalten</button>
+          <span style="color:var(--text-faint)">Die Person meldet sich dann mit ihrem Microsoft-Konto an — ein Profil ist nicht nötig, die Gruppe reicht.</span>
+          ${(() => { const ohne = Object.keys(b.zuweisung).filter(e => !(cache.userprofiles || []).some(p => String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase() === e)); return ohne.length ? `<div style="flex-basis:100%;color:var(--text-dim)">Nur über Gruppe freigeschaltet (ohne Profil): ${ohne.map(e => `<span style="display:inline-block;margin:2px 6px 0 0">${escape(e)} <span style="color:var(--text-faint)">(${escape((b.gruppen[b.zuweisung[e]] || {}).name || "?")})</span> <a href="#" onclick="bgZuweisen(${tkJs(e)}, '');return false" title="Freischaltung entfernen" style="color:var(--danger);text-decoration:none">✕</a></span>`).join("")}</div>` : ""; })()}
+        </div></div>`; })()}
       <table class="table">
         <thead><tr>
           <th style="width:280px">E-Mail</th>
@@ -14522,8 +14611,9 @@ function openContact(id) {
   showModal(escape(c.Title || "Kontakt"), `
     <dl class="kv">
       <dt>Firma</dt><dd>${comp ? `<a href="#" onclick="closeModal();openCompany(${comp.id});return false">${escape(comp.Title)}</a>` : "—"}</dd>
-      <dt>Rolle</dt><dd>${escape(c.Role||"—")}</dd>
-      <dt>Email</dt><dd>${c.Email ? `<a href="mailto:${escape(c.Email)}">${escape(c.Email)}</a>` : "—"}</dd>
+      <dt>Funktion</dt><dd>${c.CompanyId && kontaktTags(c.CompanyId, c.id).length ? kontaktTags(c.CompanyId, c.id).map(t => `<span style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;margin-right:3px;border:1px solid var(--accent);background:rgba(184,233,134,0.15);color:var(--accent)">${escape(t)}</span>`).join("") : "—"}</dd>
+      <dt>Rolle / Titel</dt><dd>${escape(c.Role||"—")}</dd>
+      <dt>E-Mail</dt><dd>${c.Email ? `<a href="mailto:${escape(c.Email)}">${escape(c.Email)}</a>` : "—"}</dd>
       <dt>Telefon</dt><dd>${escape(c.Phone||"—")}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
     </dl>
@@ -14608,14 +14698,25 @@ function crmCompanyMatchesScope(companyId, scope) {
   if (scope === "bpo") return custs.some(x => segmentNeedsBPO(x.Segment));
   return true;
 }
+/* E-Mails einer Firma je Funktion: alte Textfelder (entscheid/user) + Kontakte mit Funktion Entscheidungsträger/User */
+function crmFirmaEmails(companyId) {
+  const s = (crmStamm && crmStamm[String(companyId)]) || {};
+  const ent = new Set(crmParseEmails(s.entscheid)), usr = new Set(crmParseEmails(s.user));
+  cache.contacts.filter(k => String(k.CompanyId) === String(companyId) && k.Email).forEach(k => {
+    const t = kontaktTags(companyId, k.id); const e = String(k.Email).trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return;
+    if (t.includes("Entscheidungsträger")) ent.add(e); if (t.includes("User")) usr.add(e);
+  });
+  return { entscheid: [...ent], user: [...usr] };
+}
 function crmCustomerEmailCounts(scope) {
   const sc = scope || filters.dashboardEmailScope || "alle";
   const custs = cache.companies.filter(c => c.IsCustomer && crmCompanyMatchesScope(c.id, sc));
   const out = { alle: new Set(), entscheid: new Set(), user: new Set(), firmen: custs.length };
   custs.forEach(c => {
-    const s = (crmStamm && crmStamm[String(c.id)]) || {};
-    crmParseEmails(s.entscheid).forEach(e => { out.entscheid.add(e); out.alle.add(e); });
-    crmParseEmails(s.user).forEach(e => { out.user.add(e); out.alle.add(e); });
+    const m = crmFirmaEmails(c.id);
+    m.entscheid.forEach(e => { out.entscheid.add(e); out.alle.add(e); });
+    m.user.forEach(e => { out.user.add(e); out.alle.add(e); });
   });
   return { alle: out.alle.size, entscheid: out.entscheid.size, user: out.user.size, firmen: out.firmen };
 }
@@ -14656,9 +14757,9 @@ async function crmCopyCustomerEmails(kind) {
   const custs = cache.companies.filter(c => c.IsCustomer && crmCompanyMatchesScope(c.id, scope));
   let emails = [];
   custs.forEach(c => {
-    const s = (crmStamm && crmStamm[String(c.id)]) || {};
-    if (kind === "alle" || kind === "entscheid") emails.push(...crmParseEmails(s.entscheid));
-    if (kind === "alle" || kind === "user") emails.push(...crmParseEmails(s.user));
+    const m = crmFirmaEmails(c.id);
+    if (kind === "alle" || kind === "entscheid") emails.push(...m.entscheid);
+    if (kind === "alle" || kind === "user") emails.push(...m.user);
   });
   emails = [...new Set(emails)].sort((a, b) => {
     const da = a.split("@")[1] || "", db = b.split("@")[1] || "";
@@ -14670,7 +14771,12 @@ async function crmCopyCustomerEmails(kind) {
     return;
   }
   const text = emails.join("; ");
-  const done = () => toast(emails.length + " E-Mail-Adresse" + (emails.length === 1 ? "" : "n") + " kopiert — bereit zum Einfügen in Bcc (Strg+V).");
+  // Mail direkt öffnen, alle Adressen in Bcc. Sicherheitshalber zusätzlich in die Zwischenablage,
+  // weil Outlook/Windows mailto-Links ab ca. 2000 Zeichen abschneidet.
+  const mailto = "mailto:?bcc=" + encodeURIComponent(emails.join(",")) ;
+  const zuLang = mailto.length > 1900;
+  const done = () => toast(emails.length + " Adresse" + (emails.length === 1 ? "" : "n") + " in Bcc" + (zuLang ? " — Liste ist lang, falls Outlook abschneidet: alle Adressen sind in der Zwischenablage (Strg+V in Bcc)." : " — Mail geöffnet (und Adressen in der Zwischenablage)."), zuLang);
+  try { window.location.href = mailto; } catch (e) {}
   try {
     await navigator.clipboard.writeText(text);
     done();
@@ -14708,8 +14814,8 @@ function firmenFelderHtml(c, pfx) {
       </datalist>
     </div>
     <div class="field-row">
-      <div class="field"><label>Entscheidungsträger (E-Mails, komma-getrennt)</label><textarea id="${pfx}entscheid" rows="2" placeholder="anna@kunde.ch, max@kunde.ch">${escape(st.entscheid || "")}</textarea></div>
-      <div class="field"><label>User (E-Mails, komma-getrennt)</label><textarea id="${pfx}user" rows="2" placeholder="user1@kunde.ch, user2@kunde.ch">${escape(st.user || "")}</textarea></div>
+      <div class="field"><label>Entscheidungsträger (alt — neu als Kontakt mit Funktion erfassen)</label><textarea id="${pfx}entscheid" rows="2" placeholder="anna@kunde.ch, max@kunde.ch">${escape(st.entscheid || "")}</textarea></div>
+      <div class="field"><label>User (alt — neu als Kontakt mit Funktion erfassen)</label><textarea id="${pfx}user" rows="2" placeholder="user1@kunde.ch, user2@kunde.ch">${escape(st.user || "")}</textarea></div>
     </div>
     <div class="field"><label>Notes (Firma)</label><textarea id="${pfx}fnotes">${escape(c.Notes||"")}</textarea></div>`;
 }
@@ -14805,19 +14911,23 @@ async function deleteCompany(id) {
 }
 
 function newContact() { editContact(null); }
-function editContact(id) {
-  const c = id ? cache.contacts.find(x => x.id == id) : {};
+let kontaktZurueckKunde = null;
+function editContact(id, compIdVorgabe, zurueckKundeId) {
+  kontaktZurueckKunde = zurueckKundeId || null;
+  const c = id ? cache.contacts.find(x => x.id == id) : (compIdVorgabe ? { CompanyId: compIdVorgabe } : {});
+  const tagsJetzt = c.CompanyId && id ? kontaktTags(c.CompanyId, id) : [];
   const companyOptions = cache.companies
     .sort((a,b) => (a.Title||"").localeCompare(b.Title||""))
     .map(co => `<option value="${co.id}" ${c.CompanyId==co.id?"selected":""}>${escape(co.Title)}</option>`).join("");
   showModal(id ? "Kontakt bearbeiten" : "Neuer Kontakt", `
-    <div class="field"><label>Name *</label><input id="f-title" value="${escape(c.Title||"")}"></div>
+    <div class="field"><label>Name Vorname *</label><input id="f-title" value="${escape(c.Title||"")}" placeholder="Muster Max"></div>
     <div class="field"><label>Firma</label><select id="f-company"><option value="">—</option>${companyOptions}</select></div>
+    <div class="field"><label>Funktion beim Kunden</label><div style="display:flex;gap:14px;flex-wrap:wrap;padding:4px 0">${KONTAKT_TAGS.map(t => `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="checkbox" class="f-ktag" value="${escape(t)}" ${tagsJetzt.includes(t) ? "checked" : ""} style="width:auto;margin:0">${escape(t)}</label>`).join("")}</div></div>
     <div class="field-row">
-      <div class="field"><label>Rolle</label><input id="f-role" value="${escape(c.Role||"")}"></div>
-      <div class="field"><label>Telefon</label><input id="f-phone" value="${escape(c.Phone||"")}"></div>
+      <div class="field"><label>Rolle / Titel (frei)</label><input id="f-role" value="${escape(c.Role||"")}" placeholder="z.B. Geschäftsführer"></div>
+      <div class="field"><label>Telefon direkt</label><input id="f-phone" value="${escape(c.Phone||"")}" placeholder="+41 61 …"></div>
     </div>
-    <div class="field"><label>Email</label><input id="f-email" value="${escape(c.Email||"")}"></div>
+    <div class="field"><label>E-Mail</label><input id="f-email" value="${escape(c.Email||"")}"></div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
   `, [
     `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
@@ -14832,11 +14942,17 @@ async function saveContact(id) {
     CompanyId: compId ? parseInt(compId) : null
   };
   if (!data.Title) return toast("Name erforderlich", true);
+  const tags = Array.from(document.querySelectorAll(".f-ktag:checked")).map(cb => cb.value);
   try {
+    let kid = id;
     if (id) await updateItem("Contacts", id, data);
-    else await createItem("Contacts", data);
+    else { const res = await createItem("Contacts", data); kid = res && res.id; }
     await reload("Contacts");
-    closeModal(); render(); toast("Gespeichert");
+    if (!kid && !id) { const k = cache.contacts.filter(x => x.Title === data.Title && String(x.CompanyId) === String(data.CompanyId)).sort((a, b) => b.id - a.id)[0]; kid = k && k.id; }
+    if (kid && data.CompanyId) await kontaktTagsSetzen(data.CompanyId, kid, tags);
+    closeModal(); toast("Gespeichert");
+    const zk = kontaktZurueckKunde; kontaktZurueckKunde = null;
+    if (zk) openCustomer(zk); else render();
   } catch (e) { toast(e.message, true); }
 }
 async function deleteContact(id) {
