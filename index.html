@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.429.0"></script>
-<script src="apriko-api.js?v=1.429.0"></script>
-<script src="lohncheck.js?v=1.429.0"></script>
-<script src="personalbudget.js?v=1.429.0"></script>
-<script src="jahresbudget.js?v=1.429.0"></script>
-<script src="budgetpositionen.js?v=1.429.0"></script>
-<script src="lohnchecklistetemp.js?v=1.429.0"></script>
-<script src="apriko-endpunkte.js?v=1.429.0"></script>
+<script src="apriko-filters.js?v=1.432.0"></script>
+<script src="apriko-api.js?v=1.432.0"></script>
+<script src="lohncheck.js?v=1.432.0"></script>
+<script src="personalbudget.js?v=1.432.0"></script>
+<script src="jahresbudget.js?v=1.432.0"></script>
+<script src="budgetpositionen.js?v=1.432.0"></script>
+<script src="lohnchecklistetemp.js?v=1.432.0"></script>
+<script src="apriko-endpunkte.js?v=1.432.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1026,7 +1026,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.429.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.432.0</span> · <span id="app-build-date">21.09.2026</span>
     </div>
   </aside>
 
@@ -13587,6 +13587,7 @@ function renderCustomerRevPreview(customerId) {
 function openCustomer(id) {
   const c = cache.customers.find(x => x.id == id);
   if (!c) return;
+  if (crmMitarbeiter === null) { crmLoadMitarbeiter().then(() => { const mt = document.getElementById("modal-title"); if (document.getElementById("modal").classList.contains("open") && mt && mt.textContent === String(c.Title || "Kunde")) openCustomer(id); }); }
   const comp = cache.companies.find(x => x.id == c.CompanyId);
   const riskColor = c.Risk === "Rot" ? "var(--danger)" : c.Risk === "Gelb" ? "var(--warn)" : "var(--accent)";
   const revs = cache.monthlyrevenue.filter(r => r.CustomerId == id);
@@ -13598,7 +13599,7 @@ function openCustomer(id) {
       ${comp ? (() => { const st = (crmStamm && crmStamm[String(comp.id)]) || {}; const mails = t => String(t || "").split(/[,;\s]+/).filter(Boolean).map(e => escape(e) + `<a href="mailto:${escape(e)}" onclick="event.stopPropagation()" title="E-Mail an ${escape(e)}" style="text-decoration:none;margin:0 6px 0 3px">✉</a>`).join(" "); const ansp = (crmAnsprech || {})[String(comp.id)] || "";
         return `<dt>Website</dt><dd>${comp.Website ? `<a href="${escape(normalizeUrl(comp.Website) || comp.Website)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent-2)">${escape(comp.Website)} ↗</a>` : "—"}</dd>
       <dt>Adresse</dt><dd>${escape([st.strasse, [comp.City, comp.Country].filter(Boolean).join(", ")].filter(Boolean).join(" · ") || "—")}</dd>
-      <dt>Interne Ansprechperson</dt><dd style="font-size:12px">${ansp ? mails(ansp) : "—"}</dd>`; })() : ""}
+`; })() : ""}
       <dt>Segment</dt><dd>${escape(c.Segment||"—")}</dd>
       <dt>Status</dt><dd>${escape(c.Status||"—")}</dd>
       <dt>Risiko</dt><dd><span style="color:${riskColor}">●</span> ${escape(c.Risk||"—")}</dd>
@@ -13619,13 +13620,13 @@ function openCustomer(id) {
       <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Prozentual" && kundenMin(c.id, "minBpo") ? ` · min. CHF ${kundenMin(c.id, "minBpo").toLocaleString("de-CH")}/Monat` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}${c.BPOYtd ? ` · <span style="color:var(--accent-3)">YTD-kumulativ</span>` : ""}</dd>
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Link</dt><dd>${appLinkText(c.id, c.Link) ? `<a href="${escape(normalizeUrl(appLinkText(c.id, c.Link)) || appLinkText(c.id, c.Link))}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent-2);text-decoration:underline;cursor:pointer">${escape(appLinkText(c.id, c.Link))} ↗</a>` : "—"}</dd>
-      <dt>Apriko-intern (Lohn/FIBU)</dt><dd style="font-size:12px">${(() => { const f = (crmKundenFlags || {})[String(c.id)] || {}; const mail = e => `<a href="mailto:${escape(e)}?subject=${encodeURIComponent((c.Title || "") + " — ")}" onclick="event.stopPropagation()" title="E-Mail an ${escape(e)}" style="text-decoration:none;margin-left:3px">✉</a>`; const zeile = arr => arr.filter(x => x[1]).map(x => x[0] + ": " + escape(x[1]) + mail(x[1])).join(" · "); const z = zeile([["Ansprechperson Lohn", f.apLohn], ["Backup Lohn", f.apLohnBackup], ["Lohn intern", f.apLohnIntern]]); const z2 = zeile([["Ansprechperson FIBU", f.apFibu], ["Backup FIBU", f.apFibuBackup]]); return [z, z2].filter(Boolean).join("<br>") || "—"; })()}</dd>
       ${VERTRAG_ARTEN.map(([art, label]) => `<dt>${label}</dt><dd>${vertragLink(c.id, art) ? `<a href="${escape(vertragLink(c.id, art))}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${escape(vertragLink(c.id, art))}" style="color:var(--accent-2)">📄 ${escape(vertragName(vertragLink(c.id, art)))} ↗</a>` : "—"}</dd>`).join("")}
       <dt>Workflows</dt><dd>${[kundenFlag(c.id, "intern") ? "Interner Lohn ✓" : "", kundenFlag(c.id, "fibu") ? "FIBU Monatsabschluss ✓" : "", kundenHatDb(c.id) ? "Datenbank (Hosting) ✓" : ""].filter(Boolean).join(" · ") || "—"}</dd>
       <dt>Mindesthonorar</dt><dd style="white-space:pre-wrap">${escape(minFeeText(c.id, c.MinFee)||"—")}</dd>
       <dt>Notes</dt><dd style="white-space:pre-wrap">${escape(c.Notes||"—")}</dd>
     </dl>
     ${kundenKontakteHtml(c)}
+    ${kundenInternHtml(c)}
     <div style="margin-top:14px"><button class="btn btn-sm" onclick="closeModal();filters.revenueMode='customer';filters.revenueCustomerId=${id};currentView='revenue';document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));document.querySelector('nav button[data-view=revenue]').classList.add('active');render()">In Umsätze-Tab öffnen</button></div>
   `, [
     `<button class="btn btn-danger" onclick="deleteCustomer(${id})">Löschen</button>`,
@@ -13676,14 +13677,102 @@ function kundenKontakteHtml(c) {
       ${offen.length ? `<button class="btn btn-sm" onclick="kontakteAusStamm(${compId}, ${c.id})" title="${escape(offen.map(o => o.email + " (" + o.tags.join(", ") + ")").join(", "))}">⤵ ${offen.length} E-Mail(s) aus Entscheidungsträger/User übernehmen</button>` : ""}
       <span style="font-size:11px;color:var(--text-faint)">Funktion per Klick auf die Chips setzen</span>
     </div>
-    ${ks.length ? `<div class="table-wrap"><table style="font-size:12.5px"><thead><tr><th>Name Vorname</th><th>Funktion</th><th>Telefon direkt</th><th>E-Mail</th><th style="width:40px"></th></tr></thead><tbody>
+    ${ks.length ? `<div class="table-wrap"><table style="font-size:12.5px"><thead><tr><th>Name Vorname</th><th>Funktion</th><th>Telefon direkt</th><th>E-Mail</th><th style="width:80px"></th></tr></thead><tbody>
       ${ks.map(k => `<tr>
         <td><a href="#" onclick="event.preventDefault();closeModal();openContact(${k.id})" style="color:var(--text);text-decoration:none"><strong>${escape(k.Title || "")}</strong></a>${k.Role ? `<div style="color:var(--text-faint);font-size:11px">${escape(k.Role)}</div>` : ""}</td>
         <td>${KONTAKT_TAGS.map(t => chip(k, t)).join("")}</td>
         <td>${k.Phone ? `<a href="tel:${escape(String(k.Phone).replace(/\s+/g, ""))}" style="color:var(--text)">${escape(k.Phone)}</a>` : `<span style="color:var(--text-faint)">—</span>`}</td>
         <td>${k.Email ? `<a href="mailto:${escape(k.Email)}">${escape(k.Email)}</a>` : `<span style="color:var(--text-faint)">—</span>`}</td>
-        <td><button class="btn btn-sm" onclick="editContact(${k.id}, ${compId}, ${c.id})" title="Bearbeiten">✎</button></td>
+        <td style="white-space:nowrap"><button class="btn btn-sm" onclick="editContact(${k.id}, ${compId}, ${c.id})" title="Bearbeiten">✎</button> <button class="btn btn-sm" style="color:var(--danger)" onclick="deleteContact(${k.id}, ${c.id})" title="Kontakt löschen">✕</button></td>
       </tr>`).join("")}</tbody></table></div>` : `<div class="empty" style="padding:10px;font-size:12px">Noch keine Ansprechpersonen — mit «+ Kontakt erfassen» anlegen${offen.length ? " oder die E-Mails übernehmen" : ""}.</div>`}
+  </div>`;
+}
+/* ---------- Interne Ansprechpersonen (Apriko) je Kunde — eine Person pro Rolle, Chips exklusiv ----------
+   Ansprechperson → crm_firmen_ansprech.json (Firma); Lohn/FIBU-Rollen → crm_kunden_flags.json (Kunde) */
+const INTERN_ROLLEN = [["ansprech", "Ansprechperson"], ["apLohn", "Lohn"], ["apLohnBackup", "Lohn Backup"], ["apLohnIntern", "Lohn intern"], ["apFibu", "FIBU"], ["apFibuBackup", "FIBU Backup"]];
+function internRolleWert(c, key) { if (key === "ansprech") return String(ansprechEmail(c.CompanyId) || "").toLowerCase(); const f = (crmKundenFlags || {})[String(c.id)] || {}; return String(f[key] || "").toLowerCase(); }
+function internPersonen(c) {
+  const set = new Set();
+  (cache.userprofiles || []).forEach(p => { const e = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase(); if (e) set.add(e); });
+  Object.keys(bgParam().zuweisung || {}).forEach(e => set.add(e));
+  INTERN_ROLLEN.forEach(([k]) => { const e = internRolleWert(c, k); if (e) set.add(e); });
+  return [...set].sort();
+}
+async function internRolleSetzen(custId, key, email) {
+  const c = cache.customers.find(x => x.id == custId); if (!c) return;
+  const neu = internRolleWert(c, key) === email ? "" : email;   // Klick auf aktive Person = entfernen
+  try {
+    if (key === "ansprech") {
+      if (!c.CompanyId) { toast("Keine Firma zugeordnet.", true); return; }
+      await crmLoadAnsprech(); const k = String(c.CompanyId); if (neu) crmAnsprech[k] = neu; else delete crmAnsprech[k]; await crmSaveAnsprech();
+    } else {
+      await crmLoadKundenFlags(); const k = String(custId); const f = Object.assign({}, crmKundenFlags[k] || {});
+      if (neu) f[key] = neu; else delete f[key];
+      if (Object.keys(f).length) crmKundenFlags[k] = f; else delete crmKundenFlags[k];
+      await crmSaveKundenFlags();
+    }
+  } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); return; }
+  openCustomer(custId);
+}
+function mitarbeiterDaten(email) { return (crmMitarbeiter || {})[String(email || "").toLowerCase()] || {}; }
+function mitarbeiterVornameAusEmail(e) { const t = String(e || "").split("@")[0].split(/[._-]+/).filter(Boolean); return t.length ? t[0].charAt(0).toUpperCase() + t[0].slice(1) : ""; }
+function mitarbeiterNachnameAusEmail(e) { const t = String(e || "").split("@")[0].split(/[._-]+/).filter(Boolean); return t.length > 1 ? t.slice(1).map(x => x.charAt(0).toUpperCase() + x.slice(1)).join(" ") : ""; }
+function mitarbeiterName(email) { const m = mitarbeiterDaten(email); const v = m.vorname || mitarbeiterVornameAusEmail(email), n = m.name || mitarbeiterNachnameAusEmail(email); return [v, n].filter(Boolean).join(" ") || nameAusEmail(email); }
+function datumCH(iso) { return iso && /^\d{4}-\d{2}-\d{2}/.test(iso) ? iso.slice(8, 10) + "." + iso.slice(5, 7) + "." + iso.slice(0, 4) : ""; }
+function mitarbeiterInfoZeile(email) {
+  const m = mitarbeiterDaten(email); const t = [];
+  if (m.geburtstag) { const g = new Date(m.geburtstag); const heute = new Date(); let alter = heute.getFullYear() - g.getFullYear(); if (heute < new Date(heute.getFullYear(), g.getMonth(), g.getDate())) alter--; t.push("🎂 " + datumCH(m.geburtstag) + (isFinite(alter) ? " (" + alter + ")" : "")); }
+  if (m.eintritt) { const e = new Date(m.eintritt); const j = ((Date.now() - e.getTime()) / 31557600000); t.push("seit " + datumCH(m.eintritt) + (j >= 1 ? " · " + Math.floor(j) + " J." : j >= 0 ? " · " + Math.max(0, Math.floor(j * 12)) + " Mt." : "")); }
+  return t.join(" · ");
+}
+function mitarbeiterBearbeiten(email, custId) {
+  crmLoadMitarbeiter().then(() => {
+    const m = mitarbeiterDaten(email);
+    showModal("Mitarbeiter/in — " + escape(email), `
+      <div class="field-row">
+        <div class="field"><label>Vorname</label><input id="f-ma-vorname" value="${escape(m.vorname || mitarbeiterVornameAusEmail(email))}"></div>
+        <div class="field"><label>Name</label><input id="f-ma-name" value="${escape(m.name || mitarbeiterNachnameAusEmail(email))}"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Geburtstag</label><input id="f-ma-geb" type="date" value="${escape(m.geburtstag || "")}"></div>
+        <div class="field"><label>Bei Apriko seit</label><input id="f-ma-eintritt" type="date" value="${escape(m.eintritt || "")}"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text-faint)">Vorname/Name sind aus der E-Mail vorbelegt — bitte prüfen.</div>`, [
+      `<button class="btn" onclick="${custId ? "openCustomer(" + custId + ")" : "closeModal()"}">Abbrechen</button>`,
+      `<button class="btn btn-primary" onclick="mitarbeiterSpeichern(${tkJs(email)}, ${custId || "null"})">Speichern</button>`]);
+  });
+}
+async function mitarbeiterSpeichern(email, custId) {
+  await crmLoadMitarbeiter();
+  const m = { vorname: val("f-ma-vorname").trim(), name: val("f-ma-name").trim(), geburtstag: val("f-ma-geb"), eintritt: val("f-ma-eintritt") };
+  Object.keys(m).forEach(k => { if (!m[k]) delete m[k]; });
+  const key = String(email).toLowerCase(); if (Object.keys(m).length) crmMitarbeiter[key] = m; else delete crmMitarbeiter[key];
+  try { await crmSaveMitarbeiter(); toast("Gespeichert"); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); return; }
+  if (custId) openCustomer(custId); else { closeModal(); render(); }
+}
+function internPersonenAlle() {
+  const set = new Set();
+  (cache.userprofiles || []).forEach(p => { const e = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase(); if (e) set.add(e); });
+  Object.keys(bgParam().zuweisung || {}).forEach(e => set.add(e));
+  Object.keys(crmMitarbeiter || {}).forEach(e => set.add(e));
+  return [...set].sort((a, b) => mitarbeiterName(a).localeCompare(mitarbeiterName(b), "de"));
+}
+function mitarbeiterTabelleHtml() {
+  const p = internPersonenAlle();
+  return `<div style="margin-bottom:22px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div style="font-weight:600">Mitarbeitende</div><span style="font-size:11px;color:var(--text-faint)">Name, Geburtstag und Eintritt — werden bei den Kunden unter «Interne Ansprechpersonen» angezeigt</span></div>
+    ${p.length ? `<table class="table"><thead><tr><th>Name</th><th>E-Mail</th><th>Geburtstag</th><th>Bei Apriko seit</th><th style="width:90px;text-align:right"></th></tr></thead><tbody>${p.map(e => { const m = mitarbeiterDaten(e); return `<tr><td style="font-weight:500">${escape(mitarbeiterName(e))}</td><td style="color:var(--text-dim)">${escape(e)}</td><td>${escape(datumCH(m.geburtstag) || "—")}</td><td>${escape(datumCH(m.eintritt) || "—")}</td><td style="text-align:right"><button class="btn btn-sm" onclick="mitarbeiterBearbeiten(${tkJs(e)}, null)">Bearbeiten</button></td></tr>`; }).join("")}</tbody></table>` : `<div class="empty">Keine Benutzer.</div>`}</div>`;
+}
+function kundenInternHtml(c) {
+  const personen = internPersonen(c).sort((a, b) => mitarbeiterName(a).localeCompare(mitarbeiterName(b), "de"));
+  const chip = (e, key, label) => { const on = internRolleWert(c, key) === e; return `<span onclick="internRolleSetzen(${c.id}, ${tkJs(key)}, ${tkJs(e)})" title="${on ? "Rolle entfernen" : escape(label) + " auf diese Person setzen"}" style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;margin:1px 2px 1px 0;cursor:pointer;border:1px solid ${on ? "var(--accent-2)" : "var(--border)"};background:${on ? "rgba(120,180,255,0.12)" : "transparent"};color:${on ? "var(--accent-2)" : "var(--text-faint)"}">${escape(label)}</span>`; };
+  const belegt = INTERN_ROLLEN.filter(([k]) => internRolleWert(c, k)).length;
+  return `<div style="margin-top:18px;border-top:1px solid var(--border-soft);padding-top:12px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+      <h3 style="margin:0;font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Interne Ansprechpersonen Apriko (${belegt}/${INTERN_ROLLEN.length} Rollen besetzt)</h3>
+      <span style="font-size:11px;color:var(--text-faint)">Pro Rolle genau eine Person — Klick auf den Chip setzt sie, nochmals Klick entfernt sie. Personen = Benutzer mit Profil/Gruppe.</span>
+    </div>
+    ${personen.length ? `<div class="table-wrap"><table style="font-size:12.5px"><thead><tr><th>Mitarbeiter/in</th><th>Rolle bei diesem Kunden</th><th>E-Mail</th><th style="width:40px"></th></tr></thead><tbody>
+      ${personen.map(e => `<tr><td><strong>${escape(mitarbeiterName(e))}</strong>${mitarbeiterInfoZeile(e) ? `<div style="color:var(--text-faint);font-size:11px">${escape(mitarbeiterInfoZeile(e))}</div>` : ""}</td><td>${INTERN_ROLLEN.map(([k, l]) => chip(e, k, l)).join("")}</td><td><a href="mailto:${escape(e)}?subject=${encodeURIComponent((c.Title || "") + " — ")}">${escape(e)}</a></td><td><button class="btn btn-sm" onclick="mitarbeiterBearbeiten(${tkJs(e)}, ${c.id})" title="Name, Geburtstag, Eintritt">✎</button></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty" style="padding:10px;font-size:12px">Keine internen Benutzer gefunden (Admin → Profile).</div>`}
   </div>`;
 }
 function nameAusEmail(e) { const l = String(e || "").split("@")[0]; return l.split(/[._-]+/).filter(Boolean).map(x => x.charAt(0).toUpperCase() + x.slice(1)).join(" "); }
@@ -14293,6 +14382,7 @@ function profileViewGroups() {
 }
 
 function renderProfiles(el) {
+  if (crmMitarbeiter === null) { crmLoadMitarbeiter().then(() => { if (currentView === "profiles") render(); }); }
   // Zusatz-Aktionen im Topbar
   document.getElementById("view-actions").innerHTML = `
     <button class="btn btn-primary btn-sm" onclick="openProfileModal(null)">+ Profil hinzufügen</button>
@@ -14319,6 +14409,7 @@ function renderProfiles(el) {
         <select onchange="ansichtAlsSetzen(this.value)" style="padding:4px 8px;font-size:12px"><option value="">— eigene Ansicht —</option>${Object.entries(bgParam().gruppen).map(([id, g]) => `<option value="${escape(id)}"${ansichtAlsId() === id ? " selected" : ""}>${escape(g.name)}</option>`).join("")}</select>
         <span style="color:var(--text-faint)">gilt nur für diesen Browser-Tab, Seite wird neu geladen — ideal zum Vorführen</span></div>
 
+      ${mitarbeiterTabelleHtml()}
       ${(() => { const b = bgParam(); const grp = profileViewGroups(); const ids = Object.keys(b.gruppen);
         return `<div style="margin-bottom:22px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div style="font-weight:600">Benutzergruppen</div><span style="font-size:11px;color:var(--text-faint)">Bereiche pro Gruppe festlegen, dann unten jedem Benutzer eine Gruppe zuweisen. Individuelle Freigaben im Profil kommen zusätzlich dazu.</span><button class="btn btn-sm" style="margin-left:auto" onclick="bgGruppeAnlegen()">+ Gruppe</button></div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">${ids.map(id => { const g = b.gruppen[id]; const n = Object.values(b.zuweisung).filter(x => x === id).length; const v = g.views || []; const alle = v.length >= ALL_VIEWS.length - 1;
@@ -14930,6 +15021,7 @@ function editContact(id, compIdVorgabe, zurueckKundeId) {
     <div class="field"><label>E-Mail</label><input id="f-email" value="${escape(c.Email||"")}"></div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
   `, [
+    id ? `<button class="btn btn-danger" onclick="deleteContact(${id})" style="margin-right:auto">Löschen</button>` : "",
     `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
     `<button class="btn btn-primary" onclick="saveContact(${id||"null"})">Speichern</button>`
   ]);
@@ -14955,12 +15047,16 @@ async function saveContact(id) {
     if (zk) openCustomer(zk); else render();
   } catch (e) { toast(e.message, true); }
 }
-async function deleteContact(id) {
-  if (!confirm("Kontakt wirklich löschen?")) return;
+async function deleteContact(id, zurueckKundeId) {
+  const k = cache.contacts.find(x => x.id == id);
+  if (!confirm("Kontakt «" + ((k && k.Title) || id) + "» wirklich löschen?")) return;
   try {
     await deleteItem("Contacts", id);
+    if (k && k.CompanyId) { try { await kontaktTagsSetzen(k.CompanyId, id, []); } catch (e) {} }
     await reload("Contacts");
-    closeModal(); render(); toast("Gelöscht");
+    const zk = zurueckKundeId || kontaktZurueckKunde; kontaktZurueckKunde = null;
+    closeModal(); toast("Gelöscht");
+    if (zk) openCustomer(zk); else render();
   } catch (e) { toast(e.message, true); }
 }
 
@@ -15343,6 +15439,21 @@ function crmLoadStamm() {
 async function crmSaveStamm() {
   await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_firmen_stamm.json:/content`,
     { method: "PUT", body: JSON.stringify(crmStamm || {}) });
+}
+/* Interne Mitarbeitende (Apriko) — { "<email>": { vorname, name, geburtstag: "YYYY-MM-DD", eintritt: "YYYY-MM-DD" } } */
+let crmMitarbeiter = null;
+let crmMitarbeiterPromise = null;
+function crmLoadMitarbeiter() {
+  if (!crmMitarbeiterPromise) {
+    crmMitarbeiterPromise = (async () => {
+      try { const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_mitarbeiter.json:/content`, { cache: "no-store" }); crmMitarbeiter = data && typeof data === "object" ? data : {}; }
+      catch (e) { crmMitarbeiter = {}; }
+    })();
+  }
+  return crmMitarbeiterPromise;
+}
+async function crmSaveMitarbeiter() {
+  await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_mitarbeiter.json:/content`, { method: "PUT", body: JSON.stringify(crmMitarbeiter || {}) });
 }
 let crmAnsprech = null;
 let crmAnsprechPromise = null;
