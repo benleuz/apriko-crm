@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.472.0"></script>
-<script src="apriko-api.js?v=1.472.0"></script>
-<script src="lohncheck.js?v=1.472.0"></script>
-<script src="personalbudget.js?v=1.472.0"></script>
-<script src="jahresbudget.js?v=1.472.0"></script>
-<script src="budgetpositionen.js?v=1.472.0"></script>
-<script src="lohnchecklistetemp.js?v=1.472.0"></script>
-<script src="apriko-endpunkte.js?v=1.472.0"></script>
+<script src="apriko-filters.js?v=1.474.0"></script>
+<script src="apriko-api.js?v=1.474.0"></script>
+<script src="lohncheck.js?v=1.474.0"></script>
+<script src="personalbudget.js?v=1.474.0"></script>
+<script src="jahresbudget.js?v=1.474.0"></script>
+<script src="budgetpositionen.js?v=1.474.0"></script>
+<script src="lohnchecklistetemp.js?v=1.474.0"></script>
+<script src="apriko-endpunkte.js?v=1.474.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1027,7 +1027,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.472.0</span> · <span id="app-build-date">21.09.2026</span>
+      Apriko CRM · <span id="app-version">v1.474.0</span> · <span id="app-build-date">12.10.2026</span>
     </div>
   </aside>
 
@@ -2094,7 +2094,37 @@ let mbEtag = null, mbTimer = null;
 function mehrbenutzerStart() {
   if (mbTimer) return;
   fetch(location.pathname, { method: "HEAD", cache: "no-store" }).then(r => { mbEtag = r.headers.get("etag") || r.headers.get("last-modified") || null; }).catch(() => {});
+  versionPruefen();
   mbTimer = setInterval(mehrbenutzerTick, 60000);
+}
+/* Versionskontrolle bei jedem Login (12.10.2026): die auf dem Server liegende index.html wird frisch geladen und ihre
+   Versionsnummer mit der laufenden verglichen. Weicht sie ab, läuft der Browser auf einer gecachten alten Version →
+   blockierende Meldung mit Zwangs-Neuladen (Cache-Buster in der URL). Alte Versionen ohne Merge haben Daten anderer überschrieben. */
+function versionAktuell() { return ((document.getElementById("app-version") || {}).textContent || "").trim(); }
+async function versionPruefen() {
+  try {
+    const r = await fetch(location.pathname + "?vcheck=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) return true;
+    const html = await r.text();
+    const m = html.match(/id="app-version">\s*(v[\d.]+)\s*</);
+    if (!m) return true;
+    const server = m[1], lokal = versionAktuell();
+    if (server === lokal) return true;
+    if (document.getElementById("mb-version-block")) return false;
+    const ov = document.createElement("div"); ov.id = "mb-version-block";
+    ov.style.cssText = "position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.78);display:flex;align-items:center;justify-content:center;padding:20px";
+    ov.innerHTML = `<div style="background:var(--bg2,#1e1e1e);color:var(--text,#eee);border:1px solid var(--accent);border-radius:12px;padding:28px 32px;max-width:520px;box-shadow:0 8px 40px rgba(0,0,0,.6)">
+      <div style="font-size:20px;font-weight:700;margin-bottom:10px">🔄 Veraltete CRM-Version</div>
+      <p style="margin:0 0 8px;line-height:1.5">Dein Browser zeigt noch <b>${escape(lokal)}</b>, aktuell ist <b>${escape(server)}</b>.
+      Mit einer alten Version können Änderungen anderer Kollegen überschrieben werden – darum geht es erst nach dem Aktualisieren weiter.</p>
+      <p style="margin:0 0 18px;font-size:13px;opacity:.75">Falls die Meldung nach dem Neuladen wieder erscheint: <b>Ctrl + F5</b> drücken (Mac: Cmd + Shift + R).</p>
+      <button class="btn btn-primary" onclick="versionNeuLaden()" style="font-size:15px;padding:10px 22px">Jetzt aktualisieren</button></div>`;
+    document.body.appendChild(ov);
+    return false;
+  } catch (e) { return true; }
+}
+function versionNeuLaden() {
+  const u = new URL(location.href); u.searchParams.set("r", String(Date.now())); location.replace(u.toString());
 }
 let mbLetzteDaten = Date.now(), mbLetzteVersion = Date.now(), mbLaeuft = false;
 async function mehrbenutzerTick() {
@@ -2113,7 +2143,8 @@ async function mehrbenutzerTick() {
   if (Date.now() - mbLetzteVersion > 600000) {
     mbLetzteVersion = Date.now();
     try { const r = await fetch(location.pathname, { method: "HEAD", cache: "no-store" }); const et = r.headers.get("etag") || r.headers.get("last-modified") || null;
-      if (mbEtag && et && et !== mbEtag && !document.getElementById("mb-version-bar")) {
+      if (mbEtag && et && et !== mbEtag && !(await versionPruefen()) ) { /* Versionsnummer weicht ab → blockierende Meldung bereits gesetzt */ }
+      else if (mbEtag && et && et !== mbEtag && !document.getElementById("mb-version-bar")) {
         const bar = document.createElement("div"); bar.id = "mb-version-bar";
         bar.style.cssText = "position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:9999;background:var(--accent);color:#111;font-size:13px;font-weight:600;padding:10px 18px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.4);display:flex;gap:14px;align-items:center";
         bar.innerHTML = `🔄 Eine neue CRM-Version ist verfügbar. <button onclick="location.reload(true)" style="background:#111;color:#fff;border:0;border-radius:5px;padding:5px 12px;font-weight:600;cursor:pointer">Jetzt neu laden</button><span onclick="this.parentNode.remove()" style="cursor:pointer;opacity:.7">✕</span>`;
@@ -9735,7 +9766,12 @@ async function renderOnbParam(el) {
    SharePoint-JSON CRM-Budgetdaten/parameter.json. Aktuell Block «Überzeit»: pro GAV die
    Lohnbasis, auf der der Überzeitansatz berechnet wird — der Ultimative Check liest
    window.crmParameter.ueberzeit (lcUeberzeitCheck in lohncheck.js). */
-const PARAMETER_PFAD = "CRM-Budgetdaten/parameter.json";
+/* Seit v1.473 (12.10.2026) heisst die Datei parameter_v2.json: Kollegen mit einer alten, im Browser gecachten CRM-Version
+   (< v1.457, noch ohne 3-Wege-Merge/ETag) schreiben weiterhin die alte parameter.json ganz neu und haben so Onboarding-Einträge
+   anderer überschrieben. Die neue Datei können diese alten Versionen nicht anfassen. Beim ersten Laden wird die alte Datei
+   einmalig nach parameter_v2.json übernommen. */
+const PARAMETER_PFAD = "CRM-Budgetdaten/parameter_v2.json";
+const PARAMETER_PFAD_ALT = "CRM-Budgetdaten/parameter.json";
 const PARAM_GAV_LISTE = ["GAV Personalverleih", "Bauhauptgewerbe (LMV)", "Basler Ausbaugewerbe (BS)", "Ausbaugewerbe BL/BS/SO", "Ausbaugewerbe Westschweiz",
   "Elektro- und Telekommunikations-Installationsgewerbe", "Gebäudetechnik", "Gebäudehüllengewerbe (Dach und Wand)", "Dach- und Wandgewerbe BL",
   "Metallgewerbe", "Maler- und Gipsergewerbe (Deutschschweiz/TI)", "Maler- und Gipsergewerbe BL", "Gipsergewerbe BS", "Schreinergewerbe", "Holzbau",
@@ -9749,11 +9785,22 @@ async function parameterLaden(force) {
   if (!force && crmParameter) return crmParameter;
   let data = null;
   // cache: no-store — sonst liefert der Browser nach einem Speichern + Neuladen u.U. die alte Datei (Benutzergruppen schienen nicht zu greifen, 09.10.2026)
+  let migriert = false;
   try { data = await graph(`/sites/${siteId}/drive/root:/${PARAMETER_PFAD}:/content`, { cache: "no-store" }); }
   catch (e) { data = null; }
+  if (!data || typeof data !== "object") {
+    // Einmalige Migration: neue Datei existiert noch nicht → alte parameter.json übernehmen
+    try { data = await graph(`/sites/${siteId}/drive/root:/${PARAMETER_PFAD_ALT}:/content`, { cache: "no-store" }); }
+    catch (e) { data = null; }
+    migriert = !!(data && typeof data === "object" && Object.keys(data).length);
+  }
   if (!data || typeof data !== "object") data = {};
   if (!Array.isArray(data.ueberzeit) || !data.ueberzeit.length) {
     data.ueberzeit = [{ gav: "GAV Personalverleih", basis: "basis13" }, { gav: "Bauhauptgewerbe (LMV)", basis: "brutto" }];
+  }
+  if (migriert) {
+    try { data = await jsonMergeSpeichern(PARAMETER_PFAD, data); console.info("parameter.json → parameter_v2.json übernommen"); }
+    catch (e) { console.warn("Migration parameter_v2.json fehlgeschlagen", e); }
   }
   crmParameter = data;
   window.crmParameter = data;
