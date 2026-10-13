@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.482.0"></script>
-<script src="apriko-api.js?v=1.482.0"></script>
-<script src="lohncheck.js?v=1.482.0"></script>
-<script src="personalbudget.js?v=1.482.0"></script>
-<script src="jahresbudget.js?v=1.482.0"></script>
-<script src="budgetpositionen.js?v=1.482.0"></script>
-<script src="lohnchecklistetemp.js?v=1.482.0"></script>
-<script src="apriko-endpunkte.js?v=1.482.0"></script>
+<script src="apriko-filters.js?v=1.484.0"></script>
+<script src="apriko-api.js?v=1.484.0"></script>
+<script src="lohncheck.js?v=1.484.0"></script>
+<script src="personalbudget.js?v=1.484.0"></script>
+<script src="jahresbudget.js?v=1.484.0"></script>
+<script src="budgetpositionen.js?v=1.484.0"></script>
+<script src="lohnchecklistetemp.js?v=1.484.0"></script>
+<script src="apriko-endpunkte.js?v=1.484.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1037,7 +1037,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.482.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.484.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -15705,9 +15705,9 @@ async function crmKundenumgebungenOeffnen() {
   if (crmKundenFlags === null) { try { await crmLoadKundenFlags(); } catch (e) {} }   // normalerweise schon nach dem Login geladen (Pop-up-Freigabe bleibt so erhalten)
   const scope = filters.dashboardEmailScope || "alle";
   const kunden = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv" && c.CompanyId && crmCompanyMatchesScope(c.CompanyId, scope))
-    .map(c => ({ c, url: normalizeUrl(appLinkText(c.id, c.Link)) || appLinkText(c.id, c.Link) })).filter(x => x.url && /^https?:/i.test(x.url))
+    .map(c => ({ c, url: appLinkHost(c.id, c.Link) ? (normalizeUrl(appLinkText(c.id, c.Link)) || "") : "" })).filter(x => x.url)
     .sort((a, b) => (a.c.Title || "").localeCompare(b.c.Title || ""));
-  const ohne = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv" && c.CompanyId && crmCompanyMatchesScope(c.CompanyId, scope) && !kunden.some(k => k.c.id === c.id));
+  const ohne = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv" && c.CompanyId && crmCompanyMatchesScope(c.CompanyId, scope) && kundenHatDb(c.id) && !kunden.some(k => k.c.id === c.id));
   if (!kunden.length) { toast("Keine Kunden mit App-Link in der Auswahl.", true); return; }
   if (!confirm(kunden.length + " Kundenumgebungen in neuen Tabs öffnen?")) return;
   let offen = 0; const blockiert = [];
@@ -15730,10 +15730,10 @@ const hcState = { laeuft: false, ergebnisse: {}, zuletzt: 0, auto: false, timer:
 function hcUmgebungen() {
   const scope = filters.dashboardEmailScope || "alle";
   const map = {}; hcState.ohneLink = [];
+  hcState.ohneDb = [];
   cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv" && c.CompanyId && crmCompanyMatchesScope(c.CompanyId, scope)).forEach(c => {
-    const url = normalizeUrl(appLinkText(c.id, c.Link)) || appLinkText(c.id, c.Link);
-    let host = ""; if (url && /^https?:/i.test(url)) { try { host = new URL(url).hostname.toLowerCase(); } catch (e) { host = ""; } }
-    if (!host) { hcState.ohneLink.push(c.Title || ""); return; }
+    const host = appLinkHost(c.id, c.Link);
+    if (!host) { if (kundenHatDb(c.id)) hcState.ohneLink.push(c.Title || ""); else hcState.ohneDb.push(c.Title || ""); return; }   // ohne eigene Datenbank → keine Umgebung, nichts zu prüfen
     if (!map[host]) map[host] = { host, kunden: [], url: "https://" + host };
     map[host].kunden.push(c.Title || "");
   });
@@ -15804,6 +15804,21 @@ async function hcStart(auto) {
   let i = 0;
   const worker = async () => { while (i < umg.length) { const u = umg[i++]; const res = await hcAbfragen(u); hcState.ergebnisse[u.host] = { ...u, ...res, zeit: Date.now() }; hcPanelRender(); } };
   await Promise.all(Array.from({ length: Math.min(6, umg.length) }, worker));
+  // Ergänzung aus dem PowerShell-Skript (Production-Healthcheck-CRM.ps1 schreibt CRM-Budgetdaten/healthcheck.json):
+  // liefert die Service-Details auch dort, wo der Browser die API wegen CORS nicht lesen darf
+  hcState.skript = null;
+  try {
+    const f = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/healthcheck.json:/content`, { cache: "no-store" });
+    const zeit = f && f.zeit ? new Date(f.zeit).getTime() : 0;
+    if (f && f.umgebungen && zeit && Date.now() - zeit < 15 * 60000) {
+      hcState.skript = { zeit, quelle: f.quelle || "" };
+      Object.values(hcState.ergebnisse).forEach(r => {
+        const slug = r.host.replace(/\.apriko\.app$/, ""); const e = f.umgebungen[slug];
+        if (!e) return;
+        if (r.stufe === "cors" || r.stufe === "fail" || r.stufe === "info") { r.stufe = e.stufe || r.stufe; r.text = String(e.text || "").replace(/^[\s\u2139\u26a0\u274c\u2705\ufe0f]+/, m => m.trim() ? m.trim() + " " : ""); r.details = e.details || []; r.quelle = "skript"; }
+      });
+    } else if (f && zeit) hcState.skript = { zeit, quelle: f.quelle || "", veraltet: true };
+  } catch (e) {}
   // Umgebungen, die nicht mehr in der Auswahl sind, entfernen
   Object.keys(hcState.ergebnisse).forEach(h => { if (!umg.some(u => u.host === h)) delete hcState.ergebnisse[h]; });
   hcState.laeuft = false; hcState.zuletzt = Date.now(); hcPanelRender();
@@ -15824,7 +15839,7 @@ function hcPanelHtml() {
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px;font-size:12px">
       <b>Healthcheck</b>
       <span style="color:${farbe.ok}">✅ ${n.ok}</span><span style="color:${farbe.warn}">⚠️ ${n.warn}</span><span style="color:${farbe.fail}">❌ ${n.fail}</span>${n.cors ? `<span style="color:${farbe.cors}">🟦 ${n.cors}</span>` : ""}${n.info ? `<span style="color:${farbe.info}">ℹ️ ${n.info}</span>` : ""}
-      <span style="color:var(--text-faint)">${hcState.laeuft ? "… läuft" : hcState.zuletzt ? "zuletzt " + new Date(hcState.zuletzt).toLocaleTimeString("de-CH", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : ""}</span>
+      <span style="color:var(--text-faint)">${hcState.laeuft ? "… läuft" : hcState.zuletzt ? "zuletzt " + new Date(hcState.zuletzt).toLocaleTimeString("de-CH", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : ""}${hcState.skript ? ` · Details aus Skript${hcState.skript.quelle ? " (" + escape(hcState.skript.quelle) + ")" : ""} ${new Date(hcState.skript.zeit).toLocaleTimeString("de-CH", { hour: "2-digit", minute: "2-digit" })}${hcState.skript.veraltet ? ` <span style="color:var(--warn)">— älter als 15 min, nicht verwendet</span>` : ""}` : ""}</span>
       <label style="margin-left:auto;display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--text-dim)"><input type="checkbox" ${hcState.auto ? "checked" : ""} onchange="hcAutoToggle(this.checked)"> alle 30 s aktualisieren</label>
       <button class="btn btn-sm" onclick="hcStart()" ${hcState.laeuft ? "disabled" : ""}>↻ Jetzt prüfen</button>
     </div>
@@ -15832,13 +15847,13 @@ function hcPanelHtml() {
     ${rows.map(r => `<tr>
       <td style="white-space:nowrap"><a href="${escape(r.url)}" target="_blank" rel="noopener" style="color:var(--accent-2)">${escape(r.host.replace(/\.apriko\.app$/, ""))}</a></td>
       <td style="color:var(--text-dim)">${escape(r.kunden.join(", "))}${r.extra ? `<span style="color:var(--text-faint);font-size:11px">${r.kunden.length ? " · " : ""}intern / manuell</span>` : ""}</td>
-      <td style="color:${farbe[r.stufe] || "var(--text)"}" title="${escape((r.details || []).join("\n"))}">${escape(r.text)}</td></tr>`).join("")}
+      <td style="color:${farbe[r.stufe] || "var(--text)"}" title="${escape((r.details || []).join("\n"))}">${escape(r.text)}${r.quelle === "skript" ? ` <span style="color:var(--text-faint);font-size:10px">(Skript)</span>` : ""}</td></tr>`).join("")}
     </tbody></table>
     <div style="font-size:11px;color:var(--text-faint);margin-top:6px;display:flex;gap:14px;flex-wrap:wrap;align-items:center">
-      <span>${rows.length} Umgebung(en) aus den App-Links der aktiven Kunden${(hcState.ohneLink || []).length ? ` · <a href="#" style="color:var(--warn)" title="${escape(hcState.ohneLink.join("\n"))}" onclick="showModal('Aktive Kunden ohne App-Link', '<div style=&quot;font-size:12px;line-height:1.7&quot;>' + ${tkJs(hcState.ohneLink.slice().sort().map(n => escape(n)).join("<br>"))} + '</div>', ['<button class=&quot;btn btn-primary&quot; onclick=&quot;closeModal()&quot;>Schliessen</button>']);return false">${hcState.ohneLink.length} aktive Kunden ohne App-Link</a> (im Kunden den Link erfassen, dann werden sie geprüft)` : ""}</span>
+      <span>${rows.length} Umgebung(en) aus den App-Links der aktiven Kunden${(hcState.ohneDb || []).length ? ` · <span title="${escape(hcState.ohneDb.join("\n"))}">${hcState.ohneDb.length} ohne eigene Datenbank (nicht geprüft)</span>` : ""}${(hcState.ohneLink || []).length ? ` · <a href="#" style="color:var(--warn)" title="${escape(hcState.ohneLink.join("\n"))}" onclick="showModal('Aktive Kunden ohne App-Link', '<div style=&quot;font-size:12px;line-height:1.7&quot;>' + ${tkJs(hcState.ohneLink.slice().sort().map(n => escape(n)).join("<br>"))} + '</div>', ['<button class=&quot;btn btn-primary&quot; onclick=&quot;closeModal()&quot;>Schliessen</button>']);return false">${hcState.ohneLink.length} aktive Kunden ohne App-Link</a> (im Kunden den Link erfassen, dann werden sie geprüft)` : ""}</span>
       ${isAdmin() ? `<a href="#" onclick="hcExtraBearbeiten();return false" style="color:var(--accent-2)">+ weitere Umgebungen (intern, z.B. sales, staging)</a>` : ""}
     </div>
-    ${n.cors ? `<div style="font-size:11px;color:var(--text-faint);margin-top:6px">🟦 = Umgebung antwortet, aber der Browser darf die Antwort nicht lesen. Damit die Details wie im PowerShell-Skript erscheinen, muss /healthchecks-api den Header <code>Access-Control-Allow-Origin: ${escape(location.origin)}</code> liefern.</div>` : ""}
+    ${n.cors ? `<div style="font-size:11px;color:var(--text-faint);margin-top:6px">🟦 = Umgebung antwortet, aber der Browser darf die Antwort nicht lesen. Details erscheinen, wenn (a) /healthchecks-api den Header <code>Access-Control-Allow-Origin: ${escape(location.origin)}</code> liefert oder (b) auf einem Rechner <code>Production-Healthcheck-CRM.ps1</code> läuft, das die Resultate nach CRM-Budgetdaten/healthcheck.json schreibt.</div>` : ""}
   </div>`;
 }
 async function crmCopyCustomerEmails(kind) {
@@ -16516,6 +16531,13 @@ function applyMin(betrag, min) { return min > 0 && betrag > 0 && betrag < min ? 
 function minFeeText(custId, spFallback) {
   const t = ((crmKundenFlags || {})[String(custId)] || {}).minfee;
   return t !== undefined && t !== null ? t : (spFallback || "");
+}
+/* Ist ein App-Link brauchbar? Texte wie «keine», «-», «n/a» oder ohne Punkt im Host sind keine Umgebung. */
+function appLinkHost(custId, spLinkField) {
+  const t = String(appLinkText(custId, spLinkField) || "").trim();
+  if (!t || /^(keine?r?|kein link|nein|none|n\/a|-+|\?|offen|tbd)$/i.test(t)) return "";
+  const url = normalizeUrl(t); if (!url || !/^https?:/i.test(url)) return "";
+  try { const h = new URL(url).hostname.toLowerCase(); return h.includes(".") ? h : ""; } catch (e) { return ""; }
 }
 function appLinkText(custId, spLinkField) {
   const t = ((crmKundenFlags || {})[String(custId)] || {}).applink;   // SharePoint-Spalte AppLink ist (falls vorhanden) bereits eingeblendet
