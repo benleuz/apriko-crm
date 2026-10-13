@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.484.0"></script>
-<script src="apriko-api.js?v=1.484.0"></script>
-<script src="lohncheck.js?v=1.484.0"></script>
-<script src="personalbudget.js?v=1.484.0"></script>
-<script src="jahresbudget.js?v=1.484.0"></script>
-<script src="budgetpositionen.js?v=1.484.0"></script>
-<script src="lohnchecklistetemp.js?v=1.484.0"></script>
-<script src="apriko-endpunkte.js?v=1.484.0"></script>
+<script src="apriko-filters.js?v=1.485.0"></script>
+<script src="apriko-api.js?v=1.485.0"></script>
+<script src="lohncheck.js?v=1.485.0"></script>
+<script src="personalbudget.js?v=1.485.0"></script>
+<script src="jahresbudget.js?v=1.485.0"></script>
+<script src="budgetpositionen.js?v=1.485.0"></script>
+<script src="lohnchecklistetemp.js?v=1.485.0"></script>
+<script src="apriko-endpunkte.js?v=1.485.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1037,7 +1037,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.484.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.485.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -1892,10 +1892,15 @@ async function jsonMergeSpeichern(pfad, meine, opts) {
   const basis = jsonBasis[pfad] ? JSON.parse(jsonBasis[pfad]) : null;
   let letzterFehler = null;
   for (let versuch = 0; versuch < 4; versuch++) {
-    let meta = null, frisch = null;
-    try { meta = await graph(url); } catch (e) { meta = null; }
-    if (meta) { try { const d = await graph(url + ":/content", { cache: "no-store" }); frisch = d && typeof d === "object" ? d : null; } catch (e) { frisch = null; } }
-    const ergebnis = (frisch && basis) ? jsonMerge3(frisch, basis, meine) : (frisch && !basis && opts && opts.ohneBasisMergen ? Object.assign({}, frisch, meine) : meine);
+    let meta = null, frisch = null, neu = false;
+    try { meta = await graph(url); }
+    catch (e) { meta = null; neu = /404|itemNotFound/i.test(e.message || ""); if (!neu) throw new Error("Datei nicht prüfbar (" + pfad + "): " + (e.message || e)); }   // 13.10.2026: bei Netz/Token-Fehler nie blind überschreiben
+    if (meta) {
+      try { const d = await graph(url + ":/content", { cache: "no-store" }); frisch = d && typeof d === "object" ? d : null; }
+      catch (e) { throw new Error("Datei nicht lesbar (" + pfad + "): " + (e.message || e)); }
+    }
+    // ohne gemerkte Basis (z.B. Laden war fehlgeschlagen): gegen den frischen Stand mergen — meine Werte ergänzen, frisch bleibt sonst erhalten
+    const ergebnis = frisch ? jsonMerge3(frisch, basis || {}, meine) : meine;
     const headers = meta && meta.eTag ? { "If-Match": meta.eTag } : {};
     try {
       await graph(url + ":/content", { method: "PUT", body: JSON.stringify(ergebnis), headers });
@@ -1904,7 +1909,7 @@ async function jsonMergeSpeichern(pfad, meine, opts) {
     } catch (e) {
       letzterFehler = e;
       if (/412|precondition/i.test(e.message)) { await new Promise(r => setTimeout(r, 300 + Math.random() * 500)); continue; }   // jemand hat dazwischen gespeichert → neu mergen
-      if (!meta && /404|itemNotFound/i.test(e.message)) {
+      if (!meta && neu && /404|itemNotFound/i.test(e.message)) {
         // Ordner/Datei existiert noch nicht
         const ordner = pfad.split("/").slice(0, -1).join("/");
         if (ordner) { try { await graph(`/sites/${siteId}/drive/root/children`, { method: "POST", body: JSON.stringify({ name: ordner, folder: {}, "@microsoft.graph.conflictBehavior": "replace" }) }); } catch (e2) {} }
@@ -9799,16 +9804,26 @@ async function parameterLaden(force) {
   if (!force && crmParameter) return crmParameter;
   let data = null;
   // cache: no-store — sonst liefert der Browser nach einem Speichern + Neuladen u.U. die alte Datei (Benutzergruppen schienen nicht zu greifen, 09.10.2026)
-  let migriert = false;
+  let migriert = false, fehlt = false;
   try { data = await graph(`/sites/${siteId}/drive/root:/${PARAMETER_PFAD}:/content`, { cache: "no-store" }); }
-  catch (e) { data = null; }
-  if (!data || typeof data !== "object") {
-    // Einmalige Migration: neue Datei existiert noch nicht → alte parameter.json übernehmen
+  catch (e) {
+    data = null; fehlt = /404|itemNotFound/i.test(e.message || "");
+    if (!fehlt) {
+      // Netz/Token-Fehler (13.10.2026): NICHT mit leerem Stand weiterarbeiten — ein späteres Speichern hätte die ganze
+      // Datei (Gruppen, Onboarding, Abacus …) mit dem leeren Stand überschrieben. Bisherigen Stand behalten, Speichern gesperrt.
+      crmParameterOk = false; console.warn("parameter_v2.json nicht lesbar:", e.message);
+      if (crmParameter) return crmParameter;
+      throw new Error("Parameter konnten nicht geladen werden: " + (e.message || e));
+    }
+  }
+  if (fehlt) {
+    // Einmalige Migration: neue Datei existiert nachweislich noch nicht → alte parameter.json übernehmen
     try { data = await graph(`/sites/${siteId}/drive/root:/${PARAMETER_PFAD_ALT}:/content`, { cache: "no-store" }); }
-    catch (e) { data = null; }
+    catch (e) { data = null; if (!/404|itemNotFound/i.test(e.message || "")) { crmParameterOk = false; throw new Error("parameter.json nicht lesbar: " + (e.message || e)); } }
     migriert = !!(data && typeof data === "object" && Object.keys(data).length);
   }
   if (!data || typeof data !== "object") data = {};
+  crmParameterOk = true;
   if (!Array.isArray(data.ueberzeit) || !data.ueberzeit.length) {
     data.ueberzeit = [{ gav: "GAV Personalverleih", basis: "basis13" }, { gav: "Bauhauptgewerbe (LMV)", basis: "brutto" }];
   }
@@ -9822,8 +9837,10 @@ async function parameterLaden(force) {
   jsonBasisMerken(PARAMETER_PFAD, data);
   return data;
 }
-let crmParameterGeladen = 0;
+let crmParameterGeladen = 0, crmParameterOk = false;
 async function parameterSpeichern() {
+  if (!crmParameterOk) { await parameterLaden(true); }   // wirft, wenn die Datei weiterhin nicht lesbar ist → nichts wird überschrieben
+  if (!crmParameterOk) throw new Error("Parameter nicht geladen — Speichern abgebrochen, damit nichts überschrieben wird.");
   const ergebnis = await jsonMergeSpeichern(PARAMETER_PFAD, crmParameter || {});
   crmParameter = ergebnis; window.crmParameter = ergebnis; crmParameterGeladen = Date.now();
   toast("Parameter gespeichert");
