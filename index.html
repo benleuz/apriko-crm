@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.474.0"></script>
-<script src="apriko-api.js?v=1.474.0"></script>
-<script src="lohncheck.js?v=1.474.0"></script>
-<script src="personalbudget.js?v=1.474.0"></script>
-<script src="jahresbudget.js?v=1.474.0"></script>
-<script src="budgetpositionen.js?v=1.474.0"></script>
-<script src="lohnchecklistetemp.js?v=1.474.0"></script>
-<script src="apriko-endpunkte.js?v=1.474.0"></script>
+<script src="apriko-filters.js?v=1.476.0"></script>
+<script src="apriko-api.js?v=1.476.0"></script>
+<script src="lohncheck.js?v=1.476.0"></script>
+<script src="personalbudget.js?v=1.476.0"></script>
+<script src="jahresbudget.js?v=1.476.0"></script>
+<script src="budgetpositionen.js?v=1.476.0"></script>
+<script src="lohnchecklistetemp.js?v=1.476.0"></script>
+<script src="apriko-endpunkte.js?v=1.476.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -126,6 +126,16 @@
     .print-only { display: block !important; }
   }
   .print-only { display: none; }
+  /* Grundregel für ALLE Eingabefelder (13.10.2026): Felder ausserhalb von .field (z.B. Notizen auf «Meine Aufgaben»)
+     fielen auf das weisse Browser-Standardfeld zurück und blendeten im Dark Mode. color-scheme sorgt zusätzlich für
+     dunkle native Dropdown-Listen, Datumswähler und Scrollbalken. */
+  html { color-scheme: dark; }
+  html[data-theme="light"] { color-scheme: light; }
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="button"]):not([type="submit"]), select, textarea {
+    background: var(--bg-input, var(--bg-card)); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius-sm); font-family: inherit;
+  }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
   #app.ready { display: grid; }
 
   /* Sidebar */
@@ -1027,7 +1037,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.474.0</span> · <span id="app-build-date">12.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.476.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -5025,8 +5035,10 @@ function renderDashboard(el) {
         <button class="btn btn-sm" onclick="crmCopyCustomerEmails('user')" title="Öffnet eine neue Mail mit allen Adressen in Bcc (zusätzlich in der Zwischenablage)">✉ An User${emailCounts ? " (" + emailCounts.user + ")" : ""}</button>
         <button class="btn btn-sm" onclick="crmExportCustomerEmails()" title="Excel mit ALLEN Kunden (aktuelle Auswahl) und ihren E-Mails — auch Kunden ohne Adresse, damit Lücken sichtbar sind">⇩ E-Mails exportieren</button>
         <button class="btn btn-sm" onclick="crmKundenumgebungenOeffnen()" title="Öffnet die App-Links aller aktiven Kunden der Auswahl in je einem neuen Tab (Pop-ups für das CRM einmalig erlauben)">🌐 Alle Kundenumgebungen öffnen</button>
+        <button class="btn btn-sm" id="hc-btn" onclick="hcStart()" title="Fragt /healthchecks-api aller aktiven Kundenumgebungen der Auswahl ab (wie Production-Healthcheck.ps1)">💓 Healthcheck</button>
         <span style="font-size:11px;color:var(--text-faint);margin-left:4px">Öffnet eine neue Mail mit den Adressen der Kunden (Kennzeichnung «Ist Kunde») in Bcc. Adressen kommen aus den Kontakten mit Funktion Entscheidungsträger/User (und den alten Firmenfeldern).</span>
       </div>
+      <div id="hc-panel">${hcPanelHtml()}</div>
     </div>
 
     <div class="detail-grid">
@@ -15667,6 +15679,104 @@ function crmKundenumgebungenOeffnen() {
       ${ohne.length ? `<div style="font-weight:600;margin:12px 0 4px;color:var(--text-dim)">Ohne App-Link (${ohne.length})</div><div style="font-size:12px;color:var(--text-faint)">${ohne.map(c => escape(c.Title)).join(" · ")}</div>` : ""}`,
       [`<button class="btn btn-primary" onclick="closeModal()">Schliessen</button>`]);
   } else toast(offen + " Kundenumgebungen geöffnet.");
+}
+/* ---------- Healthcheck der Kundenumgebungen (13.10.2026) — Browser-Version von Production-Healthcheck.ps1 ----------
+   Für jede aktive Kundenumgebung der Auswahl (App-Link → Host) wird https://<host>/healthchecks-api abgefragt und wie im
+   Skript ausgewertet: alle entries «Healthy» → ✅, bis 3 Probleme → ⚠️ mit Namen, mehr → ⚠️ Anzahl, keine Daten → ℹ️,
+   Fehler → ❌. Da die Abfrage aus dem Browser kommt, braucht die API einen CORS-Header für die CRM-Domain; fehlt er,
+   wird mit einer no-cors-Anfrage wenigstens die Erreichbarkeit geprüft (Status «erreichbar, Details nicht lesbar»). */
+const hcState = { laeuft: false, ergebnisse: {}, zuletzt: 0, auto: false, timer: null };
+function hcUmgebungen() {
+  const scope = filters.dashboardEmailScope || "alle";
+  const map = {};
+  cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv" && c.CompanyId && crmCompanyMatchesScope(c.CompanyId, scope)).forEach(c => {
+    const url = normalizeUrl(appLinkText(c.id, c.Link)) || appLinkText(c.id, c.Link);
+    if (!url || !/^https?:/i.test(url)) return;
+    let host = ""; try { host = new URL(url).hostname.toLowerCase(); } catch (e) { return; }
+    if (!host) return;
+    if (!map[host]) map[host] = { host, kunden: [], url: "https://" + host };
+    map[host].kunden.push(c.Title || "");
+  });
+  return Object.values(map).sort((a, b) => a.host.localeCompare(b.host));
+}
+function hcAuswerten(apiResponse) {
+  const unhealthy = []; let hasData = false;
+  const services = Array.isArray(apiResponse) ? apiResponse : [apiResponse];
+  services.forEach(s => {
+    if (s && Array.isArray(s.entries) && s.entries.length) {
+      hasData = true;
+      s.entries.forEach(e => { if (e && e.status !== "Healthy") unhealthy.push(`${s.name || "?"}: ${e.name || "?"} (${e.status || "?"})`); });
+    } else if (s && s.entries && typeof s.entries === "object" && Object.keys(s.entries).length) {
+      // Format der HealthChecks-UI /health-Endpunkte: entries als Objekt
+      hasData = true;
+      Object.keys(s.entries).forEach(k => { const e = s.entries[k]; if (e && e.status !== "Healthy") unhealthy.push(`${s.name || "?"}: ${k} (${e.status || "?"})`); });
+    }
+  });
+  if (!hasData) return { stufe: "info", text: "ℹ️ Keine Health-Daten", details: [] };
+  if (!unhealthy.length) return { stufe: "ok", text: "✅ Alle Services healthy", details: [] };
+  if (unhealthy.length <= 3) return { stufe: "warn", text: "⚠️ Probleme: " + unhealthy.join(" | "), details: unhealthy };
+  return { stufe: "warn", text: `⚠️ ${unhealthy.length} Services unhealthy`, details: unhealthy };
+}
+async function hcAbfragen(u) {
+  const url = u.url + "/healthchecks-api";
+  const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const r = await fetch(url, { cache: "no-store", signal: ctrl.signal });
+    clearTimeout(t);
+    if (!r.ok) return { stufe: "fail", text: `❌ /healthchecks-api FAILED (${r.status})`, details: [] };
+    let data; try { data = await r.json(); } catch (e) { return { stufe: "fail", text: "❌ Antwort kein JSON", details: [] }; }
+    return hcAuswerten(data);
+  } catch (e) {
+    clearTimeout(t);
+    if (e && e.name === "AbortError") return { stufe: "fail", text: "❌ Timeout (8 s)", details: [] };
+    // CORS oder Netzwerk: Erreichbarkeit ohne Antwortinhalt prüfen
+    const ctrl2 = new AbortController(); const t2 = setTimeout(() => ctrl2.abort(), 8000);
+    try { await fetch(url, { mode: "no-cors", cache: "no-store", signal: ctrl2.signal }); clearTimeout(t2); return { stufe: "cors", text: "🟦 Erreichbar — Details nicht lesbar (CORS-Header fehlt)", details: [] }; }
+    catch (e2) { clearTimeout(t2); return { stufe: "fail", text: "❌ Nicht erreichbar", details: [] }; }
+  }
+}
+async function hcStart(auto) {
+  if (hcState.laeuft) return;
+  const umg = hcUmgebungen();
+  if (!umg.length) { toast("Keine aktiven Kunden mit App-Link in der Auswahl.", true); return; }
+  hcState.laeuft = true; hcPanelRender();
+  umg.forEach(u => { if (!hcState.ergebnisse[u.host]) hcState.ergebnisse[u.host] = { ...u, stufe: "pending", text: "Checking …", details: [] }; else hcState.ergebnisse[u.host].kunden = u.kunden; });
+  // max. 6 parallel
+  let i = 0;
+  const worker = async () => { while (i < umg.length) { const u = umg[i++]; const res = await hcAbfragen(u); hcState.ergebnisse[u.host] = { ...u, ...res, zeit: Date.now() }; hcPanelRender(); } };
+  await Promise.all(Array.from({ length: Math.min(6, umg.length) }, worker));
+  // Umgebungen, die nicht mehr in der Auswahl sind, entfernen
+  Object.keys(hcState.ergebnisse).forEach(h => { if (!umg.some(u => u.host === h)) delete hcState.ergebnisse[h]; });
+  hcState.laeuft = false; hcState.zuletzt = Date.now(); hcPanelRender();
+  if (!auto) { const n = Object.values(hcState.ergebnisse); const schlecht = n.filter(r => r.stufe === "warn" || r.stufe === "fail").length; toast(schlecht ? `Healthcheck: ${schlecht} von ${n.length} Umgebungen mit Problemen` : `Healthcheck: alle ${n.length} Umgebungen OK`, !!schlecht); }
+}
+function hcAutoToggle(an) {
+  hcState.auto = !!an; clearInterval(hcState.timer); hcState.timer = null;
+  if (hcState.auto) hcState.timer = setInterval(() => { if (currentView === "dashboard" && !document.hidden && document.getElementById("hc-panel")) hcStart(true); else if (currentView !== "dashboard") hcAutoToggle(false); }, 30000);
+  hcPanelRender();
+}
+function hcPanelRender() { const el = document.getElementById("hc-panel"); if (el) el.innerHTML = hcPanelHtml(); }
+function hcPanelHtml() {
+  const rows = Object.values(hcState.ergebnisse).sort((a, b) => a.host.localeCompare(b.host));
+  if (!rows.length && !hcState.laeuft) return "";
+  const farbe = { ok: "var(--success, #3fb950)", warn: "var(--warn, #d29922)", fail: "var(--danger, #f85149)", info: "var(--text-faint)", cors: "var(--accent-2)", pending: "var(--text-faint)" };
+  const n = { ok: 0, warn: 0, fail: 0, info: 0, cors: 0, pending: 0 }; rows.forEach(r => n[r.stufe] = (n[r.stufe] || 0) + 1);
+  return `<div style="padding:0 16px 14px">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px;font-size:12px">
+      <b>Healthcheck</b>
+      <span style="color:${farbe.ok}">✅ ${n.ok}</span><span style="color:${farbe.warn}">⚠️ ${n.warn}</span><span style="color:${farbe.fail}">❌ ${n.fail}</span>${n.cors ? `<span style="color:${farbe.cors}">🟦 ${n.cors}</span>` : ""}${n.info ? `<span style="color:${farbe.info}">ℹ️ ${n.info}</span>` : ""}
+      <span style="color:var(--text-faint)">${hcState.laeuft ? "… läuft" : hcState.zuletzt ? "zuletzt " + new Date(hcState.zuletzt).toLocaleTimeString("de-CH", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : ""}</span>
+      <label style="margin-left:auto;display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--text-dim)"><input type="checkbox" ${hcState.auto ? "checked" : ""} onchange="hcAutoToggle(this.checked)"> alle 30 s aktualisieren</label>
+      <button class="btn btn-sm" onclick="hcStart()" ${hcState.laeuft ? "disabled" : ""}>↻ Jetzt prüfen</button>
+    </div>
+    <table style="width:100%;font-size:12px"><thead><tr><th style="text-align:left">Umgebung</th><th style="text-align:left">Kunde(n)</th><th style="text-align:left">Status</th></tr></thead><tbody>
+    ${rows.map(r => `<tr>
+      <td style="white-space:nowrap"><a href="${escape(r.url)}" target="_blank" rel="noopener" style="color:var(--accent-2)">${escape(r.host.replace(/\.apriko\.app$/, ""))}</a></td>
+      <td style="color:var(--text-dim)">${escape(r.kunden.join(", "))}</td>
+      <td style="color:${farbe[r.stufe] || "var(--text)"}" title="${escape((r.details || []).join("\n"))}">${escape(r.text)}</td></tr>`).join("")}
+    </tbody></table>
+    ${n.cors ? `<div style="font-size:11px;color:var(--text-faint);margin-top:6px">🟦 = Umgebung antwortet, aber der Browser darf die Antwort nicht lesen. Damit die Details wie im PowerShell-Skript erscheinen, muss /healthchecks-api den Header <code>Access-Control-Allow-Origin: ${escape(location.origin)}</code> liefern.</div>` : ""}
+  </div>`;
 }
 async function crmCopyCustomerEmails(kind) {
   if (crmStamm === null) { await crmLoadStamm(); }
