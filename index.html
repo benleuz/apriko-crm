@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.478.0"></script>
-<script src="apriko-api.js?v=1.478.0"></script>
-<script src="lohncheck.js?v=1.478.0"></script>
-<script src="personalbudget.js?v=1.478.0"></script>
-<script src="jahresbudget.js?v=1.478.0"></script>
-<script src="budgetpositionen.js?v=1.478.0"></script>
-<script src="lohnchecklistetemp.js?v=1.478.0"></script>
-<script src="apriko-endpunkte.js?v=1.478.0"></script>
+<script src="apriko-filters.js?v=1.480.0"></script>
+<script src="apriko-api.js?v=1.480.0"></script>
+<script src="lohncheck.js?v=1.480.0"></script>
+<script src="personalbudget.js?v=1.480.0"></script>
+<script src="jahresbudget.js?v=1.480.0"></script>
+<script src="budgetpositionen.js?v=1.480.0"></script>
+<script src="lohnchecklistetemp.js?v=1.480.0"></script>
+<script src="apriko-endpunkte.js?v=1.480.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1037,7 +1037,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.478.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.480.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -2105,6 +2105,7 @@ function mehrbenutzerStart() {
   if (mbTimer) return;
   fetch(location.pathname, { method: "HEAD", cache: "no-store" }).then(r => { mbEtag = r.headers.get("etag") || r.headers.get("last-modified") || null; }).catch(() => {});
   versionPruefen();
+  crmLoadKundenFlags().catch(() => {});   // App-Links etc. früh laden (Healthcheck, «Alle Kundenumgebungen öffnen»)
   mbTimer = setInterval(mehrbenutzerTick, 60000);
 }
 /* Versionskontrolle bei jedem Login (12.10.2026): die auf dem Server liegende index.html wird frisch geladen und ihre
@@ -13855,6 +13856,7 @@ function renderCustomers(el) {
     <input class="search-input" placeholder="Suchen..." oninput="filterTable(this.value, 'cust-row')">
     ${isAdmin() ? `<button class="btn" onclick="geloeschteAnzeigen()" title="Gelöschte Kunden, Firmen und Kontakte ansehen und wiederherstellen">🗑 Gelöschte${(cacheGeloescht.customers || []).length + (cacheGeloescht.companies || []).length + (cacheGeloescht.contacts || []).length ? " (" + ((cacheGeloescht.customers || []).length + (cacheGeloescht.companies || []).length + (cacheGeloescht.contacts || []).length) + ")" : ""}</button>` : ""}
     <label class="btn" style="cursor:pointer" title="Tabelle «Kundenumgebungen» (HTML-Export) einlesen: Link, Ansprechperson, interne Zuständigkeiten (LoBu/FiBu), Workflows ergänzen — nur leere Felder werden gefüllt">⇧ Kundenumgebungen (HTML)<input type="file" accept=".html,.htm,text/html" hidden onchange="kuImport(this)"></label>
+    ${isAdmin() ? `<button class="btn" onclick="appLinksNachSharepoint()" title="Einmalig: App-Links aus der CRM-Datei (crm_kunden_flags.json) in die SharePoint-Textspalte «AppLink» der Liste Customers übertragen — danach ist SharePoint die einzige Quelle">⇨ App-Links nach SharePoint</button>` : ""}
     <button class="btn btn-primary" onclick="newCustomer()">+ Neuer Kunde</button>
   `;
   if (crmVertragLinks === null && typeof siteId !== "undefined" && siteId) {
@@ -14380,8 +14382,10 @@ async function kuImport(input) {
     const linkNorm = link ? (normalizeUrl(link) || link) : "";
     const aktuell = appLinkText(kunde.id, kunde.Link) || "";
     if (linkNorm && /^https?:/i.test(linkNorm)) {
-      if (!flags.applink) aend.push({ art: "link", label: "App-Link", wert: linkNorm + (aktuell ? " (bisher: " + aktuell + ")" : ""), url: linkNorm });
-      else if (String(flags.applink).replace(/\/$/, "").toLowerCase() !== linkNorm.replace(/\/$/, "").toLowerCase()) aend.push({ art: "linkneu", label: "App-Link abweichend", wert: linkNorm + " (im CRM: " + flags.applink + ") — übernehmen?", url: linkNorm, optional: true });
+      const gesetzt = (typeof kunde.AppLink === "string" && kunde.AppLink.trim()) || flags.applink || "";   // AppLink-Spalte oder JSON-Datei
+      const gleich = (a, b) => String(a).replace(/\/$/, "").toLowerCase() === String(b).replace(/\/$/, "").toLowerCase();
+      if (!gesetzt) { if (!gleich(aktuell, linkNorm)) aend.push({ art: "link", label: "App-Link", wert: linkNorm + (aktuell ? " (bisher: " + aktuell + ")" : ""), url: linkNorm }); }
+      else if (!gleich(gesetzt, linkNorm)) aend.push({ art: "linkneu", label: "App-Link abweichend", wert: linkNorm + " (im CRM: " + gesetzt + ") — übernehmen?", url: linkNorm, optional: true });
     }
     // Ansprechperson → Kontakt
     const ap = ci.ap >= 0 && r[ci.ap] ? r[ci.ap].text : "";
@@ -14438,8 +14442,8 @@ async function kuImportUebernehmen() {
     for (const i of idx) {
       const p = kuImportPlan[i]; if (!p || !p.kunde) continue; const key = String(p.kunde.id);
       for (const a of p.aend) {
-        if (a.art === "link") { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}, { applink: a.url || a.wert }); flagsGeaendert = true; n++; }
-        else if (a.art === "linkneu") { const cb = document.querySelector(`.ku-opt[data-i="${i}"][data-art="linkneu"]`); if (cb && cb.checked) { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}, { applink: a.url }); flagsGeaendert = true; n++; } }
+        if (a.art === "link") { if (await appLinkSpalteVorhanden()) { try { await updateItem("Customers", key, { AppLink: a.url || a.wert }); n++; kundenGeaendert = true; } catch (e) { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}, { applink: a.url || a.wert }); flagsGeaendert = true; n++; } } else { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}, { applink: a.url || a.wert }); flagsGeaendert = true; n++; } }
+        else if (a.art === "linkneu") { const cb = document.querySelector(`.ku-opt[data-i="${i}"][data-art="linkneu"]`); if (cb && cb.checked) { if (await appLinkSpalteVorhanden()) { try { await updateItem("Customers", key, { AppLink: a.url }); n++; kundenGeaendert = true; } catch (e) { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}, { applink: a.url }); flagsGeaendert = true; n++; } } else { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}, { applink: a.url }); flagsGeaendert = true; n++; } } }
         else if (a.art === "rolle") { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}); crmKundenFlags[key][a.key] = a.email; flagsGeaendert = true; n++; }
         else if (a.art === "flag") { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}); crmKundenFlags[key][a.key] = true; flagsGeaendert = true; n++; }
         else if (a.art === "factoring") { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}, { factoring: true }); if (a.notiz && !crmKundenFlags[key].factoringNotiz) crmKundenFlags[key].factoringNotiz = a.notiz; flagsGeaendert = true; n++; }
@@ -14692,6 +14696,8 @@ async function saveCustomer(id) {
     TargetARR: val("f-targetarr") ? parseFloat(val("f-targetarr")) : null,
     Notes: val("f-notes")
   };
+  const appLinkInSp = await appLinkSpalteVorhanden();
+  if (appLinkInSp) data.AppLink = normalizeUrl(val("f-link")) || "";
   if (!data.CompanyId) return toast("Firma erforderlich", true);
   if (!data.Title) return toast("Konnte Vertragsname nicht generieren — bitte Firma wählen", true);
   const vertragNeu = {
@@ -14729,7 +14735,7 @@ async function saveCustomer(id) {
       const neuFibu = document.getElementById("f-wf-fibu")?.checked || false;
       const neuHatDb = document.getElementById("f-wf-hatdb")?.checked || false;
       const neuMinfee = val("f-minfee");
-      const neuApplink = normalizeUrl(val("f-link")) || "";
+      const neuApplink = appLinkInSp ? "" : (normalizeUrl(val("f-link")) || "");   // liegt der Link in der SharePoint-Spalte, bleibt die JSON-Datei leer
       const neuMinSaas = parseFloat(val("f-minsaas")) || 0;
       const neuMinBpo = parseFloat(val("f-minbpo")) || 0;
       const neuZielExt = parseFloat(val("f-zielext")) || 0;
@@ -15696,7 +15702,8 @@ async function crmExportCustomerEmails() {
 }
 /* Alle Kundenumgebungen (App-Links) der aktuellen Auswahl in neuen Tabs öffnen — Browser blockieren mehrere Pop-ups,
    daher: versuchen, zählen, und bei Blockade die Liste zum Klicken anzeigen (plus Hinweis, Pop-ups zu erlauben). */
-function crmKundenumgebungenOeffnen() {
+async function crmKundenumgebungenOeffnen() {
+  if (crmKundenFlags === null) { try { await crmLoadKundenFlags(); } catch (e) {} }   // normalerweise schon nach dem Login geladen (Pop-up-Freigabe bleibt so erhalten)
   const scope = filters.dashboardEmailScope || "alle";
   const kunden = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv" && c.CompanyId && crmCompanyMatchesScope(c.CompanyId, scope))
     .map(c => ({ c, url: normalizeUrl(appLinkText(c.id, c.Link)) || appLinkText(c.id, c.Link) })).filter(x => x.url && /^https?:/i.test(x.url))
@@ -15788,6 +15795,8 @@ async function hcAbfragen(u) {
 }
 async function hcStart(auto) {
   if (hcState.laeuft) return;
+  // App-Links liegen grösstenteils in crm_kunden_flags.json (Import «Kundenumgebungen») — ohne diese Datei fehlten Kunden wie ksk (13.10.2026)
+  try { await crmLoadKundenFlags(); } catch (e) {}
   const umg = hcUmgebungen();
   if (!umg.length) { toast("Keine aktiven Kunden mit App-Link in der Auswahl.", true); return; }
   hcState.laeuft = true; hcPanelRender();
@@ -16509,9 +16518,55 @@ function minFeeText(custId, spFallback) {
   const t = ((crmKundenFlags || {})[String(custId)] || {}).minfee;
   return t !== undefined && t !== null ? t : (spFallback || "");
 }
+/* App-Link eines Kunden. Reihenfolge (13.10.2026): Textspalte «AppLink» in der SharePoint-Liste Customers (führend, sofern die
+   Spalte existiert) → crm_kunden_flags.json (applink, Altbestand/Import) → Hyperlink-Spalte «Link» (nur lesbar; Hyperlink-
+   Spalten lassen sich über Graph nicht schreiben, deshalb gab es den Umweg über die JSON-Datei). */
 function appLinkText(custId, spLinkField) {
+  const cu = (cache.customers || []).find(x => String(x.id) === String(custId));
+  if (cu && typeof cu.AppLink === "string" && cu.AppLink.trim()) return cu.AppLink.trim();
   const t = ((crmKundenFlags || {})[String(custId)] || {}).applink;
   return t !== undefined && t !== null ? t : linkUrl(spLinkField);
+}
+let appLinkSpalteVorh = null;   // null = noch nicht geprüft
+async function appLinkSpalteVorhanden() {
+  if (appLinkSpalteVorh !== null) return appLinkSpalteVorh;
+  try {
+    const r = await graph(`/sites/${siteId}/lists/${listIds.Customers}/columns?$select=name,text`);
+    appLinkSpalteVorh = !!((r && r.value) || []).find(c => c.name === "AppLink" && c.text);
+  } catch (e) { appLinkSpalteVorh = false; }
+  return appLinkSpalteVorh;
+}
+/* Einmalig: alle App-Links aus crm_kunden_flags.json / Hyperlink-Spalte in die Textspalte AppLink übertragen (Admin). */
+async function appLinksNachSharepoint() {
+  if (!isAdmin()) { toast("Nur für Admins.", true); return; }
+  if (!(await appLinkSpalteVorhanden())) {
+    showModal("Spalte «AppLink» fehlt", `<div style="font-size:13px;line-height:1.6">In der SharePoint-Liste <b>Customers</b> gibt es noch keine Spalte <b>AppLink</b>.<br><br>
+      Bitte in SharePoint anlegen: Liste Customers → <i>+ Spalte hinzufügen</i> → <b>Text (eine Zeile)</b> → Name exakt <code>AppLink</code> → Speichern.<br>
+      Danach diesen Knopf erneut drücken. (Hyperlink-Spalten wie «Link» lassen sich über die Schnittstelle leider nicht beschreiben, Textspalten schon.)</div>`,
+      [`<button class="btn btn-primary" onclick="closeModal()">OK</button>`]);
+    return;
+  }
+  await crmLoadKundenFlags();
+  const todo = (cache.customers || []).map(c => {
+    const vorhanden = (typeof c.AppLink === "string" ? c.AppLink.trim() : "");
+    const flag = ((crmKundenFlags || {})[String(c.id)] || {}).applink || "";
+    const alt = linkUrl(c.Link) || "";
+    const ziel = normalizeUrl(flag || alt) || "";
+    return { c, vorhanden, ziel, flag };
+  }).filter(x => x.ziel && x.ziel !== x.vorhanden);
+  const nurFlags = (cache.customers || []).filter(c => ((crmKundenFlags || {})[String(c.id)] || {}).applink && (typeof c.AppLink === "string" && c.AppLink.trim()));
+  if (!todo.length && !nurFlags.length) { toast("Alle App-Links liegen bereits in der Spalte AppLink."); return; }
+  if (!confirm(`${todo.length} App-Link(s) in die SharePoint-Spalte AppLink übertragen` + (nurFlags.length ? ` und ${nurFlags.length} doppelte Einträge aus der JSON-Datei entfernen` : "") + `?\n\n` + todo.slice(0, 15).map(x => `• ${x.c.Title}: ${x.ziel}`).join("\n") + (todo.length > 15 ? `\n… und ${todo.length - 15} weitere` : ""))) return;
+  let ok = 0; const fehler = [];
+  for (const x of todo) {
+    try { await updateItem("Customers", x.c.id, { AppLink: x.ziel }); ok++; if (crmKundenFlags[String(x.c.id)]) delete crmKundenFlags[String(x.c.id)].applink; }
+    catch (e) { fehler.push(x.c.Title + ": " + (e.message || e)); }
+  }
+  nurFlags.forEach(c => { if (crmKundenFlags[String(c.id)]) delete crmKundenFlags[String(c.id)].applink; });
+  Object.keys(crmKundenFlags).forEach(k => { if (crmKundenFlags[k] && !Object.keys(crmKundenFlags[k]).length) delete crmKundenFlags[k]; });
+  try { await crmSaveKundenFlags(); } catch (e) { fehler.push("Kundenflags speichern: " + (e.message || e)); }
+  await reload("Customers"); render();
+  if (fehler.length) alert(`${ok} übertragen, ${fehler.length} Fehler:\n` + fehler.join("\n")); else toast(`${ok} App-Link(s) nach SharePoint übertragen.`);
 }
 
 function linkUrl(linkField) {
