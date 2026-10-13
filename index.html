@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.476.0"></script>
-<script src="apriko-api.js?v=1.476.0"></script>
-<script src="lohncheck.js?v=1.476.0"></script>
-<script src="personalbudget.js?v=1.476.0"></script>
-<script src="jahresbudget.js?v=1.476.0"></script>
-<script src="budgetpositionen.js?v=1.476.0"></script>
-<script src="lohnchecklistetemp.js?v=1.476.0"></script>
-<script src="apriko-endpunkte.js?v=1.476.0"></script>
+<script src="apriko-filters.js?v=1.478.0"></script>
+<script src="apriko-api.js?v=1.478.0"></script>
+<script src="lohncheck.js?v=1.478.0"></script>
+<script src="personalbudget.js?v=1.478.0"></script>
+<script src="jahresbudget.js?v=1.478.0"></script>
+<script src="budgetpositionen.js?v=1.478.0"></script>
+<script src="lohnchecklistetemp.js?v=1.478.0"></script>
+<script src="apriko-endpunkte.js?v=1.478.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1037,7 +1037,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.476.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.478.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -15230,6 +15230,8 @@ function renderProfiles(el) {
           <span style="color:var(--text-faint)">Die Person meldet sich dann mit ihrem Microsoft-Konto an — ein Profil ist nicht nötig, die Gruppe reicht.</span>
           ${(() => { const ohne = Object.keys(b.zuweisung).filter(e => !(cache.userprofiles || []).some(p => String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase() === e)); return ohne.length ? `<div style="flex-basis:100%;color:var(--text-dim)">Nur über Gruppe freigeschaltet (ohne Profil): ${ohne.map(e => `<span style="display:inline-block;margin:2px 6px 0 0">${escape(e)} <span style="color:var(--text-faint)">(${escape((b.gruppen[b.zuweisung[e]] || {}).name || "?")})</span> <a href="#" onclick="bgZuweisen(${tkJs(e)}, '');return false" title="Freischaltung entfernen" style="color:var(--danger);text-decoration:none">✕</a></span>`).join("")}</div>` : ""; })()}
         </div></div>`; })()}
+      ${(() => { const mitIndiv = profiles.filter(p => (Array.isArray(p.AllowedViews) ? p.AllowedViews : (typeof p.AllowedViews === "string" ? p.AllowedViews.split(/[,;]/).map(s => s.trim()).filter(Boolean) : [])).length).length;
+        return mitIndiv ? `<div style="display:flex;align-items:center;gap:10px;margin:0 0 10px;font-size:12px;color:var(--text-dim)"><span>${mitIndiv} Profil(e) haben noch individuelle Bereiche neben der Gruppe.</span><button class="btn btn-sm" onclick="bgIndividuellLeeren()" title="Setzt bei allen Profilen die individuellen Bereiche auf leer — es gelten danach nur noch die Gruppenrechte">🧹 Individuelle Bereiche bei allen entfernen</button></div>` : ""; })()}
       <table class="table">
         <thead><tr>
           <th style="width:280px">E-Mail</th>
@@ -15431,6 +15433,39 @@ async function saveProfile(profileId) {
   }
 }
 
+/* Einmalige Bereinigung (13.10.2026): individuelle AllowedViews bei allen Profilen leeren, damit nur noch Gruppenrechte gelten.
+   Profile ohne Gruppenzuweisung werden übersprungen (sie würden sonst jeden Zugriff verlieren) und gemeldet. Role bleibt unverändert. */
+async function bgIndividuellLeeren() {
+  if (!isAdmin()) { toast("Nur für Admins.", true); return; }
+  await parameterLaden(true);
+  const bg = bgParam();
+  const alle = (cache.userprofiles || []).map(p => {
+    const email = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase();
+    const views = Array.isArray(p.AllowedViews) ? p.AllowedViews : (typeof p.AllowedViews === "string" ? p.AllowedViews.split(/[,;]/).map(s => s.trim()).filter(Boolean) : []);
+    return { p, email, views, gruppe: bg.zuweisung[email] || "" };
+  }).filter(x => x.views.length);
+  if (!alle.length) { toast("Keine individuellen Bereiche vorhanden."); return; }
+  const ohneGruppe = alle.filter(x => !x.gruppe), mitGruppe = alle.filter(x => x.gruppe);
+  const txt = `${mitGruppe.length} Profil(e) werden auf «nur Gruppenrechte» gesetzt:\n${mitGruppe.map(x => `• ${x.email} → ${(bg.gruppen[x.gruppe] || {}).name || x.gruppe}`).join("\n")}` +
+    (ohneGruppe.length ? `\n\nÜBERSPRUNGEN (keine Gruppe zugewiesen, würden sonst alles verlieren):\n${ohneGruppe.map(x => "• " + x.email).join("\n")}\n→ zuerst eine Gruppe zuweisen, dann erneut ausführen.` : "") +
+    `\n\nFortfahren?`;
+  if (!mitGruppe.length) { alert(txt.replace("Fortfahren?", "")); return; }
+  if (!confirm(txt)) return;
+  let ok = 0; const fehler = [];
+  for (const x of mitGruppe) {
+    try { await updateItem("UserProfiles", x.p.id, { "AllowedViews@odata.type": "Collection(Edm.String)", AllowedViews: [] }); ok++; }
+    catch (e) {
+      // manche Tenants akzeptieren das Leeren eines Multi-Choice nur mit null
+      try { await updateItem("UserProfiles", x.p.id, { AllowedViews: null }); ok++; }
+      catch (e2) { fehler.push(x.email + ": " + (e2.message || e2)); }
+    }
+  }
+  await reload("UserProfiles");
+  if (currentUser && !currentUser.isSuperAdmin) { currentUser = resolveCurrentUser(currentUser.email); applyPermissionsToNav(); }
+  render();
+  if (fehler.length) alert(`${ok} bereinigt, ${fehler.length} Fehler:\n` + fehler.join("\n"));
+  else toast(`${ok} Profil(e) bereinigt — es gelten nur noch Gruppenrechte.`);
+}
 async function deleteProfile(profileId) {
   const p = (cache.userprofiles || []).find(x => x.id == profileId);
   if (!p) return;
@@ -15688,16 +15723,32 @@ function crmKundenumgebungenOeffnen() {
 const hcState = { laeuft: false, ergebnisse: {}, zuletzt: 0, auto: false, timer: null };
 function hcUmgebungen() {
   const scope = filters.dashboardEmailScope || "alle";
-  const map = {};
+  const map = {}; hcState.ohneLink = [];
   cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv" && c.CompanyId && crmCompanyMatchesScope(c.CompanyId, scope)).forEach(c => {
     const url = normalizeUrl(appLinkText(c.id, c.Link)) || appLinkText(c.id, c.Link);
-    if (!url || !/^https?:/i.test(url)) return;
-    let host = ""; try { host = new URL(url).hostname.toLowerCase(); } catch (e) { return; }
-    if (!host) return;
+    let host = ""; if (url && /^https?:/i.test(url)) { try { host = new URL(url).hostname.toLowerCase(); } catch (e) { host = ""; } }
+    if (!host) { hcState.ohneLink.push(c.Title || ""); return; }
     if (!map[host]) map[host] = { host, kunden: [], url: "https://" + host };
     map[host].kunden.push(c.Title || "");
   });
+  // Zusätzliche (interne) Umgebungen aus parameter_v2.json → healthcheck.extra, z.B. ["sales", "staging", "worknet-svc"]
+  (((crmParameter || {}).healthcheck || {}).extra || []).forEach(s => {
+    const slug = String(s || "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, ""); if (!slug) return;
+    const host = slug.includes(".") ? slug : slug + ".apriko.app";
+    if (!map[host]) map[host] = { host, kunden: [], url: "https://" + host, extra: true }; else map[host].extra = true;
+  });
   return Object.values(map).sort((a, b) => a.host.localeCompare(b.host));
+}
+async function hcExtraBearbeiten() {
+  if (!isAdmin()) { toast("Nur für Admins.", true); return; }
+  await parameterLaden(true);
+  const aktuell = (((crmParameter || {}).healthcheck || {}).extra || []).join(", ");
+  const v = prompt("Zusätzliche Umgebungen (interne / ohne Kunde), kommagetrennt — Kurzname reicht (z.B. sales, staging, worknet-svc):", aktuell);
+  if (v === null) return;
+  crmParameter.healthcheck = crmParameter.healthcheck || {};
+  crmParameter.healthcheck.extra = v.split(/[,\s;]+/).map(s => s.trim()).filter(Boolean);
+  await parameterSpeichern();
+  hcState.ergebnisse = {}; hcStart();
 }
 function hcAuswerten(apiResponse) {
   const unhealthy = []; let hasData = false;
@@ -15772,9 +15823,13 @@ function hcPanelHtml() {
     <table style="width:100%;font-size:12px"><thead><tr><th style="text-align:left">Umgebung</th><th style="text-align:left">Kunde(n)</th><th style="text-align:left">Status</th></tr></thead><tbody>
     ${rows.map(r => `<tr>
       <td style="white-space:nowrap"><a href="${escape(r.url)}" target="_blank" rel="noopener" style="color:var(--accent-2)">${escape(r.host.replace(/\.apriko\.app$/, ""))}</a></td>
-      <td style="color:var(--text-dim)">${escape(r.kunden.join(", "))}</td>
+      <td style="color:var(--text-dim)">${escape(r.kunden.join(", "))}${r.extra ? `<span style="color:var(--text-faint);font-size:11px">${r.kunden.length ? " · " : ""}intern / manuell</span>` : ""}</td>
       <td style="color:${farbe[r.stufe] || "var(--text)"}" title="${escape((r.details || []).join("\n"))}">${escape(r.text)}</td></tr>`).join("")}
     </tbody></table>
+    <div style="font-size:11px;color:var(--text-faint);margin-top:6px;display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+      <span>${rows.length} Umgebung(en) aus den App-Links der aktiven Kunden${(hcState.ohneLink || []).length ? ` · <a href="#" style="color:var(--warn)" title="${escape(hcState.ohneLink.join("\n"))}" onclick="showModal('Aktive Kunden ohne App-Link', '<div style=&quot;font-size:12px;line-height:1.7&quot;>' + ${tkJs(hcState.ohneLink.slice().sort().map(n => escape(n)).join("<br>"))} + '</div>', ['<button class=&quot;btn btn-primary&quot; onclick=&quot;closeModal()&quot;>Schliessen</button>']);return false">${hcState.ohneLink.length} aktive Kunden ohne App-Link</a> (im Kunden den Link erfassen, dann werden sie geprüft)` : ""}</span>
+      ${isAdmin() ? `<a href="#" onclick="hcExtraBearbeiten();return false" style="color:var(--accent-2)">+ weitere Umgebungen (intern, z.B. sales, staging)</a>` : ""}
+    </div>
     ${n.cors ? `<div style="font-size:11px;color:var(--text-faint);margin-top:6px">🟦 = Umgebung antwortet, aber der Browser darf die Antwort nicht lesen. Damit die Details wie im PowerShell-Skript erscheinen, muss /healthchecks-api den Header <code>Access-Control-Allow-Origin: ${escape(location.origin)}</code> liefern.</div>` : ""}
   </div>`;
 }
