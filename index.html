@@ -23,14 +23,14 @@
 })();
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.480.0"></script>
-<script src="apriko-api.js?v=1.480.0"></script>
-<script src="lohncheck.js?v=1.480.0"></script>
-<script src="personalbudget.js?v=1.480.0"></script>
-<script src="jahresbudget.js?v=1.480.0"></script>
-<script src="budgetpositionen.js?v=1.480.0"></script>
-<script src="lohnchecklistetemp.js?v=1.480.0"></script>
-<script src="apriko-endpunkte.js?v=1.480.0"></script>
+<script src="apriko-filters.js?v=1.482.0"></script>
+<script src="apriko-api.js?v=1.482.0"></script>
+<script src="lohncheck.js?v=1.482.0"></script>
+<script src="personalbudget.js?v=1.482.0"></script>
+<script src="jahresbudget.js?v=1.482.0"></script>
+<script src="budgetpositionen.js?v=1.482.0"></script>
+<script src="lohnchecklistetemp.js?v=1.482.0"></script>
+<script src="apriko-endpunkte.js?v=1.482.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1037,7 +1037,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.480.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.482.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -2023,6 +2023,7 @@ async function deleteItem(listName, id) {
 async function reload(listName) {
   const key = listName.toLowerCase();
   cache[key] = await loadList(listName);
+  if (listName === "Customers") { try { kundenFlagsOverlay(); } catch (e) {} }
 }
 
 /* ===========================================================
@@ -13856,7 +13857,7 @@ function renderCustomers(el) {
     <input class="search-input" placeholder="Suchen..." oninput="filterTable(this.value, 'cust-row')">
     ${isAdmin() ? `<button class="btn" onclick="geloeschteAnzeigen()" title="Gelöschte Kunden, Firmen und Kontakte ansehen und wiederherstellen">🗑 Gelöschte${(cacheGeloescht.customers || []).length + (cacheGeloescht.companies || []).length + (cacheGeloescht.contacts || []).length ? " (" + ((cacheGeloescht.customers || []).length + (cacheGeloescht.companies || []).length + (cacheGeloescht.contacts || []).length) + ")" : ""}</button>` : ""}
     <label class="btn" style="cursor:pointer" title="Tabelle «Kundenumgebungen» (HTML-Export) einlesen: Link, Ansprechperson, interne Zuständigkeiten (LoBu/FiBu), Workflows ergänzen — nur leere Felder werden gefüllt">⇧ Kundenumgebungen (HTML)<input type="file" accept=".html,.htm,text/html" hidden onchange="kuImport(this)"></label>
-    ${isAdmin() ? `<button class="btn" onclick="appLinksNachSharepoint()" title="Einmalig: App-Links aus der CRM-Datei (crm_kunden_flags.json) in die SharePoint-Textspalte «AppLink» der Liste Customers übertragen — danach ist SharePoint die einzige Quelle">⇨ App-Links nach SharePoint</button>` : ""}
+    ${isAdmin() ? `<button class="btn" onclick="kundenDatenNachSharepoint()" title="Kundendaten (App-Link, Mindesthonorare, Workflows, Zuständigkeiten, Vertragslinks) aus den CRM-JSON-Dateien in Spalten der SharePoint-Liste Customers übertragen — zeigt, welche Spalten noch anzulegen sind">⇨ Kundendaten nach SharePoint</button>` : ""}
     <button class="btn btn-primary" onclick="newCustomer()">+ Neuer Kunde</button>
   `;
   if (crmVertragLinks === null && typeof siteId !== "undefined" && siteId) {
@@ -14382,7 +14383,7 @@ async function kuImport(input) {
     const linkNorm = link ? (normalizeUrl(link) || link) : "";
     const aktuell = appLinkText(kunde.id, kunde.Link) || "";
     if (linkNorm && /^https?:/i.test(linkNorm)) {
-      const gesetzt = (typeof kunde.AppLink === "string" && kunde.AppLink.trim()) || flags.applink || "";   // AppLink-Spalte oder JSON-Datei
+      const gesetzt = flags.applink || "";   // (SharePoint-Spalte AppLink ist bereits in die Flags eingeblendet)
       const gleich = (a, b) => String(a).replace(/\/$/, "").toLowerCase() === String(b).replace(/\/$/, "").toLowerCase();
       if (!gesetzt) { if (!gleich(aktuell, linkNorm)) aend.push({ art: "link", label: "App-Link", wert: linkNorm + (aktuell ? " (bisher: " + aktuell + ")" : ""), url: linkNorm }); }
       else if (!gleich(gesetzt, linkNorm)) aend.push({ art: "linkneu", label: "App-Link abweichend", wert: linkNorm + " (im CRM: " + gesetzt + ") — übernehmen?", url: linkNorm, optional: true });
@@ -14442,8 +14443,8 @@ async function kuImportUebernehmen() {
     for (const i of idx) {
       const p = kuImportPlan[i]; if (!p || !p.kunde) continue; const key = String(p.kunde.id);
       for (const a of p.aend) {
-        if (a.art === "link") { if (await appLinkSpalteVorhanden()) { try { await updateItem("Customers", key, { AppLink: a.url || a.wert }); n++; kundenGeaendert = true; } catch (e) { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}, { applink: a.url || a.wert }); flagsGeaendert = true; n++; } } else { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}, { applink: a.url || a.wert }); flagsGeaendert = true; n++; } }
-        else if (a.art === "linkneu") { const cb = document.querySelector(`.ku-opt[data-i="${i}"][data-art="linkneu"]`); if (cb && cb.checked) { if (await appLinkSpalteVorhanden()) { try { await updateItem("Customers", key, { AppLink: a.url }); n++; kundenGeaendert = true; } catch (e) { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}, { applink: a.url }); flagsGeaendert = true; n++; } } else { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}, { applink: a.url }); flagsGeaendert = true; n++; } } }
+        if (a.art === "link") { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}, { applink: a.url || a.wert }); flagsGeaendert = true; n++; }
+        else if (a.art === "linkneu") { const cb = document.querySelector(`.ku-opt[data-i="${i}"][data-art="linkneu"]`); if (cb && cb.checked) { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}, { applink: a.url }); flagsGeaendert = true; n++; } }
         else if (a.art === "rolle") { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}); crmKundenFlags[key][a.key] = a.email; flagsGeaendert = true; n++; }
         else if (a.art === "flag") { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}); crmKundenFlags[key][a.key] = true; flagsGeaendert = true; n++; }
         else if (a.art === "factoring") { crmKundenFlags[key] = Object.assign({}, crmKundenFlags[key] || {}, { factoring: true }); if (a.notiz && !crmKundenFlags[key].factoringNotiz) crmKundenFlags[key].factoringNotiz = a.notiz; flagsGeaendert = true; n++; }
@@ -14696,8 +14697,6 @@ async function saveCustomer(id) {
     TargetARR: val("f-targetarr") ? parseFloat(val("f-targetarr")) : null,
     Notes: val("f-notes")
   };
-  const appLinkInSp = await appLinkSpalteVorhanden();
-  if (appLinkInSp) data.AppLink = normalizeUrl(val("f-link")) || "";
   if (!data.CompanyId) return toast("Firma erforderlich", true);
   if (!data.Title) return toast("Konnte Vertragsname nicht generieren — bitte Firma wählen", true);
   const vertragNeu = {
@@ -14725,7 +14724,7 @@ async function saveCustomer(id) {
       const geaendert = VERTRAG_ARTEN.some(([art]) => (vertragNeu[art] || "") !== (alt[art] || ""));
       if (geaendert) {
         const hatWas = VERTRAG_ARTEN.some(([art]) => vertragNeu[art]);
-        if (hatWas) crmVertragLinks[key] = vertragNeu; else delete crmVertragLinks[key];
+        crmVertragLinks[key] = hatWas ? vertragNeu : {};   // leer statt löschen, damit vorhandene SharePoint-Spalten mitgeleert werden
         await crmSaveVertragLinks();
       }
     }
@@ -14735,7 +14734,7 @@ async function saveCustomer(id) {
       const neuFibu = document.getElementById("f-wf-fibu")?.checked || false;
       const neuHatDb = document.getElementById("f-wf-hatdb")?.checked || false;
       const neuMinfee = val("f-minfee");
-      const neuApplink = appLinkInSp ? "" : (normalizeUrl(val("f-link")) || "");   // liegt der Link in der SharePoint-Spalte, bleibt die JSON-Datei leer
+      const neuApplink = normalizeUrl(val("f-link")) || "";
       const neuMinSaas = parseFloat(val("f-minsaas")) || 0;
       const neuMinBpo = parseFloat(val("f-minbpo")) || 0;
       const neuZielExt = parseFloat(val("f-zielext")) || 0;
@@ -14764,7 +14763,7 @@ async function saveCustomer(id) {
           if (neuZielExt) crmKundenFlags[key].zielExt = neuZielExt;
           if (neuPctFrom) crmKundenFlags[key].saasPctFrom = neuPctFrom;
         }
-        else delete crmKundenFlags[key];
+        else crmKundenFlags[key] = {};   // leer lassen statt löschen: so werden auch die SharePoint-Spalten geleert (Sync); leere Einträge fliegen beim Speichern aus der JSON-Datei
         await crmSaveKundenFlags();
       }
     }
@@ -16383,25 +16382,21 @@ function crmLoadVertragLinks() {
   if (!crmVertragLinksPromise) {
     crmVertragLinksPromise = (async () => {
       try {
-        const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_vertragslinks.json:/content`);
+        const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_vertragslinks.json:/content`, { cache: "no-store" });
         crmVertragLinks = data && typeof data === "object" ? data : {};
       } catch (e) { crmVertragLinks = {}; }
+      jsonBasisMerken(FB_BUCH_DIR + "/crm_vertragslinks.json", crmVertragLinks);
+      try { await kundenSpaltenLaden(); kundenFlagsOverlay(); } catch (e) {}
     })();
   }
   return crmVertragLinksPromise;
 }
 async function crmSaveVertragLinks() {
-  const path = `/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_vertragslinks.json:/content`;
-  const body = JSON.stringify(crmVertragLinks || {});
-  try { await graph(path, { method: "PUT", body }); }
-  catch (e) {
-    if (!/404|itemNotFound|400/i.test(e.message)) throw e;
-    await graph(`/sites/${siteId}/drive/root/children`, {
-      method: "POST",
-      body: JSON.stringify({ name: FB_BUCH_DIR, folder: {}, "@microsoft.graph.conflictBehavior": "replace" })
-    });
-    await graph(path, { method: "PUT", body });
-  }
+  // seit 13.10.2026 konfliktsicher (3-Wege-Merge) und mit Sync in die Spalten VertragSaaS/VertragBPO/VertragADV/VertragSonst, sofern vorhanden
+  await kundenSpaltenLaden();
+  const ohneSpalten = await kundenSpaltenSync(crmVertragLinks, VERTRAG_SPALTEN, e => typeof e === "string" ? { sonst: e } : (e || {}));
+  crmVertragLinks = await jsonMergeSpeichern(FB_BUCH_DIR + "/crm_vertragslinks.json", ohneSpalten);
+  kundenFlagsOverlay();
 }
 const VERTRAG_ARTEN = [["saas", "Vertrag SaaS"], ["bpo", "Vertrag BPO"], ["adv", "ADV-Vertrag"], ["sonst", "Sonstiges"]];
 /* Anzeigename aus einer SharePoint-URL: Dateiname aus dem Pfad (dekodiert, ohne Query); Freigabe-Links ohne
@@ -16489,6 +16484,7 @@ function crmLoadKundenFlags() {
       try {
         const data = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_kunden_flags.json:/content`);
         crmKundenFlags = data && typeof data === "object" ? data : {}; crmKundenFlagsOk = true; jsonBasisMerken(FB_BUCH_DIR + "/crm_kunden_flags.json", crmKundenFlags);
+        await kundenSpaltenLaden(); kundenFlagsOverlay();
       } catch (e) {
         // Nur bei «Datei existiert nicht» mit leerem Stand weiterarbeiten — bei anderen Fehlern (Netz, Token)
         // darf ein späteres Speichern die Flags aller Kunden NICHT mit {} überschreiben.
@@ -16506,7 +16502,10 @@ async function crmSaveKundenFlags() {
     if (!crmKundenFlagsOk) throw new Error("Kundenflags konnten nicht geladen werden — Speichern abgebrochen, damit keine Flags anderer Kunden verloren gehen.");
     Object.assign(crmKundenFlags, merke || {});   // die aktuelle Änderung auf den frisch geladenen Stand anwenden
   }
-  crmKundenFlags = await jsonMergeSpeichern(FB_BUCH_DIR + "/crm_kunden_flags.json", crmKundenFlags || {});
+  await kundenSpaltenLaden();
+  const ohneSpalten = await kundenSpaltenSync(crmKundenFlags, KUNDEN_SPALTEN, e => (e && typeof e === "object") ? e : {});
+  const gespeichert = await jsonMergeSpeichern(FB_BUCH_DIR + "/crm_kunden_flags.json", ohneSpalten);
+  crmKundenFlags = gespeichert; kundenFlagsOverlay();   // Spaltenwerte wieder einblenden
 }
 function kundenFlag(custId, flag) { return !!((crmKundenFlags || {})[String(custId)] || {})[flag]; }
 /* Datenbank/Hosting: Standard JA (praktisch jeder Kunde hat eine eigene DB) — nur ein explizites «keineDb» schaltet aus. */
@@ -16518,55 +16517,138 @@ function minFeeText(custId, spFallback) {
   const t = ((crmKundenFlags || {})[String(custId)] || {}).minfee;
   return t !== undefined && t !== null ? t : (spFallback || "");
 }
-/* App-Link eines Kunden. Reihenfolge (13.10.2026): Textspalte «AppLink» in der SharePoint-Liste Customers (führend, sofern die
-   Spalte existiert) → crm_kunden_flags.json (applink, Altbestand/Import) → Hyperlink-Spalte «Link» (nur lesbar; Hyperlink-
-   Spalten lassen sich über Graph nicht schreiben, deshalb gab es den Umweg über die JSON-Datei). */
 function appLinkText(custId, spLinkField) {
-  const cu = (cache.customers || []).find(x => String(x.id) === String(custId));
-  if (cu && typeof cu.AppLink === "string" && cu.AppLink.trim()) return cu.AppLink.trim();
-  const t = ((crmKundenFlags || {})[String(custId)] || {}).applink;
+  const t = ((crmKundenFlags || {})[String(custId)] || {}).applink;   // SharePoint-Spalte AppLink ist (falls vorhanden) bereits eingeblendet
   return t !== undefined && t !== null ? t : linkUrl(spLinkField);
 }
-let appLinkSpalteVorh = null;   // null = noch nicht geprüft
-async function appLinkSpalteVorhanden() {
-  if (appLinkSpalteVorh !== null) return appLinkSpalteVorh;
+/* ===========================================================
+   Kundendaten in SharePoint-Spalten (13.10.2026)
+   Die JSON-Dateien crm_kunden_flags.json / crm_vertragslinks.json entstanden, weil sich Hyperlink-Spalten über Graph nicht
+   schreiben lassen. Text-, Ja/Nein- und Zahlenspalten gehen aber. Darum: existiert in der Liste Customers eine Spalte mit dem
+   Namen aus KUNDEN_SPALTEN, ist SIE die Quelle — beim Laden wird ihr Wert in die Flags eingeblendet (Overlay), beim Speichern
+   wird der Wert in die Spalte geschrieben und aus der JSON-Datei entfernt (Strip). Fehlt eine Spalte, läuft es wie bisher
+   über die JSON-Datei. Der Admin-Knopf «Kundendaten nach SharePoint» überträgt den Altbestand und zeigt fehlende Spalten.
+   =========================================================== */
+const KUNDEN_SPALTEN = [   // [Flag in JSON, SharePoint-Spalte, Typ, Beschreibung]
+  ["applink", "AppLink", "text", "App-Link (Kundenumgebung)"],
+  ["applink", "Link", "link", "App-Link (bestehende Hyperlink-Spalte — wird genutzt, falls Graph sie schreiben lässt)"],
+  ["minfee", "MinFee", "text", "Mindesthonorar (Text)"],
+  ["minSaas", "MinSaaS", "num", "Mindesthonorar SaaS CHF/Monat"],
+  ["minBpo", "MinBPO", "num", "Mindesthonorar BPO CHF/Monat"],
+  ["zielExt", "ZielExt", "num", "Ziel externe Mitarbeitende"],
+  ["saasPctFrom", "SaaSPctFrom", "text", "Prozentual ab (Monat)"],
+  ["intern", "WfIntern", "bool", "Workflow Lohn intern"],
+  ["fibu", "WfFibu", "bool", "Workflow FIBU"],
+  ["keineDb", "KeineDb", "bool", "keine eigene Datenbank"],
+  ["factoring", "Factoring", "bool", "Factoring"],
+  ["factoringNotiz", "FactoringNotiz", "text", "Factoring-Notiz"],
+  ["apLohn", "ApLohn", "text", "Zuständig Lohn (E-Mail)"],
+  ["apLohnBackup", "ApLohnBackup", "text", "Zuständig Lohn Backup"],
+  ["apLohnIntern", "ApLohnIntern", "text", "Zuständig Lohn intern"],
+  ["apLohnInternBackup", "ApLohnInternBackup", "text", "Zuständig Lohn intern Backup"],
+  ["apFibu", "ApFibu", "text", "Zuständig FIBU"],
+  ["apFibuBackup", "ApFibuBackup", "text", "Zuständig FIBU Backup"]
+];
+const VERTRAG_SPALTEN = [["saas", "VertragSaaS", "text", "Vertragslink SaaS"], ["bpo", "VertragBPO", "text", "Vertragslink BPO"], ["adv", "VertragADV", "text", "Vertragslink ADV"], ["sonst", "VertragSonst", "text", "Vertragslink Sonstiges"]];
+let kundenSpalten = null;   // { Spaltenname: "text"|"bool"|"num"|"link" } der tatsächlich vorhandenen Spalten (null = noch nicht geprüft)
+let kundenLinkSpalteRo = false;   // true, sobald ein Schreibversuch auf eine Hyperlink-Spalte scheiterte (Graph unterstützt das nicht überall)
+async function kundenSpaltenLaden(force) {
+  if (kundenSpalten && !force) return kundenSpalten;
   try {
-    const r = await graph(`/sites/${siteId}/lists/${listIds.Customers}/columns?$select=name,text`);
-    appLinkSpalteVorh = !!((r && r.value) || []).find(c => c.name === "AppLink" && c.text);
-  } catch (e) { appLinkSpalteVorh = false; }
-  return appLinkSpalteVorh;
+    const r = await graph(`/sites/${siteId}/lists/${listIds.Customers}/columns?$select=name,text,boolean,number,hyperlinkOrPicture`);
+    const map = {};
+    ((r && r.value) || []).forEach(c => { if (c.text) map[c.name] = "text"; else if (c.boolean) map[c.name] = "bool"; else if (c.number) map[c.name] = "num"; else if (c.hyperlinkOrPicture) map[c.name] = "link"; });
+    if (kundenLinkSpalteRo) Object.keys(map).forEach(k => { if (map[k] === "link") delete map[k]; });
+    kundenSpalten = map;
+  } catch (e) { kundenSpalten = kundenSpalten || {}; }
+  return kundenSpalten;
 }
-/* Einmalig: alle App-Links aus crm_kunden_flags.json / Hyperlink-Spalte in die Textspalte AppLink übertragen (Admin). */
-async function appLinksNachSharepoint() {
+function spaltenAktiv(defs) { const seen = new Set(); return (defs || []).filter(d => kundenSpalten && kundenSpalten[d[1]] === d[2] && !seen.has(d[0]) && seen.add(d[0])); }   // pro Flag nur die erste vorhandene Spalte
+function spWertLesen(c, sp, typ) {
+  const v = c[sp]; if (v === undefined || v === null || v === "") return undefined;
+  if (typ === "bool") return v === true || v === "true" || v === 1 || v === "1";
+  if (typ === "num") { const n = parseFloat(v); return isNaN(n) ? undefined : n; }
+  if (typ === "link") { const u = linkUrl(v); return u ? u : undefined; }
+  return String(v);
+}
+function spWertSchreiben(v, typ) {
+  if (typ === "bool") return !!v;
+  if (typ === "num") { const n = parseFloat(v); return n ? n : null; }
+  if (typ === "link") return v ? { Url: String(v), Description: String(v) } : null;
+  return v === undefined || v === null ? "" : String(v);
+}
+/* Overlay: Spaltenwerte (nicht leer) in die Flags einblenden. Leere Spalte → JSON-Wert bleibt (Übergangsphase vor der Übertragung). */
+function kundenFlagsOverlay() {
+  if (!kundenSpalten || !crmKundenFlags || !cache.customers) return;
+  const defs = spaltenAktiv(KUNDEN_SPALTEN); const vdefs = spaltenAktiv(VERTRAG_SPALTEN);
+  (cache.customers || []).forEach(c => {
+    const key = String(c.id);
+    defs.forEach(([flag, sp, typ]) => { const v = spWertLesen(c, sp, typ); if (v === undefined) return;
+      if (typ === "link" && crmKundenFlags[key] && crmKundenFlags[key][flag] !== undefined) return;   // Hyperlink-Spalte: JSON-Wert hat Vorrang, bis die Übertragung nachweislich klappt
+      crmKundenFlags[key] = crmKundenFlags[key] || {}; crmKundenFlags[key][flag] = v; });
+    if (vdefs.length && crmVertragLinks) vdefs.forEach(([art, sp, typ]) => { const v = spWertLesen(c, sp, typ); if (v !== undefined) { const raw = crmVertragLinks[key]; const o = typeof raw === "string" ? { sonst: raw } : (raw || {}); o[art] = v; crmVertragLinks[key] = o; } });
+  });
+}
+/* Sync + Strip: für Kunden mit Spalten die Werte aus `obj` (Flags oder Vertragslinks) in die Liste schreiben, Kopie ohne diese Schlüssel zurückgeben. */
+async function kundenSpaltenSync(obj, defs, pick) {
+  const kopie = JSON.parse(JSON.stringify(obj || {}));
+  const leereWeg = () => Object.keys(kopie).forEach(k => { if (kopie[k] && typeof kopie[k] === "object" && !Object.keys(kopie[k]).length) delete kopie[k]; });
+  const aktiv = spaltenAktiv(defs); if (!aktiv.length || !cache.customers) { leereWeg(); return kopie; }
+  for (const c of cache.customers) {
+    const key = String(c.id); const patch = {};
+    if (obj[key] === undefined) continue;   // kein Eintrag → nichts schreiben und vor allem nichts löschen (Schutz, falls das Overlay noch nicht lief)
+    const eintrag = pick(obj[key]);
+    aktiv.forEach(([flag, sp, typ]) => {
+      const soll = spWertSchreiben(eintrag[flag], typ);
+      const ist = spWertSchreiben(spWertLesen(c, sp, typ), typ);
+      if (JSON.stringify(soll) !== JSON.stringify(ist)) patch[sp] = soll;
+    });
+    if (Object.keys(patch).length) {
+      try { await updateItem("Customers", c.id, patch); Object.assign(c, patch); }
+      catch (e) {
+        const linkCols = aktiv.filter(d => d[2] === "link" && d[1] in patch).map(d => d[1]);
+        if (!linkCols.length) throw e;
+        // Hyperlink-Spalte lässt sich nicht schreiben → dauerhaft ignorieren, Rest erneut
+        kundenLinkSpalteRo = true; linkCols.forEach(k => { delete patch[k]; delete kundenSpalten[k]; });
+        console.warn("Hyperlink-Spalte nicht schreibbar, bleibt in der JSON-Datei:", linkCols.join(", "), e.message);
+        if (Object.keys(patch).length) { await updateItem("Customers", c.id, patch); Object.assign(c, patch); }
+        return kundenSpaltenSync(obj, defs, pick);   // mit bereinigter Spaltenliste neu starten
+      }
+    }
+    if (kopie[key] && typeof kopie[key] === "object") { aktiv.forEach(([flag]) => delete kopie[key][flag]); if (!Object.keys(kopie[key]).length) delete kopie[key]; }
+    else if (typeof kopie[key] === "string" && aktiv.some(d => d[0] === "sonst")) delete kopie[key];   // Legacy-Einzellink (Vertrag «sonst»)
+  }
+  leereWeg();
+  return kopie;
+}
+/* Admin: Altbestand aus den JSON-Dateien in die vorhandenen Spalten übertragen; fehlende Spalten auflisten. */
+async function kundenDatenNachSharepoint() {
   if (!isAdmin()) { toast("Nur für Admins.", true); return; }
-  if (!(await appLinkSpalteVorhanden())) {
-    showModal("Spalte «AppLink» fehlt", `<div style="font-size:13px;line-height:1.6">In der SharePoint-Liste <b>Customers</b> gibt es noch keine Spalte <b>AppLink</b>.<br><br>
-      Bitte in SharePoint anlegen: Liste Customers → <i>+ Spalte hinzufügen</i> → <b>Text (eine Zeile)</b> → Name exakt <code>AppLink</code> → Speichern.<br>
-      Danach diesen Knopf erneut drücken. (Hyperlink-Spalten wie «Link» lassen sich über die Schnittstelle leider nicht beschreiben, Textspalten schon.)</div>`,
-      [`<button class="btn btn-primary" onclick="closeModal()">OK</button>`]);
-    return;
-  }
-  await crmLoadKundenFlags();
-  const todo = (cache.customers || []).map(c => {
-    const vorhanden = (typeof c.AppLink === "string" ? c.AppLink.trim() : "");
-    const flag = ((crmKundenFlags || {})[String(c.id)] || {}).applink || "";
-    const alt = linkUrl(c.Link) || "";
-    const ziel = normalizeUrl(flag || alt) || "";
-    return { c, vorhanden, ziel, flag };
-  }).filter(x => x.ziel && x.ziel !== x.vorhanden);
-  const nurFlags = (cache.customers || []).filter(c => ((crmKundenFlags || {})[String(c.id)] || {}).applink && (typeof c.AppLink === "string" && c.AppLink.trim()));
-  if (!todo.length && !nurFlags.length) { toast("Alle App-Links liegen bereits in der Spalte AppLink."); return; }
-  if (!confirm(`${todo.length} App-Link(s) in die SharePoint-Spalte AppLink übertragen` + (nurFlags.length ? ` und ${nurFlags.length} doppelte Einträge aus der JSON-Datei entfernen` : "") + `?\n\n` + todo.slice(0, 15).map(x => `• ${x.c.Title}: ${x.ziel}`).join("\n") + (todo.length > 15 ? `\n… und ${todo.length - 15} weitere` : ""))) return;
-  let ok = 0; const fehler = [];
-  for (const x of todo) {
-    try { await updateItem("Customers", x.c.id, { AppLink: x.ziel }); ok++; if (crmKundenFlags[String(x.c.id)]) delete crmKundenFlags[String(x.c.id)].applink; }
-    catch (e) { fehler.push(x.c.Title + ": " + (e.message || e)); }
-  }
-  nurFlags.forEach(c => { if (crmKundenFlags[String(c.id)]) delete crmKundenFlags[String(c.id)].applink; });
-  Object.keys(crmKundenFlags).forEach(k => { if (crmKundenFlags[k] && !Object.keys(crmKundenFlags[k]).length) delete crmKundenFlags[k]; });
-  try { await crmSaveKundenFlags(); } catch (e) { fehler.push("Kundenflags speichern: " + (e.message || e)); }
-  await reload("Customers"); render();
-  if (fehler.length) alert(`${ok} übertragen, ${fehler.length} Fehler:\n` + fehler.join("\n")); else toast(`${ok} App-Link(s) nach SharePoint übertragen.`);
+  await kundenSpaltenLaden(true); await crmLoadKundenFlags(); await crmLoadVertragLinks();
+  const alle = KUNDEN_SPALTEN.concat(VERTRAG_SPALTEN);
+  const da = spaltenAktiv(KUNDEN_SPALTEN).concat(spaltenAktiv(VERTRAG_SPALTEN)), falschTyp = alle.filter(d => kundenSpalten[d[1]] && kundenSpalten[d[1]] !== d[2]), fehlt = alle.filter(d => !kundenSpalten[d[1]] && !da.some(x => x[0] === d[0]));
+  const typName = { text: "Text (eine Zeile)", bool: "Ja/Nein", num: "Zahl", link: "Hyperlink" };
+  const zeile = d => `<tr><td><code>${escape(d[1])}</code></td><td>${typName[d[2]]}</td><td style="color:var(--text-dim)">${escape(d[3])}</td></tr>`;
+  // Anzahl Werte, die noch nur in den JSON-Dateien liegen
+  let offen = 0;
+  (cache.customers || []).forEach(c => { const key = String(c.id);
+    spaltenAktiv(KUNDEN_SPALTEN).forEach(([flag, sp, typ]) => { const f = (crmKundenFlags[key] || {})[flag]; if (f !== undefined && f !== "" && f !== false && f !== 0 && spWertLesen(c, sp, typ) === undefined) offen++; });
+    spaltenAktiv(VERTRAG_SPALTEN).forEach(([art, sp, typ]) => { if (vertragLink(c.id, art) && spWertLesen(c, sp, typ) === undefined) offen++; }); });
+  showModal("Kundendaten nach SharePoint", `<div style="font-size:12px;line-height:1.6">
+    <p>Vorhandene Spalten in der Liste <b>Customers</b>: <b>${da.length}</b> von ${alle.length}. ${offen ? `<b style="color:var(--warn)">${offen} Wert(e)</b> liegen noch nur in den JSON-Dateien und werden jetzt übertragen.` : "Alle Werte liegen bereits in den Spalten."}</p>
+    ${falschTyp.length ? `<p style="color:var(--danger)"><b>Falscher Spaltentyp</b> (wird ignoriert): ${falschTyp.map(d => `<code>${escape(d[1])}</code> ist ${typName[kundenSpalten[d[1]]] || "?"}, erwartet ${typName[d[2]]}`).join("; ")}</p>` : ""}
+    <p>Verwendet werden: ${da.length ? da.map(d => `<code>${escape(d[1])}</code>`).join(", ") : "<i>keine</i>"}.</p>
+    ${fehlt.length ? `<details><summary style="cursor:pointer;color:var(--text-dim)">Optional: weitere Spalten, die das CRM automatisch nutzen würde (${fehlt.length})</summary><table class="table" style="font-size:12px;margin-top:6px"><thead><tr><th>Spalte</th><th>Typ</th><th>Inhalt</th></tr></thead><tbody>${fehlt.filter(d => d[2] !== "link").map(zeile).join("")}</tbody></table></details>` : "<p>✅ Alle Spalten vorhanden.</p>"}
+  </div>`, [`<button class="btn" onclick="closeModal()">Abbrechen</button>`, `<button class="btn btn-primary" onclick="closeModal(); kundenDatenNachSharepointAusfuehren()" ${da.length ? "" : "disabled"}>${offen ? `${offen} Wert(e) übertragen` : "Abgleich ausführen"}</button>`]);
+}
+async function kundenDatenNachSharepointAusfuehren() {
+  try {
+    toast("Übertrage …");
+    await crmSaveKundenFlags();        // Sync + Strip für alle vorhandenen Spalten
+    await crmSaveVertragLinks();
+    await reload("Customers"); render();
+    toast("Kundendaten nach SharePoint übertragen — die Spalten sind jetzt die Quelle.");
+  } catch (e) { alert("Übertragung fehlgeschlagen: " + (e.message || e)); }
 }
 
 function linkUrl(linkField) {
