@@ -22,15 +22,20 @@
   } catch(e) {}
 })();
 </script>
+<script>
+  /* Alle CRM-Dateien liegen seit 13.10.2026 unter «06 CRM» in der Bibliothek «Dokumente» (vorher auf oberster Ebene).
+     Die Module (lohncheck.js, lohnchecklistetemp.js) lesen diese Konstante beim Laden. */
+  window.CRM_ROOT = "06 CRM";
+</script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.485.0"></script>
-<script src="apriko-api.js?v=1.485.0"></script>
-<script src="lohncheck.js?v=1.485.0"></script>
-<script src="personalbudget.js?v=1.485.0"></script>
-<script src="jahresbudget.js?v=1.485.0"></script>
-<script src="budgetpositionen.js?v=1.485.0"></script>
-<script src="lohnchecklistetemp.js?v=1.485.0"></script>
-<script src="apriko-endpunkte.js?v=1.485.0"></script>
+<script src="apriko-filters.js?v=1.488.0"></script>
+<script src="apriko-api.js?v=1.488.0"></script>
+<script src="lohncheck.js?v=1.488.0"></script>
+<script src="personalbudget.js?v=1.488.0"></script>
+<script src="jahresbudget.js?v=1.488.0"></script>
+<script src="budgetpositionen.js?v=1.488.0"></script>
+<script src="lohnchecklistetemp.js?v=1.488.0"></script>
+<script src="apriko-endpunkte.js?v=1.488.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1037,7 +1042,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.485.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.488.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -1825,10 +1830,28 @@ async function graph(path, opts = {}) {
   return await res.json();
 }
 
+/* Einmalige Umstellung (13.10.2026): Ordner CRM-Budgetdaten, CRM-Finanzen, Rapporte-Eingang von der obersten Ebene
+   nach «06 CRM» verschieben (Graph: parentReference ändern — Inhalt, Versionen und Berechtigungen bleiben erhalten). */
+async function crmOrdnerUmzug() {
+  const alt = ["CRM-Budgetdaten", "CRM-Finanzen", "Rapporte-Eingang"]; let verschoben = [];
+  let ziel = null;
+  for (const name of alt) {
+    let neuDa = false; try { await graph(`/sites/${siteId}/drive/root:/${window.CRM_ROOT}/${name}`); neuDa = true; } catch (e) { neuDa = !/404|itemNotFound/i.test(e.message || ""); }
+    if (neuDa) continue;
+    let altItem = null; try { altItem = await graph(`/sites/${siteId}/drive/root:/${name}`); } catch (e) { altItem = null; }
+    if (!altItem || !altItem.id) continue;
+    if (!ziel) { await spOrdnerSicherstellen(window.CRM_ROOT); ziel = await graph(`/sites/${siteId}/drive/root:/${window.CRM_ROOT}`); }
+    try { await graph(`/sites/${siteId}/drive/items/${altItem.id}`, { method: "PATCH", body: JSON.stringify({ parentReference: { id: ziel.id }, name }) }); verschoben.push(name); }
+    catch (e) { console.warn("Ordner konnte nicht verschoben werden:", name, e.message); }
+  }
+  if (verschoben.length) console.info("Nach «" + window.CRM_ROOT + "» verschoben:", verschoben.join(", "));
+  return verschoben;
+}
 async function bootstrap() {
   // Site auflösen
   const site = await graph(`/sites/${CONFIG.siteHost}:${CONFIG.sitePath}`);
   siteId = site.id;
+  try { const v = await crmOrdnerUmzug(); if (v.length && typeof toast === "function") setTimeout(() => toast("SharePoint-Ordner nach «" + window.CRM_ROOT + "» verschoben: " + v.join(", ")), 1500); } catch (e) { console.warn("Ordner-Umzug:", e.message); }
   // Lists holen
   const lists = await graph(`/sites/${siteId}/lists?$select=id,name,displayName`);
   for (const l of lists.value) {
@@ -1885,7 +1908,20 @@ function jsonMerge3(frisch, basis, meine) {
   });
   return out;
 }
-/* Speichert `meine` konfliktsicher nach `pfad` (relativ zur Bibliothek, z.B. "CRM-Budgetdaten/parameter.json").
+/* Ordnerpfad (relativ zur Bibliothek, z.B. "06 CRM/CRM-Budgetdaten") Segment für Segment anlegen, falls nicht vorhanden. */
+async function spOrdnerSicherstellen(pfad) {
+  const teile = String(pfad || "").split("/").filter(Boolean); let eltern = "";
+  for (const t of teile) {
+    const voll = eltern ? eltern + "/" + t : t;
+    try { await graph(`/sites/${siteId}/drive/root:/${voll}`); }
+    catch (e) {
+      const url = eltern ? `/sites/${siteId}/drive/root:/${eltern}:/children` : `/sites/${siteId}/drive/root/children`;
+      try { await graph(url, { method: "POST", body: JSON.stringify({ name: t, folder: {}, "@microsoft.graph.conflictBehavior": "fail" }) }); } catch (e2) {}
+    }
+    eltern = voll;
+  }
+}
+/* Speichert `meine` konfliktsicher nach `pfad` (relativ zur Bibliothek, z.B. "06 CRM/CRM-Budgetdaten/parameter_v2.json").
    Rückgabe: der tatsächlich gespeicherte (gemergte) Stand — den Aufrufer in seine Variable übernehmen! */
 async function jsonMergeSpeichern(pfad, meine, opts) {
   const url = `/sites/${siteId}/drive/root:/${pfad}`;
@@ -1912,7 +1948,7 @@ async function jsonMergeSpeichern(pfad, meine, opts) {
       if (!meta && neu && /404|itemNotFound/i.test(e.message)) {
         // Ordner/Datei existiert noch nicht
         const ordner = pfad.split("/").slice(0, -1).join("/");
-        if (ordner) { try { await graph(`/sites/${siteId}/drive/root/children`, { method: "POST", body: JSON.stringify({ name: ordner, folder: {}, "@microsoft.graph.conflictBehavior": "replace" }) }); } catch (e2) {} }
+        if (ordner) { try { await spOrdnerSicherstellen(ordner); } catch (e2) {} }
         await graph(url + ":/content", { method: "PUT", body: JSON.stringify(ergebnis) });
         jsonBasisMerken(pfad, ergebnis); return ergebnis;
       }
@@ -2111,7 +2147,9 @@ function mehrbenutzerStart() {
   if (mbTimer) return;
   fetch(location.pathname, { method: "HEAD", cache: "no-store" }).then(r => { mbEtag = r.headers.get("etag") || r.headers.get("last-modified") || null; }).catch(() => {});
   versionPruefen();
-  crmLoadKundenFlags().catch(() => {});   // App-Links etc. früh laden (Healthcheck, «Alle Kundenumgebungen öffnen»)
+  // Zusatzdaten früh und parallel laden (14.10.2026): vorher wurden Stamm (Kontaktfunktionen), Ansprechpersonen, Mitarbeiter
+  // und Vertragslinks erst beim ersten Öffnen eines Kunden nacheinander geholt — darum «ewig» bis die Chips erschienen.
+  [crmLoadKundenFlags, crmLoadStamm, crmLoadAnsprech, crmLoadMitarbeiter, crmLoadVertragLinks].forEach(f => { try { f().catch(() => {}); } catch (e) {} });
   mbTimer = setInterval(mehrbenutzerTick, 60000);
 }
 /* Versionskontrolle bei jedem Login (12.10.2026): die auf dem Server liegende index.html wird frisch geladen und ihre
@@ -3690,7 +3728,7 @@ function fbGesFromFilename(name) {
    Braucht keine Listen-Schema-Rechte (Sites.ReadWrite.All genügt für Drive-Files).
    Ein File pro Jahr+Gesellschaft: /CRM-Budgetdaten/fb_buch_{jahr}_{ges}.json
    Inhalt: { "6600": { bez, buch: [[datum, text, betrag], …] }, … } */
-const FB_BUCH_DIR = "CRM-Budgetdaten";
+const FB_BUCH_DIR = window.CRM_ROOT + "/CRM-Budgetdaten";
 function fbBuchFileName(year, ges) {
   return "fb_buch_" + year + "_" + String(ges).replace(/[^A-Za-z0-9äöüÄÖÜ ]/g, "").replace(/\s+/g, "_") + ".json";
 }
@@ -3704,10 +3742,7 @@ async function fbSaveBuchFile(year, ges, buchObj) {
   } catch (e) {
     if (!/404|itemNotFound|400/i.test(e.message)) throw e;
     // Zielordner existiert evtl. noch nicht → anlegen und wiederholen
-    await graph(`/sites/${siteId}/drive/root/children`, {
-      method: "POST",
-      body: JSON.stringify({ name: FB_BUCH_DIR, folder: {}, "@microsoft.graph.conflictBehavior": "replace" })
-    });
+    await spOrdnerSicherstellen(FB_BUCH_DIR);
     await graph(path, { method: "PUT", body });
   }
 }
@@ -3823,10 +3858,7 @@ async function fbSaveNotesFile(year, notes) {
   try { await graph(path, { method: "PUT", body }); }
   catch (e) {
     if (!/404|itemNotFound|400/i.test(e.message)) throw e;
-    await graph(`/sites/${siteId}/drive/root/children`, {
-      method: "POST",
-      body: JSON.stringify({ name: FB_BUCH_DIR, folder: {}, "@microsoft.graph.conflictBehavior": "replace" })
-    });
+    await spOrdnerSicherstellen(FB_BUCH_DIR);
     await graph(path, { method: "PUT", body });
   }
   fbNotesCache[year] = notes || {};
@@ -5714,7 +5746,7 @@ async function toggleInvoiced(customerId, year, month, type) {
    Abrechnungsmonats auf «Ja» gesetzt, springt «Fakturiert bis» automatisch
    auf den Import-Stichtag. Tagessummen und Vorher-Werte (Rückgängig) liegen
    in CRM-Budgetdaten/fakt_import.json. */
-const FAKT_PFAD = "CRM-Budgetdaten/fakt_import.json";
+const FAKT_PFAD = FB_BUCH_DIR + "/fakt_import.json";
 let faktStand = null;          // { "c<custId>": {faktBis, ytdBis, ytdBasis}, "<custId>_<year>": {tage, letzterImport} }
 let faktStandLaedt = false;
 async function faktLaden(force) {
@@ -5731,7 +5763,7 @@ async function faktSpeichern() {
   try { await graph(`/sites/${siteId}/drive/root:/${FAKT_PFAD}:/content`, { method: "PUT", body }); }
   catch (e) {
     if (!/404|itemNotFound|400/i.test(e.message)) throw e;
-    await graph(`/sites/${siteId}/drive/root/children`, { method: "POST", body: JSON.stringify({ name: "CRM-Budgetdaten", folder: {}, "@microsoft.graph.conflictBehavior": "replace" }) });
+    await spOrdnerSicherstellen(FB_BUCH_DIR);
     await graph(`/sites/${siteId}/drive/root:/${FAKT_PFAD}:/content`, { method: "PUT", body });
   }
 }
@@ -8241,7 +8273,7 @@ async function apUebernehmeLohnartenliste() { await apSpeichereAlsLohnartenstamm
    Ultimativ Check einfliessen — reine Nachschlage-Ansicht. Gleiches SharePoint-Speichermuster wie
    der Lohnartenstamm. KEIN Gegenkonto verfügbar (RateType/BasicRateType/AdditionalRateType im
    receivableaccounting-Schema gründlich durchsucht, 11.09.2026 — nicht vorhanden). */
-const TARIFARTEN_PFAD = "CRM-Budgetdaten/lc_tarifartenliste.json";
+const TARIFARTEN_PFAD = FB_BUCH_DIR + "/lc_tarifartenliste.json";
 let tarifartenStamm = null;
 async function tarifartenLaden(force) {
   if (!force && tarifartenStamm) return tarifartenStamm;
@@ -8257,7 +8289,7 @@ async function tarifartenSpeichern() {
   try { await graph(`/sites/${siteId}/drive/root:/${TARIFARTEN_PFAD}:/content`, { method: "PUT", body }); }
   catch (e) {
     if (!/404|itemNotFound|400/i.test(e.message)) throw e;
-    await graph(`/sites/${siteId}/drive/root/children`, { method: "POST", body: JSON.stringify({ name: "CRM-Budgetdaten", folder: {}, "@microsoft.graph.conflictBehavior": "replace" }) });
+    await spOrdnerSicherstellen(FB_BUCH_DIR);
     await graph(`/sites/${siteId}/drive/root:/${TARIFARTEN_PFAD}:/content`, { method: "PUT", body });
   }
 }
@@ -9789,8 +9821,8 @@ async function renderOnbParam(el) {
    (< v1.457, noch ohne 3-Wege-Merge/ETag) schreiben weiterhin die alte parameter.json ganz neu und haben so Onboarding-Einträge
    anderer überschrieben. Die neue Datei können diese alten Versionen nicht anfassen. Beim ersten Laden wird die alte Datei
    einmalig nach parameter_v2.json übernommen. */
-const PARAMETER_PFAD = "CRM-Budgetdaten/parameter_v2.json";
-const PARAMETER_PFAD_ALT = "CRM-Budgetdaten/parameter.json";
+const PARAMETER_PFAD = FB_BUCH_DIR + "/parameter_v2.json";
+const PARAMETER_PFAD_ALT = FB_BUCH_DIR + "/parameter.json";
 const PARAM_GAV_LISTE = ["GAV Personalverleih", "Bauhauptgewerbe (LMV)", "Basler Ausbaugewerbe (BS)", "Ausbaugewerbe BL/BS/SO", "Ausbaugewerbe Westschweiz",
   "Elektro- und Telekommunikations-Installationsgewerbe", "Gebäudetechnik", "Gebäudehüllengewerbe (Dach und Wand)", "Dach- und Wandgewerbe BL",
   "Metallgewerbe", "Maler- und Gipsergewerbe (Deutschschweiz/TI)", "Maler- und Gipsergewerbe BL", "Gipsergewerbe BS", "Schreinergewerbe", "Holzbau",
@@ -10513,10 +10545,7 @@ async function wfCheckSave(typ, monat) {
   try { await graph(path, { method: "PUT", body }); }
   catch (e) {
     if (!/404|itemNotFound|400/i.test(e.message)) throw e;
-    await graph(`/sites/${siteId}/drive/root/children`, {
-      method: "POST",
-      body: JSON.stringify({ name: FB_BUCH_DIR, folder: {}, "@microsoft.graph.conflictBehavior": "replace" })
-    });
+    await spOrdnerSicherstellen(FB_BUCH_DIR);
     await graph(path, { method: "PUT", body });
   }
 }
@@ -13996,7 +14025,9 @@ function renderCustomerRevPreview(customerId) {
 function openCustomer(id) {
   const c = cache.customers.find(x => x.id == id);
   if (!c) return;
-  if (crmMitarbeiter === null) { crmLoadMitarbeiter().then(() => { const mt = document.getElementById("modal-title"); if (document.getElementById("modal").classList.contains("open") && mt && mt.textContent === String(c.Title || "Kunde")) openCustomer(id); }); }
+  const nachladen = () => { const mt = document.getElementById("modal-title"); if (document.getElementById("modal").classList.contains("open") && mt && mt.textContent === String(c.Title || "Kunde")) openCustomer(id); };
+  if (crmMitarbeiter === null) crmLoadMitarbeiter().then(nachladen);
+  if (crmStamm === null) crmLoadStamm().then(nachladen);
   const comp = cache.companies.find(x => x.id == c.CompanyId);
   const riskColor = c.Risk === "Rot" ? "var(--danger)" : c.Risk === "Gelb" ? "var(--warn)" : "var(--accent)";
   const revs = cache.monthlyrevenue.filter(r => r.CustomerId == id);
@@ -14024,6 +14055,12 @@ function openCustomer(id) {
     </dl>
     ${kundenKontakteHtml(c)}
     ${kundenInternHtml(c)}
+    ${comp ? (() => { const kIds = cache.contacts.filter(k => String(k.CompanyId) === String(comp.id)).map(k => String(k.id)); const dIds = cache.deals.filter(d => String(d.CompanyId) === String(comp.id)).map(d => String(d.id));
+      const acts = cache.activities.filter(a => (a.RelatedTo === "Company" && String(a.RelatedId) === String(comp.id)) || (a.RelatedTo === "Contact" && kIds.includes(String(a.RelatedId))) || (a.RelatedTo === "Deal" && dIds.includes(String(a.RelatedId))));
+      return `<div style="margin-top:18px;border-top:1px solid var(--border-soft);padding-top:12px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><h3 style="margin:0;font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Aktivitäten (${acts.length})</h3>
+        <button class="btn btn-sm btn-primary" onclick="newActivity('Company', ${comp.id}, () => openCustomer(${id}))">+ Aktivität erfassen</button></div>
+        ${renderActivityList(acts)}</div>`; })() : ""}
     </div>
     <div ${kt === "kond" ? "" : "hidden"}>
     <dl class="kv">
@@ -15547,7 +15584,7 @@ function openCompany(id) {
 
     <h3 style="margin-top:20px;font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Aktivitäten</h3>
     ${renderActivityList(acts)}
-    <div style="margin-top:12px"><button class="btn btn-sm" onclick="newActivity('Company', ${id})">+ Aktivität</button></div>
+    <div style="margin-top:12px"><button class="btn btn-sm" onclick="newActivity('Company', ${id}, () => openCompany(${id}))">+ Aktivität erfassen</button></div>
     ${typeof ofHistorieHtml === "function" ? ofHistorieHtml(id) : ""}
   `, [
     isAdmin() ? `<button class="btn btn-danger" onclick="deleteCompany(${id})">Löschen</button>` : "",
@@ -15585,7 +15622,7 @@ function openContact(id) {
 
     <h3 style="margin-top:20px;font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Aktivitäten</h3>
     ${renderActivityList(acts)}
-    <div style="margin-top:12px"><button class="btn btn-sm" onclick="newActivity('Contact', ${id})">+ Aktivität</button></div>
+    <div style="margin-top:12px"><button class="btn btn-sm" onclick="newActivity('Contact', ${id}, () => openContact(${id}))">+ Aktivität erfassen</button></div>
   `, [
     `<button class="btn btn-danger" onclick="deleteContact(${id})">Löschen</button>`,
     `<button class="btn" onclick="editContact(${id})">Bearbeiten</button>`
@@ -15617,7 +15654,7 @@ function openDeal(id) {
 
     <h3 style="margin-top:20px;font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Aktivitäten</h3>
     ${renderActivityList(acts)}
-    <div style="margin-top:12px"><button class="btn btn-sm" onclick="newActivity('Deal', ${id})">+ Aktivität</button></div>
+    <div style="margin-top:12px"><button class="btn btn-sm" onclick="newActivity('Deal', ${id}, () => openDeal(${id}))">+ Aktivität erfassen</button></div>
   `, [
     `<button class="btn btn-danger" onclick="deleteDeal(${id})">Löschen</button>`,
     d.CompanyId ? `<button class="btn" onclick="closeModal();ofDialog(${d.CompanyId})">📄 Offerte erstellen</button>` : "",
@@ -15821,7 +15858,7 @@ async function hcStart(auto) {
   let i = 0;
   const worker = async () => { while (i < umg.length) { const u = umg[i++]; const res = await hcAbfragen(u); hcState.ergebnisse[u.host] = { ...u, ...res, zeit: Date.now() }; hcPanelRender(); } };
   await Promise.all(Array.from({ length: Math.min(6, umg.length) }, worker));
-  // Ergänzung aus dem PowerShell-Skript (Production-Healthcheck-CRM.ps1 schreibt CRM-Budgetdaten/healthcheck.json):
+  // Ergänzung aus dem PowerShell-Skript (Production-Healthcheck-CRM.ps1 schreibt 06 CRM/CRM-Budgetdaten/healthcheck.json):
   // liefert die Service-Details auch dort, wo der Browser die API wegen CORS nicht lesen darf
   hcState.skript = null;
   try {
@@ -15870,7 +15907,7 @@ function hcPanelHtml() {
       <span>${rows.length} Umgebung(en) aus den App-Links der aktiven Kunden${(hcState.ohneDb || []).length ? ` · <span title="${escape(hcState.ohneDb.join("\n"))}">${hcState.ohneDb.length} ohne eigene Datenbank (nicht geprüft)</span>` : ""}${(hcState.ohneLink || []).length ? ` · <a href="#" style="color:var(--warn)" title="${escape(hcState.ohneLink.join("\n"))}" onclick="showModal('Aktive Kunden ohne App-Link', '<div style=&quot;font-size:12px;line-height:1.7&quot;>' + ${tkJs(hcState.ohneLink.slice().sort().map(n => escape(n)).join("<br>"))} + '</div>', ['<button class=&quot;btn btn-primary&quot; onclick=&quot;closeModal()&quot;>Schliessen</button>']);return false">${hcState.ohneLink.length} aktive Kunden ohne App-Link</a> (im Kunden den Link erfassen, dann werden sie geprüft)` : ""}</span>
       ${isAdmin() ? `<a href="#" onclick="hcExtraBearbeiten();return false" style="color:var(--accent-2)">+ weitere Umgebungen (intern, z.B. sales, staging)</a>` : ""}
     </div>
-    ${n.cors ? `<div style="font-size:11px;color:var(--text-faint);margin-top:6px">🟦 = Umgebung antwortet, aber der Browser darf die Antwort nicht lesen. Details erscheinen, wenn (a) /healthchecks-api den Header <code>Access-Control-Allow-Origin: ${escape(location.origin)}</code> liefert oder (b) auf einem Rechner <code>Production-Healthcheck-CRM.ps1</code> läuft, das die Resultate nach CRM-Budgetdaten/healthcheck.json schreibt.</div>` : ""}
+    ${n.cors ? `<div style="font-size:11px;color:var(--text-faint);margin-top:6px">🟦 = Umgebung antwortet, aber der Browser darf die Antwort nicht lesen. Details erscheinen, wenn (a) /healthchecks-api den Header <code>Access-Control-Allow-Origin: ${escape(location.origin)}</code> liefert oder (b) auf einem Rechner <code>Production-Healthcheck-CRM.ps1</code> läuft, das die Resultate nach 06 CRM/CRM-Budgetdaten/healthcheck.json schreibt.</div>` : ""}
   </div>`;
 }
 async function crmCopyCustomerEmails(kind) {
@@ -15992,6 +16029,7 @@ function editCompany(id) {
       </div>
     </div>
     ${firmenFelderHtml(c, "f-")}
+    ${firmaKontakteHtml(id)}
     <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-iscustomer" ${c.IsCustomer?"checked":""} style="width:auto;margin:0" onchange="document.getElementById('f-winprob-row').style.display=this.checked?'none':'block'"> Ist Kunde (zahlt monatlich)</label></div>
     <div id="f-winprob-row" class="field" style="display:${c.IsCustomer?'none':'block'}">
       <label>Win-Wahrscheinlichkeit (%)</label>
@@ -16019,9 +16057,62 @@ async function saveCompany(id) {
     if (!id) { const created = await createItem("Companies", data); compId = created && created.id; }
     // Firmendaten (gemeinsamer Block) + Titel/Branche/Kunde-Flag/Win% speichern
     await firmenFelderSpeichern(compId, "f-", { Title: data.Title, Industry: data.Industry, IsCustomer: data.IsCustomer, WinProbability: data.WinProbability });
+    const nk = await firmaKontakteSpeichern(compId);
     await reload("Companies");
-    closeModal(); render(); toast("Gespeichert");
+    closeModal(); render(); toast("Gespeichert" + (nk ? ` · ${nk} Kontakt(e) angelegt` : ""));
   } catch (e) { toast(e.message, true); }
+}
+/* ---------- Kontakte direkt im Firmenformular erfassen (14.10.2026) ----------
+   Bestehende Kontakte werden angezeigt (Klick → Kontaktformular), neue Zeilen werden beim Speichern der Firma als
+   Kontakte angelegt (Vorname/Nachname Pflicht, E-Mail, Telefon, Funktion-Chips wie im Kontaktformular). */
+function firmaKontakteHtml(compId) {
+  const vorhandene = compId ? cache.contacts.filter(k => String(k.CompanyId) === String(compId)).sort((a, b) => (a.Title || "").localeCompare(b.Title || "")) : [];
+  return `<div class="field" style="margin-top:6px">
+    <label>Kontakte beim Kunden</label>
+    ${vorhandene.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px">${vorhandene.map(k => { const tags = kontaktTags(compId, k.id); return `<span onclick="editContact(${k.id}, null, null)" title="Kontakt bearbeiten" style="cursor:pointer;background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:3px 10px;font-size:12px">${escape(k.Title || "")}${k.Email ? ` <span style="color:var(--text-faint)">${escape(k.Email)}</span>` : ""}${tags.length ? ` <span style="color:var(--accent)">· ${escape(tags.join(", "))}</span>` : ""}</span>`; }).join("")}</div>` : ""}
+    <div id="fk-rows"></div>
+    <button type="button" class="btn btn-sm" onclick="fkZeile()">+ Kontakt erfassen</button>
+    <span style="font-size:11px;color:var(--text-faint);margin-left:8px">wird mit «Speichern» zusammen mit der Firma angelegt</span>
+  </div>`;
+}
+function fkZeile() {
+  const box = document.getElementById("fk-rows"); if (!box) return;
+  const row = document.createElement("div"); row.className = "fk-row";
+  row.style.cssText = "border:1px dashed var(--border);border-radius:6px;padding:8px 10px;margin-bottom:8px";
+  row.innerHTML = `<div class="field-row" style="grid-template-columns:1fr 1fr 1.3fr 1fr auto;gap:8px;align-items:end">
+      <div class="field" style="margin:0"><label>Vorname *</label><input class="fk-vn" placeholder="Max"></div>
+      <div class="field" style="margin:0"><label>Nachname *</label><input class="fk-nn" placeholder="Muster"></div>
+      <div class="field" style="margin:0"><label>E-Mail</label><input class="fk-mail" type="email" placeholder="max@kunde.ch"></div>
+      <div class="field" style="margin:0"><label>Telefon direkt</label><input class="fk-tel" placeholder="+41 61 …"></div>
+      <button type="button" class="btn btn-sm" title="Zeile entfernen" onclick="this.closest('.fk-row').remove()">✕</button>
+    </div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;padding:6px 0 0;font-size:12px">${KONTAKT_TAGS.map(t => `<label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" class="fk-tag" value="${escape(t)}" style="width:auto;margin:0">${escape(t)}</label>`).join("")}</div>`;
+  box.appendChild(row); const f = row.querySelector(".fk-vn"); if (f) f.focus();
+}
+async function firmaKontakteSpeichern(compId) {
+  const rows = Array.from(document.querySelectorAll("#fk-rows .fk-row")); if (!rows.length || !compId) return 0;
+  const neue = [];
+  for (const r of rows) {
+    const vn = (r.querySelector(".fk-vn").value || "").trim(), nn = (r.querySelector(".fk-nn").value || "").trim();
+    if (!vn && !nn) continue;
+    if (!vn || !nn) throw new Error("Kontakt: Vorname und Nachname sind Pflicht (" + (vn || nn) + ")");
+    neue.push({ vn, nn, mail: (r.querySelector(".fk-mail").value || "").trim(), tel: (r.querySelector(".fk-tel").value || "").trim(), tags: Array.from(r.querySelectorAll(".fk-tag:checked")).map(cb => cb.value) });
+  }
+  if (!neue.length) return 0;
+  const angelegt = [];
+  for (const k of neue) {
+    const res = await createItem("Contacts", { Title: k.vn + " " + k.nn, Email: k.mail, Phone: k.tel, CompanyId: parseInt(compId) });
+    angelegt.push({ ...k, id: res && res.id });
+  }
+  await reload("Contacts");
+  for (const k of angelegt) {
+    let kid = k.id;
+    if (!kid) { const t = cache.contacts.filter(x => x.Title === k.vn + " " + k.nn && String(x.CompanyId) === String(compId)).sort((a, b) => b.id - a.id)[0]; kid = t && t.id; }
+    if (!kid) continue;
+    await kontaktNamenSetzen(compId, kid, k.vn, k.nn);
+    if (k.tags.length) await kontaktTagsSetzen(compId, kid, k.tags);
+  }
+  return angelegt.length;
 }
 async function deleteCompany(id) {
   if (!isAdmin()) { toast("Firmen löschen dürfen nur Admins.", true); return; }
@@ -16223,7 +16314,9 @@ function updateRelatedDropdown() {
          .map(i => `<option value="${i.id}">${escape(i.Title||"")}</option>`).join("");
 }
 
-function newActivity(relatedTo, relatedId) {
+let aktZurueck = null;   // Funktion, die nach dem Speichern/Löschen einer Aktivität das Ausgangs-Detail wieder öffnet
+function newActivity(relatedTo, relatedId, zurueck) {
+  aktZurueck = typeof zurueck === "function" ? zurueck : null;
   editActivity(null, relatedTo, relatedId);
 }
 
@@ -16300,6 +16393,7 @@ async function saveActivity(id) {
     else await createItem("Activities", data);
     await reload("Activities");
     closeModal(); render(); toast(id ? "Gespeichert" : "Erstellt");
+    const z = aktZurueck; aktZurueck = null; if (z) { try { z(); } catch (e) {} }
   } catch (e) { toast(e.message, true); }
 }
 async function toggleTask(id, done) {
@@ -18641,11 +18735,11 @@ function rpStapelErledigt(){
 function rpStapelVerwerfen(){ if(rpStapel.length && !confirm('Stapel verwerfen?')) return; rpStapel = []; rpStapelAktiv = -1; rpStapelQuelle = null; rpStapelRender(); }
 /* ---- SharePoint-Eingang: Ordner «Rapporte-Eingang» in der CRM-Bibliothek (neben CRM-Budgetdaten).
    Dateien werden NIE gelöscht — erledigte Rapporte wandern in den Unterordner «erledigt». ---- */
-var RP_EINGANG_DIR = 'Rapporte-Eingang', RP_EINGANG_ERLEDIGT = 'erledigt';
+var RP_EINGANG_DIR = window.CRM_ROOT + '/Rapporte-Eingang', RP_EINGANG_ERLEDIGT = 'erledigt';
 var rpEingang = { dateien: [], geladen: {}, erledigtId: null, laeuft: false };
 async function rpEingangOrdner(){
   try { var e = await graph('/sites/' + siteId + '/drive/root:/' + RP_EINGANG_DIR + '/' + RP_EINGANG_ERLEDIGT); if(e && e.id) return e.id; } catch(x){}
-  try { await graph('/sites/' + siteId + '/drive/root:/' + RP_EINGANG_DIR); } catch(x){ await graph('/sites/' + siteId + '/drive/root/children', { method: 'POST', body: JSON.stringify({ name: RP_EINGANG_DIR, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }) }); }
+  try { await graph('/sites/' + siteId + '/drive/root:/' + RP_EINGANG_DIR); } catch(x){ await spOrdnerSicherstellen(RP_EINGANG_DIR); } if (false) { await graph('/sites/' + siteId + '/drive/root/children', { method: 'POST', body: JSON.stringify({ name: RP_EINGANG_DIR, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }) }); }
   var e2 = await graph('/sites/' + siteId + '/drive/root:/' + RP_EINGANG_DIR + ':/children', { method: 'POST', body: JSON.stringify({ name: RP_EINGANG_ERLEDIGT, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }) });
   return e2 && e2.id;
 }
