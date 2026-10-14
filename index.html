@@ -28,14 +28,14 @@
   window.CRM_ROOT = "06 CRM";
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.505.0"></script>
-<script src="apriko-api.js?v=1.505.0"></script>
-<script src="lohncheck.js?v=1.505.0"></script>
-<script src="personalbudget.js?v=1.505.0"></script>
-<script src="jahresbudget.js?v=1.505.0"></script>
-<script src="budgetpositionen.js?v=1.505.0"></script>
-<script src="lohnchecklistetemp.js?v=1.505.0"></script>
-<script src="apriko-endpunkte.js?v=1.505.0"></script>
+<script src="apriko-filters.js?v=1.506.0"></script>
+<script src="apriko-api.js?v=1.506.0"></script>
+<script src="lohncheck.js?v=1.506.0"></script>
+<script src="personalbudget.js?v=1.506.0"></script>
+<script src="jahresbudget.js?v=1.506.0"></script>
+<script src="budgetpositionen.js?v=1.506.0"></script>
+<script src="lohnchecklistetemp.js?v=1.506.0"></script>
+<script src="apriko-endpunkte.js?v=1.506.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1042,7 +1042,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.505.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.506.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -5311,6 +5311,96 @@ function revenueCustomersForMonth(year, month) {
     return Math.abs(calc.saas) > 0.005 || Math.abs(calc.bpo) > 0.005;
   }).sort((a,b) => (a.Title||"").localeCompare(b.Title||""));
 }
+/* ---------- Fakturakontrolle (14.10.2026) ----------
+   Für den gewählten Monat: welche Kunden haben noch keine Eingabe (Lizenzen / Aussenumsatz / Stunden), welche Honorare sind
+   berechnet, aber nicht als fakturiert markiert, und welche sind als fakturiert markiert, obwohl kein Betrag da ist.
+   Optional: bexio-Rechnungsexport (CSV) hochladen → Rechnungen werden den Kunden zugeordnet (Firmenname) und mit den
+   erwarteten Honoraren verglichen. */
+let fkBexio = null;   // { zeilen:[{name, datum, betrag, titel, nr}], dateiname }
+function fkKontrolle() {
+  const year = filters.revenueYear, month = filters.revenueMonth;
+  const kunden = revenueCustomersForMonth(year, month);
+  const zeilen = kunden.map(c => {
+    const r = findRev(c.id, year, month) || {};
+    const calc = calcRevenue(r, c, year, month);
+    const needLic = segmentNeedsLicenses(c.Segment), useExt = needsExternal(c), useHrs = needsHours(c);
+    const stdMonat = useHrs && bpoModel(c, year, month) === "Stundensatz";
+    const lic = parseInt(r.Licenses) || 0, ext = parseFloat(r.ExternalRevenue) || 0, hrs = parseFloat(r.Hours) || 0;
+    const fehlend = [];
+    if (needLic && !saasIsPercent(c, year, month) && !lic) fehlend.push("Lizenzen");
+    if (stdMonat) { if (!hrs) fehlend.push("Stunden"); }
+    else if (useExt && !ext && !(c.BPOYtd && calc.ytd)) fehlend.push("Aussenumsatz");
+    const saasOffen = segmentChargesSaaS(c.Segment) && calc.saas > 0 && !r.InvoicedSaaS;
+    const bpoOffen = segmentNeedsBPO(c.Segment) && calc.bpo > 0 && !r.InvoicedBPO;
+    const saasLeer = !!r.InvoicedSaaS && !(calc.saas > 0), bpoLeer = !!r.InvoicedBPO && !(calc.bpo > 0);
+    const comp = cache.companies.find(x => x.id == c.CompanyId);
+    return { c, comp, r, calc, fehlend, saasOffen, bpoOffen, saasLeer, bpoLeer };
+  });
+  const bx = fkBexio ? fkBexioAbgleich(zeilen, year, month) : null;
+  const n = { fehlend: zeilen.filter(z => z.fehlend.length).length, offen: zeilen.filter(z => z.saasOffen || z.bpoOffen).length, leer: zeilen.filter(z => z.saasLeer || z.bpoLeer).length };
+  const status = z => {
+    const t = [];
+    if (z.fehlend.length) t.push(`<span style="color:var(--warn)">⚠ Eingabe fehlt: ${escape(z.fehlend.join(", "))}</span>`);
+    if (z.saasOffen) t.push(`<span style="color:var(--danger)">SaaS CHF ${fmtCHFShort(z.calc.saas)} nicht fakturiert</span>`);
+    if (z.bpoOffen) t.push(`<span style="color:var(--danger)">BPO CHF ${fmtCHFShort(z.calc.bpo)} nicht fakturiert</span>`);
+    if (z.saasLeer) t.push(`<span style="color:var(--warn)">SaaS als fakturiert markiert, aber Betrag 0</span>`);
+    if (z.bpoLeer) t.push(`<span style="color:var(--warn)">BPO als fakturiert markiert, aber Betrag 0</span>`);
+    if (!t.length) t.push(`<span style="color:var(--accent)">✓ vollständig</span>`);
+    return t.join("<br>");
+  };
+  const bxZelle = z => { if (!bx) return ""; const m = bx.proKunde[z.c.id] || []; if (!m.length) return `<td style="color:var(--text-faint)">—</td>`;
+    const sum = m.reduce((a, x) => a + x.betrag, 0); const soll = (z.calc.saas || 0) + (z.calc.bpo || 0);
+    const ok = Math.abs(sum - soll) < 1; return `<td style="font-family:var(--font-mono);color:${ok ? "var(--accent)" : "var(--warn)"}" title="${escape(m.map(x => (x.nr ? x.nr + " · " : "") + x.datum + " · " + x.titel + " · CHF " + fmtCHFShort(x.betrag)).join("\n"))}">${m.length} Rg · CHF ${fmtCHFShort(sum)}${ok ? "" : ` <span style="font-size:10px">(erwartet ${fmtCHFShort(soll)})</span>`}</td>`; };
+  const sortiert = zeilen.slice().sort((a, b) => { const ra = (a.fehlend.length || a.saasOffen || a.bpoOffen || a.saasLeer || a.bpoLeer) ? 0 : 1, rb = (b.fehlend.length || b.saasOffen || b.bpoOffen || b.saasLeer || b.bpoLeer) ? 0 : 1; return ra - rb || (a.c.Title || "").localeCompare(b.c.Title || ""); });
+  modalBreit(true);
+  showModal(`Fakturakontrolle ${MONTH_NAMES[month - 1]} ${year}`, `
+    <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;margin-bottom:10px;align-items:center">
+      <span><b>${kunden.length}</b> aktive Kunden</span>
+      <span style="color:var(--warn)">⚠ ${n.fehlend} ohne Eingabe</span>
+      <span style="color:var(--danger)">● ${n.offen} mit nicht fakturiertem Honorar</span>
+      ${n.leer ? `<span style="color:var(--warn)">${n.leer} markiert ohne Betrag</span>` : ""}
+      <label class="btn btn-sm" style="margin-left:auto;cursor:pointer" title="bexio → Verkauf → Rechnungen → Export (CSV)">⇧ bexio-Rechnungen (CSV)<input type="file" accept=".csv,text/csv" hidden onchange="fkBexioLaden(this)"></label>
+      ${fkBexio ? `<span style="color:var(--text-faint)">${escape(fkBexio.dateiname)} · ${fkBexio.zeilen.length} Rechnungen${bx ? ` · ${bx.imMonat} im Monat, ${bx.unzugeordnet.length} nicht zuordenbar` : ""}</span>` : ""}
+    </div>
+    <div class="table-wrap"><table style="font-size:12px"><thead><tr><th>Kunde</th><th style="text-align:right">SaaS</th><th style="text-align:right">BPO</th><th>Status</th>${bx ? "<th>bexio</th>" : ""}</tr></thead><tbody>
+      ${sortiert.map(z => `<tr><td><a href="#" onclick="closeModal();filters.revenueMode='customer';filters.revenueCustomerId=${z.c.id};render();return false">${escape(z.c.Title)}</a></td>
+        <td style="text-align:right;font-family:var(--font-mono)">${z.calc.saas ? fmtCHFShort(z.calc.saas) + (z.r.InvoicedSaaS ? " ✓" : "") : "—"}</td>
+        <td style="text-align:right;font-family:var(--font-mono)">${z.calc.bpo ? fmtCHFShort(z.calc.bpo) + (z.r.InvoicedBPO ? " ✓" : "") : "—"}</td>
+        <td>${status(z)}</td>${bxZelle(z)}</tr>`).join("")}
+    </tbody></table></div>
+    ${bx && bx.unzugeordnet.length ? `<div style="margin-top:10px;font-size:12px"><b>bexio-Rechnungen im Monat ohne Zuordnung zu einem Kunden (${bx.unzugeordnet.length}):</b><div style="color:var(--text-dim);margin-top:4px">${bx.unzugeordnet.map(x => escape((x.nr ? x.nr + " · " : "") + x.name + " · " + x.datum + " · CHF " + fmtCHFShort(x.betrag) + (x.titel ? " · " + x.titel : ""))).join("<br>")}</div></div>` : ""}
+    <div style="font-size:11px;color:var(--text-faint);margin-top:10px">«Nicht fakturiert» = Honorar berechnet, aber «Fakt. SaaS/BPO» steht noch auf Nein. Der bexio-Abgleich ordnet Rechnungen über den Firmennamen zu und vergleicht die Summe des Monats mit SaaS + BPO.</div>`,
+    [`<button class="btn btn-primary" onclick="closeModal()">Schliessen</button>`]);
+}
+async function fkBexioLaden(input) {
+  const f = input.files && input.files[0]; if (!f) return;
+  let text; try { text = await f.text(); } catch (e) { toast("Datei nicht lesbar", true); return; }
+  const trenner = (text.split("\n")[0].match(/;/g) || []).length >= (text.split("\n")[0].match(/,/g) || []).length ? ";" : ",";
+  const zeilen = faktParseCsv(trenner === ";" ? text : text.replace(/,/g, ";"));   // einfache Umsetzung; bei Kommatrennung mit Anführungszeichen ggf. anpassen
+  if (!zeilen.length) { toast("Keine Zeilen gefunden", true); return; }
+  const head = Object.keys(zeilen[0]);
+  const spalte = re => head.find(h => re.test(h)) || "";
+  const cName = spalte(/kontakt|kunde|firma|empf|name|adress/i), cBetrag = spalte(/^total$|total\s*\(?chf|netto|betrag|total/i), cDatum = spalte(/datum|date/i), cTitel = spalte(/titel|bezeichnung|beschreib|thema|position/i), cNr = spalte(/nummer|nr\.?$|^nr|dokument/i);
+  if (!cName || !cBetrag) { alert("Spalten nicht erkannt. Gefunden: " + head.join(", ") + "\n\nBitte die Datei einmal zusenden, dann passe ich den Import an."); return; }
+  fkBexio = { dateiname: f.name, zeilen: zeilen.map(z => ({ name: String(z[cName] || "").trim(), betrag: faktNum(z[cBetrag]), datum: faktDatumIso(z[cDatum]) || "", titel: String(z[cTitel] || "").trim(), nr: String(z[cNr] || "").trim() })).filter(z => z.name) };
+  toast(`${fkBexio.zeilen.length} bexio-Rechnungen geladen (Spalten: ${cName} / ${cBetrag} / ${cDatum || "ohne Datum"})`);
+  fkKontrolle();
+}
+function fkNorm(s) { return String(s || "").toLowerCase().replace(/\b(ag|gmbh|sa|sarl|sagl|ltd|inc|personal|services?|group|holding)\b/g, " ").replace(/[^a-z0-9äöü]+/g, " ").trim(); }
+function fkBexioAbgleich(zeilen, year, month) {
+  const ym = `${year}-${String(month).padStart(2, "0")}`;
+  const proKunde = {}; const unzugeordnet = []; let imMonat = 0;
+  const kandidaten = zeilen.map(z => ({ id: z.c.id, norm: [fkNorm(z.comp && z.comp.Title), fkNorm(z.c.Title)].filter(Boolean) }));
+  fkBexio.zeilen.forEach(x => {
+    if (x.datum && !x.datum.startsWith(ym)) return;
+    imMonat++;
+    const n = fkNorm(x.name); const nt = n.split(" ").filter(w => w.length > 2);
+    let best = null, bestScore = 0;
+    kandidaten.forEach(k => k.norm.forEach(kn => { const kt = kn.split(" ").filter(w => w.length > 2); const treffer = kt.filter(w => nt.includes(w)).length; const score = treffer / Math.max(1, Math.min(kt.length, nt.length)); if (treffer && score > bestScore) { bestScore = score; best = k.id; } }));
+    if (best != null && bestScore >= 0.5) (proKunde[best] = proKunde[best] || []).push(x); else unzugeordnet.push(x);
+  });
+  return { proKunde, unzugeordnet, imMonat };
+}
 function renderRevenueByMonth(el) {
   const year = filters.revenueYear;
   const month = filters.revenueMonth;
@@ -5356,6 +5446,7 @@ function renderRevenueByMonth(el) {
       <label style="color:var(--text-dim);font-size:12px">Monat:</label>
       <select onchange="filters.revenueMonth=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${monthOptions}</select>
       <select onchange="filters.revenueYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${yearOptions}</select>
+      <button class="btn btn-sm" onclick="fkKontrolle()" title="Prüft für diesen Monat: fehlende Eingaben, offene (nicht fakturierte) Honorare, Abgleich mit bexio-Export">🔍 Fakturakontrolle</button>
       <div style="margin-left:auto; display:flex; gap:20px; font-size:12px; flex-wrap:wrap;">
         <div><span style="color:var(--text-dim)">SaaS-Kunden:</span> <span style="font-family:var(--font-mono);color:var(--accent)">${saasOnlyCust}</span></div>
         <div><span style="color:var(--text-dim)">BPO-Kunden:</span> <span style="font-family:var(--font-mono);color:var(--accent-2)">${bpoCust}</span></div>
