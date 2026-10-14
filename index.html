@@ -28,14 +28,14 @@
   window.CRM_ROOT = "06 CRM";
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.506.0"></script>
-<script src="apriko-api.js?v=1.506.0"></script>
-<script src="lohncheck.js?v=1.506.0"></script>
-<script src="personalbudget.js?v=1.506.0"></script>
-<script src="jahresbudget.js?v=1.506.0"></script>
-<script src="budgetpositionen.js?v=1.506.0"></script>
-<script src="lohnchecklistetemp.js?v=1.506.0"></script>
-<script src="apriko-endpunkte.js?v=1.506.0"></script>
+<script src="apriko-filters.js?v=1.508.0"></script>
+<script src="apriko-api.js?v=1.508.0"></script>
+<script src="lohncheck.js?v=1.508.0"></script>
+<script src="personalbudget.js?v=1.508.0"></script>
+<script src="jahresbudget.js?v=1.508.0"></script>
+<script src="budgetpositionen.js?v=1.508.0"></script>
+<script src="lohnchecklistetemp.js?v=1.508.0"></script>
+<script src="apriko-endpunkte.js?v=1.508.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1042,7 +1042,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.506.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.508.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -5303,9 +5303,15 @@ function setRevMode(mode) {
 /* === Modus: Monatsabschluss === */
 /* Einheitliche Kundenauswahl für Monatsumsätze: aktive Kunden PLUS alle anderen, die in diesem Monat
    Umsatz (auch negativ) haben — damit Monatsabschluss, Statistik und Chart dieselben Zahlen zeigen. */
+/* Kunden, die im Monat relevant sind: aktiv UND Vertrag läuft im Monat (Start ≤ Monatsende, Ende ≥ Monatsanfang — 14.10.2026:
+   Kunden mit Start 1.1.2027 erschienen sonst schon 2026). Nicht aktive bleiben drin, wenn der Monat Beträge hat. */
 function revenueCustomersForMonth(year, month) {
+  const mStart = `${year}-${String(month).padStart(2, "0")}-01`;
+  const mEnde = `${year}-${String(month).padStart(2, "0")}-${new Date(year, month, 0).getDate()}`;
   return cache.customers.filter(c => {
-    if ((c.Status || "Aktiv") === "Aktiv") return true;
+    const start = (c.StartDate || "").slice(0, 10), ende = (c.EndDate || "").slice(0, 10);
+    const laeuft = (!start || start <= mEnde) && (!ende || ende >= mStart);
+    if ((c.Status || "Aktiv") === "Aktiv" && laeuft) return true;
     const r = findRev(c.id, year, month); if (!r) return false;
     const calc = calcRevenue(r, c, year, month);
     return Math.abs(calc.saas) > 0.005 || Math.abs(calc.bpo) > 0.005;
@@ -5350,7 +5356,7 @@ function fkKontrolle() {
   };
   const bxZelle = z => { if (!bx) return ""; const m = bx.proKunde[z.c.id] || []; if (!m.length) return `<td style="color:var(--text-faint)">—</td>`;
     const sum = m.reduce((a, x) => a + x.betrag, 0); const soll = (z.calc.saas || 0) + (z.calc.bpo || 0);
-    const ok = Math.abs(sum - soll) < 1; return `<td style="font-family:var(--font-mono);color:${ok ? "var(--accent)" : "var(--warn)"}" title="${escape(m.map(x => (x.nr ? x.nr + " · " : "") + x.datum + " · " + x.titel + " · CHF " + fmtCHFShort(x.betrag)).join("\n"))}">${m.length} Rg · CHF ${fmtCHFShort(sum)}${ok ? "" : ` <span style="font-size:10px">(erwartet ${fmtCHFShort(soll)})</span>`}</td>`; };
+    const ok = Math.abs(sum - soll) < 1; return `<td style="font-family:var(--font-mono);color:${ok ? "var(--accent)" : "var(--warn)"}" title="${escape(m.map(x => (x.nr ? x.nr + " · " : "") + x.datum + " · " + x.titel + (x.leistung ? " · " + x.leistung : "") + " · CHF " + fmtCHFShort(x.betrag) + (x.status ? " · " + x.status : "")).join("\n"))}">${m.length} Rg · CHF ${fmtCHFShort(sum)}${ok ? "" : ` <span style="font-size:10px">(erwartet ${fmtCHFShort(soll)})</span>`}</td>`; };
   const sortiert = zeilen.slice().sort((a, b) => { const ra = (a.fehlend.length || a.saasOffen || a.bpoOffen || a.saasLeer || a.bpoLeer) ? 0 : 1, rb = (b.fehlend.length || b.saasOffen || b.bpoOffen || b.saasLeer || b.bpoLeer) ? 0 : 1; return ra - rb || (a.c.Title || "").localeCompare(b.c.Title || ""); });
   modalBreit(true);
   showModal(`Fakturakontrolle ${MONTH_NAMES[month - 1]} ${year}`, `
@@ -5359,7 +5365,7 @@ function fkKontrolle() {
       <span style="color:var(--warn)">⚠ ${n.fehlend} ohne Eingabe</span>
       <span style="color:var(--danger)">● ${n.offen} mit nicht fakturiertem Honorar</span>
       ${n.leer ? `<span style="color:var(--warn)">${n.leer} markiert ohne Betrag</span>` : ""}
-      <label class="btn btn-sm" style="margin-left:auto;cursor:pointer" title="bexio → Verkauf → Rechnungen → Export (CSV)">⇧ bexio-Rechnungen (CSV)<input type="file" accept=".csv,text/csv" hidden onchange="fkBexioLaden(this)"></label>
+      <label class="btn btn-sm" style="margin-left:auto;cursor:pointer" title="bexio → Verkauf → Rechnungen → Exportieren (Excel oder CSV)">⇧ bexio-Rechnungen (Excel/CSV)<input type="file" accept=".xlsx,.xls,.csv" hidden onchange="fkBexioLaden(this)"></label>
       ${fkBexio ? `<span style="color:var(--text-faint)">${escape(fkBexio.dateiname)} · ${fkBexio.zeilen.length} Rechnungen${bx ? ` · ${bx.imMonat} im Monat, ${bx.unzugeordnet.length} nicht zuordenbar` : ""}</span>` : ""}
     </div>
     <div class="table-wrap"><table style="font-size:12px"><thead><tr><th>Kunde</th><th style="text-align:right">SaaS</th><th style="text-align:right">BPO</th><th>Status</th>${bx ? "<th>bexio</th>" : ""}</tr></thead><tbody>
@@ -5374,16 +5380,29 @@ function fkKontrolle() {
 }
 async function fkBexioLaden(input) {
   const f = input.files && input.files[0]; if (!f) return;
-  let text; try { text = await f.text(); } catch (e) { toast("Datei nicht lesbar", true); return; }
-  const trenner = (text.split("\n")[0].match(/;/g) || []).length >= (text.split("\n")[0].match(/,/g) || []).length ? ";" : ",";
-  const zeilen = faktParseCsv(trenner === ";" ? text : text.replace(/,/g, ";"));   // einfache Umsetzung; bei Kommatrennung mit Anführungszeichen ggf. anpassen
-  if (!zeilen.length) { toast("Keine Zeilen gefunden", true); return; }
-  const head = Object.keys(zeilen[0]);
-  const spalte = re => head.find(h => re.test(h)) || "";
-  const cName = spalte(/kontakt|kunde|firma|empf|name|adress/i), cBetrag = spalte(/^total$|total\s*\(?chf|netto|betrag|total/i), cDatum = spalte(/datum|date/i), cTitel = spalte(/titel|bezeichnung|beschreib|thema|position/i), cNr = spalte(/nummer|nr\.?$|^nr|dokument/i);
-  if (!cName || !cBetrag) { alert("Spalten nicht erkannt. Gefunden: " + head.join(", ") + "\n\nBitte die Datei einmal zusenden, dann passe ich den Import an."); return; }
-  fkBexio = { dateiname: f.name, zeilen: zeilen.map(z => ({ name: String(z[cName] || "").trim(), betrag: faktNum(z[cBetrag]), datum: faktDatumIso(z[cDatum]) || "", titel: String(z[cTitel] || "").trim(), nr: String(z[cNr] || "").trim() })).filter(z => z.name) };
-  toast(`${fkBexio.zeilen.length} bexio-Rechnungen geladen (Spalten: ${cName} / ${cBetrag} / ${cDatum || "ohne Datum"})`);
+  let rows;
+  try {
+    await lcLoadXlsx();
+    const wb = /\.xlsx?$/i.test(f.name) ? window.XLSX.read(await f.arrayBuffer(), { type: "array", cellDates: false }) : window.XLSX.read(await f.text(), { type: "string", raw: true });
+    rows = window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "", raw: false });
+  } catch (e) { toast("Datei nicht lesbar: " + (e.message || e), true); return; }
+  if (!rows.length) { toast("Keine Zeilen gefunden", true); return; }
+  const head = Object.keys(rows[0]);
+  const spalte = (...res) => { for (const re of res) { const h = head.find(h => re.test(h)); if (h) return h; } return ""; };
+  // bexio-Export «Rechnungen»: ID, Nr., Titel, Status, Kontakt, Betrag Netto, Betrag Brutto, Datum, Leistungszeitraum …
+  const cName = spalte(/^kontakt$/i, /kontakt|kunde|firma|empf|name/i), cBetrag = spalte(/betrag\s*netto/i, /netto/i, /^total$/i, /betrag|total/i),
+    cDatum = spalte(/^datum$/i, /datum|date/i), cTitel = spalte(/^titel$/i, /titel|bezeichnung|beschreib/i), cNr = spalte(/^nr\.?$/i, /nummer|nr\b/i), cStatus = spalte(/^status$/i), cLz = spalte(/leistungszeitraum/i);
+  if (!cName || !cBetrag) { alert("Spalten nicht erkannt. Gefunden: " + head.join(", ")); return; }
+  const putz = v => String(v == null ? "" : v).replace(/^'+/, "").trim();   // bexio stellt Text-Zellen ein Apostroph voran ('13.02.2026, '000043)
+  let storniert = 0, entwurf = 0;
+  const zeilen = rows.map(z => {
+    const status = putz(z[cStatus]);
+    if (/storn/i.test(status)) { storniert++; return null; }
+    if (/entwurf|draft/i.test(status)) { entwurf++; return null; }
+    return { name: putz(z[cName]), betrag: faktNum(putz(z[cBetrag]).replace(/[’'`´]/g, "")), datum: faktDatumIso(putz(z[cDatum])) || "", titel: putz(z[cTitel]), nr: putz(z[cNr]), status, leistung: putz(z[cLz]) };
+  }).filter(z => z && z.name);
+  fkBexio = { dateiname: f.name, zeilen };
+  toast(`${zeilen.length} bexio-Rechnungen geladen${storniert ? `, ${storniert} stornierte übersprungen` : ""}${entwurf ? `, ${entwurf} Entwürfe übersprungen` : ""}`);
   fkKontrolle();
 }
 function fkNorm(s) { return String(s || "").toLowerCase().replace(/\b(ag|gmbh|sa|sarl|sagl|ltd|inc|personal|services?|group|holding)\b/g, " ").replace(/[^a-z0-9äöü]+/g, " ").trim(); }
