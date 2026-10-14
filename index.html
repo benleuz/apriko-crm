@@ -28,14 +28,14 @@
   window.CRM_ROOT = "06 CRM";
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.497.0"></script>
-<script src="apriko-api.js?v=1.497.0"></script>
-<script src="lohncheck.js?v=1.497.0"></script>
-<script src="personalbudget.js?v=1.497.0"></script>
-<script src="jahresbudget.js?v=1.497.0"></script>
-<script src="budgetpositionen.js?v=1.497.0"></script>
-<script src="lohnchecklistetemp.js?v=1.497.0"></script>
-<script src="apriko-endpunkte.js?v=1.497.0"></script>
+<script src="apriko-filters.js?v=1.504.0"></script>
+<script src="apriko-api.js?v=1.504.0"></script>
+<script src="lohncheck.js?v=1.504.0"></script>
+<script src="personalbudget.js?v=1.504.0"></script>
+<script src="jahresbudget.js?v=1.504.0"></script>
+<script src="budgetpositionen.js?v=1.504.0"></script>
+<script src="lohnchecklistetemp.js?v=1.504.0"></script>
+<script src="apriko-endpunkte.js?v=1.504.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1042,7 +1042,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.497.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.504.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -1349,19 +1349,31 @@ function segmentChargesSaaS(segment) {
   return segment === "Nur SaaS" || segment === "SaaS und BPO";
 }
 
+/* BPO-Modell Stundensatz optional erst ab einem Datum (Kundenflag bpoStdFrom, z.B. 2026-09-01) — davor gilt Prozentual
+   auf Aussenumsatz (14.10.2026). Ohne year/month wird der heutige Monat angenommen. */
+function bpoStdFrom(customer) {
+  return (customer?.id != null && ((crmKundenFlags || {})[String(customer.id)] || {}).bpoStdFrom) || "";
+}
+function bpoModel(customer, year, month) {
+  const m0 = customer?.BPOModel || "Prozentual";
+  if (m0 !== "Stundensatz") return m0;
+  const from = bpoStdFrom(customer); if (!from) return m0;
+  const now = new Date(); const y = year || now.getFullYear(), m = month || (now.getMonth() + 1);
+  return (y * 100 + m) >= (parseInt(from.slice(0, 4)) * 100 + parseInt(from.slice(5, 7))) ? "Stundensatz" : "Prozentual";
+}
 // Was wird vom BPO-Modell als Input gebraucht?
 function needsExternal(customer) {
-  return (segmentNeedsBPO(customer?.Segment) && (customer?.BPOModel || "Prozentual") === "Prozentual")
+  return (segmentNeedsBPO(customer?.Segment) && ((customer?.BPOModel || "Prozentual") === "Prozentual" || !!bpoStdFrom(customer)))
     || saasIsPercentEver(customer);
 }
 function needsHours(customer) {
   return segmentNeedsBPO(customer?.Segment) && customer?.BPOModel === "Stundensatz";
 }
 
-// Brutto-BPO eines einzelnen Monats (ohne YTD-Logik)
-function grossBPOofMonth(rec, customer) {
+// Brutto-BPO eines einzelnen Monats (ohne YTD-Logik); Jahr/Monat aus dem Datensatz, falls nicht übergeben
+function grossBPOofMonth(rec, customer, year, month) {
   if (!segmentNeedsBPO(customer?.Segment)) return 0;
-  const model = customer?.BPOModel || "Prozentual";
+  const model = bpoModel(customer, year || parseInt(rec?.Year) || 0, month || parseInt(rec?.Month) || 0);
   if (model === "Stundensatz") {
     const rate = parseFloat(customer?.HourlyRate) || 0;
     const hours = parseFloat(rec?.Hours) || 0;
@@ -1410,7 +1422,7 @@ function calcRevenue(rec, customer, year, month) {
   let saasComponent = saasOfMonth(rec, customer, pricePerLic, year, month);
 
   // BPO berechnen — mit oder ohne YTD-Kumulation
-  let bpoGross = grossBPOofMonth(rec, customer);
+  let bpoGross = grossBPOofMonth(rec, customer, year, month);
   let ytdInfo = null;
 
   // YTD + prozentuales SaaS: auch der SaaS-Anteil ist die Differenz zum Vormonatsstand
@@ -1458,11 +1470,15 @@ function calcRevenue(rec, customer, year, month) {
     };
   }
 
-  // Mindesthonorare (CHF/Monat) auf prozentuale Komponenten — nur bei erfasstem Aussenumsatz
+  // Mindesthonorare (CHF/Monat) auf prozentuale Komponenten — bei erfasstem Aussenumsatz, oder (14.10.2026) wenn der Monat
+  // bereits erfasst ist (Zeile existiert, z.B. Lizenzen eingetragen) und nicht in der Zukunft liegt: dann gilt das
+  // Mindesthonorar auch ohne Umsatz (Kunde hat noch keine Rechnungen gestellt, zahlt aber das Minimum).
   const hasExt = (parseFloat(rec?.ExternalRevenue) || 0) > 0;
-  if (hasExt && customer?.id != null) {
+  const monatVorbei = (() => { const h = new Date(); return year < h.getFullYear() || (year === h.getFullYear() && month <= h.getMonth() + 1); })();
+  const monatErfasst = !!(rec && rec.id) && monatVorbei;
+  if ((hasExt || monatErfasst) && customer?.id != null) {
     if (saasIsPercent(customer, year, month)) saasComponent = applyMin(saasComponent, kundenMin(customer.id, "minSaas"));
-    if (segmentNeedsBPO(seg) && (customer?.BPOModel || "Prozentual") === "Prozentual") bpoGross = applyMin(bpoGross, kundenMin(customer.id, "minBpo"));
+    if (segmentNeedsBPO(seg) && bpoModel(customer, year, month) === "Prozentual") bpoGross = applyMin(bpoGross, kundenMin(customer.id, "minBpo"));
   }
 
   let saas = 0, bpo = 0, total = 0;
@@ -2294,7 +2310,23 @@ function bindNav() {
 /* ===========================================================
    Rendering
    =========================================================== */
+/* Scrollposition über ein Neuzeichnen hinweg behalten (14.10.2026): render() baut die Ansicht komplett neu auf, dadurch
+   sprang z.B. die Onboarding-Matrix nach jedem Klick auf eine Checkbox nach oben/links. Hier werden die Scrollwerte des
+   Hauptbereichs und aller scrollbaren Tabellen (nach Reihenfolge) gemerkt und nach dem Aufbau wiederhergestellt. */
+let renderLetzteView = null;
 function render() {
+  const main = document.querySelector("main");
+  const vorher = { view: renderLetzteView, top: main ? main.scrollTop : 0, wraps: Array.from(document.querySelectorAll("#view-content .table-wrap")).map(w => w.scrollLeft) };
+  renderInner();
+  const gleich = vorher.view === currentView; renderLetzteView = currentView;
+  if (!gleich && main) { main.scrollTop = 0; return; }   // andere Ansicht → oben beginnen
+  if (gleich && main) {
+    const wraps = Array.from(document.querySelectorAll("#view-content .table-wrap"));
+    wraps.forEach((w, i) => { if (vorher.wraps[i]) w.scrollLeft = vorher.wraps[i]; });
+    if (vorher.top) { main.scrollTop = vorher.top; requestAnimationFrame(() => { main.scrollTop = vorher.top; }); }
+  }
+}
+function renderInner() {
   const titles = VIEW_TITLES;
 
   // Router-Guard: hat der User Zugriff auf diese View?
@@ -2942,7 +2974,7 @@ async function budgetTakeoverActive() {
   });
   active.forEach(c => {
     const want = [];
-    const bpoTyp = (c.BPOModel === "Stundensatz") ? "BPOStd" : "BPO";
+    const bpoTyp = (bpoModel(c, year, 1) === "Stundensatz") ? "BPOStd" : "BPO";
     const saasTyp = saasIsPercent(c, year, 1) ? "SaaSPct" : "SaaS";
     if (segmentChargesSaaS(c.Segment)) want.push(saasTyp);
     if (segmentNeedsBPO(c.Segment)) want.push(bpoTyp);
@@ -5073,6 +5105,7 @@ function renderDashboard(el) {
         <button class="btn btn-sm" onclick="crmCopyCustomerEmails('entscheid')" title="Öffnet eine neue Mail mit allen Adressen in Bcc (zusätzlich in der Zwischenablage)">✉ An Entscheidungsträger${emailCounts ? " (" + emailCounts.entscheid + ")" : ""}</button>
         <button class="btn btn-sm" onclick="crmCopyCustomerEmails('user')" title="Öffnet eine neue Mail mit allen Adressen in Bcc (zusätzlich in der Zwischenablage)">✉ An User${emailCounts ? " (" + emailCounts.user + ")" : ""}</button>
         <button class="btn btn-sm" onclick="crmExportCustomerEmails()" title="Excel mit ALLEN Kunden (aktuelle Auswahl) und ihren E-Mails — auch Kunden ohne Adresse, damit Lücken sichtbar sind">⇩ E-Mails exportieren</button>
+        ${isAdmin() ? `<button class="btn btn-sm" onclick="crmUserNachfuehren()" title="Alle Kontakte der Kunden (aktuelle Auswahl) mit E-Mail, die weder Entscheidungsträger noch User sind, als «User» markieren">👥 User nachführen</button>` : ""}
         <button class="btn btn-sm" onclick="crmKundenumgebungenOeffnen()" title="Öffnet die App-Links aller aktiven Kunden der Auswahl in je einem neuen Tab (Pop-ups für das CRM einmalig erlauben)">🌐 Alle Kundenumgebungen öffnen</button>
         <button class="btn btn-sm" id="hc-btn" onclick="hcStart()" title="Fragt /healthchecks-api aller aktiven Kundenumgebungen der Auswahl ab (wie Production-Healthcheck.ps1)">💓 Healthcheck</button>
         <span style="font-size:11px;color:var(--text-faint);margin-left:4px">Öffnet eine neue Mail mit den Adressen der Kunden (Kennzeichnung «Ist Kunde») in Bcc. Adressen kommen aus den Kontakten mit Funktion Entscheidungsträger/User (und den alten Firmenfeldern).</span>
@@ -5423,6 +5456,11 @@ function renderRevenueByMonth(el) {
 }
 
 /* === Modus: Pro Kunde === */
+function revSegToggle(sg) {
+  const a = Array.isArray(filters.revenueSegmente) ? filters.revenueSegmente.slice() : [];
+  const i = a.indexOf(sg); if (i >= 0) a.splice(i, 1); else a.push(sg);
+  filters.revenueSegmente = a; render();
+}
 function renderRevenueByCustomer(el) {
   const year = filters.revenueYear;
   let custId = filters.revenueCustomerId;
@@ -5430,10 +5468,16 @@ function renderRevenueByCustomer(el) {
 
   // Pro Kunde: alle Kunden — aktive zuerst, danach gekündigte/inaktive mit Umsatzhistorie (mit Status-Zusatz)
   const hatUmsatz = c => cache.monthlyrevenue.some(r => String(r.CustomerId) === String(c.id) && ((parseFloat(r.Licenses) || 0) > 0 || (parseFloat(r.ExternalRevenue) || 0) > 0 || (parseFloat(r.Hours) || 0) > 0));
-  const activeCust = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv")
+  // Segment-Filter (14.10.2026): z.B. nur «SaaS und BPO» + «BPO inkl. SaaS» zum Fakturieren durchgehen
+  const segF = Array.isArray(filters.revenueSegmente) ? filters.revenueSegmente : [];
+  const segOk = c => !segF.length || segF.includes(c.Segment || "");
+  const activeCust = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv" && segOk(c))
     .sort((a,b) => (a.Title||"").localeCompare(b.Title||""));
-  const sonstige = cache.customers.filter(c => (c.Status || "Aktiv") !== "Aktiv" && hatUmsatz(c))
+  const sonstige = cache.customers.filter(c => (c.Status || "Aktiv") !== "Aktiv" && hatUmsatz(c) && segOk(c))
     .sort((a,b) => (a.Title||"").localeCompare(b.Title||""));
+  // passt der gewählte Kunde nicht zum Filter → ersten passenden nehmen
+  if (segF.length && !activeCust.concat(sonstige).some(c => c.id == custId) && activeCust.length) { custId = activeCust[0].id; filters.revenueCustomerId = custId; }
+  const reihe = activeCust.concat(sonstige); const pos = reihe.findIndex(c => c.id == custId);
   const cust = cache.customers.find(c => c.id == custId);
 
   const custOptions = activeCust.map(c => `<option value="${c.id}" ${c.id==custId?"selected":""}>${escape(c.Title||"")}</option>`).join("")
@@ -5529,8 +5573,15 @@ function renderRevenueByCustomer(el) {
 
   el.innerHTML = `
     <div style="display:flex; gap:12px; margin-bottom:8px; align-items:center; flex-wrap:wrap;">
+      <button class="btn btn-sm" title="Vorheriger Kunde (in der gefilterten Liste)" ${pos > 0 ? `onclick="filters.revenueCustomerId=${reihe[pos - 1].id};render()"` : "disabled"}>◀</button>
       <select onchange="filters.revenueCustomerId=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit;min-width:240px">${custOptions}</select>
+      <button class="btn btn-sm" title="Nächster Kunde (in der gefilterten Liste)" ${pos >= 0 && pos < reihe.length - 1 ? `onclick="filters.revenueCustomerId=${reihe[pos + 1].id};render()"` : "disabled"}>▶</button>
+      <span style="font-size:11px;color:var(--text-faint)">${pos >= 0 ? pos + 1 : "–"} / ${reihe.length}</span>
       <select onchange="filters.revenueYear=parseInt(this.value);render()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit">${yearOptions}</select>
+      <div class="scope-toggle" title="Segment-Filter: Klick schaltet ein/aus, mehrere kombinierbar">
+        ${SEGMENTS.map(sg => `<button class="${segF.includes(sg) ? "active" : ""}" onclick="revSegToggle(${tkJs(sg)})">${escape(sg)}</button>`).join("")}
+        ${segF.length ? `<button onclick="filters.revenueSegmente=[];render()" title="Filter aufheben">✕</button>` : ""}
+      </div>
       <div style="margin-left:auto; display:flex; gap:20px; font-size:12px; flex-wrap:wrap;">
         ${useExt ? `<div title="${cust.BPOYtd ? "Letzter erfasster Jahresstand" : "Summe der Monatswerte"}"><span style="color:var(--text-dim)">Aussenumsatz ${year}:</span> <span style="font-family:var(--font-mono)">CHF ${yearExt.toLocaleString("de-CH", { maximumFractionDigits: 2 })}</span></div>` : ""}
         <div><span style="color:var(--text-dim)">SaaS ${year}:</span> <span style="font-family:var(--font-mono);color:var(--accent)">CHF ${fmtCHFShort(yearSaaS)}</span></div>
@@ -6068,9 +6119,9 @@ function faktOffen(cust, year) {
     const fakturiert = !!(r && r.InvoicedBPO);
     const b = faktYtdBasis(cust, year);
     const wert = Math.round((stand - b.betrag) * 100) / 100;
-    return { ytd: true, monat, stand, vormonate: b.betrag, fakturiert, netto: wert, saasHonorar: fakturiert ? 0 : faktSaasHonorar(cust, wert, year, monat),
+    return { ytd: true, monat, stand, vormonate: b.betrag, fakturiert, netto: wert, saasHonorar: (fakturiert || !li) ? 0 : faktSaasHonorar(cust, wert, year, monat),
              ytdBis: b.bis, ytdBasis: b.betrag, ytdQuelle: b.quelle,
-             honorar: fakturiert ? 0 : faktBpoHonorar(cust, wert), faktBis, bis, von: "", anzahlTage: wert ? 1 : 0, rate };
+             honorar: (fakturiert || !li) ? 0 : faktBpoHonorar(cust, wert), faktBis, bis, von: "", anzahlTage: wert ? 1 : 0, rate };
   }
   let netto = 0, anzahlTage = 0, von = "";
   if (e && bis) {
@@ -6078,7 +6129,8 @@ function faktOffen(cust, year) {
       if (d > faktBis && d <= bis) { netto += e.tage[d]; anzahlTage++; if (!von) von = d; }
     });
   }
-  return { netto: Math.round(netto * 100) / 100, honorar: faktBpoHonorar(cust, netto), saasHonorar: faktSaasHonorar(cust, netto, year, e && e.letzterImport ? e.letzterImport.monat : 0), faktBis, bis, von, anzahlTage, rate };
+  const li2 = e && e.letzterImport;
+  return { netto: Math.round(netto * 100) / 100, honorar: li2 ? faktBpoHonorar(cust, netto) : 0, saasHonorar: li2 ? faktSaasHonorar(cust, netto, year, li2.monat) : 0, faktBis, bis, von, anzahlTage, rate };
 }
 /* Rechnungstext zum Kopieren (14.10.2026), z.B. «Honorar 16.9.-14.10.2026 1.4% auf CHF 424'154.66».
    Periode: Tag nach «Fakturiert bis» (bzw. nach dem zuletzt verrechneten YTD-Stand) bis zum Import-Stichtag. */
@@ -6087,7 +6139,12 @@ function faktTagDanach(iso) { if (!iso) return ""; const d = new Date(iso + "T00
 function faktPct(v) { return (parseFloat(v) || 0).toLocaleString("de-CH", { minimumFractionDigits: 0, maximumFractionDigits: 2 }); }
 function faktFmtApo(v) { return faktFmt(v).replace(/[\u2019\u2018`´]/g, "'"); }   // gerader Apostroph wie auf der Rechnung
 function faktRechnungszeilenHtml(cust, o, li) {
-  if (!li || !(o.netto > 0)) return "";
+  if (!li) return "";
+  if (!(o.netto > 0)) {
+    if (!(o.honorar > 0)) return "";
+    const txt = `Mindesthonorar ${li.monat ? MONTH_NAMES_LANG[li.monat - 1] + " " : ""}${(o.bis || "").slice(0, 4)}: CHF ${faktFmtApo(o.honorar)}`;
+    return `<div style="margin-top:8px;display:flex;gap:8px;align-items:flex-start"><textarea readonly rows="1" onclick="this.select()" style="flex:1;font-family:var(--font-mono);font-size:12px;padding:6px 8px;resize:vertical;white-space:pre">${escape(txt)}</textarea><button class="btn btn-sm" onclick="navigator.clipboard.writeText(${tkJs(txt)}).then(() => toast('Rechnungstext kopiert'))">📋 Kopieren</button></div>`;
+  }
   const jahr = (o.bis || "").slice(0, 4);
   const zeilen = [];
   const bpo = segmentNeedsBPO(cust.Segment) && parseFloat(cust.BPORate) > 0;
@@ -6095,9 +6152,8 @@ function faktRechnungszeilenHtml(cust, o, li) {
   if (o.ytd) {
     // YTD: Zeile 1 = Honorar auf den ganzen Jahresumsatz bis Stichtag, Zeile 2 = Abzug des bereits verrechneten Standes
     const monatName = li.monat ? MONTH_NAMES_LANG[li.monat - 1] : "";
-    zeilen.push(`Abrechnung ${monatName} YTD ${jahr}:`);
-    if (bpo) { zeilen.push(`${faktPct(cust.BPORate)}% auf Umsatz von CHF ${faktFmtApo(o.stand)} für unsere Dienstleistungen`); if (o.vormonate > 0) zeilen.push(`abzüglich bereits verrechnet${o.ytdBis ? " bis " + faktKurzDatum(o.ytdBis, true) : ""}: ${faktPct(cust.BPORate)}% auf CHF ${faktFmtApo(o.vormonate)} = CHF ${faktFmtApo(o.vormonate * (parseFloat(cust.BPORate) || 0) / 100)}`); }
-    if (saas) { zeilen.push(`SaaS ${faktPct(cust.SaaSRate)}% auf Umsatz von CHF ${faktFmtApo(o.stand)}`); if (o.vormonate > 0) zeilen.push(`abzüglich bereits verrechnet${o.ytdBis ? " bis " + faktKurzDatum(o.ytdBis, true) : ""}: ${faktPct(cust.SaaSRate)}% auf CHF ${faktFmtApo(o.vormonate)} = CHF ${faktFmtApo(o.vormonate * (parseFloat(cust.SaaSRate) || 0) / 100)}`); }
+    if (bpo) { zeilen.push(`Abrechnung ${monatName} YTD ${jahr}: ${faktPct(cust.BPORate)}% auf Umsatz von CHF ${faktFmtApo(o.stand)} für unsere Dienstleistungen`); if (o.vormonate > 0) zeilen.push(`abzüglich bereits verrechnet${o.ytdBis ? " bis " + faktKurzDatum(o.ytdBis, true) : ""}: ${faktPct(cust.BPORate)}% auf CHF ${faktFmtApo(o.vormonate)} = CHF ${faktFmtApo(o.vormonate * (parseFloat(cust.BPORate) || 0) / 100)}`); }
+    if (saas) { zeilen.push(`${bpo ? "" : "Abrechnung " + monatName + " YTD " + jahr + ": "}SaaS ${faktPct(cust.SaaSRate)}% auf Umsatz von CHF ${faktFmtApo(o.stand)}`); if (o.vormonate > 0) zeilen.push(`abzüglich bereits verrechnet${o.ytdBis ? " bis " + faktKurzDatum(o.ytdBis, true) : ""}: ${faktPct(cust.SaaSRate)}% auf CHF ${faktFmtApo(o.vormonate)} = CHF ${faktFmtApo(o.vormonate * (parseFloat(cust.SaaSRate) || 0) / 100)}`); }
   } else {
     const vonIso = o.faktBis ? faktTagDanach(o.faktBis) : jahr + "-01-01";
     const periode = `${faktKurzDatum(vonIso, false)}-${faktKurzDatum(o.bis, true)}`;
@@ -6106,7 +6162,9 @@ function faktRechnungszeilenHtml(cust, o, li) {
   }
   if (!zeilen.length) return "";
   const alles = zeilen.join("\n");
-  return `<div style="margin-top:8px;display:grid;gap:4px">${zeilen.length > 1 ? `<div><button class="btn btn-sm" onclick="navigator.clipboard.writeText(${tkJs(alles)}).then(() => toast('Rechnungstext kopiert (' + ${zeilen.length} + ' Zeilen)'))">📋 Alle Zeilen kopieren</button></div>` : ""}${zeilen.map(z => `<div style="display:flex;align-items:center;gap:8px"><code style="font-size:12px;background:var(--bg-elev);padding:4px 8px;border-radius:4px;user-select:all">${escape(z)}</code><button class="btn btn-sm" title="Rechnungstext in die Zwischenablage kopieren" onclick="navigator.clipboard.writeText(${tkJs(z)}).then(() => toast('Kopiert: ' + ${tkJs(z)}))">📋 Kopieren</button></div>`).join("")}</div>`;
+  return `<div style="margin-top:8px;display:flex;gap:8px;align-items:flex-start">
+    <textarea readonly rows="${zeilen.length}" onclick="this.select()" title="Klick markiert alles" style="flex:1;font-family:var(--font-mono);font-size:12px;padding:6px 8px;resize:vertical;white-space:pre;overflow-x:auto">${escape(alles)}</textarea>
+    <button class="btn btn-sm" title="Rechnungstext in die Zwischenablage kopieren" onclick="navigator.clipboard.writeText(${tkJs(alles)}).then(() => toast('Rechnungstext kopiert'))">📋 Kopieren</button></div>`;
 }
 /* «Zu verrechnen»-Kasten für den Pro-Kunde-Modus. */
 function faktRenderKasten(cust, year) {
@@ -6155,7 +6213,7 @@ function faktRenderKasten(cust, year) {
       <div style="flex:1;min-width:280px">
         <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em">Zu verrechnen (${segmentNeedsBPO(cust.Segment) ? "BPO" + (segmentChargesSaaS(cust.Segment) ? "" : ", inkl. SaaS-Anteil") : "SaaS"})</div>
         <div style="font-family:var(--font-mono);font-size:22px;font-weight:600;color:${(segmentNeedsBPO(cust.Segment) ? o.honorar : o.saasHonorar) > 0 ? "var(--accent-2)" : "var(--text-dim)"}">CHF ${faktFmt(segmentNeedsBPO(cust.Segment) ? o.honorar : o.saasHonorar)}${nurLizenz && segmentNeedsBPO(cust.Segment) ? ` <span style="color:var(--warn);font-size:11px;font-weight:400">BPO-Satz fehlt beim Kunden</span>` : ""}</div>
-        ${o.netto > 0 && o.honorar > 0 && o.honorar === kundenMin(cust.id, "minBpo") && o.netto * o.rate / 100 < o.honorar ? `<div style="font-size:11px;color:var(--warn)">Mindesthonorar BPO greift (${o.rate.toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})} % wären CHF ${faktFmt(o.netto * o.rate / 100)})</div>` : ""}
+        ${o.honorar > 0 && o.honorar === kundenMin(cust.id, "minBpo") && o.netto * o.rate / 100 < o.honorar ? `<div style="font-size:11px;color:var(--warn)">Mindesthonorar BPO greift (${o.rate.toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})} % auf CHF ${faktFmt(o.netto)} wären CHF ${faktFmt(o.netto * o.rate / 100)})</div>` : ""}
         ${o.netto > 0 && saasIsPercent(cust, year, li ? li.monat : 0) && o.saasHonorar === kundenMin(cust.id, "minSaas") && o.netto * (parseFloat(cust.SaaSRate) || 0) / 100 < o.saasHonorar ? `<div style="font-size:11px;color:var(--warn)">Mindesthonorar SaaS greift</div>` : ""}
         ${saasIsPercent(cust, year, li ? li.monat : 0) && segmentNeedsBPO(cust.Segment) ? `<div style="font-family:var(--font-mono);font-size:13px;color:var(--accent);margin-top:2px">+ SaaS ${parseFloat(cust.SaaSRate || 0).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})} %: CHF ${faktFmt(o.saasHonorar)}</div>` : ""}
         <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${detail}</div>${abweichung}
@@ -14110,7 +14168,7 @@ function openCustomer(id) {
     <div ${kt === "kond" ? "" : "hidden"}>
     <dl class="kv">
       <dt>SaaS-Modell</dt><dd>${saasIsPercentEver(c) ? `Prozentual${saasPctFrom(c) ? " ab " + saasPctFrom(c).slice(8,10) + "." + saasPctFrom(c).slice(5,7) + "." + saasPctFrom(c).slice(0,4) + " (davor pro Lizenz)" : ""} · ${parseFloat(c.SaaSRate || 0).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}% auf Aussenumsatz${kundenMin(c.id, "minSaas") ? ` · min. CHF ${kundenMin(c.id, "minSaas").toLocaleString("de-CH")}/Monat` : ""}` : "Pro Lizenz"}</dd>
-      <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Prozentual" && kundenMin(c.id, "minBpo") ? ` · min. CHF ${kundenMin(c.id, "minBpo").toLocaleString("de-CH")}/Monat` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}${c.BPOYtd ? ` · <span style="color:var(--accent-3)">YTD-kumulativ</span>` : ""}</dd>
+      <dt>BPO-Modell</dt><dd>${escape(c.BPOModel||"—")}${c.BPOModel === "Stundensatz" && bpoStdFrom(c) ? ` ab ${bpoStdFrom(c).slice(8,10)}.${bpoStdFrom(c).slice(5,7)}.${bpoStdFrom(c).slice(0,4)} (davor Prozentual${c.BPORate ? " " + parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2}) + "%" : ""})` : ""}${c.BPOModel === "Prozentual" && c.BPORate ? ` · ${parseFloat(c.BPORate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : ""}${c.BPOModel === "Prozentual" && kundenMin(c.id, "minBpo") ? ` · min. CHF ${kundenMin(c.id, "minBpo").toLocaleString("de-CH")}/Monat` : ""}${c.BPOModel === "Stundensatz" && c.HourlyRate ? ` · CHF ${parseFloat(c.HourlyRate).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})}/h` : ""}${c.BPOYtd ? ` · <span style="color:var(--accent-3)">YTD-kumulativ</span>` : ""}</dd>
       <dt>Ziel-ARR</dt><dd style="font-family:var(--font-mono);color:var(--accent)">${c.TargetARR ? "CHF " + parseFloat(c.TargetARR).toLocaleString("de-CH",{maximumFractionDigits:0}) : "—"}</dd>
       <dt>Preis/Lizenz</dt><dd style="font-family:var(--font-mono)">${c.PricePerLicense ? "CHF " + parseFloat(c.PricePerLicense).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—"}${(() => {
         try {
@@ -14627,12 +14685,12 @@ function editCustomer(id) {
     </div>
     </div>
     <div class="field"><label>BPO-Modell</label>
-      <select id="f-bpomodel" onchange="document.getElementById('bpo-percent-row').style.display=this.value==='Prozentual'?'block':'none';document.getElementById('bpo-hourly-row').style.display=this.value==='Stundensatz'?'block':'none'">
+      <select id="f-bpomodel" onchange="document.getElementById('bpo-percent-row').style.display=(this.value==='Prozentual'||(this.value==='Stundensatz'&&document.getElementById('f-bpostdfrom').value))?'block':'none';document.getElementById('bpo-hourly-row').style.display=this.value==='Stundensatz'?'block':'none'">
         <option value="" ${!c.BPOModel?"selected":""}>—</option>
         ${BPO_MODELS.map(m => `<option value="${m}" ${c.BPOModel===m?"selected":""}>${m}</option>`).join("")}
       </select>
     </div>
-    <div id="bpo-percent-row" class="field" style="display:${c.BPOModel==='Prozentual'?'block':'none'}">
+    <div id="bpo-percent-row" class="field" style="display:${(c.BPOModel==='Prozentual' || (c.BPOModel==='Stundensatz' && bpoStdFrom(c)))?'block':'none'}">
       <label>BPO-Satz (% auf Aussenumsatz)</label>
       <input id="f-bporate" type="number" step="0.01" min="0" max="100" value="${c.BPORate||""}" placeholder="z.B. 1.2">
       <label style="margin-top:8px">Mindesthonorar BPO (CHF/Monat)</label>
@@ -14646,6 +14704,8 @@ function editCustomer(id) {
     <div id="bpo-hourly-row" class="field" style="display:${c.BPOModel==='Stundensatz'?'block':'none'}">
       <label>Stundensatz (CHF/h)</label>
       <input id="f-hourlyrate" type="number" step="0.01" min="0" value="${c.HourlyRate||""}" placeholder="z.B. 180">
+      <label style="margin-top:8px">Stundensatz ab <span style="color:var(--text-faint);font-weight:400">— leer = schon immer; sonst gilt davor Prozentual (BPO-Satz unten)</span></label>
+      <input id="f-bpostdfrom" type="date" value="${bpoStdFrom(c)}" onchange="document.getElementById('bpo-percent-row').style.display=(this.value||document.getElementById('f-bpomodel').value==='Prozentual')?'block':'none'">
     </div>
     <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-bpoytd" ${c.BPOYtd?"checked":""} style="width:auto;margin:0"> BPO-Abrechnung YTD-kumulativ (Jahresbasis, Vormonate werden automatisch abgezogen)</label></div>
     <div class="field"><label>Link</label><input id="f-link" type="text" value="${escape(appLinkText(c.id || "", c.Link))}" placeholder="z.B. helva.apriko.app"></div>
@@ -14659,11 +14719,7 @@ function editCustomer(id) {
       <div class="field" style="flex:0 0 160px"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-factoring" ${f.factoring ? "checked" : ""} style="width:auto;margin:0"> Factoring</label></div>
       <div class="field"><label>Factoring — wer / Notiz</label><input id="f-factoring-notiz" value="${escape(f.factoringNotiz || "")}" placeholder="z.B. Partnerbank, Ansprechperson, Konditionen"></div>
     </div>`; })()}
-    ${(() => { const f = (crmKundenFlags || {})[String(c.id || "")] || {}; const emails = [...new Set((cache.userprofiles || []).map(p => (p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase()).filter(Boolean))].sort();
-      // ✉ neben dem Dropdown: öffnet Outlook mit der gewählten Adresse (passt sich beim Wechsel an)
-      const sel = (id, label, cur) => `<div class="field"><label>${label}</label><div style="display:flex;gap:6px;align-items:center"><select id="${id}" style="flex:1" onchange="const a=document.getElementById('${id}-mail'); if(a){a.href='mailto:'+encodeURIComponent(this.value); a.style.visibility=this.value?'visible':'hidden';}"><option value="">—</option>${emails.map(e => `<option value="${escape(e)}" ${cur === e ? "selected" : ""}>${escape(e)}</option>`).join("")}${cur && !emails.includes(cur) ? `<option value="${escape(cur)}" selected>${escape(cur)}</option>` : ""}</select><a id="${id}-mail" href="mailto:${escape(cur)}" title="E-Mail schreiben" style="font-size:18px;text-decoration:none;visibility:${cur ? "visible" : "hidden"}">✉</a></div></div>`;
-      return `<div class="field-row">${sel("f-ap-lohn", "Ansprechperson Lohn", f.apLohn || "")}${sel("f-ap-lohn-backup", "Ansprechperson Backup Lohn", f.apLohnBackup || "")}${sel("f-ap-lohn-intern", "Ansprechperson Lohn intern", f.apLohnIntern || "")}${sel("f-ap-lohn-intern-backup", "Backup Lohn intern", f.apLohnInternBackup || "")}</div>
-    <div class="field-row">${sel("f-ap-fibu", "Ansprechperson FIBU", f.apFibu || "")}${sel("f-ap-fibu-backup", "Ansprechperson Backup FIBU", f.apFibuBackup || "")}</div>`; })()}
+    <div style="font-size:11px;color:var(--text-faint);margin:-4px 0 10px">Interne Zuständigkeiten (Lohn, FIBU, Backups) werden in der Kundenansicht unter «Interne Ansprechpersonen» per Chip gesetzt.</div>
     <div class="field"><label>Mindesthonorar</label><textarea id="f-minfee" rows="3" placeholder="z.B. CHF 1'500/Monat, gültig ab Q3 2026">${escape(minFeeText(c.id || "", c.MinFee))}</textarea></div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${escape(c.Notes||"")}</textarea></div>
   `, [
@@ -14838,7 +14894,10 @@ async function saveCustomer(id) {
       const neuMinBpo = parseFloat(val("f-minbpo")) || 0;
       const neuZielExt = parseFloat(val("f-zielext")) || 0;
       const neuPctFrom = val("f-saasmodel") === "Prozentual" ? (val("f-saaspctfrom") || "") : "";
-      const ap = { apLohn: val("f-ap-lohn"), apLohnBackup: val("f-ap-lohn-backup"), apLohnIntern: val("f-ap-lohn-intern"), apLohnInternBackup: val("f-ap-lohn-intern-backup"), apFibu: val("f-ap-fibu"), apFibuBackup: val("f-ap-fibu-backup") };
+      const neuStdFrom = val("f-bpomodel") === "Stundensatz" ? (val("f-bpostdfrom") || "") : "";
+      // Zuständigkeiten (ap*) werden seit 14.10.2026 nur noch in der Kundenansicht (Chips) gepflegt — hier unverändert übernehmen
+      const altAp = crmKundenFlags[key] || {};
+      const ap = { apLohn: altAp.apLohn || "", apLohnBackup: altAp.apLohnBackup || "", apLohnIntern: altAp.apLohnIntern || "", apLohnInternBackup: altAp.apLohnInternBackup || "", apFibu: altAp.apFibu || "", apFibuBackup: altAp.apFibuBackup || "" };
       const neuFactoring = document.getElementById("f-factoring")?.checked || false;
       const neuFactoringNotiz = val("f-factoring-notiz").trim();
       const alt = crmKundenFlags[key] || {};
@@ -14846,12 +14905,12 @@ async function saveCustomer(id) {
       const apGesetzt = Object.values(ap).some(Boolean);
       if (apGeaendert || neuIntern !== !!alt.intern || neuFibu !== !!alt.fibu || neuHatDb !== !alt.keineDb || neuMinfee !== (alt.minfee || "") || neuApplink !== (alt.applink || "")
           || neuMinSaas !== (parseFloat(alt.minSaas) || 0) || neuMinBpo !== (parseFloat(alt.minBpo) || 0)
-          || neuZielExt !== (parseFloat(alt.zielExt) || 0) || neuPctFrom !== (alt.saasPctFrom || "")
+          || neuZielExt !== (parseFloat(alt.zielExt) || 0) || neuPctFrom !== (alt.saasPctFrom || "") || neuStdFrom !== (alt.bpoStdFrom || "")
           || neuFactoring !== !!alt.factoring || neuFactoringNotiz !== (alt.factoringNotiz || "")) {
         // Nicht vom Formular verwaltete Schlüssel (z.B. aus Importen) bleiben erhalten
-        const verwaltet = ["intern", "fibu", "minfee", "applink", "keineDb", "minSaas", "minBpo", "zielExt", "saasPctFrom", "factoring", "factoringNotiz"].concat(Object.keys(ap));
+        const verwaltet = ["intern", "fibu", "minfee", "applink", "keineDb", "minSaas", "minBpo", "zielExt", "saasPctFrom", "bpoStdFrom", "factoring", "factoringNotiz"].concat(Object.keys(ap));
         const rest = {}; Object.keys(alt).forEach(k => { if (!verwaltet.includes(k)) rest[k] = alt[k]; });
-        if (neuIntern || neuFibu || !neuHatDb || neuMinfee || neuApplink || neuMinSaas || neuMinBpo || neuZielExt || neuPctFrom || apGesetzt || neuFactoring || neuFactoringNotiz || Object.keys(rest).length) {
+        if (neuIntern || neuFibu || !neuHatDb || neuMinfee || neuApplink || neuMinSaas || neuMinBpo || neuZielExt || neuPctFrom || neuStdFrom || apGesetzt || neuFactoring || neuFactoringNotiz || Object.keys(rest).length) {
           crmKundenFlags[key] = Object.assign(rest, { intern: neuIntern, fibu: neuFibu, minfee: neuMinfee, applink: neuApplink });
           if (neuFactoring) crmKundenFlags[key].factoring = true;
           if (neuFactoringNotiz) crmKundenFlags[key].factoringNotiz = neuFactoringNotiz;
@@ -14861,6 +14920,7 @@ async function saveCustomer(id) {
           if (neuMinBpo) crmKundenFlags[key].minBpo = neuMinBpo;
           if (neuZielExt) crmKundenFlags[key].zielExt = neuZielExt;
           if (neuPctFrom) crmKundenFlags[key].saasPctFrom = neuPctFrom;
+          if (neuStdFrom) crmKundenFlags[key].bpoStdFrom = neuStdFrom;
         }
         else crmKundenFlags[key] = {};   // leer lassen statt löschen: so werden auch die SharePoint-Spalten geleert (Sync); leere Einträge fliegen beim Speichern aus der JSON-Datei
         await crmSaveKundenFlags();
@@ -15998,6 +16058,29 @@ function hcPanelHtml() {
     ${n.cors ? `<div style="font-size:11px;color:var(--text-faint);margin-top:6px">🟦 = Umgebung antwortet, aber der Browser darf die Antwort nicht lesen. Details erscheinen, wenn (a) /healthchecks-api den Header <code>Access-Control-Allow-Origin: ${escape(location.origin)}</code> liefert oder (b) auf einem Rechner <code>Production-Healthcheck-CRM.ps1</code> läuft, das die Resultate nach 06 CRM/CRM-Budgetdaten/healthcheck.json schreibt.</div>` : ""}
   </div>`;
 }
+/* Einmalige Nachführung (14.10.2026): alle Kontakte von Kunden mit gültiger E-Mail, die noch keine Funktion «Entscheidungsträger»
+   oder «User» haben, bekommen die Funktion «User» — in einem Schritt, eine Speicherung der Stammdatei. */
+async function crmUserNachfuehren() {
+  if (!isAdmin()) { toast("Nur für Admins.", true); return; }
+  await crmLoadStamm();
+  const scope = filters.dashboardEmailScope || "alle";
+  const firmen = cache.companies.filter(c => c.IsCustomer && crmCompanyMatchesScope(c.id, scope));
+  const todo = [];
+  firmen.forEach(f => cache.contacts.filter(k => String(k.CompanyId) === String(f.id)).forEach(k => {
+    const e = String(k.Email || "").trim().toLowerCase(); if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return;
+    const t = kontaktTags(f.id, k.id); if (t.includes("Entscheidungsträger") || t.includes("User")) return;
+    todo.push({ f, k, t });
+  }));
+  if (!todo.length) { toast("Nichts nachzuführen — alle Kontakte mit E-Mail sind bereits Entscheidungsträger oder User."); return; }
+  const liste = todo.slice(0, 40).map(x => `• ${x.k.Title} <${x.k.Email}> (${x.f.Title})`).join("\n") + (todo.length > 40 ? `\n… und ${todo.length - 40} weitere` : "");
+  if (!confirm(`${todo.length} Kontakt(e) als «User» markieren?\n\n${liste}`)) return;
+  todo.forEach(({ f, k, t }) => {
+    const key = String(f.id); const st = Object.assign({}, crmStamm[key] || {}); st.kontaktTags = Object.assign({}, st.kontaktTags || {});
+    st.kontaktTags[String(k.id)] = t.concat(["User"]); crmStamm[key] = st;
+  });
+  try { await crmSaveStamm(); render(); toast(`${todo.length} Kontakt(e) als User markiert.`); }
+  catch (e) { toast("Speichern fehlgeschlagen: " + (e.message || e), true); }
+}
 async function crmCopyCustomerEmails(kind) {
   if (crmStamm === null) { await crmLoadStamm(); }
   const scope = filters.dashboardEmailScope || "alle";
@@ -16780,7 +16863,8 @@ function kundenFlag(custId, flag) { return !!((crmKundenFlags || {})[String(cust
 function kundenHatDb(custId) { const f = (crmKundenFlags || {})[String(custId)] || {}; return !f.keineDb; }
 /* Numerische Mindesthonorare (CHF/Monat) aus den Kundenflags: minSaas / minBpo. */
 function kundenMin(custId, which) { return parseFloat(((crmKundenFlags || {})[String(custId)] || {})[which]) || 0; }
-function applyMin(betrag, min) { return min > 0 && betrag > 0 && betrag < min ? min : betrag; }
+/* Mindesthonorar: greift auch bei 0 Umsatz (14.10.2026) — ob ein Monat überhaupt abgerechnet wird, entscheidet der Aufrufer. */
+function applyMin(betrag, min) { return min > 0 && betrag < min ? min : betrag; }
 function minFeeText(custId, spFallback) {
   const t = ((crmKundenFlags || {})[String(custId)] || {}).minfee;
   return t !== undefined && t !== null ? t : (spFallback || "");
@@ -16812,6 +16896,7 @@ const KUNDEN_SPALTEN = [   // [Flag in JSON, SharePoint-Spalte, Typ, Beschreibun
   ["minBpo", "MinBPO", "num", "Mindesthonorar BPO CHF/Monat"],
   ["zielExt", "ZielExt", "num", "Ziel externe Mitarbeitende"],
   ["saasPctFrom", "SaaSPctFrom", "text", "Prozentual ab (Monat)"],
+  ["bpoStdFrom", "BPOStdFrom", "text", "Stundensatz ab (Datum)"],
   ["intern", "WfIntern", "bool", "Workflow Lohn intern"],
   ["fibu", "WfFibu", "bool", "Workflow FIBU"],
   ["keineDb", "KeineDb", "bool", "keine eigene Datenbank"],
