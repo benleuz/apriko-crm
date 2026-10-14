@@ -28,14 +28,14 @@
   window.CRM_ROOT = "06 CRM";
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.494.0"></script>
-<script src="apriko-api.js?v=1.494.0"></script>
-<script src="lohncheck.js?v=1.494.0"></script>
-<script src="personalbudget.js?v=1.494.0"></script>
-<script src="jahresbudget.js?v=1.494.0"></script>
-<script src="budgetpositionen.js?v=1.494.0"></script>
-<script src="lohnchecklistetemp.js?v=1.494.0"></script>
-<script src="apriko-endpunkte.js?v=1.494.0"></script>
+<script src="apriko-filters.js?v=1.495.0"></script>
+<script src="apriko-api.js?v=1.495.0"></script>
+<script src="lohncheck.js?v=1.495.0"></script>
+<script src="personalbudget.js?v=1.495.0"></script>
+<script src="jahresbudget.js?v=1.495.0"></script>
+<script src="budgetpositionen.js?v=1.495.0"></script>
+<script src="lohnchecklistetemp.js?v=1.495.0"></script>
+<script src="apriko-endpunkte.js?v=1.495.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1042,7 +1042,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.494.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.495.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -6079,6 +6079,22 @@ function faktOffen(cust, year) {
   }
   return { netto: Math.round(netto * 100) / 100, honorar: faktBpoHonorar(cust, netto), saasHonorar: faktSaasHonorar(cust, netto, year, e && e.letzterImport ? e.letzterImport.monat : 0), faktBis, bis, von, anzahlTage, rate };
 }
+/* Rechnungstext zum Kopieren (14.10.2026), z.B. «Honorar 16.9.-14.10.2026 1.4% auf CHF 424'154.66».
+   Periode: Tag nach «Fakturiert bis» (bzw. nach dem zuletzt verrechneten YTD-Stand) bis zum Import-Stichtag. */
+function faktKurzDatum(iso, mitJahr) { if (!iso) return ""; const [j, m, t] = iso.split("-"); return `${parseInt(t)}.${parseInt(m)}.${mitJahr ? j : ""}`; }
+function faktTagDanach(iso) { if (!iso) return ""; const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); }
+function faktPct(v) { return (parseFloat(v) || 0).toLocaleString("de-CH", { minimumFractionDigits: 0, maximumFractionDigits: 2 }); }
+function faktFmtApo(v) { return faktFmt(v).replace(/[\u2019\u2018`´]/g, "'"); }   // gerader Apostroph wie auf der Rechnung
+function faktRechnungszeilenHtml(cust, o, li) {
+  if (!li || !(o.netto > 0)) return "";
+  const vonIso = o.ytd ? (o.ytdBis ? faktTagDanach(o.ytdBis) : (o.bis || "").slice(0, 4) + "-01-01") : (o.faktBis ? faktTagDanach(o.faktBis) : (o.bis || "").slice(0, 4) + "-01-01");
+  const periode = `${faktKurzDatum(vonIso, false)}-${faktKurzDatum(o.bis, true)}`;
+  const zeilen = [];
+  if (segmentNeedsBPO(cust.Segment) && parseFloat(cust.BPORate) > 0) zeilen.push(`Honorar ${periode} ${faktPct(cust.BPORate)}% auf CHF ${faktFmtApo(o.netto)}`);
+  if (saasIsPercent(cust, parseInt((o.bis || "").slice(0, 4)) || new Date().getFullYear(), li.monat || 0) && parseFloat(cust.SaaSRate) > 0) zeilen.push(`SaaS-Honorar ${periode} ${faktPct(cust.SaaSRate)}% auf CHF ${faktFmtApo(o.netto)}`);
+  if (!zeilen.length) return "";
+  return `<div style="margin-top:8px;display:grid;gap:4px">${zeilen.map(z => `<div style="display:flex;align-items:center;gap:8px"><code style="font-size:12px;background:var(--bg-elev);padding:4px 8px;border-radius:4px;user-select:all">${escape(z)}</code><button class="btn btn-sm" title="Rechnungstext in die Zwischenablage kopieren" onclick="navigator.clipboard.writeText(${tkJs(z)}).then(() => toast('Kopiert: ' + ${tkJs(z)}))">📋 Kopieren</button></div>`).join("")}</div>`;
+}
 /* «Zu verrechnen»-Kasten für den Pro-Kunde-Modus. */
 function faktRenderKasten(cust, year) {
   if (!needsExternal(cust)) return "";
@@ -6130,6 +6146,7 @@ function faktRenderKasten(cust, year) {
         ${o.netto > 0 && saasIsPercent(cust, year, li ? li.monat : 0) && o.saasHonorar === kundenMin(cust.id, "minSaas") && o.netto * (parseFloat(cust.SaaSRate) || 0) / 100 < o.saasHonorar ? `<div style="font-size:11px;color:var(--warn)">Mindesthonorar SaaS greift</div>` : ""}
         ${saasIsPercent(cust, year, li ? li.monat : 0) && segmentNeedsBPO(cust.Segment) ? `<div style="font-family:var(--font-mono);font-size:13px;color:var(--accent);margin-top:2px">+ SaaS ${parseFloat(cust.SaaSRate || 0).toLocaleString("de-CH",{minimumFractionDigits:2,maximumFractionDigits:2})} %: CHF ${faktFmt(o.saasHonorar)}</div>` : ""}
         <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${detail}</div>${abweichung}
+        ${faktRechnungszeilenHtml(cust, o, li)}
         <div style="font-size:11px;color:var(--text-faint);margin-top:6px">${importInfo}</div>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;font-size:11px;color:var(--text-dim)">
