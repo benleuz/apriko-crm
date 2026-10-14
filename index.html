@@ -28,14 +28,14 @@
   window.CRM_ROOT = "06 CRM";
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.495.0"></script>
-<script src="apriko-api.js?v=1.495.0"></script>
-<script src="lohncheck.js?v=1.495.0"></script>
-<script src="personalbudget.js?v=1.495.0"></script>
-<script src="jahresbudget.js?v=1.495.0"></script>
-<script src="budgetpositionen.js?v=1.495.0"></script>
-<script src="lohnchecklistetemp.js?v=1.495.0"></script>
-<script src="apriko-endpunkte.js?v=1.495.0"></script>
+<script src="apriko-filters.js?v=1.497.0"></script>
+<script src="apriko-api.js?v=1.497.0"></script>
+<script src="lohncheck.js?v=1.497.0"></script>
+<script src="personalbudget.js?v=1.497.0"></script>
+<script src="jahresbudget.js?v=1.497.0"></script>
+<script src="budgetpositionen.js?v=1.497.0"></script>
+<script src="lohnchecklistetemp.js?v=1.497.0"></script>
+<script src="apriko-endpunkte.js?v=1.497.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1042,7 +1042,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.495.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.497.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -5189,6 +5189,7 @@ function renderPipeline(el) {
 
 /* ---------- Revenue (Monatsumsätze) ---------- */
 const MONTH_NAMES = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+const MONTH_NAMES_LANG = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
 
 /* Aussenumsatz-Eingabefelder: Anzeige mit Tausender-Apostroph (de-CH), Speichern als reine Zahl. */
 function fmtExtRevInput(v) {
@@ -6087,13 +6088,25 @@ function faktPct(v) { return (parseFloat(v) || 0).toLocaleString("de-CH", { mini
 function faktFmtApo(v) { return faktFmt(v).replace(/[\u2019\u2018`´]/g, "'"); }   // gerader Apostroph wie auf der Rechnung
 function faktRechnungszeilenHtml(cust, o, li) {
   if (!li || !(o.netto > 0)) return "";
-  const vonIso = o.ytd ? (o.ytdBis ? faktTagDanach(o.ytdBis) : (o.bis || "").slice(0, 4) + "-01-01") : (o.faktBis ? faktTagDanach(o.faktBis) : (o.bis || "").slice(0, 4) + "-01-01");
-  const periode = `${faktKurzDatum(vonIso, false)}-${faktKurzDatum(o.bis, true)}`;
+  const jahr = (o.bis || "").slice(0, 4);
   const zeilen = [];
-  if (segmentNeedsBPO(cust.Segment) && parseFloat(cust.BPORate) > 0) zeilen.push(`Honorar ${periode} ${faktPct(cust.BPORate)}% auf CHF ${faktFmtApo(o.netto)}`);
-  if (saasIsPercent(cust, parseInt((o.bis || "").slice(0, 4)) || new Date().getFullYear(), li.monat || 0) && parseFloat(cust.SaaSRate) > 0) zeilen.push(`SaaS-Honorar ${periode} ${faktPct(cust.SaaSRate)}% auf CHF ${faktFmtApo(o.netto)}`);
+  const bpo = segmentNeedsBPO(cust.Segment) && parseFloat(cust.BPORate) > 0;
+  const saas = saasIsPercent(cust, parseInt(jahr) || new Date().getFullYear(), li.monat || 0) && parseFloat(cust.SaaSRate) > 0;
+  if (o.ytd) {
+    // YTD: Zeile 1 = Honorar auf den ganzen Jahresumsatz bis Stichtag, Zeile 2 = Abzug des bereits verrechneten Standes
+    const monatName = li.monat ? MONTH_NAMES_LANG[li.monat - 1] : "";
+    zeilen.push(`Abrechnung ${monatName} YTD ${jahr}:`);
+    if (bpo) { zeilen.push(`${faktPct(cust.BPORate)}% auf Umsatz von CHF ${faktFmtApo(o.stand)} für unsere Dienstleistungen`); if (o.vormonate > 0) zeilen.push(`abzüglich bereits verrechnet${o.ytdBis ? " bis " + faktKurzDatum(o.ytdBis, true) : ""}: ${faktPct(cust.BPORate)}% auf CHF ${faktFmtApo(o.vormonate)} = CHF ${faktFmtApo(o.vormonate * (parseFloat(cust.BPORate) || 0) / 100)}`); }
+    if (saas) { zeilen.push(`SaaS ${faktPct(cust.SaaSRate)}% auf Umsatz von CHF ${faktFmtApo(o.stand)}`); if (o.vormonate > 0) zeilen.push(`abzüglich bereits verrechnet${o.ytdBis ? " bis " + faktKurzDatum(o.ytdBis, true) : ""}: ${faktPct(cust.SaaSRate)}% auf CHF ${faktFmtApo(o.vormonate)} = CHF ${faktFmtApo(o.vormonate * (parseFloat(cust.SaaSRate) || 0) / 100)}`); }
+  } else {
+    const vonIso = o.faktBis ? faktTagDanach(o.faktBis) : jahr + "-01-01";
+    const periode = `${faktKurzDatum(vonIso, false)}-${faktKurzDatum(o.bis, true)}`;
+    if (bpo) zeilen.push(`Honorar ${periode} ${faktPct(cust.BPORate)}% auf CHF ${faktFmtApo(o.netto)}`);
+    if (saas) zeilen.push(`SaaS-Honorar ${periode} ${faktPct(cust.SaaSRate)}% auf CHF ${faktFmtApo(o.netto)}`);
+  }
   if (!zeilen.length) return "";
-  return `<div style="margin-top:8px;display:grid;gap:4px">${zeilen.map(z => `<div style="display:flex;align-items:center;gap:8px"><code style="font-size:12px;background:var(--bg-elev);padding:4px 8px;border-radius:4px;user-select:all">${escape(z)}</code><button class="btn btn-sm" title="Rechnungstext in die Zwischenablage kopieren" onclick="navigator.clipboard.writeText(${tkJs(z)}).then(() => toast('Kopiert: ' + ${tkJs(z)}))">📋 Kopieren</button></div>`).join("")}</div>`;
+  const alles = zeilen.join("\n");
+  return `<div style="margin-top:8px;display:grid;gap:4px">${zeilen.length > 1 ? `<div><button class="btn btn-sm" onclick="navigator.clipboard.writeText(${tkJs(alles)}).then(() => toast('Rechnungstext kopiert (' + ${zeilen.length} + ' Zeilen)'))">📋 Alle Zeilen kopieren</button></div>` : ""}${zeilen.map(z => `<div style="display:flex;align-items:center;gap:8px"><code style="font-size:12px;background:var(--bg-elev);padding:4px 8px;border-radius:4px;user-select:all">${escape(z)}</code><button class="btn btn-sm" title="Rechnungstext in die Zwischenablage kopieren" onclick="navigator.clipboard.writeText(${tkJs(z)}).then(() => toast('Kopiert: ' + ${tkJs(z)}))">📋 Kopieren</button></div>`).join("")}</div>`;
 }
 /* «Zu verrechnen»-Kasten für den Pro-Kunde-Modus. */
 function faktRenderKasten(cust, year) {
