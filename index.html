@@ -28,14 +28,14 @@
   window.CRM_ROOT = "06 CRM";
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.511.0"></script>
-<script src="apriko-api.js?v=1.511.0"></script>
-<script src="lohncheck.js?v=1.511.0"></script>
-<script src="personalbudget.js?v=1.511.0"></script>
-<script src="jahresbudget.js?v=1.511.0"></script>
-<script src="budgetpositionen.js?v=1.511.0"></script>
-<script src="lohnchecklistetemp.js?v=1.511.0"></script>
-<script src="apriko-endpunkte.js?v=1.511.0"></script>
+<script src="apriko-filters.js?v=1.512.0"></script>
+<script src="apriko-api.js?v=1.512.0"></script>
+<script src="lohncheck.js?v=1.512.0"></script>
+<script src="personalbudget.js?v=1.512.0"></script>
+<script src="jahresbudget.js?v=1.512.0"></script>
+<script src="budgetpositionen.js?v=1.512.0"></script>
+<script src="lohnchecklistetemp.js?v=1.512.0"></script>
+<script src="apriko-endpunkte.js?v=1.512.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1042,7 +1042,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.511.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.512.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -2107,8 +2107,16 @@ async function startApp() {
       }
     }
 
-    // Parameter (Benutzergruppen) vor der Berechtigungsprüfung laden
-    try { await parameterLaden(false); } catch (e) { console.warn("Parameter nicht geladen:", e.message); }
+    // Parameter (Benutzergruppen) vor der Berechtigungsprüfung laden — bis zu 3 Versuche (14.10.2026: ein einmaliger
+    // Lesefehler führte sonst zu «Kein Zugriff» für Benutzer, die nur über eine Gruppe freigeschaltet sind)
+    for (let versuch = 0; versuch < 3; versuch++) {
+      try { await parameterLaden(true); break; }
+      catch (e) { console.warn("Parameter nicht geladen (Versuch " + (versuch + 1) + "):", e.message); await new Promise(r => setTimeout(r, 800 * (versuch + 1))); }
+    }
+    // Profile ebenfalls nochmals versuchen, falls das Laden oben scheiterte
+    if (listIds.UserProfiles && !(cache.userprofiles || []).length) {
+      try { const data = await graph(`/sites/${siteId}/lists/${listIds.UserProfiles}/items?expand=fields&$top=999`); cache.userprofiles = data.value.map(item => ({ id: item.id, ...item.fields })); } catch (e) {}
+    }
     // currentUser anhand E-Mail auflösen
     currentUser = resolveCurrentUser(account.username);
     ansichtAlsAnwenden();
@@ -2257,6 +2265,7 @@ function renderAccessDenied() {
     <div style="max-width:520px;margin:80px auto;text-align:center;padding:40px 32px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px">
       <div style="font-size:48px;margin-bottom:16px;color:var(--warn)">⚠</div>
       <h2 style="margin-bottom:12px;color:var(--text)">Kein Zugriff auf das Apriko CRM</h2>
+      ${!crmParameterOk ? `<p style="color:var(--warn);margin-bottom:12px;line-height:1.6">Die Berechtigungen konnten gerade nicht geladen werden (Netzwerk/Anmeldung). Das ist vermutlich vorübergehend — bitte <a href="#" onclick="versionNeuLaden();return false" style="color:var(--accent-2)">Seite neu laden</a>.</p>` : ""}
       <p style="color:var(--text-dim);margin-bottom:8px;line-height:1.6">
         Dein Account <b style="color:var(--text)">${escape(account.username)}</b> ist nicht für den Zugriff auf das CRM freigeschaltet.
       </p>
