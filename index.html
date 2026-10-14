@@ -28,14 +28,14 @@
   window.CRM_ROOT = "06 CRM";
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.504.0"></script>
-<script src="apriko-api.js?v=1.504.0"></script>
-<script src="lohncheck.js?v=1.504.0"></script>
-<script src="personalbudget.js?v=1.504.0"></script>
-<script src="jahresbudget.js?v=1.504.0"></script>
-<script src="budgetpositionen.js?v=1.504.0"></script>
-<script src="lohnchecklistetemp.js?v=1.504.0"></script>
-<script src="apriko-endpunkte.js?v=1.504.0"></script>
+<script src="apriko-filters.js?v=1.505.0"></script>
+<script src="apriko-api.js?v=1.505.0"></script>
+<script src="lohncheck.js?v=1.505.0"></script>
+<script src="personalbudget.js?v=1.505.0"></script>
+<script src="jahresbudget.js?v=1.505.0"></script>
+<script src="budgetpositionen.js?v=1.505.0"></script>
+<script src="lohnchecklistetemp.js?v=1.505.0"></script>
+<script src="apriko-endpunkte.js?v=1.505.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1042,7 +1042,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.504.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.505.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -5390,9 +5390,13 @@ function renderRevenueByMonth(el) {
           const chargesSaaS = segmentChargesSaaS(c.Segment);
           const hasBPO = segmentNeedsBPO(c.Segment);
 
-          // BPO-Input-Cell: entweder Aussenumsatz, Stunden oder gar nichts
+          // BPO-Input-Cell: entweder Aussenumsatz, Stunden oder gar nichts — bei Modellwechsel per Datum zählt der Monat
           let bpoInputCell;
-          if (useExt) {
+          const stdMonat = useHrs && bpoModel(c, year, month) === "Stundensatz";
+          if (stdMonat) {
+            bpoInputCell = `<input class="rev-input" type="number" step="0.25" min="0" value="${r.Hours||""}" onblur="saveRev(${c.id}, ${year}, ${month}, 'Hours', this.value, this)" data-orig="${r.Hours||""}" title="Stunden">
+              <span class="saved-flash">✓</span>${useExt ? `<span style="font-size:10px;color:var(--text-faint);margin-left:4px">h</span>` : ""}`;
+          } else if (useExt) {
             bpoInputCell = `<input class="rev-input" type="text" inputmode="decimal" value="${fmtExtRevInput(r.ExternalRevenue)}" onfocus="this.select()" onblur="saveRev(${c.id}, ${year}, ${month}, 'ExternalRevenue', parseExtRevInput(this.value), this)" data-orig="${parseExtRevInput(r.ExternalRevenue)}" title="Aussenumsatz in CHF">
               <span class="saved-flash">✓</span>`;
           } else if (useHrs) {
@@ -5559,7 +5563,7 @@ function renderRevenueByCustomer(el) {
     || (segmentNeedsBPO(cust.Segment) && useExt && !cust.BPORate) || (useHrs && !cust.HourlyRate);
 
   // BPO-Spalten-Header je nach Modell
-  const bpoColHeader = useExt ? "Aussenumsatz" : (useHrs ? "Stunden" : "BPO-Input");
+  const bpoColHeader = (useExt && useHrs) ? "Aussenumsatz / Stunden" : useExt ? "Aussenumsatz" : (useHrs ? "Stunden" : "BPO-Input");
 
   // Aussenumsatz kumuliert: YTD-Kunde = letzter Jahresstand, sonst Summe der Monate
   let yearExt = 0;
@@ -5616,7 +5620,11 @@ function renderRevenueByCustomer(el) {
           const calc = calcRevenue(r, cust, year, m);
 
           let bpoInputCell;
-          if (useExt) {
+          const stdMonat = useHrs && bpoModel(cust, year, m) === "Stundensatz";   // Modellwechsel per Datum: Monat für Monat entscheiden
+          if (stdMonat) {
+            bpoInputCell = `<input class="rev-input" type="number" step="0.25" min="0" value="${r.Hours||""}" onblur="saveRev(${custId}, ${year}, ${m}, 'Hours', this.value, this)" data-orig="${r.Hours||""}" title="Stunden × ${parseFloat(cust.HourlyRate||0).toLocaleString("de-CH")} CHF/h">
+              <span class="saved-flash">✓</span>${useExt ? `<span style="font-size:10px;color:var(--text-faint);margin-left:4px">h</span>` : ""}`;
+          } else if (useExt) {
             bpoInputCell = `<input class="rev-input" type="text" inputmode="decimal" value="${fmtExtRevInput(r.ExternalRevenue)}" onfocus="this.select()" onblur="saveRev(${custId}, ${year}, ${m}, 'ExternalRevenue', parseExtRevInput(this.value), this)" data-orig="${parseExtRevInput(r.ExternalRevenue)}">
               <span class="saved-flash">✓</span>`;
           } else if (useHrs) {
