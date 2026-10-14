@@ -28,14 +28,14 @@
   window.CRM_ROOT = "06 CRM";
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.492.0"></script>
-<script src="apriko-api.js?v=1.492.0"></script>
-<script src="lohncheck.js?v=1.492.0"></script>
-<script src="personalbudget.js?v=1.492.0"></script>
-<script src="jahresbudget.js?v=1.492.0"></script>
-<script src="budgetpositionen.js?v=1.492.0"></script>
-<script src="lohnchecklistetemp.js?v=1.492.0"></script>
-<script src="apriko-endpunkte.js?v=1.492.0"></script>
+<script src="apriko-filters.js?v=1.494.0"></script>
+<script src="apriko-api.js?v=1.494.0"></script>
+<script src="lohncheck.js?v=1.494.0"></script>
+<script src="personalbudget.js?v=1.494.0"></script>
+<script src="jahresbudget.js?v=1.494.0"></script>
+<script src="budgetpositionen.js?v=1.494.0"></script>
+<script src="lohnchecklistetemp.js?v=1.494.0"></script>
+<script src="apriko-endpunkte.js?v=1.494.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1042,7 +1042,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.492.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.494.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -5826,14 +5826,25 @@ function faktNum(v) {
 }
 /* Rechnungsdatum als ISO (YYYY-MM-DD); Fallback Fakturajahr/-monat (1. des Monats). */
 function faktRechnungsDatum(z) {
-  const m = /(\d{1,2})\.(\d{1,2})\.(\d{4})/.exec(z["Rechnungsdatum"] || "");
-  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  const iso = faktDatumIso(z["Rechnungsdatum"]);
+  if (iso) return iso;
+  // Fallback (nur wenn das Datum unlesbar ist): 1. des Fakturamonats — wird in faktAuswerten gezählt und beim Import gemeldet,
+  // weil damit Rechnungen fälschlich vor «Fakturiert bis» landen können (giaco, 14.10.2026: Septemberrechnungen fehlten).
   const j = parseInt(z["Fakturajahr"]) || 0, mo = parseInt(z["Fakturamonat"]) || 0;
   return (j && mo) ? `${j}-${String(mo).padStart(2, "0")}-01` : "";
 }
+/* Datum in ISO: 17.09.2026, 17.9.2026, 17.09.26, 2026-09-17, 17/09/2026, 2026-09-17T00:00:00 */
+function faktDatumIso(v) {
+  const t = String(v == null ? "" : v).trim(); if (!t) return "";
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(t);
+  if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  m = /^(\d{1,2})[.\/](\d{1,2})[.\/](\d{4}|\d{2})(?!\d)/.exec(t);
+  if (m) { const j = m[3].length === 2 ? "20" + m[3] : m[3]; return `${j}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`; }
+  return "";
+}
 /* CSV auswerten → { tage:{iso:netto}, monate:{m:netto}, anzahl, storno, fest, fremdesJahr, nachStichtag, letzterMonat } */
 function faktAuswerten(zeilen, year, bisIso) {
-  const out = { tage: {}, anzahlProTag: {}, monate: {}, anzahl: 0, storno: 0, fest: 0, fremdesJahr: 0, nachStichtag: 0, letzterMonat: 0, netto: 0 };
+  const out = { tage: {}, anzahlProTag: {}, monate: {}, anzahl: 0, storno: 0, fest: 0, fremdesJahr: 0, nachStichtag: 0, letzterMonat: 0, netto: 0, datumFallback: 0, datumBeispiel: "" };
   for (const z of zeilen) {
     const art = (z["Fakturaart"] || "").toLowerCase();
     const status = (z["Status"] || "").toLowerCase();
@@ -5841,6 +5852,7 @@ function faktAuswerten(zeilen, year, bisIso) {
     if (/storn/.test(status) || z["Storniert am"]) { out.storno++; continue; }
     const iso = faktRechnungsDatum(z);
     if (!iso) continue;
+    if (!faktDatumIso(z["Rechnungsdatum"])) { out.datumFallback++; if (!out.datumBeispiel) out.datumBeispiel = String(z["Rechnungsdatum"] || "(leer)"); }
     if (parseInt(iso.slice(0, 4)) !== year) { out.fremdesJahr++; continue; }
     if (bisIso && iso > bisIso) { out.nachStichtag++; continue; }
     const monat = parseInt(iso.slice(5, 7));
@@ -5933,6 +5945,9 @@ async function faktImportCsv(custId, year, file, bisIso, monat, faktBisFeld) {
   const frage = cust.BPOYtd
     ? `Jahresstand per ${faktFmtDatum(bisIso)}: CHF ${faktFmt(stand)} → Zeile ${MONTH_NAMES[monat - 1]} ${year}\nZu verrechnen (− CHF ${faktFmt(vormonate)} verrechnet): CHF ${faktFmt(ziel)} netto`
     : `Periode ${faktBis ? faktFmtDatum(faktBis) + " (exkl.)" : "Jahresbeginn"} – ${faktFmtDatum(bisIso)}: CHF ${faktFmt(ziel)} netto aus ${a.anzahl - a.tage_vor} Rechnungen → Zeile ${MONTH_NAMES[monat - 1]} ${year}`;
+  if (a.datumFallback) {
+    if (!confirm(`ACHTUNG: Bei ${a.datumFallback} von ${a.anzahl} Rechnungen ist das Rechnungsdatum nicht lesbar (z.B. «${a.datumBeispiel}») — sie wurden auf den 1. des Fakturamonats gesetzt. Rechnungen aus dem Monat von «Fakturiert bis» fallen dadurch fälschlich aus der Periode.\n\nBitte die Datei mit Rechnungsdatum im Format TT.MM.JJJJ exportieren und erneut importieren.\n\nTrotzdem importieren?`)) return;
+  }
   if (!confirm(frage + `\n(ausgeschlossen: ${a.storno} Storno, ${a.fest} Festvermittlung, ${a.nachStichtag} nach Stichtag)\n\nImportieren?`)) return;
   toast(cust.BPOYtd ? `Importiere YTD-Stand per ${faktFmtDatum(bisIso)} in ${MONTH_NAMES[monat - 1]} …`
                     : `Importiere Periode ${faktFmtDatum(von || bisIso)} – ${faktFmtDatum(bisIso)} in ${MONTH_NAMES[monat - 1]} …`);
@@ -6095,7 +6110,7 @@ function faktRenderKasten(cust, year) {
   else if (!o.anzahlTage) detail = o.faktBis && o.faktBis >= o.bis
     ? `Bis ${faktFmtDatum(o.bis)} importiert und bis ${faktFmtDatum(o.faktBis)} fakturiert — nichts offen.`
     : `Keine Rechnungen zwischen ${o.faktBis ? faktFmtDatum(o.faktBis) : "Jahresbeginn"} und ${faktFmtDatum(o.bis)}.`;
-  else detail = `Periode ${faktFmtDatum(o.von)} – ${faktFmtDatum(o.bis)}: CHF ${faktFmt(o.netto)} netto × ${o.rate.toLocaleString("de-CH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} % = CHF ${faktFmt(o.honorar)} → Abrechnungsmonat ${li && li.monat ? MONTH_NAMES[li.monat - 1] : "?"}${o.faktBis ? ` · fakturiert bis ${faktFmtDatum(o.faktBis)}` : " · noch nichts fakturiert"}. Fakt. BPO im Abrechnungsmonat auf «Ja» setzen → «Fakturiert bis» springt auf ${faktFmtDatum(o.bis)}.`;
+  else detail = `Rechnungen ${o.faktBis ? "nach " + faktFmtDatum(o.faktBis) : "ab Jahresbeginn"} bis ${faktFmtDatum(o.bis)}${o.von && o.von !== o.bis ? ` (datiert ${faktFmtDatum(o.von)} – ${faktFmtDatum(o.bis)}, ${o.anzahlTage} Rechnungstag${o.anzahlTage === 1 ? "" : "e"})` : o.von ? ` (alle datiert ${faktFmtDatum(o.von)})` : ""}: CHF ${faktFmt(o.netto)} netto × ${o.rate.toLocaleString("de-CH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} % = CHF ${faktFmt(o.honorar)} → Abrechnungsmonat ${li && li.monat ? MONTH_NAMES[li.monat - 1] : "?"}${o.faktBis ? ` · fakturiert bis ${faktFmtDatum(o.faktBis)}` : " · noch nichts fakturiert"}. Fakt. BPO im Abrechnungsmonat auf «Ja» setzen → «Fakturiert bis» springt auf ${faktFmtDatum(o.bis)}.`;
   // Monats-Kunde: weicht die Zeile des Abrechnungsmonats von der aktuellen Periode ab (z.B. «Fakturiert bis» nachträglich geändert) → Hinweis
   let abweichung = "";
   if (!cust.BPOYtd && li && li.monat) {
