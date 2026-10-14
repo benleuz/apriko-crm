@@ -28,14 +28,14 @@
   window.CRM_ROOT = "06 CRM";
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.509.0"></script>
-<script src="apriko-api.js?v=1.509.0"></script>
-<script src="lohncheck.js?v=1.509.0"></script>
-<script src="personalbudget.js?v=1.509.0"></script>
-<script src="jahresbudget.js?v=1.509.0"></script>
-<script src="budgetpositionen.js?v=1.509.0"></script>
-<script src="lohnchecklistetemp.js?v=1.509.0"></script>
-<script src="apriko-endpunkte.js?v=1.509.0"></script>
+<script src="apriko-filters.js?v=1.511.0"></script>
+<script src="apriko-api.js?v=1.511.0"></script>
+<script src="lohncheck.js?v=1.511.0"></script>
+<script src="personalbudget.js?v=1.511.0"></script>
+<script src="jahresbudget.js?v=1.511.0"></script>
+<script src="budgetpositionen.js?v=1.511.0"></script>
+<script src="lohnchecklistetemp.js?v=1.511.0"></script>
+<script src="apriko-endpunkte.js?v=1.511.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1042,7 +1042,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.509.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.511.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -5323,6 +5323,35 @@ function revenueCustomersForMonth(year, month) {
    Optional: bexio-Rechnungsexport (CSV) hochladen → Rechnungen werden den Kunden zugeordnet (Firmenname) und mit den
    erwarteten Honoraren verglichen. */
 let fkBexio = null;   // { zeilen:[{name, datum, betrag, titel, nr}], dateiname }
+/* Automatisch abhaken (14.10.2026): hat bexio eine Rechnung zum Kunden und stimmt die Monatssumme mit SaaS + BPO überein
+   (Toleranz CHF 1), ist das der Beleg → «Fakt. SaaS/BPO» wird ohne Rückfrage gesetzt. Abweichende Beträge bleiben zum Klicken. */
+async function fkAutoMarkieren(year, month, leise) {
+  if (!fkBexio) return 0;
+  const kunden = revenueCustomersForMonth(year, month);
+  const bx = fkBexioAbgleich(kunden.map(c => ({ c, comp: cache.companies.find(x => x.id == c.CompanyId) })), year, month);
+  const todo = [];
+  kunden.forEach(c => {
+    const m = bx.proKunde[c.id] || []; if (!m.length) return;
+    const r = findRev(c.id, year, month) || {}; const calc = calcRevenue(r, c, year, month);
+    const soll = (segmentChargesSaaS(c.Segment) ? calc.saas : 0) + (segmentNeedsBPO(c.Segment) ? calc.bpo : 0);
+    const ist = m.reduce((a, x) => a + x.betrag, 0);
+    if (!(soll > 0) || Math.abs(ist - soll) >= 1) return;
+    if (segmentChargesSaaS(c.Segment) && calc.saas > 0 && !r.InvoicedSaaS) todo.push([c, "SaaS"]);
+    if (segmentNeedsBPO(c.Segment) && calc.bpo > 0 && !r.InvoicedBPO) todo.push([c, "BPO"]);
+  });
+  let n = 0;
+  for (const [c, t] of todo) { try { await toggleInvoiced(c.id, year, month, t); n++; } catch (e) { toast(c.Title + ": " + e.message, true); } }
+  if (n && !leise) toast(`${MONTH_NAMES[month - 1]} ${year}: ${n} Honorar(e) automatisch als fakturiert markiert (Beleg in bexio).`);
+  return n;
+}
+async function fkJahrAbgleichen(year) {
+  if (!fkBexio) return;
+  if (!confirm(`Alle Monate ${year} mit bexio abgleichen und passende Honorare als fakturiert markieren?\n(nur das Häkchen «Fakt.» mit Datum — Umsätze und Lizenzen bleiben unverändert)`)) return;
+  let total = 0; const heute = new Date();
+  for (let m = 1; m <= 12; m++) { if (year > heute.getFullYear() || (year === heute.getFullYear() && m > heute.getMonth() + 1)) break; total += await fkAutoMarkieren(year, m, true); }
+  toast(`${year}: ${total} Honorar(e) als fakturiert markiert.`);
+  fkKontrolle();
+}
 function fkKontrolle() {
   const year = filters.revenueYear, month = filters.revenueMonth;
   const kunden = revenueCustomersForMonth(year, month);
@@ -5344,11 +5373,13 @@ function fkKontrolle() {
   });
   const bx = fkBexio ? fkBexioAbgleich(zeilen, year, month) : null;
   const n = { fehlend: zeilen.filter(z => z.fehlend.length).length, offen: zeilen.filter(z => z.saasOffen || z.bpoOffen).length, leer: zeilen.filter(z => z.saasLeer || z.bpoLeer).length };
+  const inBexio = z => !!(bx && (bx.proKunde[z.c.id] || []).length);
   const status = z => {
     const t = [];
     if (z.fehlend.length) t.push(`<span style="color:var(--warn)">⚠ Eingabe fehlt: ${escape(z.fehlend.join(", "))}</span>`);
-    if (z.saasOffen) t.push(`<span style="color:var(--danger)">SaaS CHF ${fmtCHFShort(z.calc.saas)} nicht fakturiert</span>`);
-    if (z.bpoOffen) t.push(`<span style="color:var(--danger)">BPO CHF ${fmtCHFShort(z.calc.bpo)} nicht fakturiert</span>`);
+    const knopf = typ => inBexio(z) ? ` <button class="btn btn-sm" style="padding:1px 7px;font-size:11px" onclick="fkMarkieren(${z.c.id}, ${year}, ${month}, ${tkJs(typ)})" title="Rechnung ist in bexio vorhanden → im CRM als fakturiert markieren">✓ markieren</button>` : "";
+    if (z.saasOffen) t.push(`<span style="color:${inBexio(z) ? "var(--warn)" : "var(--danger)"}">SaaS CHF ${fmtCHFShort(z.calc.saas)} ${inBexio(z) ? "in bexio vorhanden, im CRM nicht markiert" : "nicht fakturiert"}</span>${knopf("SaaS")}`);
+    if (z.bpoOffen) t.push(`<span style="color:${inBexio(z) ? "var(--warn)" : "var(--danger)"}">BPO CHF ${fmtCHFShort(z.calc.bpo)} ${inBexio(z) ? "in bexio vorhanden, im CRM nicht markiert" : "nicht fakturiert"}</span>${knopf("BPO")}`);
     if (z.saasLeer) t.push(`<span style="color:var(--warn)">SaaS als fakturiert markiert, aber Betrag 0</span>`);
     if (z.bpoLeer) t.push(`<span style="color:var(--warn)">BPO als fakturiert markiert, aber Betrag 0</span>`);
     if (!t.length) t.push(`<span style="color:var(--accent)">✓ vollständig</span>`);
@@ -5367,6 +5398,8 @@ function fkKontrolle() {
       ${n.leer ? `<span style="color:var(--warn)">${n.leer} markiert ohne Betrag</span>` : ""}
       <label class="btn btn-sm" style="margin-left:auto;cursor:pointer" title="bexio → Verkauf → Rechnungen → Exportieren (Excel oder CSV)">⇧ bexio-Rechnungen (Excel/CSV)<input type="file" accept=".xlsx,.xls,.csv" hidden onchange="fkBexioLaden(this)"></label>
       ${fkBexio ? `<span style="color:var(--text-faint)">${escape(fkBexio.dateiname)} · ${fkBexio.zeilen.length} Rechnungen${bx ? ` · ${bx.imMonat} im Monat, ${bx.unzugeordnet.length} nicht zuordenbar` : ""}</span>` : ""}
+      ${fkBexio ? `<button class="btn btn-sm" onclick="fkJahrAbgleichen(${year})" title="Alle Monate des Jahres: Honorare mit passender bexio-Rechnung als fakturiert markieren">↻ ganzes Jahr ${year} abgleichen</button>` : ""}
+      ${bx && zeilen.some(z => (z.saasOffen || z.bpoOffen) && (bx.proKunde[z.c.id] || []).length) ? `<button class="btn btn-sm btn-primary" onclick="fkMarkierenAlle(${year}, ${month})" title="Alle offenen Honorare, zu denen bexio eine Rechnung hat, im CRM als fakturiert markieren">✓ alle bexio-bestätigten markieren (${zeilen.filter(z => (z.saasOffen || z.bpoOffen) && (bx.proKunde[z.c.id] || []).length).length})</button>` : ""}
     </div>
     <div class="table-wrap"><table style="font-size:12px"><thead><tr><th>Kunde</th><th style="text-align:right">SaaS</th><th style="text-align:right">BPO</th><th>Status</th>${bx ? "<th>bexio</th>" : ""}</tr></thead><tbody>
       ${sortiert.map(z => `<tr><td><a href="#" onclick="closeModal();filters.revenueMode='customer';filters.revenueCustomerId=${z.c.id};render();return false">${escape(z.c.Title)}</a></td>
@@ -5377,6 +5410,24 @@ function fkKontrolle() {
     ${bx && bx.unzugeordnet.length ? `<div style="margin-top:10px;font-size:12px"><b>bexio-Rechnungen im Monat ohne Zuordnung zu einem Kunden (${bx.unzugeordnet.length}):</b><div style="color:var(--text-dim);margin-top:4px">${bx.unzugeordnet.map(x => escape((x.nr ? x.nr + " · " : "") + x.name + " · " + x.datum + " · CHF " + fmtCHFShort(x.betrag) + (x.titel ? " · " + x.titel : ""))).join("<br>")}</div></div>` : ""}
     <div style="font-size:11px;color:var(--text-faint);margin-top:10px">«Nicht fakturiert» = Honorar berechnet, aber «Fakt. SaaS/BPO» steht noch auf Nein. Der bexio-Abgleich ordnet Rechnungen über den Firmennamen zu und vergleicht die Summe mit SaaS + BPO. Abrechnungsmonat einer Rechnung: Leistungszeitraum → Monatsname im Titel → Rechnungsdatum (bis zum 20. zählt der Vormonat, z.B. 14.10. → September).</div>`,
     [`<button class="btn btn-primary" onclick="closeModal()">Schliessen</button>`]);
+}
+/* Fakturiert-Häkchen setzen (nur das Flag + Datum; Umsätze/Lizenzen bleiben unangetastet) und Kontrolle neu zeichnen */
+async function fkMarkieren(custId, year, month, typ) {
+  const r = findRev(custId, year, month); if (r && r["Invoiced" + typ]) { fkKontrolle(); return; }
+  await toggleInvoiced(custId, year, month, typ);
+  fkKontrolle();
+}
+async function fkMarkierenAlle(year, month) {
+  const kunden = revenueCustomersForMonth(year, month); const zeilen = kunden.map(c => { const comp = cache.companies.find(x => x.id == c.CompanyId); return { c, comp }; });
+  const bx = fkBexio ? fkBexioAbgleich(zeilen, year, month) : null; if (!bx) return;
+  const todo = [];
+  kunden.forEach(c => { if (!(bx.proKunde[c.id] || []).length) return; const r = findRev(c.id, year, month) || {}; const calc = calcRevenue(r, c, year, month);
+    if (segmentChargesSaaS(c.Segment) && calc.saas > 0 && !r.InvoicedSaaS) todo.push([c, "SaaS"]);
+    if (segmentNeedsBPO(c.Segment) && calc.bpo > 0 && !r.InvoicedBPO) todo.push([c, "BPO"]); });
+  if (!todo.length) { toast("Nichts zu markieren."); return; }
+  if (!confirm(`${todo.length} Honorar(e) als fakturiert markieren (nur das Häkchen «Fakt.» mit Datum, keine Umsätze)?\n\n` + todo.map(([c, t]) => `• ${c.Title} · ${t}`).join("\n"))) return;
+  for (const [c, t] of todo) { try { await toggleInvoiced(c.id, year, month, t); } catch (e) { toast(c.Title + ": " + e.message, true); } }
+  fkKontrolle();
 }
 async function fkBexioLaden(input) {
   const f = input.files && input.files[0]; if (!f) return;
@@ -5403,6 +5454,7 @@ async function fkBexioLaden(input) {
   }).filter(z => z && z.name);
   fkBexio = { dateiname: f.name, zeilen };
   toast(`${zeilen.length} bexio-Rechnungen geladen${storniert ? `, ${storniert} stornierte übersprungen` : ""}${entwurf ? `, ${entwurf} Entwürfe übersprungen` : ""}`);
+  await fkAutoMarkieren(filters.revenueYear, filters.revenueMonth);
   fkKontrolle();
 }
 function fkNorm(s) { return String(s || "").toLowerCase().replace(/\b(ag|gmbh|sa|sarl|sagl|ltd|inc|personal|services?|group|holding)\b/g, " ").replace(/[^a-z0-9äöü]+/g, " ").trim(); }
