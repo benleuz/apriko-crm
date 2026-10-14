@@ -28,14 +28,14 @@
   window.CRM_ROOT = "06 CRM";
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.491.0"></script>
-<script src="apriko-api.js?v=1.491.0"></script>
-<script src="lohncheck.js?v=1.491.0"></script>
-<script src="personalbudget.js?v=1.491.0"></script>
-<script src="jahresbudget.js?v=1.491.0"></script>
-<script src="budgetpositionen.js?v=1.491.0"></script>
-<script src="lohnchecklistetemp.js?v=1.491.0"></script>
-<script src="apriko-endpunkte.js?v=1.491.0"></script>
+<script src="apriko-filters.js?v=1.492.0"></script>
+<script src="apriko-api.js?v=1.492.0"></script>
+<script src="lohncheck.js?v=1.492.0"></script>
+<script src="personalbudget.js?v=1.492.0"></script>
+<script src="jahresbudget.js?v=1.492.0"></script>
+<script src="budgetpositionen.js?v=1.492.0"></script>
+<script src="lohnchecklistetemp.js?v=1.492.0"></script>
+<script src="apriko-endpunkte.js?v=1.492.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1042,7 +1042,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.491.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.492.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -16346,18 +16346,40 @@ async function changeStage(id, stage) {
   } catch (e) { toast(e.message, true); }
 }
 
+let aktCtxFirma = null;   // Firma, auf die das Aktivitätsformular eingeschränkt ist (null = alle)
+function aktFirmaVon(relatedTo, relatedId) {
+  if (!relatedTo || !relatedId) return null;
+  if (relatedTo === "Company") return cache.companies.some(c => String(c.id) === String(relatedId)) ? String(relatedId) : null;
+  if (relatedTo === "Contact") { const k = cache.contacts.find(x => String(x.id) === String(relatedId)); return k && k.CompanyId ? String(k.CompanyId) : null; }
+  if (relatedTo === "Deal") { const d = cache.deals.find(x => String(x.id) === String(relatedId)); return d && d.CompanyId ? String(d.CompanyId) : null; }
+  return null;
+}
+function aktRelatedItems(type) {
+  let items = [];
+  if (type === "Company") items = cache.companies;
+  else if (type === "Contact") items = cache.contacts;
+  else if (type === "Deal") items = cache.deals;
+  if (aktCtxFirma) items = items.filter(i => type === "Company" ? String(i.id) === aktCtxFirma : String(i.CompanyId) === aktCtxFirma);
+  return items.slice();
+}
+function aktCtxHint() {
+  if (!aktCtxFirma) return "";
+  const f = cache.companies.find(c => String(c.id) === aktCtxFirma);
+  return `<span style="color:var(--text-faint)">— nur ${escape((f && f.Title) || "diese Firma")} · <a href="#" onclick="aktCtxFirma=null;updateRelatedDropdown();return false" style="color:var(--accent-2)">alle anzeigen</a></span>`;
+}
 function updateRelatedDropdown() {
   const typeSel = document.getElementById("f-related-type");
   const idSel = document.getElementById("f-related-id");
   if (!typeSel || !idSel) return;
   const type = typeSel.value;
-  let items = [];
-  if (type === "Company") items = cache.companies;
-  else if (type === "Contact") items = cache.contacts;
-  else if (type === "Deal") items = cache.deals;
+  const vorher = idSel.value;
+  const items = aktRelatedItems(type);
   idSel.innerHTML = '<option value="">—</option>' +
     items.sort((a,b) => (a.Title||"").localeCompare(b.Title||""))
          .map(i => `<option value="${i.id}">${escape(i.Title||"")}</option>`).join("");
+  if (items.length === 1 && !vorher) idSel.value = String(items[0].id);   // z.B. Typ «Firma» im Firmen-Kontext → direkt vorbelegen
+  else if (items.some(i => String(i.id) === vorher)) idSel.value = vorher;
+  const h = document.getElementById("f-related-hint"); if (h) h.innerHTML = aktCtxHint();
 }
 
 /* Notizen zu Aktivitäten (14.10.2026): in der Spalte «Notes» der Liste Activities, falls vorhanden — sonst in
@@ -16397,11 +16419,10 @@ function editActivity(id, prefRelatedTo, prefRelatedId) {
 
   const relatedTo = a.RelatedTo || prefRelatedTo || "";
   const relatedId = a.RelatedId || prefRelatedId || "";
-
-  let relatedItems = [];
-  if (relatedTo === "Company") relatedItems = cache.companies;
-  else if (relatedTo === "Contact") relatedItems = cache.contacts;
-  else if (relatedTo === "Deal") relatedItems = cache.deals;
+  // Kontext-Firma (14.10.2026): wird die Aktivität aus Firma/Kunde/Kontakt/Deal heraus erfasst, stehen in «Eintrag» nur
+  // Einträge dieser Firma zur Auswahl (ihre Kontakte, ihre Deals). «alle anzeigen» hebt den Filter auf.
+  aktCtxFirma = aktFirmaVon(relatedTo, relatedId);
+  const relatedItems = aktRelatedItems(relatedTo);
 
   const due = a.DueDate ? a.DueDate.slice(0,10) : "";
   const owner = a.Owner !== undefined ? a.Owner : myEmail();
@@ -16427,7 +16448,7 @@ function editActivity(id, prefRelatedTo, prefRelatedId) {
           <option value="Deal" ${relatedTo==="Deal"?"selected":""}>Deal</option>
         </select>
       </div>
-      <div class="field"><label>Eintrag</label>
+      <div class="field"><label>Eintrag <span id="f-related-hint" style="font-weight:400;text-transform:none;letter-spacing:0">${aktCtxHint()}</span></label>
         <select id="f-related-id">
           <option value="">—</option>
           ${relatedItems.sort((a,b) => (a.Title||"").localeCompare(b.Title||""))
