@@ -28,14 +28,14 @@
   window.CRM_ROOT = "06 CRM";
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.508.0"></script>
-<script src="apriko-api.js?v=1.508.0"></script>
-<script src="lohncheck.js?v=1.508.0"></script>
-<script src="personalbudget.js?v=1.508.0"></script>
-<script src="jahresbudget.js?v=1.508.0"></script>
-<script src="budgetpositionen.js?v=1.508.0"></script>
-<script src="lohnchecklistetemp.js?v=1.508.0"></script>
-<script src="apriko-endpunkte.js?v=1.508.0"></script>
+<script src="apriko-filters.js?v=1.509.0"></script>
+<script src="apriko-api.js?v=1.509.0"></script>
+<script src="lohncheck.js?v=1.509.0"></script>
+<script src="personalbudget.js?v=1.509.0"></script>
+<script src="jahresbudget.js?v=1.509.0"></script>
+<script src="budgetpositionen.js?v=1.509.0"></script>
+<script src="lohnchecklistetemp.js?v=1.509.0"></script>
+<script src="apriko-endpunkte.js?v=1.509.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1042,7 +1042,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.508.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.509.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -5356,7 +5356,7 @@ function fkKontrolle() {
   };
   const bxZelle = z => { if (!bx) return ""; const m = bx.proKunde[z.c.id] || []; if (!m.length) return `<td style="color:var(--text-faint)">—</td>`;
     const sum = m.reduce((a, x) => a + x.betrag, 0); const soll = (z.calc.saas || 0) + (z.calc.bpo || 0);
-    const ok = Math.abs(sum - soll) < 1; return `<td style="font-family:var(--font-mono);color:${ok ? "var(--accent)" : "var(--warn)"}" title="${escape(m.map(x => (x.nr ? x.nr + " · " : "") + x.datum + " · " + x.titel + (x.leistung ? " · " + x.leistung : "") + " · CHF " + fmtCHFShort(x.betrag) + (x.status ? " · " + x.status : "")).join("\n"))}">${m.length} Rg · CHF ${fmtCHFShort(sum)}${ok ? "" : ` <span style="font-size:10px">(erwartet ${fmtCHFShort(soll)})</span>`}</td>`; };
+    const ok = Math.abs(sum - soll) < 1; return `<td style="font-family:var(--font-mono);color:${ok ? "var(--accent)" : "var(--warn)"}" title="${escape(m.map(x => (x.nr ? x.nr + " · " : "") + x.datum + " · " + x.titel + (x.leistung ? " · " + x.leistung : "") + " · CHF " + fmtCHFShort(x.betrag) + (x.status ? " · " + x.status : "") + (x.monatQuelle ? " · Monat aus " + x.monatQuelle : "")).join("\n"))}">${m.length} Rg · CHF ${fmtCHFShort(sum)}${ok ? "" : ` <span style="font-size:10px">(erwartet ${fmtCHFShort(soll)})</span>`}</td>`; };
   const sortiert = zeilen.slice().sort((a, b) => { const ra = (a.fehlend.length || a.saasOffen || a.bpoOffen || a.saasLeer || a.bpoLeer) ? 0 : 1, rb = (b.fehlend.length || b.saasOffen || b.bpoOffen || b.saasLeer || b.bpoLeer) ? 0 : 1; return ra - rb || (a.c.Title || "").localeCompare(b.c.Title || ""); });
   modalBreit(true);
   showModal(`Fakturakontrolle ${MONTH_NAMES[month - 1]} ${year}`, `
@@ -5375,7 +5375,7 @@ function fkKontrolle() {
         <td>${status(z)}</td>${bxZelle(z)}</tr>`).join("")}
     </tbody></table></div>
     ${bx && bx.unzugeordnet.length ? `<div style="margin-top:10px;font-size:12px"><b>bexio-Rechnungen im Monat ohne Zuordnung zu einem Kunden (${bx.unzugeordnet.length}):</b><div style="color:var(--text-dim);margin-top:4px">${bx.unzugeordnet.map(x => escape((x.nr ? x.nr + " · " : "") + x.name + " · " + x.datum + " · CHF " + fmtCHFShort(x.betrag) + (x.titel ? " · " + x.titel : ""))).join("<br>")}</div></div>` : ""}
-    <div style="font-size:11px;color:var(--text-faint);margin-top:10px">«Nicht fakturiert» = Honorar berechnet, aber «Fakt. SaaS/BPO» steht noch auf Nein. Der bexio-Abgleich ordnet Rechnungen über den Firmennamen zu und vergleicht die Summe des Monats mit SaaS + BPO.</div>`,
+    <div style="font-size:11px;color:var(--text-faint);margin-top:10px">«Nicht fakturiert» = Honorar berechnet, aber «Fakt. SaaS/BPO» steht noch auf Nein. Der bexio-Abgleich ordnet Rechnungen über den Firmennamen zu und vergleicht die Summe mit SaaS + BPO. Abrechnungsmonat einer Rechnung: Leistungszeitraum → Monatsname im Titel → Rechnungsdatum (bis zum 20. zählt der Vormonat, z.B. 14.10. → September).</div>`,
     [`<button class="btn btn-primary" onclick="closeModal()">Schliessen</button>`]);
 }
 async function fkBexioLaden(input) {
@@ -5406,12 +5406,32 @@ async function fkBexioLaden(input) {
   fkKontrolle();
 }
 function fkNorm(s) { return String(s || "").toLowerCase().replace(/\b(ag|gmbh|sa|sarl|sagl|ltd|inc|personal|services?|group|holding)\b/g, " ").replace(/[^a-z0-9äöü]+/g, " ").trim(); }
+/* Abrechnungsmonat einer bexio-Rechnung (14.10.2026): eine Rechnung vom 14.10. betrifft meist den September.
+   Reihenfolge: Leistungszeitraum (letztes Datum bzw. Monatsname) → Monatsname im Titel → Rechnungsdatum: bis zum 20. gilt der Vormonat, danach der laufende Monat. */
+const FK_MONATE = { jan: 1, januar: 1, feb: 2, februar: 2, mär: 3, maerz: 3, märz: 3, mar: 3, apr: 4, april: 4, mai: 5, jun: 6, juni: 6, jul: 7, juli: 7, aug: 8, august: 8, sep: 9, sept: 9, september: 9, okt: 10, oktober: 10, nov: 11, november: 11, dez: 12, dezember: 12 };
+function fkMonatAusText(t) {
+  t = String(t || ""); if (!t.trim()) return null;
+  const daten = [...t.matchAll(/(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/g)].map(m => ({ y: m[3].length === 2 ? 2000 + parseInt(m[3]) : parseInt(m[3]), m: parseInt(m[2]) }));
+  if (daten.length) { const l = daten[daten.length - 1]; return { y: l.y, m: l.m, quelle: "Leistungszeitraum" }; }
+  const mn = /(jan(?:uar)?|feb(?:ruar)?|m[äa]e?rz?|apr(?:il)?|mai|jun[i]?|jul[i]?|aug(?:ust)?|sep(?:t(?:ember)?)?|okt(?:ober)?|nov(?:ember)?|dez(?:ember)?)\.?\s*(\d{4})/i.exec(t);
+  if (mn) { const k = mn[1].toLowerCase().replace(/\.$/, ""); const m = FK_MONATE[k] || FK_MONATE[k.slice(0, 3)]; if (m) return { y: parseInt(mn[2]), m, quelle: "Text" }; }
+  const mj = /\b(\d{1,2})[./](\d{4})\b/.exec(t); if (mj && parseInt(mj[1]) >= 1 && parseInt(mj[1]) <= 12) return { y: parseInt(mj[2]), m: parseInt(mj[1]), quelle: "Text" };
+  return null;
+}
+function fkRgMonat(x) {
+  const lz = fkMonatAusText(x.leistung); if (lz) return lz;
+  const ti = fkMonatAusText(x.titel); if (ti) return { ...ti, quelle: "Titel" };
+  if (!x.datum) return null;
+  let y = parseInt(x.datum.slice(0, 4)), m = parseInt(x.datum.slice(5, 7)); const d = parseInt(x.datum.slice(8, 10));
+  if (d <= 20) { m--; if (m < 1) { m = 12; y--; } return { y, m, quelle: "Datum (Vormonat)" }; }
+  return { y, m, quelle: "Datum" };
+}
 function fkBexioAbgleich(zeilen, year, month) {
-  const ym = `${year}-${String(month).padStart(2, "0")}`;
   const proKunde = {}; const unzugeordnet = []; let imMonat = 0;
   const kandidaten = zeilen.map(z => ({ id: z.c.id, norm: [fkNorm(z.comp && z.comp.Title), fkNorm(z.c.Title)].filter(Boolean) }));
   fkBexio.zeilen.forEach(x => {
-    if (x.datum && !x.datum.startsWith(ym)) return;
+    const rm = fkRgMonat(x); if (!rm || rm.y !== year || rm.m !== month) return;
+    x.monatQuelle = rm.quelle;
     imMonat++;
     const n = fkNorm(x.name); const nt = n.split(" ").filter(w => w.length > 2);
     let best = null, bestScore = 0;
