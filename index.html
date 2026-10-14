@@ -28,14 +28,14 @@
   window.CRM_ROOT = "06 CRM";
 </script>
 <script src="msal.js"></script>
-<script src="apriko-filters.js?v=1.488.0"></script>
-<script src="apriko-api.js?v=1.488.0"></script>
-<script src="lohncheck.js?v=1.488.0"></script>
-<script src="personalbudget.js?v=1.488.0"></script>
-<script src="jahresbudget.js?v=1.488.0"></script>
-<script src="budgetpositionen.js?v=1.488.0"></script>
-<script src="lohnchecklistetemp.js?v=1.488.0"></script>
-<script src="apriko-endpunkte.js?v=1.488.0"></script>
+<script src="apriko-filters.js?v=1.491.0"></script>
+<script src="apriko-api.js?v=1.491.0"></script>
+<script src="lohncheck.js?v=1.491.0"></script>
+<script src="personalbudget.js?v=1.491.0"></script>
+<script src="jahresbudget.js?v=1.491.0"></script>
+<script src="budgetpositionen.js?v=1.491.0"></script>
+<script src="lohnchecklistetemp.js?v=1.491.0"></script>
+<script src="apriko-endpunkte.js?v=1.491.0"></script>
 <style>
   :root {
     --bg: #0e1614;
@@ -1042,7 +1042,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.488.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.491.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -2149,7 +2149,7 @@ function mehrbenutzerStart() {
   versionPruefen();
   // Zusatzdaten früh und parallel laden (14.10.2026): vorher wurden Stamm (Kontaktfunktionen), Ansprechpersonen, Mitarbeiter
   // und Vertragslinks erst beim ersten Öffnen eines Kunden nacheinander geholt — darum «ewig» bis die Chips erschienen.
-  [crmLoadKundenFlags, crmLoadStamm, crmLoadAnsprech, crmLoadMitarbeiter, crmLoadVertragLinks].forEach(f => { try { f().catch(() => {}); } catch (e) {} });
+  [crmLoadKundenFlags, crmLoadStamm, crmLoadAnsprech, crmLoadMitarbeiter, crmLoadVertragLinks, aktNotizenLaden, aktNotizSpalte].forEach(f => { try { f().catch(() => {}); } catch (e) {} });
   mbTimer = setInterval(mehrbenutzerTick, 60000);
 }
 /* Versionskontrolle bei jedem Login (12.10.2026): die auf dem Server liegende index.html wird frisch geladen und ihre
@@ -14883,6 +14883,10 @@ function renderCompanies(el) {
   // Sortierung
   const sortDir = filters.companySortDir === "desc" ? -1 : 1;
   filtered = filtered.slice().sort((a,b) => {
+    if (filters.companySort === "lastact") {
+      const av = (firmaLetzteAktivitaet(a.id) || {}).ts || 0, bv = (firmaLetzteAktivitaet(b.id) || {}).ts || 0;
+      return (av - bv) * sortDir;
+    }
     if (filters.companySort === "winprob") {
       const av = parseFloat(a.WinProbability) || 0;
       const bv = parseFloat(b.WinProbability) || 0;
@@ -14921,6 +14925,7 @@ function renderCompanies(el) {
         <th>Ansprechperson</th>
         <th>Kontakte</th>
         <th>Deals</th>
+        <th style="cursor:pointer" onclick="toggleCompanySort('lastact')" title="Jüngste Aktivität zur Firma, ihren Kontakten und Deals — Klick zum Sortieren">Letzte Aktivität${sortArrow("lastact")}</th>
         <th></th>
       </tr></thead>
       <tbody>
@@ -14943,6 +14948,9 @@ function renderCompanies(el) {
             <td onclick="openCompany(${c.id})" class="dim" ${ap ? `title="${escape(ap)}"` : ""}>${ap ? escape(ownerLabel(ap)) : `<span style="color:var(--text-faint);font-size:11px">—</span>`}</td>
             <td onclick="openCompany(${c.id})" class="dim">${contacts}</td>
             <td onclick="openCompany(${c.id})" class="dim">${deals}</td>
+            <td onclick="openCompany(${c.id})" class="dim" style="max-width:260px">${(() => { const la = firmaLetzteAktivitaet(c.id); if (!la) return `<span style="color:var(--text-faint);font-size:11px">—</span>`;
+              const d = new Date(la.ts); const tage = Math.round((Date.now() - la.ts) / 86400000); const farbe = tage > 90 ? "var(--warn)" : "var(--text-dim)";
+              return `<span style="font-family:var(--font-mono);font-size:11px;color:${farbe}" title="${escape(la.a.Title || "")}${aktNotiz(la.a) ? "\n" + escape(aktNotiz(la.a)) : ""}">${d.toLocaleDateString("de-CH")}</span> <span style="font-size:11px">${escape(la.a.Type || "")}</span> <span style="display:inline-block;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;font-size:12px" title="${escape(la.a.Title || "")}">${escape(la.a.Title || "")}</span>`; })()}</td>
             <td class="actions-cell">
               <button class="btn btn-sm" title="Offerte erstellen" onclick="event.stopPropagation();ofDialog(${c.id})">📄</button>
               <button class="btn btn-sm" onclick="event.stopPropagation();editCompany(${c.id})">Edit</button>
@@ -14964,7 +14972,7 @@ function toggleCompanySort(col) {
   } else {
     filters.companySort = col;
     // Numerische Spalten default absteigend (grösster Wert oben)
-    filters.companySortDir = (col === "winprob" || col === "extrev") ? "desc" : "asc";
+    filters.companySortDir = (col === "winprob" || col === "extrev" || col === "lastact") ? "desc" : "asc";
   }
   render();
 }
@@ -15662,6 +15670,22 @@ function openDeal(id) {
   ].filter(Boolean));
 }
 
+function aktZeit(a) {
+  const t = a.DueDate || a.Created || a.Modified || "";
+  const ts = t ? new Date(t).getTime() : 0; return isNaN(ts) ? 0 : ts;
+}
+function firmaLetzteAktivitaet(compId) {
+  const kIds = new Set(cache.contacts.filter(k => String(k.CompanyId) === String(compId)).map(k => String(k.id)));
+  const dIds = new Set(cache.deals.filter(d => String(d.CompanyId) === String(compId)).map(d => String(d.id)));
+  let best = null;
+  (cache.activities || []).forEach(a => {
+    const hit = (a.RelatedTo === "Company" && String(a.RelatedId) === String(compId)) || (a.RelatedTo === "Contact" && kIds.has(String(a.RelatedId))) || (a.RelatedTo === "Deal" && dIds.has(String(a.RelatedId)));
+    if (!hit) return;
+    const ts = aktZeit(a) || 0;
+    if (!best || ts > best.ts || (ts === best.ts && a.id > best.a.id)) best = { a, ts };
+  });
+  return best;
+}
 function renderActivityList(acts) {
   if (!acts.length) return `<div class="empty" style="padding:12px">Keine Aktivitäten.</div>`;
   return acts.sort((a,b) => (b.id - a.id)).map(a => {
@@ -15674,6 +15698,7 @@ function renderActivityList(acts) {
       <span class="type-badge">${escape(a.Type)}</span>
       <span class="title">${escape(a.Title||"")}</span>
       ${metaParts.length ? `<div class="meta">${metaParts.join(" · ")}</div>` : ""}
+      ${aktNotiz(a) ? `<div class="meta" style="white-space:pre-wrap;color:var(--text-dim);margin-top:3px" title="${escape(aktNotiz(a))}">${escape(aktNotiz(a).length > 220 ? aktNotiz(a).slice(0, 220) + " …" : aktNotiz(a))}</div>` : ""}
     </div>`;
   }).join("");
 }
@@ -15701,15 +15726,33 @@ function crmCompanyMatchesScope(companyId, scope) {
   return true;
 }
 /* E-Mails einer Firma je Funktion: alte Textfelder (entscheid/user) + Kontakte mit Funktion Entscheidungsträger/User */
+/* E-Mails je Funktion. Reihenfolge (14.10.2026): erfasste Kontakte sind massgebend — steht eine E-Mail als Kontakt, entscheidet
+   dessen Funktion; derselbe Eintrag in den alten Textfeldern (entscheid/user) wird ignoriert. Nur E-Mails, die es als Kontakt
+   nicht gibt, kommen noch aus den alten Feldern. Jede Adresse erscheint genau einmal. */
 function crmFirmaEmails(companyId) {
   const s = (crmStamm && crmStamm[String(companyId)]) || {};
-  const ent = new Set(crmParseEmails(s.entscheid)), usr = new Set(crmParseEmails(s.user));
+  const ent = new Set(), usr = new Set(), kontaktMails = new Set();
   cache.contacts.filter(k => String(k.CompanyId) === String(companyId) && k.Email).forEach(k => {
     const t = kontaktTags(companyId, k.id); const e = String(k.Email).trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return;
+    kontaktMails.add(e);
     if (t.includes("Entscheidungsträger")) ent.add(e); if (t.includes("User")) usr.add(e);
   });
+  crmParseEmails(s.entscheid).forEach(e => { if (!kontaktMails.has(String(e).toLowerCase())) ent.add(String(e).toLowerCase()); });
+  crmParseEmails(s.user).forEach(e => { if (!kontaktMails.has(String(e).toLowerCase())) usr.add(String(e).toLowerCase()); });
   return { entscheid: [...ent], user: [...usr] };
+}
+/* Alte Textfelder bereinigen: E-Mail eines (neu) erfassten Kontakts aus entscheid/user der Firma entfernen, damit sie nur noch einmal existiert. */
+async function stammLegacyEmailEntfernen(companyId, email) {
+  const e = String(email || "").trim().toLowerCase(); if (!e || !crmStamm) return;
+  const key = String(companyId); const st = crmStamm[key]; if (!st) return;
+  let geaendert = false;
+  ["entscheid", "user"].forEach(f => {
+    if (!st[f]) return;
+    const rest = crmParseEmails(st[f]).filter(x => String(x).toLowerCase() !== e);
+    if (rest.length !== crmParseEmails(st[f]).length) { geaendert = true; if (rest.length) st[f] = rest.join(", "); else delete st[f]; }
+  });
+  if (geaendert) { if (!Object.keys(st).length) delete crmStamm[key]; await crmSaveStamm(); }
 }
 function crmCustomerEmailCounts(scope) {
   const sc = scope || filters.dashboardEmailScope || "alle";
@@ -16036,11 +16079,12 @@ function editCompany(id) {
       <input id="f-winprob" type="number" step="5" min="0" max="100" value="${c.WinProbability!=null?c.WinProbability:""}" placeholder="z.B. 60 für 60%">
     </div>
   `, [
+    id ? `<button class="btn btn-sm" style="margin-right:auto" title="Speichert die Firma und öffnet danach das Aktivitäts-Formular" onclick="saveCompany(${id}, () => newActivity('Company', ${id}, () => openCompany(${id})))">+ Aktivität erfassen</button>` : `<span style="margin-right:auto;font-size:11px;color:var(--text-faint)">Aktivitäten: nach dem Speichern in der Firmenansicht</span>`,
     `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
     `<button class="btn btn-primary" onclick="saveCompany(${id||"null"})">Speichern</button>`
   ]);
 }
-async function saveCompany(id) {
+async function saveCompany(id, danach) {
   const isCust = document.getElementById("f-iscustomer")?.checked || false;
   const winRaw = val("f-winprob");
   const data = {
@@ -16060,6 +16104,7 @@ async function saveCompany(id) {
     const nk = await firmaKontakteSpeichern(compId);
     await reload("Companies");
     closeModal(); render(); toast("Gespeichert" + (nk ? ` · ${nk} Kontakt(e) angelegt` : ""));
+    if (typeof danach === "function") danach();
   } catch (e) { toast(e.message, true); }
 }
 /* ---------- Kontakte direkt im Firmenformular erfassen (14.10.2026) ----------
@@ -16111,6 +16156,7 @@ async function firmaKontakteSpeichern(compId) {
     if (!kid) continue;
     await kontaktNamenSetzen(compId, kid, k.vn, k.nn);
     if (k.tags.length) await kontaktTagsSetzen(compId, kid, k.tags);
+    if (k.mail) await stammLegacyEmailEntfernen(compId, k.mail);
   }
   return angelegt.length;
 }
@@ -16169,7 +16215,7 @@ async function saveContact(id) {
     else { const res = await createItem("Contacts", data); kid = res && res.id; }
     await reload("Contacts");
     if (!kid && !id) { const k = cache.contacts.filter(x => x.Title === data.Title && String(x.CompanyId) === String(data.CompanyId)).sort((a, b) => b.id - a.id)[0]; kid = k && k.id; }
-    if (kid && data.CompanyId) { await kontaktNamenSetzen(data.CompanyId, kid, vorname, nachname); await kontaktZendeskSetzen(data.CompanyId, kid, val("f-zendesk").trim()); await kontaktTagsSetzen(data.CompanyId, kid, tags); }
+    if (kid && data.CompanyId) { await kontaktNamenSetzen(data.CompanyId, kid, vorname, nachname); await kontaktZendeskSetzen(data.CompanyId, kid, val("f-zendesk").trim()); await kontaktTagsSetzen(data.CompanyId, kid, tags); if (data.Email) await stammLegacyEmailEntfernen(data.CompanyId, data.Email); }
     closeModal(); toast("Gespeichert");
     const zk = kontaktZurueckKunde; kontaktZurueckKunde = null;
     if (zk) openCustomer(zk); else render();
@@ -16314,6 +16360,30 @@ function updateRelatedDropdown() {
          .map(i => `<option value="${i.id}">${escape(i.Title||"")}</option>`).join("");
 }
 
+/* Notizen zu Aktivitäten (14.10.2026): in der Spalte «Notes» der Liste Activities, falls vorhanden — sonst in
+   06 CRM/CRM-Budgetdaten/crm_aktivitaet_notizen.json ({ "<activityId>": "text" }, konfliktsicher gespeichert). */
+let aktNotizSpalteVorh = null, aktNotizen = null;
+async function aktNotizSpalte() {
+  if (aktNotizSpalteVorh !== null) return aktNotizSpalteVorh;
+  try { const r = await graph(`/sites/${siteId}/lists/${listIds.Activities}/columns?$select=name,text`); aktNotizSpalteVorh = !!((r && r.value) || []).find(c => c.name === "Notes" && c.text); }
+  catch (e) { aktNotizSpalteVorh = false; }
+  return aktNotizSpalteVorh;
+}
+async function aktNotizenLaden() {
+  if (aktNotizen !== null) return aktNotizen;
+  try { const d = await graph(`/sites/${siteId}/drive/root:/${FB_BUCH_DIR}/crm_aktivitaet_notizen.json:/content`, { cache: "no-store" }); aktNotizen = d && typeof d === "object" ? d : {}; }
+  catch (e) { aktNotizen = {}; }
+  jsonBasisMerken(FB_BUCH_DIR + "/crm_aktivitaet_notizen.json", aktNotizen);
+  return aktNotizen;
+}
+function aktNotiz(a) { if (!a) return ""; if (typeof a.Notes === "string" && a.Notes.trim()) return a.Notes; return (aktNotizen || {})[String(a.id)] || ""; }
+async function aktNotizSpeichern(aid, text) {
+  await aktNotizenLaden();
+  const key = String(aid); const t = String(text || "").trim();
+  if ((aktNotizen[key] || "") === t) return;
+  if (t) aktNotizen[key] = t; else delete aktNotizen[key];
+  aktNotizen = await jsonMergeSpeichern(FB_BUCH_DIR + "/crm_aktivitaet_notizen.json", aktNotizen);
+}
 let aktZurueck = null;   // Funktion, die nach dem Speichern/Löschen einer Aktivität das Ausgangs-Detail wieder öffnet
 function newActivity(relatedTo, relatedId, zurueck) {
   aktZurueck = typeof zurueck === "function" ? zurueck : null;
@@ -16366,6 +16436,7 @@ function editActivity(id, prefRelatedTo, prefRelatedId) {
       </div>
     </div>
     <div class="field"><label>Zuständig (intern)</label><input id="f-owner" value="${escape(owner)}"></div>
+    <div class="field"><label>Notizen</label><textarea id="f-akt-notiz" rows="4" placeholder="Gesprächsnotiz, Ergebnis, nächste Schritte …">${escape(id ? aktNotiz(a) : "")}</textarea></div>
     ${id ? `<div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-done" ${a.Done?"checked":""} style="width:auto;margin:0"> Erledigt</label></div>` : ""}
   `, footer);
 }
@@ -16388,9 +16459,14 @@ async function saveActivity(id) {
     data.Done = false;
   }
   if (!data.Title) return toast("Titel erforderlich", true);
+  const notiz = val("f-akt-notiz");
   try {
+    const spNotes = await aktNotizSpalte();
+    if (spNotes) data.Notes = notiz;
+    let aid = id;
     if (id) await updateItem("Activities", id, data);
-    else await createItem("Activities", data);
+    else { const res = await createItem("Activities", data); aid = res && res.id; }
+    if (!spNotes && aid) await aktNotizSpeichern(aid, notiz);
     await reload("Activities");
     closeModal(); render(); toast(id ? "Gespeichert" : "Erstellt");
     const z = aktZurueck; aktZurueck = null; if (z) { try { z(); } catch (e) {} }
