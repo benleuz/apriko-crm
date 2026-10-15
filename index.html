@@ -1079,7 +1079,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.517.4</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.517.5</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -16016,7 +16016,9 @@ function renderProfiles(el) {
               : `<span style="color:var(--text-dim);font-size:12px">User</span>`;
             return `
               <tr>
-                <td style="font-weight:500">${escape(displayEmail)}</td>
+                <td>${(() => { const em = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase();
+                  const nm = em ? mitarbeiterName(em) : String(p.Title || "").trim();
+                  return `<span style="font-weight:500">${escape(nm || displayEmail)}</span>${em && nm && nm !== em ? `<div style="color:var(--text-dim);font-size:11px">${escape(em)}</div>` : (!em ? `<div style="color:var(--warn);font-size:11px">(kein Email)</div>` : "")}`; })()}</td>
                 <td>${roleBadge}</td>
                 <td style="text-align:center">${(() => { const em = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase();
                   return em ? `<input type="checkbox" ${mitarbeiterDaten(em).entwickler ? "checked" : ""} onchange="rmEntwicklerFlag(${tkJs(em)}, this.checked)" title="In der Roadmap als Entwickler/in anbieten" style="accent-color:var(--accent);width:15px;height:15px;cursor:pointer">`
