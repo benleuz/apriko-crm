@@ -1079,7 +1079,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.516.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.516.1</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -10060,10 +10060,24 @@ function rmKwMontag(jahr, kw) { const j4 = new Date(Date.UTC(jahr, 0, 4)); const
 function rmHeuteKw() { const h = new Date(); return { jahr: (() => { const x = new Date(Date.UTC(h.getFullYear(), h.getMonth(), h.getDate())); const t = (x.getUTCDay() + 6) % 7; x.setUTCDate(x.getUTCDate() - t + 3); return x.getUTCFullYear(); })(), kw: rmKwVon(h), tagInWoche: (h.getDay() + 6) % 7 };
 }
 function rmEntwickler() {
-  const map = new Map();
-  (cache.userprofiles || []).forEach(p => { const e = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase(); if (e && !map.has(e)) map.set(e, String(p.Title || "").trim() || e.split("@")[0]); });
-  rmParam().tasks.forEach(t => (t.entwickler || []).forEach(e => { if (!map.has(e)) map.set(e, e.split("@")[0]); }));
-  return [...map.entries()].map(([email, name]) => ({ email, name })).sort((a, b) => a.name.localeCompare(b.name));
+  /* Alle internen Mitarbeitenden, nicht nur die UserProfiles-Liste (15.10.2026):
+     Union aus Benutzerprofilen, Mitarbeiterstamm (crm_mitarbeiter.json) und
+     Benutzergruppen-Zuweisung; Namen aus dem Mitarbeiterstamm (mitarbeiterName).
+     Ausgetretene erscheinen nur, wenn sie noch auf einem Task eingetragen sind. */
+  const set = new Set();
+  (cache.userprofiles || []).forEach(p => { const e = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase(); if (e) set.add(e); });
+  Object.keys(crmMitarbeiter || {}).forEach(e => set.add(String(e).toLowerCase()));
+  try { Object.keys(bgParam().zuweisung || {}).forEach(e => set.add(String(e).toLowerCase())); } catch (e0) {}
+  const zugewiesen = new Set(); rmParam().tasks.forEach(t => (t.entwickler || []).forEach(e => { set.add(e); zugewiesen.add(e); }));
+  const titel = new Map();
+  (cache.userprofiles || []).forEach(p => { const e = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase(); const t = String(p.Title || "").trim(); if (e && t) titel.set(e, t); });
+  return [...set].filter(e => e.includes("@"))
+    .filter(e => !mitarbeiterDaten(e).austritt || zugewiesen.has(e))
+    .map(email => { const m = mitarbeiterDaten(email);
+      const name = (m.vorname || m.name) ? [m.vorname, m.name].filter(Boolean).join(" ")
+                 : (titel.get(email) || (typeof mitarbeiterName === "function" ? mitarbeiterName(email) : "") || email.split("@")[0]);
+      return { email, name }; })
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 function rmInitialen(name) { const p = String(name).replace(/[._-]+/g, " ").trim().split(/\s+/); return ((p[0] || "")[0] || "?").toUpperCase() + (p.length > 1 ? (p[p.length - 1][0] || "").toUpperCase() : (p[0] || "").slice(1, 2)); }
 function rmDevFarbe(email) { let h = 0; for (const c of email) h = (h * 31 + c.charCodeAt(0)) >>> 0; return "hsl(" + (h % 360) + ",45%,42%)"; }
@@ -10201,6 +10215,7 @@ function rmBarUp(ev, id) {
 /* ---------- Ansicht ---------- */
 async function renderRoadmap(el) {
   if (!crmParameter) { await parameterLaden(false); }
+  if (crmMitarbeiter === null) { try { await crmLoadMitarbeiter(); } catch (e0) {} }   // Mitarbeiterstamm für die Entwicklerliste
   const r = rmParam(); const maxKw = rmKwAnzahl(rmJahr); const heute = rmHeuteKw();
   const jahre = [...new Set([heute.jahr - 1, heute.jahr, heute.jahr + 1, heute.jahr + 2, ...r.tasks.map(t => t.jahr)])].sort();
   document.getElementById("view-actions").innerHTML = `
