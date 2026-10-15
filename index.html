@@ -1042,7 +1042,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.512.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.514.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -2322,20 +2322,27 @@ function bindNav() {
 /* Scrollposition über ein Neuzeichnen hinweg behalten (14.10.2026): render() baut die Ansicht komplett neu auf, dadurch
    sprang z.B. die Onboarding-Matrix nach jedem Klick auf eine Checkbox nach oben/links. Hier werden die Scrollwerte des
    Hauptbereichs und aller scrollbaren Tabellen (nach Reihenfolge) gemerkt und nach dem Aufbau wiederhergestellt. */
-let renderLetzteView = null;
+let renderLetzteView = null, renderLauf = 0;
 function render() {
   const main = document.querySelector("main");
   const vorher = { view: renderLetzteView, top: main ? main.scrollTop : 0, wraps: Array.from(document.querySelectorAll("#view-content .table-wrap")).map(w => w.scrollLeft) };
-  renderInner();
+  const meinLauf = ++renderLauf;
+  const p = renderInner();
   const gleich = vorher.view === currentView; renderLetzteView = currentView;
-  if (!gleich && main) { main.scrollTop = 0; return; }   // andere Ansicht → oben beginnen
-  if (gleich && main) {
+  const fertig = () => {
+    if (meinLauf !== renderLauf || !main) return;        // inzwischen hat ein neueres render() übernommen
+    if (!gleich) { main.scrollTop = 0; return; }         // andere Ansicht → oben beginnen
     const wraps = Array.from(document.querySelectorAll("#view-content .table-wrap"));
     wraps.forEach((w, i) => { if (vorher.wraps[i]) w.scrollLeft = vorher.wraps[i]; });
-    if (vorher.top) { main.scrollTop = vorher.top; requestAnimationFrame(() => { main.scrollTop = vorher.top; }); }
-  }
+    if (vorher.top) { main.scrollTop = vorher.top; requestAnimationFrame(() => { if (meinLauf === renderLauf) main.scrollTop = vorher.top; }); }
+  };
+  /* Asynchrone Views (z.B. Onboarding-Matrix) füllen ihren Inhalt erst NACH dem Rücksprung aus renderInner() —
+     eine sofortige Wiederherstellung würde vom späten innerHTML-Umbau wieder auf 0 geworfen (Checkbox-Klick
+     liess die Checkliste springen, 15.10.2026). Darum: warten, bis die View-Promise fertig ist. */
+  if (p && typeof p.then === "function") p.then(fertig, fertig); else fertig();
 }
 function renderInner() {
+  let viewPromise = null;   // Promise einer asynchronen View — render() wartet damit auf den fertigen Aufbau
   const titles = VIEW_TITLES;
 
   // Router-Guard: hat der User Zugriff auf diese View?
@@ -2391,15 +2398,15 @@ function renderInner() {
   else if (currentView === "einsatzdash") renderEinsatzDash(content);
   else if (currentView === "konzern") renderKonzern(content);
   else if (currentView === "lohncheck") renderLohncheck(content);
-  else if (currentView === "lohnartenstamm") renderLohnartenstamm(content);
-  else if (currentView === "tarifarten") renderTarifarten(content);
-  else if (currentView === "parameter") renderParameter(content);
-  else if (currentView === "onboarding") renderOnboarding(content);
-  else if (currentView === "onbparam") renderOnbParam(content);
+  else if (currentView === "lohnartenstamm") viewPromise = renderLohnartenstamm(content);
+  else if (currentView === "tarifarten") viewPromise = renderTarifarten(content);
+  else if (currentView === "parameter") viewPromise = renderParameter(content);
+  else if (currentView === "onboarding") viewPromise = renderOnboarding(content);
+  else if (currentView === "onbparam") viewPromise = renderOnbParam(content);
   else if (currentView === "abacus") renderAbacus(content);
   else if (currentView === "auszpdf") renderAuszPdf(content);
   else if (currentView === "uzcheck") renderUeberzeitCheck(content);
-  else if (currentView === "grad360") render360(content);
+  else if (currentView === "grad360") viewPromise = render360(content);
   else if (currentView === "tickets") renderTickets(content);
   else if (currentView === "personalbudget") renderPersonalBudget(content);
   else if (currentView === "jahresbudget") renderJahresbudget(content);
@@ -2411,6 +2418,7 @@ function renderInner() {
   else if (currentView === "meinetasks") renderMeineTasks(content);
   else if (currentView === "profiles") renderProfiles(content);
   openNavGroupFor(currentView);
+  return viewPromise;
 }
 
 /* ===========================================================
@@ -9241,6 +9249,19 @@ function onbParam() {
   return o;
 }
 async function onbSpeichern() { try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); } }
+/* Warteschlange für alle Onboarding-Änderungen (14.10.2026, «Zuständige im
+   Header gehen verloren»): Jede Änderung macht laden→mutieren→speichern.
+   Liefen zwei davon überlappend (z.B. zwei Dropdowns schnell nacheinander),
+   lud die zweite noch den alten Stand, und der 3-Wege-Merge deutete den im
+   zweiten Stand fehlenden ersten Wert als gewollte Löschung — der erste
+   Eintrag verschwand. onbEdit() serialisiert: eine Änderung nach der andern,
+   jede sieht den gespeicherten Stand der vorherigen. */
+let onbEditKette = Promise.resolve();
+function onbEdit(fn) {
+  const p = onbEditKette.then(fn, fn);
+  onbEditKette = p.catch(() => {});
+  return p.catch(e => { toast("Onboarding: " + ((e && e.message) || e), true); });
+}
 function onbUserEmail() { return (currentUser && currentUser.email) || ""; }
 function onbProfileEmails() {
   const set = new Set((cache.userprofiles || []).map(p => (p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase()).filter(Boolean));
@@ -9251,70 +9272,71 @@ function onbFmtTs(iso) { const d = new Date(iso); return isNaN(d) ? iso : d.toLo
 function onbFmtDatum(iso) { return iso ? iso.slice(8, 10) + "." + iso.slice(5, 7) + "." + iso.slice(0, 4) : ""; }
 function onbFaellig(goLive, tage) { if (!goLive) return ""; const d = new Date(goLive + "T00:00:00"); d.setDate(d.getDate() + (parseInt(tage) || 0)); return d.toISOString().slice(0, 10); }
 /* --- Kunden --- */
-async function onbKundeHinzu(custId) {
+function onbKundeHinzu(custId) { return onbEdit(async () => {
   custId = String(custId || "").trim(); if (!custId) return;
   await parameterLaden(true);
   const o = onbParam();
   if (!o.kunden[custId]) o.kunden[custId] = { verantwortlich: onbUserEmail(), goLive: "", erledigt: {}, hinzu: new Date().toISOString() };
   await onbSpeichern(); render();
-}
-async function onbKundeEntfernen(custId) {
+}); }
+function onbKundeEntfernen(custId) { return onbEdit(async () => {
   await parameterLaden(true);
   const o = onbParam(); const c = cache.customers.find(x => String(x.id) === String(custId));
   if (!confirm(`«${c ? c.Title : custId}» aus dem Onboarding entfernen? Erledigt-Status geht verloren.`)) return;
   delete o.kunden[custId]; await onbSpeichern(); render();
-}
-async function onbKundeFeld(custId, feld, wert) {
+}); }
+function onbKundeFeld(custId, feld, wert) { return onbEdit(async () => {
   await parameterLaden(true);
   const k = onbParam().kunden[custId]; if (!k) return;
   k[feld] = wert; await onbSpeichern(); render();
-}
-async function onbToggle(custId, aufgabeId) {
+}); }
+function onbToggle(custId, aufgabeId) { return onbEdit(async () => {
   await parameterLaden(true);
   const k = onbParam().kunden[custId]; if (!k) return;
   k.erledigt = k.erledigt || {};
   if (k.erledigt[aufgabeId]) delete k.erledigt[aufgabeId];
   else k.erledigt[aufgabeId] = { am: new Date().toISOString(), von: onbUserEmail() };
   await onbSpeichern(); render();
-}
+}); }
 /* --- Aufgaben (Spalten) --- */
-async function onbAufgabeFeld(id, feld, wert) {
+function onbAufgabeFeld(id, feld, wert) { return onbEdit(async () => {
   await parameterLaden(true);
   const a = onbParam().aufgaben.find(x => x.id === id); if (!a) return;
   a[feld] = feld === "tage" ? (parseInt(wert) || 0) : wert;
   await onbSpeichern(); render();
-}
-async function onbAufgabeNeu() {
+}); }
+function onbAufgabeNeu() { return onbEdit(async () => {
   await parameterLaden(true);
   const o = onbParam();
   const id = "a" + Date.now().toString(36);
   o.aufgaben.push({ id, phase: o.aufgaben.length ? o.aufgaben[o.aufgaben.length - 1].phase : "Neu", titel: "Neue Aufgabe", zustaendig: "Apriko", tage: 0 });
   await onbSpeichern(); render();
-}
-async function onbAufgabeLoeschen(id) {
+}); }
+function onbAufgabeLoeschen(id) { return onbEdit(async () => {
   await parameterLaden(true);
   const o = onbParam(); const a = o.aufgaben.find(x => x.id === id);
   if (!a || !confirm(`Aufgabe «${a.titel}» für alle Kunden löschen?`)) return;
   o.aufgaben = o.aufgaben.filter(x => x.id !== id);
   Object.values(o.kunden).forEach(k => { if (k.erledigt) delete k.erledigt[id]; });
   await onbSpeichern(); render();
-}
-async function onbAufgabeVerschieben(id, richtung) {
+}); }
+function onbAufgabeVerschieben(id, richtung) { return onbEdit(async () => {
   await parameterLaden(true);
   const o = onbParam(); const i = o.aufgaben.findIndex(x => x.id === id); const j = i + richtung;
   if (i < 0 || j < 0 || j >= o.aufgaben.length) return;
   [o.aufgaben[i], o.aufgaben[j]] = [o.aufgaben[j], o.aufgaben[i]];
   await onbSpeichern(); render();
-}
+}); }
 /* Drag & Drop der Aufgabenzeilen (Bearbeiten-Modus): Zeile vor/hinter die Zielzeile verschieben */
 let onbDragId = null;
 function onbDragStart(ev, id) { onbDragId = id; ev.dataTransfer.effectAllowed = "move"; try { ev.dataTransfer.setData("text/plain", id); } catch (e) {} const tr = ev.currentTarget.closest("tr"); if (tr) { tr.style.opacity = ".4"; try { ev.dataTransfer.setDragImage(tr, 10, 10); } catch (e) {} } }
 function onbDragOver(ev) { if (!onbDragId) return; ev.preventDefault(); ev.dataTransfer.dropEffect = "move"; const tr = ev.currentTarget; const r = tr.getBoundingClientRect(); const oben = (ev.clientY - r.top) < r.height / 2; tr.style.boxShadow = oben ? "inset 0 2px 0 var(--accent)" : "inset 0 -2px 0 var(--accent)"; tr.dataset.onbOben = oben ? "1" : ""; }
 function onbDragLeave(ev) { ev.currentTarget.style.boxShadow = ""; }
 function onbDragEnd(ev) { document.querySelectorAll("tr[data-onb-id]").forEach(tr => { tr.style.boxShadow = ""; tr.style.opacity = ""; }); onbDragId = null; }
-async function onbDrop(ev, zielId) {
+function onbDrop(ev, zielId) {
   ev.preventDefault(); const tr = ev.currentTarget; const oben = tr.dataset.onbOben === "1"; tr.style.boxShadow = "";
   const id = onbDragId; onbDragId = null; if (!id || id === zielId) return;
+  return onbEdit(async () => {
   await parameterLaden(true); const o = onbParam();
   const i = o.aufgaben.findIndex(x => x.id === id); if (i < 0) return;
   const [a] = o.aufgaben.splice(i, 1);
@@ -9323,13 +9345,14 @@ async function onbDrop(ev, zielId) {
   if (!oben) j++;
   o.aufgaben.splice(j, 0, a);
   await onbSpeichern(); render();
+  });
 }
-async function onbStandardLaden() {
+function onbStandardLaden() { return onbEdit(async () => {
   await parameterLaden(true);
   if (!confirm("Aufgabenliste auf den Apriko-Standard zurücksetzen? Eigene Aufgaben gehen verloren, der Erledigt-Status bleibt nur für gleiche IDs erhalten.")) return;
   onbParam().aufgaben = ONB_STANDARD_AUFGABEN.map((a, i) => ({ id: "a" + (i + 1), phase: a[0], titel: a[1], zustaendig: a[2], tage: a[3], gilt: a[4] || "alle" }));
   await onbSpeichern(); render();
-}
+}); }
 let onbSpaltenBearbeiten = false;
 function onbToggleBearbeiten() { onbSpaltenBearbeiten = !onbSpaltenBearbeiten; render(); }
 let onbModus = "matrix", onbKundeSel = "";
@@ -9342,13 +9365,13 @@ function onbGilt(a, c) {
   if (a.gilt === "saas") return seg.includes("saas") || !seg.includes("bpo");
   return true;
 }
-async function onbNotiz(custId, aufgabeId, text) {
+function onbNotiz(custId, aufgabeId, text) { return onbEdit(async () => {
   await parameterLaden(true);
   const k = onbParam().kunden[custId]; if (!k) return;
   k.notizen = k.notizen || {};
   if (text && text.trim()) k.notizen[aufgabeId] = text.trim(); else delete k.notizen[aufgabeId];
   await onbSpeichern();
-}
+}); }
 function onbLinkIn(text) { const m = String(text || "").match(/https?:\/\/[^\s<>"]+/); return m ? m[0] : ""; }
 function onbNotizDialog(custId, aufgabeId) {
   const o = onbParam(); const k = o.kunden[custId]; const a = o.aufgaben.find(x => x.id === aufgabeId); if (!k || !a) return;
