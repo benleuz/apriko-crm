@@ -1079,7 +1079,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.517.1</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.517.4</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -1732,6 +1732,23 @@ function bgGruppeSpeichern(id) { return paramEdit(async () => {
   await bgSpeichern(); closeModal(); render(); toast("Gruppe «" + g.name + "» gespeichert.");
 }); }
 /* Sucht den User-Profileintrag anhand E-Mail und baut daraus currentUser. */
+/* Profile, deren Email-Textfeld leer ist, liefern fürs Person-Feld nur eine
+   LookupId. Diese hier einmalig über die versteckte SharePoint-Benutzerliste
+   («User Information List») in E-Mails auflösen — sonst gelten solche Profile
+   überall als «ohne E-Mail» (erschienen als «nur Gruppe», fehlten in der
+   Roadmap-Entwicklerliste usw., 15.10.2026). */
+async function profilesEmailsAufloesen() {
+  const offen = (cache.userprofiles || []).filter(p => !(p.Email || (p.UserPerson && p.UserPerson.email)) && p.UserPersonLookupId);
+  if (!offen.length) return;
+  try {
+    const data = await graph(`/sites/${siteId}/lists/${encodeURIComponent("User Information List")}/items?expand=fields($select=EMail,UserName,Title)&$top=999`);
+    const map = new Map((data.value || []).map(it => [String(it.id), String((it.fields && (it.fields.EMail || it.fields.UserName)) || "").toLowerCase()]));
+    offen.forEach(p => {
+      const e = map.get(String(p.UserPersonLookupId));
+      if (e && e.includes("@")) p.UserPerson = Object.assign({}, p.UserPerson, { email: e });
+    });
+  } catch (e) { console.warn("Benutzerliste nicht auflösbar (Profile ohne Email-Feld bleiben unzugeordnet):", e.message); }
+}
 function resolveCurrentUser(email) {
   const emailLower = String(email || "").toLowerCase();
   const superAdmin = isSuperAdmin(email);
@@ -2138,6 +2155,7 @@ async function startApp() {
         // Person-Feld mit expand holen, damit .email verfügbar ist
         const data = await graph(`/sites/${siteId}/lists/${listIds.UserProfiles}/items?expand=fields&$top=999`);
         cache.userprofiles = data.value.map(item => ({ id: item.id, ...item.fields }));
+        await profilesEmailsAufloesen();
       } catch (e) {
         console.warn("UserProfiles konnten nicht geladen werden:", e.message);
         cache.userprofiles = [];
@@ -2152,7 +2170,7 @@ async function startApp() {
     }
     // Profile ebenfalls nochmals versuchen, falls das Laden oben scheiterte
     if (listIds.UserProfiles && !(cache.userprofiles || []).length) {
-      try { const data = await graph(`/sites/${siteId}/lists/${listIds.UserProfiles}/items?expand=fields&$top=999`); cache.userprofiles = data.value.map(item => ({ id: item.id, ...item.fields })); } catch (e) {}
+      try { const data = await graph(`/sites/${siteId}/lists/${listIds.UserProfiles}/items?expand=fields&$top=999`); cache.userprofiles = data.value.map(item => ({ id: item.id, ...item.fields })); await profilesEmailsAufloesen(); } catch (e) {}
     }
     // currentUser anhand E-Mail auflösen
     currentUser = resolveCurrentUser(account.username);
@@ -16019,8 +16037,9 @@ function renderProfiles(el) {
           ${(() => { const b = bgParam(); const ohne = Object.keys(b.zuweisung).filter(e => !profiles.some(p => String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase() === e)).sort();
             return ohne.map(e => { const g = b.gruppen[b.zuweisung[e]] || {}; return `
               <tr>
-                <td style="font-weight:500">${escape(e)} <span style="font-size:10px;color:var(--text-faint);margin-left:4px">nur Gruppe</span></td>
+                <td><span style="font-weight:500">${escape(mitarbeiterName(e))}</span> <span style="font-size:10px;color:var(--text-faint);margin-left:4px" title="Hat keine eigene Zeile in der UserProfiles-Liste — Zugriff kommt allein aus der Gruppe">nur Gruppe</span><div style="color:var(--text-dim);font-size:11px">${escape(e)}</div></td>
                 <td>${g.admin ? `<span style="background:rgba(184,233,134,0.15);color:var(--accent);padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">Admin</span>` : `<span style="color:var(--text-dim);font-size:12px">User</span>`}</td>
+                <td style="text-align:center"><input type="checkbox" ${mitarbeiterDaten(e).entwickler ? "checked" : ""} onchange="rmEntwicklerFlag(${tkJs(e)}, this.checked)" title="In der Roadmap als Entwickler/in anbieten" style="accent-color:var(--accent);width:15px;height:15px;cursor:pointer"></td>
                 <td><select onchange="bgZuweisen(${tkJs(e)}, this.value)" style="padding:3px 6px;font-size:12px;max-width:140px;border-color:var(--accent)"><option value="">— keine —</option>${Object.keys(b.gruppen).map(id => `<option value="${escape(id)}" ${b.zuweisung[e] === id ? "selected" : ""}>${escape(b.gruppen[id].name)}</option>`).join("")}</select></td>
                 <td style="color:var(--text-faint);font-size:12px">— nur Gruppenrechte (${escape(g.name || "?")})</td>
                 <td style="text-align:right"><button class="btn btn-sm" onclick="openProfileModal(null, ${tkJs(e)})" title="Profil anlegen, um zusätzliche Bereiche individuell freizugeben">Profil anlegen</button> <button class="btn btn-sm" style="color:var(--danger)" onclick="bgZuweisen(${tkJs(e)}, '')" title="Freischaltung entfernen">✕</button></td>
