@@ -1079,7 +1079,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.516.1</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.517.1</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -10064,19 +10064,45 @@ function rmEntwickler() {
      Union aus Benutzerprofilen, Mitarbeiterstamm (crm_mitarbeiter.json) und
      Benutzergruppen-Zuweisung; Namen aus dem Mitarbeiterstamm (mitarbeiterName).
      Ausgetretene erscheinen nur, wenn sie noch auf einem Task eingetragen sind. */
-  const set = new Set();
-  (cache.userprofiles || []).forEach(p => { const e = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase(); if (e) set.add(e); });
-  Object.keys(crmMitarbeiter || {}).forEach(e => set.add(String(e).toLowerCase()));
-  try { Object.keys(bgParam().zuweisung || {}).forEach(e => set.add(String(e).toLowerCase())); } catch (e0) {}
-  const zugewiesen = new Set(); rmParam().tasks.forEach(t => (t.entwickler || []).forEach(e => { set.add(e); zugewiesen.add(e); }));
+  /* Regel (Beni, 15.10.2026): Im Profil steuert die Checkbox «Entwickler»,
+     wer hier zur Auswahl steht. Sobald mindestens eine Person markiert ist,
+     zählt NUR die Markierung (+ Personen, die bereits auf Tasks eingetragen
+     sind). Ohne jede Markierung (Übergangszustand): alle Profile — Schlüssel
+     ist die E-Mail, bei Profilen ohne auflösbare E-Mail der Titel. */
+  const geflaggt = Object.keys(crmMitarbeiter || {}).filter(e => crmMitarbeiter[e] && crmMitarbeiter[e].entwickler);
+  if (geflaggt.length) {
+    const zugew = new Set(); rmParam().tasks.forEach(t => (t.entwickler || []).forEach(e => zugew.add(e)));
+    const keys = [...new Set([...geflaggt, ...zugew])];
+    const tMap = new Map();
+    (cache.userprofiles || []).forEach(p => { const e = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase(); const t = String(p.Title || "").trim(); if (e && t) tMap.set(e, t); });
+    return keys.map(key => { const m = (crmMitarbeiter || {})[key] || {};
+      const name = key.includes("@")
+        ? ((m.vorname || m.name) ? [m.vorname, m.name].filter(Boolean).join(" ") : (tMap.get(key) || (typeof mitarbeiterName === "function" ? mitarbeiterName(key) : "") || key.split("@")[0]))
+        : key;
+      return { email: key, name }; }).sort((a, b) => a.name.localeCompare(b.name));
+  }
+  const map = new Map();   // key → name
   const titel = new Map();
-  (cache.userprofiles || []).forEach(p => { const e = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase(); const t = String(p.Title || "").trim(); if (e && t) titel.set(e, t); });
-  return [...set].filter(e => e.includes("@"))
-    .filter(e => !mitarbeiterDaten(e).austritt || zugewiesen.has(e))
-    .map(email => { const m = mitarbeiterDaten(email);
-      const name = (m.vorname || m.name) ? [m.vorname, m.name].filter(Boolean).join(" ")
-                 : (titel.get(email) || (typeof mitarbeiterName === "function" ? mitarbeiterName(email) : "") || email.split("@")[0]);
-      return { email, name }; })
+  (cache.userprofiles || []).forEach(p => {
+    const e = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase();
+    const t = String(p.Title || "").trim();
+    if (e) { map.set(e, t || ""); if (t) titel.set(e, t); }
+    else if (t) map.set(t, t);   // Profil ohne auflösbare E-Mail: Titel als Schlüssel
+  });
+  Object.keys(crmMitarbeiter || {}).forEach(e => { e = String(e).toLowerCase(); if (!map.has(e)) map.set(e, ""); });
+  try { Object.keys(bgParam().zuweisung || {}).forEach(e => { e = String(e).toLowerCase(); if (!map.has(e)) map.set(e, ""); }); } catch (e0) {}
+  const zugewiesen = new Set(); rmParam().tasks.forEach(t => (t.entwickler || []).forEach(e => { if (!map.has(e)) map.set(e, ""); zugewiesen.add(e); }));
+  return [...map.entries()]
+    .filter(([key]) => !key.includes("@") || !mitarbeiterDaten(key).austritt || zugewiesen.has(key))
+    .map(([key, vorName]) => {
+      let name = vorName;
+      if (key.includes("@")) {
+        const m = mitarbeiterDaten(key);
+        name = (m.vorname || m.name) ? [m.vorname, m.name].filter(Boolean).join(" ")
+             : (titel.get(key) || vorName || (typeof mitarbeiterName === "function" ? mitarbeiterName(key) : "") || key.split("@")[0]);
+      }
+      return { email: key, name: name || key };
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 function rmInitialen(name) { const p = String(name).replace(/[._-]+/g, " ").trim().split(/\s+/); return ((p[0] || "")[0] || "?").toUpperCase() + (p.length > 1 ? (p[p.length - 1][0] || "").toUpperCase() : (p[0] || "").slice(1, 2)); }
@@ -14846,18 +14872,29 @@ function mitarbeiterBearbeiten(email, custId) {
 }
 async function mitarbeiterSpeichern(email, custId) {
   await crmLoadMitarbeiter();
-  const m = { vorname: val("f-ma-vorname").trim(), name: val("f-ma-name").trim(), geburtstag: val("f-ma-geb"), eintritt: val("f-ma-eintritt") };
-  Object.keys(m).forEach(k => { if (!m[k]) delete m[k]; });
-  const key = String(email).toLowerCase(); if (Object.keys(m).length) crmMitarbeiter[key] = m; else delete crmMitarbeiter[key];
+  const key = String(email).toLowerCase();
+  // Bestehende Zusatzfelder (entwickler-Flag, austritt aus dem Stammlisten-Import, …) erhalten — nur die vier Dialogfelder ersetzen
+  const m = Object.assign({}, crmMitarbeiter[key] || {}, { vorname: val("f-ma-vorname").trim(), name: val("f-ma-name").trim(), geburtstag: val("f-ma-geb"), eintritt: val("f-ma-eintritt") });
+  ["vorname", "name", "geburtstag", "eintritt"].forEach(k => { if (!m[k]) delete m[k]; });
+  if (Object.keys(m).length) crmMitarbeiter[key] = m; else delete crmMitarbeiter[key];
   try { await crmSaveMitarbeiter(); toast("Gespeichert"); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); return; }
   if (custId) openCustomer(custId); else { closeModal(); render(); }
+}
+async function rmEntwicklerFlag(email, an) {
+  await crmLoadMitarbeiter();
+  const key = String(email).toLowerCase();
+  const m = crmMitarbeiter[key] = crmMitarbeiter[key] || {};
+  if (an) m.entwickler = true; else delete m.entwickler;
+  if (!Object.keys(m).length) delete crmMitarbeiter[key];
+  try { await crmSaveMitarbeiter(); toast(an ? "Als Entwickler/in markiert" : "Entwickler-Markierung entfernt"); }
+  catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
 }
 function internPersonenAlle() {
   const set = new Set();
   (cache.userprofiles || []).forEach(p => { const e = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase(); if (e) set.add(e); });
   Object.keys(bgParam().zuweisung || {}).forEach(e => set.add(e));
   Object.keys(crmMitarbeiter || {}).forEach(e => set.add(e));
-  return [...set].sort((a, b) => mitarbeiterName(a).localeCompare(mitarbeiterName(b), "de"));
+  return [...set].sort((a, b) => mitarbeiterName(a).toLowerCase().localeCompare(mitarbeiterName(b).toLowerCase(), "de"));
 }
 /* ---- Import Personalstammliste (PDF, Spalten Nachname/Vorname/Geburtsdatum/Abteilung/Eintrittsdatum/Austrittsdatum/Monatslohn …) ----
    Lohnspalten werden bewusst NICHT gelesen und nirgends gespeichert. */
@@ -15897,7 +15934,11 @@ function renderProfiles(el) {
     return;
   }
 
-  const profiles = cache.userprofiles || [];
+  const profiles = (cache.userprofiles || []).slice().sort((a, b) => {
+    const ea = String(a.Email || (a.UserPerson && a.UserPerson.email) || a.Title || "").toLowerCase();
+    const eb = String(b.Email || (b.UserPerson && b.UserPerson.email) || b.Title || "").toLowerCase();
+    return ea.localeCompare(eb, "de");
+  });
 
   el.innerHTML = `
     <div style="padding:20px 28px">
@@ -15929,13 +15970,14 @@ function renderProfiles(el) {
         <thead><tr>
           <th style="width:280px">E-Mail</th>
           <th style="width:100px">Rolle</th>
+          <th style="width:80px;text-align:center" title="Erscheint in der Roadmap als wählbare/r Entwickler/in">🗺 Entwickler</th>
           <th style="width:150px">Gruppe</th>
           <th>Freigeschaltete Bereiche <span style="font-weight:400;color:var(--text-faint)">(individuell, zusätzlich zur Gruppe)</span></th>
           <th style="width:120px;text-align:right">Aktionen</th>
         </tr></thead>
         <tbody>
           ${profiles.length === 0 ? `
-            <tr><td colspan="5" class="empty">Noch keine Profile angelegt. Klick auf "+ Profil hinzufügen".</td></tr>
+            <tr><td colspan="6" class="empty">Noch keine Profile angelegt. Klick auf "+ Profil hinzufügen".</td></tr>
           ` : profiles.map(p => {
             const views = Array.isArray(p.AllowedViews) ? p.AllowedViews
               : (typeof p.AllowedViews === "string" ? p.AllowedViews.split(/[,;]/).map(s => s.trim()).filter(Boolean) : []);
@@ -15958,6 +16000,9 @@ function renderProfiles(el) {
               <tr>
                 <td style="font-weight:500">${escape(displayEmail)}</td>
                 <td>${roleBadge}</td>
+                <td style="text-align:center">${(() => { const em = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase();
+                  return em ? `<input type="checkbox" ${mitarbeiterDaten(em).entwickler ? "checked" : ""} onchange="rmEntwicklerFlag(${tkJs(em)}, this.checked)" title="In der Roadmap als Entwickler/in anbieten" style="accent-color:var(--accent);width:15px;height:15px;cursor:pointer">`
+                    : `<span title="Zuerst das Email-Feld im Profil nachtragen" style="color:var(--text-faint);cursor:help">—</span>`; })()}</td>
                 <td>${gruppeSel}</td>
                 <td style="color:var(--text-dim);font-size:12px">
                   ${views.length === 0 ? (bgG ? `<span style="color:var(--text-faint)">— nur Gruppenrechte</span>` : `<span style="color:var(--warn)">— (kein Zugriff)</span>`)
