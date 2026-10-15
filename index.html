@@ -1079,7 +1079,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.517.7</span> · <span id="app-build-date">15.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.517.8</span> · <span id="app-build-date">15.10.2026</span>
     </div>
   </aside>
 
@@ -10191,7 +10191,13 @@ function rmWiederherstellen(versionId) { return paramEdit(async () => {
   if (!confirm(r.tasks.length + " Task(s) aus diesem Stand übernehmen?\nErsetzt nur die Roadmap — alle übrigen Parameter bleiben unverändert.")) return;
   await parameterLaden(true);
   crmParameter.roadmap = r;
-  await parameterSpeichern(); closeModal(); render(); toast("Roadmap wiederhergestellt ✓");
+  await parameterSpeichern();
+  // Ansicht ins Jahr mit den meisten wiederhergestellten Tasks springen — sonst sieht
+  // man nach dem Übernehmen «nichts», wenn die Tasks in einem anderen Jahr liegen (15.10.2026)
+  const zaehl = {}; r.tasks.forEach(t => { zaehl[t.jahr] = (zaehl[t.jahr] || 0) + 1; });
+  const topJahr = parseInt((Object.entries(zaehl).sort((a, b) => b[1] - a[1])[0] || [])[0], 10);
+  if (isFinite(topJahr)) rmJahr = topJahr;
+  closeModal(); render(); toast(r.tasks.length + " Task(s) übernommen — Jahr " + rmJahr + " ✓");
 }); }
 
 /* ---------- Bearbeiten-Dialog ---------- */
@@ -10365,7 +10371,13 @@ async function renderRoadmap(el) {
           <div class="rm-months">${monate.map(m => `<div class="rm-month" style="width:${m.n * RM_KW_W}px">${escape(m.name)}</div>`).join("")}</div>
           <div class="rm-kws">${Array.from({ length: maxKw }, (_, i) => `<div class="rm-kw ${istHeuteJahr && i + 1 === heute.kw ? "heute" : ""}" style="width:${RM_KW_W}px">${i + 1}</div>`).join("")}</div>
         </div>
-        ${zeilen || `<div class="rm-row"><div class="rm-label" style="cursor:default"><span class="t" style="color:var(--text-dim);font-weight:400">Noch keine Tasks</span></div>${spur(`<div style="padding:10px 14px;font-size:12px;color:var(--text-dim)">«+ Task» oben rechts — oder Jahr wechseln.</div>`)}</div>`}
+        ${zeilen || `<div class="rm-row"><div class="rm-label" style="cursor:default"><span class="t" style="color:var(--text-dim);font-weight:400">Noch keine Tasks</span></div>${spur(`<div style="padding:10px 14px;font-size:12px;color:var(--text-dim)">«+ Task» oben rechts — oder Jahr wechseln.${(() => {
+          /* Jahr-Falle (15.10.2026): Tasks in anderen Jahren sind hier unsichtbar — das sah
+             nach Datenverlust aus. Darum im Leerzustand direkt verlinken, wo etwas liegt. */
+          const aj = {}; r.tasks.forEach(t => { if (t.jahr !== rmJahr) aj[t.jahr] = (aj[t.jahr] || 0) + 1; });
+          const e2 = Object.entries(aj).sort((a, b) => a[0] - b[0]);
+          return e2.length ? ` <span style="color:var(--warn)">Übrigens:</span> ` + e2.map(([j, n]) => `<a href="#" onclick="rmJahr=${j};render();return false" style="color:var(--accent)">${n} Task(s) in ${j}</a>`).join(" · ") : "";
+        })()}</div>`)}</div>`}
         ${tasks.length ? lastHtml : ""}
         ${heuteX >= 0 ? `<div class="rm-heutelinie" style="left:${230 + heuteX}px;top:0;bottom:0"></div>` : ""}
       </div>
