@@ -501,6 +501,42 @@
   .toast.show { opacity: 1; transform: translateY(0); }
   .toast.error { border-color: var(--danger); }
 
+  /* ===== Roadmap ===== */
+  .rm-wrap { border: 1px solid var(--border-soft); border-radius: var(--radius); overflow: auto; position: relative; background: var(--bg-card); }
+  .rm-grid { display: grid; min-width: max-content; position: relative; }
+  .rm-head, .rm-row { display: contents; }
+  .rm-corner, .rm-label { position: sticky; left: 0; z-index: 6; background: var(--bg-card); border-right: 1px solid var(--border); }
+  .rm-corner { z-index: 7; }
+  .rm-months, .rm-kws { display: flex; }
+  .rm-month { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .08em; border-left: 1px solid var(--border); padding: 4px 0 2px 6px; white-space: nowrap; overflow: hidden; }
+  .rm-kw { font-size: 9px; color: var(--text-faint); text-align: center; padding: 2px 0 4px; border-left: 1px solid transparent; font-family: var(--font-mono); }
+  .rm-kw.heute { color: var(--accent); font-weight: 700; }
+  .rm-track { position: relative; height: 40px; border-top: 1px solid var(--border-soft); }
+  .rm-track.lanes { background-image: repeating-linear-gradient(90deg, var(--border-soft) 0 1px, transparent 1px var(--rm-kw, 26px)); background-attachment: local; }
+  .rm-label { display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 4px 10px 4px 12px; border-top: 1px solid var(--border-soft); min-width: 230px; max-width: 230px; cursor: pointer; }
+  .rm-label:hover { background: var(--bg-elev); }
+  .rm-label .t { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rm-label .m { display: flex; align-items: center; gap: 4px; }
+  .rm-bar { position: absolute; top: 7px; height: 26px; border-radius: 6px; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 10px; font-size: 11px; font-weight: 600; color: #0c1210; cursor: grab; user-select: none; box-shadow: 0 1px 4px rgba(0,0,0,.35); overflow: hidden; white-space: nowrap; touch-action: none; }
+  .rm-bar:active { cursor: grabbing; }
+  .rm-bar .griff { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; }
+  .rm-bar .griff.l { left: 0; border-radius: 6px 0 0 6px; }
+  .rm-bar .griff.r { right: 0; border-radius: 0 6px 6px 0; }
+  .rm-bar:hover .griff { background: rgba(255,255,255,.28); }
+  .rm-bar.fertig { opacity: .5; }
+  .rm-bar.drag { box-shadow: 0 4px 14px rgba(0,0,0,.5); z-index: 5; }
+  .rm-av { width: 17px; height: 17px; border-radius: 50%; font-size: 8.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; color: #fff; border: 1px solid rgba(0,0,0,.35); flex: none; }
+  .rm-av + .rm-av { margin-left: -5px; }
+  .rm-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+  .rm-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 20px; font-size: 11px; cursor: pointer; background: var(--bg-card); color: var(--text-dim); user-select: none; }
+  .rm-chip:hover { border-color: var(--accent); }
+  .rm-chip.an { border-color: var(--accent); color: var(--text); background: var(--bg-elev); }
+  .rm-heutelinie { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: .65; z-index: 4; pointer-events: none; }
+  .rm-badge { position: fixed; z-index: 300; background: var(--bg-elev); border: 1px solid var(--accent); border-radius: 4px; padding: 2px 8px; font-size: 11px; font-family: var(--font-mono); pointer-events: none; }
+  .rm-last { display: flex; align-items: flex-end; height: 26px; }
+  .rm-last i { flex: none; background: var(--accent); opacity: .35; border-radius: 1px 1px 0 0; margin-top: auto; }
+
+
   /* ============================================================ RAPPORT-MODUL
      Alle Klassen mit rp- präfixiert. Eigene CSS-Variablen (--rp-*), damit es
      nicht mit den bestehenden App-Variablen kollidiert. Der Rapport hat eine
@@ -1027,6 +1063,7 @@
           <button data-view="uzcheck"><span class="ic">⏱</span> Überzeit-Check</button>
           <button data-view="grad360"><span class="ic">◔</span> 360 Grad</button>
           <button data-view="tickets"><span class="ic">🎫</span> Tickets Auswertung</button>
+          <button data-view="roadmap"><span class="ic">🗺</span> Roadmap</button>
         </div>
       </div>
       <div class="nav-group" data-group="admin">
@@ -1042,7 +1079,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.514.0</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.516.0</span> · <span id="app-build-date">13.10.2026</span>
     </div>
   </aside>
 
@@ -1577,7 +1614,7 @@ const EXTRA_VIEWS_BY_EMAIL = {
   "leutrim@apriko.com": ["abacus"],
   "nicolas@apriko.com": ["abacus"]
 };
-const ALL_VIEWS = ["meinetasks","dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","onboarding","onbparam","lohncheck","parameter","apipoc","abacus","auszpdf","uzcheck","grad360","tickets","profiles"];
+const ALL_VIEWS = ["meinetasks","dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","onboarding","onbparam","lohncheck","parameter","apipoc","abacus","auszpdf","uzcheck","grad360","tickets","roadmap","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
@@ -1590,7 +1627,7 @@ const VIEW_TITLES = {
   lohnartenstamm: "Lohnartenstamm",
   tarifarten: "Tarifarten",
   rapport: "Rapport", einsatzdash: "Kundendashboard", konzern: "Konzernanalyse",
-  onboarding: "Onboarding-Checkliste", onbparam: "Parametrierung (Fragebogen für Neukunden)", lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)", abacus: "Abacus Schnittstelle", auszpdf: "Auszahlungsliste → PDF (nur ausbezahlte Lohnabrechnungen)", uzcheck: "Überzeit-Check", grad360: "360 Grad — Ökosystem statt nur Software", tickets: "Tickets Auswertung (Zendesk-Export)",
+  onboarding: "Onboarding-Checkliste", onbparam: "Parametrierung (Fragebogen für Neukunden)", lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)", abacus: "Abacus Schnittstelle", auszpdf: "Auszahlungsliste → PDF (nur ausbezahlte Lohnabrechnungen)", uzcheck: "Überzeit-Check", grad360: "360 Grad — Ökosystem statt nur Software", tickets: "Tickets Auswertung (Zendesk-Export)", roadmap: "Roadmap",
   profiles: "Profile"
 };
 
@@ -1642,11 +1679,11 @@ async function bgSchnellFreischalten() {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("Bitte eine gültige E-Mail-Adresse eingeben.", true); return; }
   await bgZuweisen(email, gruppe); toast(email + " freigeschaltet (" + ((bgParam().gruppen[gruppe] || {}).name || gruppe) + ").");
 }
-async function bgZuweisen(email, gruppeId) {
+function bgZuweisen(email, gruppeId) { return paramEdit(async () => {
   await parameterLaden(true); const b = bgParam(); const key = String(email || "").toLowerCase();
   if (gruppeId) b.zuweisung[key] = gruppeId; else delete b.zuweisung[key];
   await bgSpeichern(); render();
-}
+}); }
 /* ---------- Vorschau «Ansicht als Gruppe» (nur für Admins, pro Browser-Tab; für Demos) ----------
    Der echte Benutzer bleibt Admin — nur Menü und Zugriff werden auf die gewählte Gruppe reduziert. */
 function ansichtAlsId() { try { return sessionStorage.getItem("crm-ansicht-als") || ""; } catch (e) { return ""; } }
@@ -1662,19 +1699,19 @@ function ansichtAlsAnwenden() {
   bar.innerHTML = `👁 Vorschau als Benutzergruppe <b>${escape(g.name)}</b> (${currentUser.allowedViews.length} Bereiche${g.admin ? ", Admin" : ""}) — so sieht ein Benutzer dieser Gruppe das CRM. <button onclick="ansichtAlsSetzen('')" style="margin-left:auto;background:#fff;color:#b26a00;border:0;border-radius:4px;padding:3px 10px;font-weight:600;cursor:pointer">Zurück zur eigenen Ansicht</button>`;
   document.body.appendChild(bar); document.body.style.paddingTop = "28px";
 }
-async function bgGruppeAnlegen() {
+function bgGruppeAnlegen() { return paramEdit(async () => {
   const name = prompt("Name der neuen Benutzergruppe:"); if (!name) return;
   await parameterLaden(true); const b = bgParam(); const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || ("g" + Date.now());
   if (b.gruppen[id]) { toast("Gruppe existiert bereits.", true); return; }
   b.gruppen[id] = { name, admin: false, views: ["dashboard"] }; await bgSpeichern(); bgGruppeBearbeiten(id);
-}
-async function bgGruppeLoeschen(id) {
+}); }
+function bgGruppeLoeschen(id) { return paramEdit(async () => {
   await parameterLaden(true); const b = bgParam(); const g = b.gruppen[id]; if (!g) return;
   const n = Object.values(b.zuweisung).filter(x => x === id).length;
   if (!confirm("Gruppe «" + g.name + "» löschen?" + (n ? " " + n + " Benutzer verlieren dadurch die Gruppenrechte." : ""))) return;
   delete b.gruppen[id]; Object.keys(b.zuweisung).forEach(k => { if (b.zuweisung[k] === id) delete b.zuweisung[k]; });
   await bgSpeichern(); render();
-}
+}); }
 function bgGruppeBearbeiten(id) {
   const b = bgParam(); const g = b.gruppen[id]; if (!g) return;
   showModal("Benutzergruppe bearbeiten", `
@@ -1687,13 +1724,13 @@ function bgGruppeBearbeiten(id) {
     `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
     `<button class="btn btn-primary" onclick="bgGruppeSpeichern(${tkJs(id)})">Speichern</button>`]);
 }
-async function bgGruppeSpeichern(id) {
+function bgGruppeSpeichern(id) { return paramEdit(async () => {
   await parameterLaden(true); const b = bgParam(); const g = b.gruppen[id]; if (!g) return;
   g.name = (document.getElementById("bg-name").value || g.name).trim(); g.admin = document.getElementById("bg-admin").checked;
   g.views = Array.from(document.querySelectorAll(".profile-view-cb:checked")).map(cb => cb.value);
   if (g.admin && !g.views.includes("profiles")) g.views.push("profiles");
   await bgSpeichern(); closeModal(); render(); toast("Gruppe «" + g.name + "» gespeichert.");
-}
+}); }
 /* Sucht den User-Profileintrag anhand E-Mail und baut daraus currentUser. */
 function resolveCurrentUser(email) {
   const emailLower = String(email || "").toLowerCase();
@@ -2215,7 +2252,7 @@ async function mehrbenutzerTick() {
       for (const l of ["Companies", "Contacts", "Deals", "Activities", "Customers", "MonthlyRevenue"]) { if (listIds[l]) await reload(l); }
       if (mtAufgaben !== null) { try { await mtLaden(true); } catch (e) {} }
       const tippt = /^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || "");
-      if (!document.getElementById("modal").classList.contains("open") && !tippt && !["rapport", "apipoc", "tickets", "abacus", "lohncheck", "auszpdf"].includes(currentView)) render();
+      if (!document.getElementById("modal").classList.contains("open") && !tippt && !["rapport", "apipoc", "tickets", "abacus", "lohncheck", "auszpdf", "roadmap"].includes(currentView)) render();
     } catch (e) { console.warn("Auto-Aktualisierung:", e.message); }
     mbLaeuft = false;
   }
@@ -2408,6 +2445,7 @@ function renderInner() {
   else if (currentView === "uzcheck") renderUeberzeitCheck(content);
   else if (currentView === "grad360") viewPromise = render360(content);
   else if (currentView === "tickets") renderTickets(content);
+  else if (currentView === "roadmap") viewPromise = renderRoadmap(content);
   else if (currentView === "personalbudget") renderPersonalBudget(content);
   else if (currentView === "jahresbudget") renderJahresbudget(content);
   else if (currentView === "budgetpos") renderBudgetpositionen(content);
@@ -2831,12 +2869,12 @@ function budgetDbProMonat(year) {
   return out;
 }
 function hostingProDb() { const v = crmParameter && crmParameter.hostingDb && parseFloat(crmParameter.hostingDb.proDb); return (v || v === 0) ? v : 500; }
-async function hostingProDbSet(v) {
+function hostingProDbSet(v) { return paramEdit(async () => {
   await parameterLaden(true);
   crmParameter.hostingDb = crmParameter.hostingDb || {}; crmParameter.hostingDb.proDb = parseFloat(v) || 0;
   try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
   render();
-}
+}); }
 /* Vertragsende eines Kunden im Planjahr: null = kein Ende im/vor dem Jahr, 0 = vor dem Jahr beendet, 1..12 = letzter aktiver Monat */
 function budgetEndMonat(c, year) {
   if (!c || !c.EndDate) return null;
@@ -8709,14 +8747,14 @@ function abaSettings() {
   if (r.docCode === "B" && !r.docCodeExplizit) r.docCode = "";
   return r;
 }
-async function abaSettingSet(k, v) {
+function abaSettingSet(k, v) { return paramEdit(async () => {
   if (abaState.kunde) {
     await parameterLaden(true);
     const a = abaParam(); a.mandant = a.mandant || {}; a.mandant[k] = v;
     await abaParamSpeichern(); render(); return;
   }
   const s = abaSettings(); s[k] = v; localStorage.setItem("aba-settings", JSON.stringify(s)); render();
-}
+}); }
 const ABA_MONATE_RE = [/^jan/i, /^feb/i, /^m[aä]r/i, /^apr/i, /^mai|^may/i, /^jun/i, /^jul/i, /^aug/i, /^sep/i, /^okt|^oct/i, /^nov/i, /^dez|^dec/i];
 /* Spaltenname → Monat (1..12) oder 0 */
 function abaMonatAusSpalte(name) {
@@ -8852,7 +8890,7 @@ function abaNichtBuchen(code, pa) {
   return (pa.nichtBuchen || []).some(m => m.endsWith("*") ? String(code).startsWith(m.slice(0, -1)) : String(code) === m);
 }
 function abaUmkonto(konto, pa) { return konto && pa.umkontierung[konto] ? pa.umkontierung[konto] : konto; }
-async function abaStandardLaden() {
+function abaStandardLaden() { return paramEdit(async () => {
   await parameterLaden(true);
   const ziel = abaState.kunde ? "den gewählten Kunden" : "die Vorlage";
   if (!confirm("Regelwerk für " + ziel + " auf den Helva-Standard (Buchungsmaske Juli 2026) zurücksetzen? Eigene Umkontierungen/Kontierungen gehen verloren.")) return;
@@ -8860,23 +8898,23 @@ async function abaStandardLaden() {
   if (abaState.kunde) { crmParameter.abacusKunden = crmParameter.abacusKunden || {}; std.mandant = (crmParameter.abacusKunden[String(abaState.kunde)] || {}).mandant || {}; crmParameter.abacusKunden[String(abaState.kunde)] = std; }
   else crmParameter.abacus = std;
   await abaParamSpeichern(); render();
-}
+}); }
 async function abaParamSpeichern() {
   try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
 }
-async function abaErzwingen(code, ja) {
+function abaErzwingen(code, ja) { return paramEdit(async () => {
   await parameterLaden(true);
   const a = abaParam();
   a.erzwungen = a.erzwungen.filter(c => c !== code); a.ausgeschlossen = a.ausgeschlossen.filter(c => c !== code);
   if (ja === true) a.erzwungen.push(code); else if (ja === false) a.ausgeschlossen.push(code);
   abaState.xml = "";
   await abaParamSpeichern(); render();
-}
-async function abaDurchlaufSetzen(v) {
+}); }
+function abaDurchlaufSetzen(v) { return paramEdit(async () => {
   await parameterLaden(true);
   abaParam().durchlauf = String(v || "").trim();
   await abaParamSpeichern(); render();
-}
+}); }
 /* Buchungszeilen für den gewählten Monat aufbauen */
 function abaBuchungen() {
   const sp = abaSpaltenErkennen(abaState.spalten);
@@ -8966,7 +9004,7 @@ function abaBuchungen() {
   return out.concat(extra);
 }
 /* Kontierung pro Lohnart ergänzen/überschreiben — persistent in parameter.json (abacus.kontierung) */
-async function abaOverride(code, feld, wert) {
+function abaOverride(code, feld, wert) { return paramEdit(async () => {
   await parameterLaden(true);
   const a = abaParam();
   a.kontierung[code] = a.kontierung[code] || {};
@@ -8974,7 +9012,7 @@ async function abaOverride(code, feld, wert) {
   if (!a.kontierung[code].soll && !a.kontierung[code].haben) delete a.kontierung[code];
   abaState.xml = "";
   await abaParamSpeichern(); render();
-}
+}); }
 /* Durchlaufkonto-Check: Soll − Haben über alle Buchungen auf dem Durchlaufkonto muss 0 sein */
 function abaDurchlaufCheck(buchungen) {
   const dk = abaParam().durchlauf || abaDurchlaufVorschlag(buchungen);
@@ -9249,19 +9287,25 @@ function onbParam() {
   return o;
 }
 async function onbSpeichern() { try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); } }
-/* Warteschlange für alle Onboarding-Änderungen (14.10.2026, «Zuständige im
-   Header gehen verloren»): Jede Änderung macht laden→mutieren→speichern.
-   Liefen zwei davon überlappend (z.B. zwei Dropdowns schnell nacheinander),
-   lud die zweite noch den alten Stand, und der 3-Wege-Merge deutete den im
-   zweiten Stand fehlenden ersten Wert als gewollte Löschung — der erste
-   Eintrag verschwand. onbEdit() serialisiert: eine Änderung nach der andern,
-   jede sieht den gespeicherten Stand der vorherigen. */
-let onbEditKette = Promise.resolve();
-function onbEdit(fn) {
-  const p = onbEditKette.then(fn, fn);
-  onbEditKette = p.catch(() => {});
-  return p.catch(e => { toast("Onboarding: " + ((e && e.message) || e), true); });
+/* Warteschlange für ALLE parameter.json-Änderungen (14./15.10.2026, «Zuständige
+   im Header gehen verloren»): Jeder Mutator macht laden→mutieren→speichern.
+   Liefen zwei davon überlappend (z.B. zwei Dropdowns/Checkboxen schnell
+   nacheinander), lud der zweite noch den alten Stand, und der 3-Wege-Merge
+   deutete den im zweiten Stand fehlenden ersten Wert als gewollte Löschung —
+   der erste Eintrag verschwand. paramEdit() serialisiert: eine Änderung nach
+   der andern, jede sieht den gespeicherten Stand der vorherigen. Gilt für
+   Onboarding, Benutzergruppen, Hosting-Flag, Abacus-Mandanten, Ticket-
+   Zuordnung, 360°, Überzeit-Parameter und Healthcheck-Extras (21 Funktionen,
+   per AST-Audit abgesichert, 15.10.2026). Die übrigen Store-Dateien
+   (crm_kunden_flags, Firmenstamm, Mitarbeiter, Vertragslinks, Notizen) laden
+   einmalig mit Promise-Cache und sind gegen diesen Wettlauf immun. */
+let paramEditKette = Promise.resolve();
+function paramEdit(fn) {
+  const p = paramEditKette.then(fn, fn);
+  paramEditKette = p.catch(() => {});
+  return p.catch(e => { toast("Speichern: " + ((e && e.message) || e), true); });
 }
+const onbEdit = paramEdit;   // Onboarding nutzt dieselbe Kette
 function onbUserEmail() { return (currentUser && currentUser.email) || ""; }
 function onbProfileEmails() {
   const set = new Set((cache.userprofiles || []).map(p => (p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase()).filter(Boolean));
@@ -9691,12 +9735,12 @@ async function tkExportExcel() {
 /* ---------- Tickets × Ertrag: Ticket-Kunden mit dem Kundenstamm abgleichen und Umsatz gegenüberstellen ---------- */
 function tkNormName(n) { return String(n || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\b(ag|gmbh|sa|sarl|sagl|kg|ltd|inc|schweiz|swiss|personal|personalberatung|jobs?|group|holding|services?)\b/g, " ").replace(/[^a-z0-9]+/g, " ").trim(); }
 function tkZuordnung() { if (!crmParameter) return {}; if (!crmParameter.ticketsZuordnung) crmParameter.ticketsZuordnung = {}; return crmParameter.ticketsZuordnung; }
-async function tkZuordnungSetzen(name, custId) {
+function tkZuordnungSetzen(name, custId) { return paramEdit(async () => {
   await parameterLaden(true); const z = tkZuordnung(); tkMatchCache = {};
   if (custId === "") delete z[name]; else z[name] = custId;   // "" = Automatik, "-" = bewusst kein Kunde
   try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
   render();
-}
+}); }
 function tkMatchKunde(name) {
   const z = tkZuordnung(); if (z[name] !== undefined) { if (z[name] === "-") return null; return cache.customers.find(c => String(c.id) === String(z[name])) || null; }
   return tkMatchKundeAuto(name);
@@ -9990,6 +10034,246 @@ function renderTickets(el) {
     <details class="card" style="padding:10px 14px;margin-top:10px"><summary style="cursor:pointer;font-weight:600;font-size:12px">ⓘ Legende — was steckt hinter den Anliegen</summary><div style="font-size:11.5px;color:var(--text-dim);line-height:1.6;margin-top:6px;columns:2;column-gap:28px">${arten.filter(([k]) => TK_BESCHREIBUNG[k]).map(([k, v]) => `<div style="break-inside:avoid;margin-bottom:4px"><strong style="color:var(--text)">${escape(k)}</strong> <span style="color:var(--text-faint)">(${v})</span><br>${escape(TK_BESCHREIBUNG[k])}</div>`).join("")}<div style="margin-top:6px;color:var(--text-faint)">Die Zuordnung erfolgt über Wortmuster in Betreff und Verlauf; bis zu drei Anliegen pro Ticket, das wichtigste zuerst. Generische Tags («Dokumente», «Sonstige») nur, wenn nichts Spezifisches gefunden wurde.</div></div></details>`;
 }
 
+/* ============ Spielwiese → Roadmap ============
+   Jahres-Roadmap im KW-Raster: Tasks als verschieb- und dehnbare Balken
+   (Drag = verschieben, Ränder = Laufzeit ändern, Klick = bearbeiten),
+   1–n Entwickler (Benutzerprofile) pro Task, farbige Attribute
+   (Backend/Frontend/…, frei erweiterbar), Heute-Linie, Auslastungszeile.
+   Daten in parameter.json → roadmap { tags:[], tasks:[] }; alle
+   Änderungen laufen durch die paramEdit-Warteschlange. */
+const RM_KW_W = 26, RM_FARBEN = ["#b8e986", "#6ec6ff", "#f4c95d", "#ef9a9a", "#ce93d8", "#80cbc4", "#ffcc80", "#90caf9", "#a5d6a7", "#f48fb1"];
+let rmJahr = new Date().getFullYear(), rmFilterDev = new Set(), rmFilterTag = new Set();
+function rmParam() {
+  if (!crmParameter.roadmap) crmParameter.roadmap = {};
+  const r = crmParameter.roadmap;
+  if (!Array.isArray(r.tags) || !r.tags.length) r.tags = [
+    { id: "backend", name: "Backend", farbe: "#6ec6ff" }, { id: "frontend", name: "Frontend", farbe: "#b8e986" },
+    { id: "api", name: "API", farbe: "#f4c95d" }, { id: "design", name: "Design", farbe: "#ce93d8" },
+    { id: "infra", name: "Infra", farbe: "#80cbc4" }, { id: "doku", name: "Doku", farbe: "#ffcc80" }];
+  if (!Array.isArray(r.tasks)) r.tasks = [];
+  return r;
+}
+/* ISO-Kalenderwochen */
+function rmKwAnzahl(jahr) { const d = new Date(Date.UTC(jahr, 11, 28)); return rmKwVon(d); }
+function rmKwVon(d) { const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())); const tag = (x.getUTCDay() + 6) % 7; x.setUTCDate(x.getUTCDate() - tag + 3); const j1 = new Date(Date.UTC(x.getUTCFullYear(), 0, 4)); return 1 + Math.round(((x - j1) / 86400000 - 3 + ((j1.getUTCDay() + 6) % 7)) / 7); }
+function rmKwMontag(jahr, kw) { const j4 = new Date(Date.UTC(jahr, 0, 4)); const mo1 = new Date(j4); mo1.setUTCDate(j4.getUTCDate() - ((j4.getUTCDay() + 6) % 7)); const d = new Date(mo1); d.setUTCDate(mo1.getUTCDate() + (kw - 1) * 7); return d; }
+function rmHeuteKw() { const h = new Date(); return { jahr: (() => { const x = new Date(Date.UTC(h.getFullYear(), h.getMonth(), h.getDate())); const t = (x.getUTCDay() + 6) % 7; x.setUTCDate(x.getUTCDate() - t + 3); return x.getUTCFullYear(); })(), kw: rmKwVon(h), tagInWoche: (h.getDay() + 6) % 7 };
+}
+function rmEntwickler() {
+  const map = new Map();
+  (cache.userprofiles || []).forEach(p => { const e = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase(); if (e && !map.has(e)) map.set(e, String(p.Title || "").trim() || e.split("@")[0]); });
+  rmParam().tasks.forEach(t => (t.entwickler || []).forEach(e => { if (!map.has(e)) map.set(e, e.split("@")[0]); }));
+  return [...map.entries()].map(([email, name]) => ({ email, name })).sort((a, b) => a.name.localeCompare(b.name));
+}
+function rmInitialen(name) { const p = String(name).replace(/[._-]+/g, " ").trim().split(/\s+/); return ((p[0] || "")[0] || "?").toUpperCase() + (p.length > 1 ? (p[p.length - 1][0] || "").toUpperCase() : (p[0] || "").slice(1, 2)); }
+function rmDevFarbe(email) { let h = 0; for (const c of email) h = (h * 31 + c.charCodeAt(0)) >>> 0; return "hsl(" + (h % 360) + ",45%,42%)"; }
+function rmTagVon(id) { return rmParam().tags.find(t => t.id === id); }
+function rmTaskFarbe(t) { const tg = (t.tags || []).map(rmTagVon).find(Boolean); return tg ? tg.farbe : "var(--accent)"; }
+
+/* ---------- Mutatoren (alle in der paramEdit-Kette) ---------- */
+function rmTaskSchreiben(task) { return paramEdit(async () => {
+  await parameterLaden(true); const r = rmParam();
+  const i = r.tasks.findIndex(x => x.id === task.id);
+  if (i >= 0) r.tasks[i] = task; else r.tasks.push(task);
+  await parameterSpeichern(); closeModal(); render();
+}); }
+function rmTaskLoeschen(id) { return paramEdit(async () => {
+  await parameterLaden(true); const r = rmParam();
+  const t = r.tasks.find(x => x.id === id);
+  if (!t || !confirm("Task «" + t.titel + "» löschen?")) return;
+  r.tasks = r.tasks.filter(x => x.id !== id);
+  await parameterSpeichern(); closeModal(); render();
+}); }
+function rmTaskZeit(id, von, bis) { return paramEdit(async () => {
+  await parameterLaden(true); const t = rmParam().tasks.find(x => x.id === id); if (!t) return;
+  t.von = von; t.bis = bis;
+  await parameterSpeichern(); render();
+}); }
+function rmTagAnlegen(name) { return paramEdit(async () => {
+  await parameterLaden(true); const r = rmParam();
+  const id = String(name).toLowerCase().replace(/[^a-z0-9äöü]+/g, "-").replace(/^-|-$/g, "");
+  if (!id || r.tags.some(t => t.id === id)) return;
+  r.tags.push({ id, name: String(name).trim(), farbe: RM_FARBEN[r.tags.length % RM_FARBEN.length] });
+  await parameterSpeichern();
+}); }
+
+/* ---------- Bearbeiten-Dialog ---------- */
+function rmDialog(id) {
+  const r = rmParam(); const neu = !id;
+  const h = rmHeuteKw(); const maxKw = rmKwAnzahl(rmJahr);
+  const t = neu ? { id: "rm" + Date.now().toString(36), jahr: rmJahr, titel: "", von: (rmJahr === h.jahr ? h.kw : 1), bis: Math.min((rmJahr === h.jahr ? h.kw : 1) + 3, maxKw), entwickler: [], tags: [], status: "geplant", notiz: "" }
+            : JSON.parse(JSON.stringify(r.tasks.find(x => x.id === id)));
+  if (!t) return;
+  const kwOpt = sel => Array.from({ length: maxKw }, (_, i) => `<option value="${i + 1}" ${i + 1 === sel ? "selected" : ""}>KW ${i + 1} · ${rmKwMontag(t.jahr, i + 1).toISOString().slice(8, 10)}.${rmKwMontag(t.jahr, i + 1).toISOString().slice(5, 7)}.</option>`).join("");
+  const devs = rmEntwickler();
+  showModal(neu ? "Neuer Roadmap-Task" : "Task bearbeiten", `
+    <div class="field"><label>Titel *</label><input id="rm-titel" value="${escape(t.titel)}" placeholder="z.B. Rapportscan v2"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <div class="field"><label>Von</label><select id="rm-von">${kwOpt(t.von)}</select></div>
+      <div class="field"><label>Bis</label><select id="rm-bis">${kwOpt(t.bis)}</select></div>
+      <div class="field"><label>Status</label><select id="rm-status">${["geplant", "laufend", "fertig"].map(s => `<option value="${s}" ${t.status === s ? "selected" : ""}>${s[0].toUpperCase() + s.slice(1)}</option>`).join("")}</select></div>
+    </div>
+    <div class="field"><label>Entwickler (1–n)</label>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${devs.map(d => `
+        <label class="rm-chip ${(t.entwickler || []).includes(d.email) ? "an" : ""}" style="cursor:pointer">
+          <input type="checkbox" class="rm-dev-cb" value="${escape(d.email)}" ${(t.entwickler || []).includes(d.email) ? "checked" : ""} style="display:none" onchange="this.closest('label').classList.toggle('an', this.checked)">
+          <span class="rm-av" style="background:${rmDevFarbe(d.email)}">${escape(rmInitialen(d.name))}</span>${escape(d.name)}
+        </label>`).join("")}</div></div>
+    <div class="field"><label>Attribute</label>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${r.tags.map(g => `
+        <label class="rm-chip ${(t.tags || []).includes(g.id) ? "an" : ""}" style="cursor:pointer">
+          <input type="checkbox" class="rm-tag-cb" value="${escape(g.id)}" ${(t.tags || []).includes(g.id) ? "checked" : ""} style="display:none" onchange="this.closest('label').classList.toggle('an', this.checked)">
+          <span class="rm-dot" style="background:${g.farbe}"></span>${escape(g.name)}
+        </label>`).join("")}
+        <button type="button" class="btn btn-sm" onclick="(async()=>{const n=prompt('Neues Attribut:');if(n){await rmTagAnlegen(n);rmDialogTags('${t.id}');}})()">+ Attribut</button>
+      </div></div>
+    <div class="field"><label>Notiz</label><textarea id="rm-notiz" rows="2">${escape(t.notiz || "")}</textarea></div>`,
+    [ neu ? "" : `<button class="btn" style="color:var(--danger);border-color:var(--danger)" onclick="rmTaskLoeschen('${t.id}')">Löschen</button>`,
+      `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
+      `<button class="btn btn-primary" onclick="rmDialogSpeichern('${t.id}', ${neu}, ${t.jahr})">Speichern</button>` ].filter(Boolean));
+}
+function rmDialogTags(taskId) {   // nach «+ Attribut»: nur die Chip-Zeile auffrischen, Eingaben behalten
+  const titel = document.getElementById("rm-titel") ? document.getElementById("rm-titel").value : null;
+  const gewaehlt = Array.from(document.querySelectorAll(".rm-tag-cb:checked")).map(c => c.value);
+  const devs = Array.from(document.querySelectorAll(".rm-dev-cb:checked")).map(c => c.value);
+  const r = rmParam(); const t = r.tasks.find(x => x.id === taskId);
+  const basis = t ? JSON.parse(JSON.stringify(t)) : { id: taskId, jahr: rmJahr, von: 1, bis: 4, status: "geplant" };
+  basis.titel = titel !== null ? titel : (basis.titel || ""); basis.tags = gewaehlt; basis.entwickler = devs;
+  basis.von = parseInt(document.getElementById("rm-von").value) || basis.von; basis.bis = parseInt(document.getElementById("rm-bis").value) || basis.bis;
+  basis.status = document.getElementById("rm-status").value || basis.status; basis.notiz = document.getElementById("rm-notiz").value || "";
+  const neu = !t;
+  const alt = r.tasks; if (neu) r.tasks = alt.concat([basis]);
+  try { rmDialog(taskId); const el = document.getElementById("rm-titel"); if (el) el.value = basis.titel; } finally { if (neu) r.tasks = alt; }
+  // Auswahl wiederherstellen
+  document.querySelectorAll(".rm-dev-cb").forEach(c => { c.checked = devs.includes(c.value); c.closest("label").classList.toggle("an", c.checked); });
+  document.querySelectorAll(".rm-tag-cb").forEach(c => { c.checked = gewaehlt.includes(c.value); c.closest("label").classList.toggle("an", c.checked); });
+  document.getElementById("rm-von").value = basis.von; document.getElementById("rm-bis").value = basis.bis;
+  document.getElementById("rm-status").value = basis.status; document.getElementById("rm-notiz").value = basis.notiz;
+}
+function rmDialogSpeichern(id, neu, jahr) {
+  const titel = (document.getElementById("rm-titel").value || "").trim();
+  if (!titel) { toast("Titel fehlt", true); return; }
+  let von = parseInt(document.getElementById("rm-von").value), bis = parseInt(document.getElementById("rm-bis").value);
+  if (bis < von) [von, bis] = [bis, von];
+  rmTaskSchreiben({ id, jahr, titel, von, bis,
+    entwickler: Array.from(document.querySelectorAll(".rm-dev-cb:checked")).map(c => c.value),
+    tags: Array.from(document.querySelectorAll(".rm-tag-cb:checked")).map(c => c.value),
+    status: document.getElementById("rm-status").value,
+    notiz: document.getElementById("rm-notiz").value.trim() });
+}
+
+/* ---------- Drag (verschieben / Laufzeit ziehen) ---------- */
+let rmDrag = null;
+function rmBarDown(ev, id) {
+  if (ev.button !== 0) return;
+  const bar = ev.currentTarget; const t = rmParam().tasks.find(x => x.id === id); if (!t) return;
+  const griff = ev.target.classList.contains("griff") ? (ev.target.classList.contains("l") ? "l" : "r") : "m";
+  rmDrag = { id, griff, startX: ev.clientX, von0: t.von, bis0: t.bis, von: t.von, bis: t.bis, bar, bewegt: false, maxKw: rmKwAnzahl(rmJahr) };
+  try { bar.setPointerCapture(ev.pointerId); } catch (e) { /* ältere Browser/Tests ohne Pointer Capture */ }
+  bar.classList.add("drag");
+  ev.preventDefault();
+}
+function rmBarMove(ev) {
+  if (!rmDrag) return;
+  const d = Math.round((ev.clientX - rmDrag.startX) / RM_KW_W);
+  if (Math.abs(ev.clientX - rmDrag.startX) > 4) rmDrag.bewegt = true;
+  let von = rmDrag.von0, bis = rmDrag.bis0;
+  if (rmDrag.griff === "m") { const len = bis - von; von = Math.min(Math.max(1, von + d), rmDrag.maxKw - len); bis = von + len; }
+  else if (rmDrag.griff === "l") { von = Math.min(Math.max(1, von + d), bis); }
+  else { bis = Math.max(Math.min(rmDrag.maxKw, bis + d), von); }
+  rmDrag.von = von; rmDrag.bis = bis;
+  rmDrag.bar.style.left = ((von - 1) * RM_KW_W + 2) + "px";
+  rmDrag.bar.style.width = ((bis - von + 1) * RM_KW_W - 4) + "px";
+  let b = document.getElementById("rm-dragbadge");
+  if (!b) { b = document.createElement("div"); b.id = "rm-dragbadge"; b.className = "rm-badge"; document.body.appendChild(b); }
+  b.textContent = "KW " + von + " – " + bis;
+  b.style.left = (ev.clientX + 12) + "px"; b.style.top = (ev.clientY - 28) + "px";
+}
+function rmBarUp(ev, id) {
+  if (!rmDrag) return;
+  const { bewegt, von, bis, von0, bis0, bar } = rmDrag; rmDrag = null;
+  bar.classList.remove("drag");
+  const b = document.getElementById("rm-dragbadge"); if (b) b.remove();
+  if (!bewegt) { rmDialog(id); return; }
+  if (von !== von0 || bis !== bis0) rmTaskZeit(id, von, bis);
+}
+
+/* ---------- Ansicht ---------- */
+async function renderRoadmap(el) {
+  if (!crmParameter) { await parameterLaden(false); }
+  const r = rmParam(); const maxKw = rmKwAnzahl(rmJahr); const heute = rmHeuteKw();
+  const jahre = [...new Set([heute.jahr - 1, heute.jahr, heute.jahr + 1, heute.jahr + 2, ...r.tasks.map(t => t.jahr)])].sort();
+  document.getElementById("view-actions").innerHTML = `
+    <select onchange="rmJahr=parseInt(this.value);render()" style="padding:4px 8px;font-weight:600">${jahre.map(j => `<option value="${j}" ${j === rmJahr ? "selected" : ""}>${j}</option>`).join("")}</select>
+    <button class="btn btn-sm btn-primary" onclick="rmDialog()">+ Task</button>`;
+
+  const alle = r.tasks.filter(t => t.jahr === rmJahr).sort((a, b) => a.von - b.von || a.bis - b.bis || String(a.titel).localeCompare(b.titel));
+  const tasks = alle.filter(t => (!rmFilterDev.size || (t.entwickler || []).some(e => rmFilterDev.has(e)))
+                             && (!rmFilterTag.size || (t.tags || []).some(g => rmFilterTag.has(g))));
+  const devs = rmEntwickler().filter(d => alle.some(t => (t.entwickler || []).includes(d.email)));
+  const tagsImJahr = r.tags.filter(g => alle.some(t => (t.tags || []).includes(g.id)));
+  const chip = (an, click, inhalt, titel) => `<span class="rm-chip ${an ? "an" : ""}" onclick="${click}" title="${escape(titel || "")}">${inhalt}</span>`;
+  const filterHtml = (devs.length || tagsImJahr.length) ? `<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px">
+      ${devs.map(d => chip(rmFilterDev.has(d.email), `rmFilterDev.has('${escape(d.email)}')?rmFilterDev.delete('${escape(d.email)}'):rmFilterDev.add('${escape(d.email)}');render()`, `<span class="rm-av" style="background:${rmDevFarbe(d.email)}">${escape(rmInitialen(d.name))}</span>${escape(d.name)}`, d.email)).join("")}
+      ${tagsImJahr.length ? `<span style="color:var(--border);margin:0 2px">|</span>` : ""}
+      ${tagsImJahr.map(g => chip(rmFilterTag.has(g.id), `rmFilterTag.has('${g.id}')?rmFilterTag.delete('${g.id}'):rmFilterTag.add('${g.id}');render()`, `<span class="rm-dot" style="background:${g.farbe}"></span>${escape(g.name)}`)).join("")}
+      ${(rmFilterDev.size || rmFilterTag.size) ? `<a href="#" onclick="rmFilterDev.clear();rmFilterTag.clear();render();return false" style="font-size:11px;color:var(--danger)">✕ Filter löschen</a>` : ""}
+    </div>` : "";
+
+  // Monats-Kopf: KWs nach Monat (des Donnerstags) gruppieren
+  const monate = [];
+  for (let kw = 1; kw <= maxKw; kw++) {
+    const dow = rmKwMontag(rmJahr, kw); dow.setUTCDate(dow.getUTCDate() + 3);
+    const m = dow.toLocaleDateString("de-CH", { month: "short", timeZone: "UTC" });
+    if (monate.length && monate[monate.length - 1].name === m) monate[monate.length - 1].n++;
+    else monate.push({ name: m, n: 1 });
+  }
+  const istHeuteJahr = rmJahr === heute.jahr;
+  const heuteX = istHeuteJahr ? ((heute.kw - 1) + heute.tagInWoche / 7) * RM_KW_W : -1;
+  const spur = inhalt => `<div class="rm-track lanes" style="width:${maxKw * RM_KW_W}px;--rm-kw:${RM_KW_W}px">${inhalt}</div>`;
+
+  const zeilen = tasks.map(t => {
+    const farbe = rmTaskFarbe(t);
+    const avs = (t.entwickler || []).slice(0, 4).map(e => { const d = rmEntwickler().find(x => x.email === e); return `<span class="rm-av" style="background:${rmDevFarbe(e)}" title="${escape(e)}">${escape(rmInitialen(d ? d.name : e))}</span>`; }).join("");
+    const dots = (t.tags || []).map(g => { const tg = rmTagVon(g); return tg ? `<span class="rm-dot" style="background:${tg.farbe}" title="${escape(tg.name)}"></span>` : ""; }).join("");
+    const breit = (t.bis - t.von + 1) * RM_KW_W - 4;
+    return `<div class="rm-row">
+      <div class="rm-label" onclick="rmDialog('${t.id}')" title="${escape(t.titel)}${t.notiz ? "\n" + escape(t.notiz) : ""}">
+        <span class="t">${t.status === "fertig" ? "✓ " : ""}${escape(t.titel)}</span>
+        <span class="m">${dots}${dots && avs ? "<span style='width:4px'></span>" : ""}${avs}${t.status === "laufend" ? `<span style="font-size:9px;color:var(--accent);margin-left:4px">● läuft</span>` : ""}</span>
+      </div>
+      ${spur(`<div class="rm-bar ${t.status === "fertig" ? "fertig" : ""}" data-rmid="${t.id}"
+         style="left:${(t.von - 1) * RM_KW_W + 2}px;width:${breit}px;background:${farbe}"
+         onpointerdown="rmBarDown(event,'${t.id}')" onpointermove="rmBarMove(event)" onpointerup="rmBarUp(event,'${t.id}')" onpointercancel="rmBarUp(event,'${t.id}')">
+        <span class="griff l"></span>${breit > 70 ? `<span style="overflow:hidden;text-overflow:ellipsis">${escape(t.titel)}</span>` : ""}${breit > 120 ? avs : ""}<span class="griff r"></span>
+      </div>`)}
+    </div>`;
+  }).join("");
+
+  // Auslastung: Tasks pro KW (gefilterte Menge)
+  const last = Array.from({ length: maxKw }, (_, i) => tasks.filter(t => t.von <= i + 1 && t.bis >= i + 1).length);
+  const maxLast = Math.max(1, ...last);
+  const lastHtml = `<div class="rm-row">
+    <div class="rm-label" style="cursor:default"><span class="t" style="color:var(--text-dim);font-weight:400">Auslastung</span><span class="m" style="font-size:9px;color:var(--text-faint)">Tasks pro KW</span></div>
+    ${spur(`<div class="rm-last" style="width:${maxKw * RM_KW_W}px">${last.map(n => `<i style="width:${RM_KW_W}px;height:${Math.round(n / maxLast * 24)}px" title="${n} Task(s)"></i>`).join("")}</div>`)}
+  </div>`;
+
+  el.innerHTML = `${filterHtml}
+    <div class="rm-wrap">
+      <div class="rm-grid" style="grid-template-columns:230px ${maxKw * RM_KW_W}px">
+        <div class="rm-head">
+          <div class="rm-corner" style="grid-row:1/3;display:flex;align-items:flex-end;padding:6px 12px;font-size:11px;color:var(--text-dim)">${tasks.length} von ${alle.length} Tasks · ${rmJahr}</div>
+          <div class="rm-months">${monate.map(m => `<div class="rm-month" style="width:${m.n * RM_KW_W}px">${escape(m.name)}</div>`).join("")}</div>
+          <div class="rm-kws">${Array.from({ length: maxKw }, (_, i) => `<div class="rm-kw ${istHeuteJahr && i + 1 === heute.kw ? "heute" : ""}" style="width:${RM_KW_W}px">${i + 1}</div>`).join("")}</div>
+        </div>
+        ${zeilen || `<div class="rm-row"><div class="rm-label" style="cursor:default"><span class="t" style="color:var(--text-dim);font-weight:400">Noch keine Tasks</span></div>${spur(`<div style="padding:10px 14px;font-size:12px;color:var(--text-dim)">«+ Task» oben rechts — oder Jahr wechseln.</div>`)}</div>`}
+        ${tasks.length ? lastHtml : ""}
+        ${heuteX >= 0 ? `<div class="rm-heutelinie" style="left:${230 + heuteX}px;top:0;bottom:0"></div>` : ""}
+      </div>
+    </div>
+    <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px">Balken ziehen = verschieben · an den Rändern ziehen = Laufzeit ändern · Klick auf Balken oder Titel = bearbeiten. Gespeichert wird in den CRM-Parametern (für alle sichtbar).</div>`;
+}
+
 /* ============ Spielwiese → 360 Grad ============
    Konzept: Software allein wird durch KI billiger — Apriko bietet das ganze Ökosystem rund um den Personaldienstleister
    (Versicherungen, Treuhand, Inkasso, Recruiting-Tools, …) über Partner und verdient daran eine Provision.
@@ -10008,14 +10292,14 @@ function g360Param() {
   const g = crmParameter.grad360; g.stuecke = g.stuecke || []; return g;
 }
 async function g360Speichern() { try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); } }
-async function g360Feld(id, feld, wert) {
+function g360Feld(id, feld, wert) { return paramEdit(async () => {
   await parameterLaden(true); const st = g360Param().stuecke.find(x => x.id === id); if (!st) return;
   if (feld === "anteil" || feld === "provision" || feld === "ertrag") st[feld] = Math.max(0, Math.min(100, parseFloat(String(wert).replace(",", ".")) || 0)); else st[feld] = String(wert || "");
   await g360Speichern(); render();
-}
-async function g360Volumen(v) { await parameterLaden(true); g360Param().volumen = Math.max(0, parseFloat(String(v).replace(/['’\s]/g, "")) || 0); await g360Speichern(); render(); }
-async function g360Neu() { await parameterLaden(true); const g = g360Param(); const rest = Math.max(0, 100 - g.stuecke.reduce((s, x) => s + (x.anteil || 0), 0)); g.stuecke.push({ id: "s" + Date.now().toString(36), name: "Neuer Bereich", anteil: Math.min(10, rest), ertrag: 100, provision: 10, partner: "", notiz: "" }); await g360Speichern(); render(); }
-async function g360Loeschen(id) { await parameterLaden(true); const g = g360Param(); const st = g.stuecke.find(x => x.id === id); if (!st || !confirm("«" + st.name + "» entfernen?")) return; g.stuecke = g.stuecke.filter(x => x.id !== id); await g360Speichern(); render(); }
+}); }
+function g360Volumen(v) { return paramEdit(async () => { await parameterLaden(true); g360Param().volumen = Math.max(0, parseFloat(String(v).replace(/['’\s]/g, "")) || 0); await g360Speichern(); render(); }); }
+function g360Neu() { return paramEdit(async () => { await parameterLaden(true); const g = g360Param(); const rest = Math.max(0, 100 - g.stuecke.reduce((s, x) => s + (x.anteil || 0), 0)); g.stuecke.push({ id: "s" + Date.now().toString(36), name: "Neuer Bereich", anteil: Math.min(10, rest), ertrag: 100, provision: 10, partner: "", notiz: "" }); await g360Speichern(); render(); }); }
+function g360Loeschen(id) { return paramEdit(async () => { await parameterLaden(true); const g = g360Param(); const st = g.stuecke.find(x => x.id === id); if (!st || !confirm("«" + st.name + "» entfernen?")) return; g.stuecke = g.stuecke.filter(x => x.id !== id); await g360Speichern(); render(); }); }
 function g360Pie(stuecke, total) {
   const R = 120, cx = 150, cy = 150; let a0 = -Math.PI / 2; const teile = [];
   stuecke.forEach((st, i) => {
@@ -10216,27 +10500,27 @@ function paramUzRow(i, r) {
     <td><button class="btn btn-sm" onclick="paramUzDel(${i})" title="Zeile entfernen">✕</button></td>
   </tr>`;
 }
-async function paramUzSet(i, feld, wert) {
+function paramUzSet(i, feld, wert) { return paramEdit(async () => {
   await parameterLaden(true);
   const r = crmParameter.ueberzeit[i]; if (!r) return;
   if (feld === "gav" && wert === "Andere") { r.gav = "Andere"; render(); return; }
   r[feld] = wert;
   try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
   render();
-}
-async function paramUzAdd() {
+}); }
+function paramUzAdd() { return paramEdit(async () => {
   await parameterLaden(true);
   crmParameter.ueberzeit.push({ gav: "Andere", basis: "basis13" });
   render();
-}
-async function paramUzDel(i) {
+}); }
+function paramUzDel(i) { return paramEdit(async () => {
   await parameterLaden(true);
   const r = crmParameter.ueberzeit[i];
   if (!r || !confirm(`Eintrag «${r.gav}» entfernen?`)) return;
   crmParameter.ueberzeit.splice(i, 1);
   try { await parameterSpeichern(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
   render();
-}
+}); }
 async function renderParameter(el) {
   await parameterLaden(false);
   document.getElementById("view-actions").innerHTML = `<button class="btn btn-sm" onclick="parameterLaden(true).then(() => render())">🔄 Neu laden</button>`;
@@ -10291,7 +10575,7 @@ function paramAbacusBlock() {
       </div>
     </div>`;
 }
-async function paramAbaUm(von, neuVon, nach) {
+function paramAbaUm(von, neuVon, nach) { return paramEdit(async () => {
   await parameterLaden(true);
   const a = abaParam();
   von = String(von || "").trim();
@@ -10299,8 +10583,8 @@ async function paramAbaUm(von, neuVon, nach) {
   if (nach !== null && nach !== undefined && nach !== "") a.umkontierung[von] = String(nach).trim();
   if (neuVon === "" && nach === "") delete a.umkontierung[von];
   await abaParamSpeichern(); render();
-}
-async function paramAbaText(feld, text) {
+}); }
+function paramAbaText(feld, text) { return paramEdit(async () => {
   await parameterLaden(true);
   const a = abaParam();
   const zeilen = String(text || "").split(/\n/).map(z => z.trim()).filter(Boolean);
@@ -10308,8 +10592,8 @@ async function paramAbaText(feld, text) {
   if (feld === "zusatz") { a.zusatz = {}; zeilen.forEach(z => { const m = /^(\d+)\s*:\s*(\d+)\s*\/\s*(\d+)$/.exec(z); if (m) a.zusatz[m[1]] = { soll: m[2], haben: m[3] }; }); }
   if (feld === "nichtBuchen") a.nichtBuchen = String(text || "").split(/[,\s]+/).map(x => x.trim()).filter(Boolean);
   await abaParamSpeichern(); render();
-}
-async function paramAbaKontDel(code) { await parameterLaden(true); delete abaParam().kontierung[code]; await abaParamSpeichern(); render(); }
+}); }
+function paramAbaKontDel(code) { return paramEdit(async () => { await parameterLaden(true); delete abaParam().kontierung[code]; await abaParamSpeichern(); render(); }); }
 async function paramAbaKontNeu(code) { code = String(code || "").trim(); if (!code) return; await parameterLaden(true); const a = abaParam(); if (!a.kontierung[code]) a.kontierung[code] = { soll: "", haben: "" }; render(); }
 
 async function renderTarifarten(el) {
@@ -16169,7 +16453,7 @@ function hcUmgebungen() {
   });
   return Object.values(map).sort((a, b) => a.host.localeCompare(b.host));
 }
-async function hcExtraBearbeiten() {
+function hcExtraBearbeiten() { return paramEdit(async () => {
   if (!isAdmin()) { toast("Nur für Admins.", true); return; }
   await parameterLaden(true);
   const aktuell = (((crmParameter || {}).healthcheck || {}).extra || []).join(", ");
@@ -16179,7 +16463,7 @@ async function hcExtraBearbeiten() {
   crmParameter.healthcheck.extra = v.split(/[,\s;]+/).map(s => s.trim()).filter(Boolean);
   await parameterSpeichern();
   hcState.ergebnisse = {}; hcStart();
-}
+}); }
 function hcAuswerten(apiResponse) {
   const unhealthy = []; let hasData = false;
   const services = Array.isArray(apiResponse) ? apiResponse : [apiResponse];
