@@ -1079,7 +1079,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.517.5</span> · <span id="app-build-date">13.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.517.7</span> · <span id="app-build-date">15.10.2026</span>
     </div>
   </aside>
 
@@ -10155,6 +10155,45 @@ function rmTagAnlegen(name) { return paramEdit(async () => {
   await parameterSpeichern();
 }); }
 
+/* ---------- Datenrettung über die SharePoint-Versionsgeschichte (15.10.2026) ----------
+   SharePoint legt bei jedem Speichern von parameter_v2.json eine Version an. Hier werden die
+   letzten Versionen durchsucht und gezielt NUR der roadmap-Schlüssel zurückgeholt —
+   alle übrigen Parameter (Gruppen, Onboarding, Abacus …) bleiben unangetastet. */
+async function rmWiederherstellenZeigen() {
+  showModal("Roadmap — frühere Stände", `<div style="font-size:12px;color:var(--text-dim);margin-bottom:10px">SharePoint versioniert <code>parameter_v2.json</code> bei jedem Speichern. Unten die letzten Stände mit der Anzahl Roadmap-Tasks darin — «übernehmen» ersetzt nur die Roadmap, sonst nichts.</div><div id="rm-vers" style="font-size:12px;color:var(--text-dim)">Lade Versionsgeschichte …</div>`,
+    [`<button class="btn" onclick="closeModal()">Schliessen</button>`]);
+  const box = () => document.getElementById("rm-vers");
+  try {
+    const liste = await graph(`/sites/${siteId}/drive/root:/${PARAMETER_PFAD}:/versions`);
+    const vers = ((liste && liste.value) || []).slice(0, 25);
+    if (!vers.length) { if (box()) box().innerHTML = "Keine Versionen gefunden."; return; }
+    const zeilen = [];
+    const malen = (fertig) => { if (box()) box().innerHTML = `<table class="table" style="font-size:12px"><thead><tr><th>Gespeichert</th><th>Von</th><th style="text-align:right">Roadmap-Tasks</th><th></th></tr></thead><tbody>${zeilen.join("")}</tbody></table>${fertig ? "" : `<div style="color:var(--text-faint);margin-top:6px">… prüfe weitere Versionen …</div>`}`; };
+    for (const v of vers) {
+      if (!document.getElementById("rm-vers")) return;   // Modal geschlossen → abbrechen
+      let inhalt = null;
+      try { inhalt = await graph(`/sites/${siteId}/drive/root:/${PARAMETER_PFAD}:/versions/${encodeURIComponent(v.id)}/content`); } catch (e) {}
+      const tasks = (inhalt && inhalt.roadmap && Array.isArray(inhalt.roadmap.tasks)) ? inhalt.roadmap.tasks : [];
+      const jahre = {}; tasks.forEach(t => { jahre[t.jahr] = (jahre[t.jahr] || 0) + 1; });
+      const wann = v.lastModifiedDateTime ? new Date(v.lastModifiedDateTime).toLocaleString("de-CH", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : String(v.id);
+      const wer = (v.lastModifiedBy && v.lastModifiedBy.user && v.lastModifiedBy.user.displayName) || "";
+      zeilen.push(`<tr><td>${escape(wann)}</td><td>${escape(wer)}</td><td style="text-align:right">${tasks.length ? `<b>${tasks.length}</b> <span style="color:var(--text-faint)">(${Object.entries(jahre).map(([j, n]) => j + ": " + n).join(", ")})</span>` : `<span style="color:var(--text-faint)">—</span>`}</td><td style="text-align:right">${tasks.length ? `<button class="btn btn-sm btn-primary" onclick="rmWiederherstellen(${tkJs(String(v.id))})">übernehmen</button>` : ""}</td></tr>`);
+      malen(false);
+    }
+    malen(true);
+    if (box() && !zeilen.some(z => z.includes("rmWiederherstellen"))) box().innerHTML += `<div style="color:var(--warn);margin-top:8px">In keiner der geprüften Versionen stecken Roadmap-Tasks — dann wurden sie nie erfolgreich gespeichert (z.B. Speichern-Fehler im Hintergrund).</div>`;
+  } catch (e) { if (box()) box().innerHTML = `<span style="color:var(--danger)">Versionsgeschichte nicht lesbar: ${escape(e.message || String(e))}</span>`; }
+}
+function rmWiederherstellen(versionId) { return paramEdit(async () => {
+  const inhalt = await graph(`/sites/${siteId}/drive/root:/${PARAMETER_PFAD}:/versions/${encodeURIComponent(versionId)}/content`);
+  const r = inhalt && inhalt.roadmap;
+  if (!r || !Array.isArray(r.tasks) || !r.tasks.length) { toast("Diese Version enthält keine Roadmap-Tasks", true); return; }
+  if (!confirm(r.tasks.length + " Task(s) aus diesem Stand übernehmen?\nErsetzt nur die Roadmap — alle übrigen Parameter bleiben unverändert.")) return;
+  await parameterLaden(true);
+  crmParameter.roadmap = r;
+  await parameterSpeichern(); closeModal(); render(); toast("Roadmap wiederhergestellt ✓");
+}); }
+
 /* ---------- Bearbeiten-Dialog ---------- */
 function rmDialog(id) {
   const r = rmParam(); const neu = !id;
@@ -10264,6 +10303,7 @@ async function renderRoadmap(el) {
   const jahre = [...new Set([heute.jahr - 1, heute.jahr, heute.jahr + 1, heute.jahr + 2, ...r.tasks.map(t => t.jahr)])].sort();
   document.getElementById("view-actions").innerHTML = `
     <select onchange="rmJahr=parseInt(this.value);render()" style="padding:4px 8px;font-weight:600">${jahre.map(j => `<option value="${j}" ${j === rmJahr ? "selected" : ""}>${j}</option>`).join("")}</select>
+    <button class="btn btn-sm" onclick="rmWiederherstellenZeigen()" title="Frühere Stände der Roadmap aus der SharePoint-Versionsgeschichte zurückholen">🕘 Frühere Stände</button>
     <button class="btn btn-sm btn-primary" onclick="rmDialog()">+ Task</button>`;
 
   const alle = r.tasks.filter(t => t.jahr === rmJahr).sort((a, b) => a.von - b.von || a.bis - b.bis || String(a.titel).localeCompare(b.titel));
@@ -10517,6 +10557,18 @@ async function parameterLaden(force) {
     }
   }
   if (fehlt) {
+    // DATENVERLUST-FALLE entschärft (15.10.2026): Meldet Graph mitten in der Sitzung ein 404 für
+    // parameter_v2.json (Glitch/Replikation), lud dieser Block früher die ALTE parameter.json und
+    // speicherte sie zurück — der Merge sah dann jeden seither neu angelegten Schlüssel (z.B.
+    // roadmap vom 15.10.) als «gelöscht» an und entfernte ihn. Darum: Migration NUR noch beim
+    // allerersten Laden der Sitzung (weder crmParameter noch eine gemerkte Basis vorhanden);
+    // war die Datei vorhin noch da, behalten wir den geladenen Stand und importieren nichts.
+    if (crmParameter || jsonBasis[PARAMETER_PFAD]) {
+      console.warn("parameter_v2.json plötzlich nicht auffindbar — behalte den Stand der Sitzung, kein Import der alten parameter.json");
+      if (crmParameter) return crmParameter;
+      crmParameterOk = false;
+      throw new Error("Parameter vorübergehend nicht erreichbar — bitte nochmals versuchen.");
+    }
     // Einmalige Migration: neue Datei existiert nachweislich noch nicht → alte parameter.json übernehmen
     try { data = await graph(`/sites/${siteId}/drive/root:/${PARAMETER_PFAD_ALT}:/content`, { cache: "no-store" }); }
     catch (e) { data = null; if (!/404|itemNotFound/i.test(e.message || "")) { crmParameterOk = false; throw new Error("parameter.json nicht lesbar: " + (e.message || e)); } }
@@ -10528,6 +10580,11 @@ async function parameterLaden(force) {
     data.ueberzeit = [{ gav: "GAV Personalverleih", basis: "basis13" }, { gav: "Bauhauptgewerbe (LMV)", basis: "brutto" }];
   }
   if (migriert) {
+    // Gegenprobe (15.10.2026): existiert v2 in Wirklichkeit doch (404 war ein Glitch), NICHTS importieren
+    try { const doch = await graph(`/sites/${siteId}/drive/root:/${PARAMETER_PFAD}:/content`, { cache: "no-store" }); if (doch && typeof doch === "object" && Object.keys(doch).length) { data = doch; migriert = false; } } catch (e) {}
+  }
+  if (migriert) {
+    delete jsonBasis[PARAMETER_PFAD];   // ohne Basis löscht der Merge nie Schlüssel — Alt-Werte füllen höchstens Lücken
     try { data = await jsonMergeSpeichern(PARAMETER_PFAD, data); console.info("parameter.json → parameter_v2.json übernommen"); }
     catch (e) { console.warn("Migration parameter_v2.json fehlgeschlagen", e); }
   }
@@ -15994,35 +16051,38 @@ function renderProfiles(el) {
           <th style="width:120px;text-align:right">Aktionen</th>
         </tr></thead>
         <tbody>
-          ${profiles.length === 0 ? `
-            <tr><td colspan="6" class="empty">Noch keine Profile angelegt. Klick auf "+ Profil hinzufügen".</td></tr>
-          ` : profiles.map(p => {
-            const views = Array.isArray(p.AllowedViews) ? p.AllowedViews
-              : (typeof p.AllowedViews === "string" ? p.AllowedViews.split(/[,;]/).map(s => s.trim()).filter(Boolean) : []);
-            // Anzeige gruppiert und sortiert wie das Menü links
-            const grp = profileViewGroups();
-            const viewGroupsHtml = grp.map(g => {
-              const hit = g.views.filter(v => views.includes(v.key));
-              if (!hit.length) return "";
-              const all = hit.length === g.views.length;
-              return `<div style="margin:2px 0"><span style="color:var(--text-faint);font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin-right:6px">${escape(g.name)}</span>${all ? `<span style="display:inline-block;background:var(--bg-elev);padding:2px 7px;border-radius:3px;margin:1px 3px 1px 0;color:var(--accent)">alle</span>` : hit.map(v => `<span style="display:inline-block;background:var(--bg-elev);padding:2px 7px;border-radius:3px;margin:1px 3px 1px 0">${escape(v.label)}</span>`).join("")}</div>`;
-            }).join("");
-            const unknown = views.filter(v => !VIEW_LABELS_FOR_PROFILE.some(x => x.key === v));
-            const displayEmail = p.Email || (p.UserPerson && p.UserPerson.email) || "(kein Email)";
-            const bg = bgParam(); const bgId = bg.zuweisung[String(displayEmail).toLowerCase()] || ""; const bgG = bgId && bg.gruppen[bgId];
-            const gruppeSel = `<select onchange="bgZuweisen(${tkJs(String(displayEmail).toLowerCase())}, this.value)" style="padding:3px 6px;font-size:12px;max-width:140px;${bgG ? "border-color:var(--accent)" : ""}"><option value="">— keine —</option>${Object.keys(bg.gruppen).map(id => `<option value="${escape(id)}" ${id === bgId ? "selected" : ""}>${escape(bg.gruppen[id].name)}</option>`).join("")}</select>`;
-            const roleBadge = p.Role === "Admin" || (bgG && bgG.admin)
-              ? `<span style="background:rgba(184,233,134,0.15);color:var(--accent);padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">Admin</span>`
-              : `<span style="color:var(--text-dim);font-size:12px">User</span>`;
-            return `
+          ${(() => {
+            // EINE gemeinsame, alphabetisch sortierte Liste (15.10.2026): Profilzeilen und
+            // «nur Gruppe»-Zeilen werden zusammen nach Anzeigename sortiert — vorher standen
+            // die nur-Gruppe-Zeilen immer am Schluss, was wie eine kaputte Sortierung aussah.
+            const bg0 = bgParam();
+            const zeilen = [];
+            profiles.forEach(p => {
+              const views = Array.isArray(p.AllowedViews) ? p.AllowedViews
+                : (typeof p.AllowedViews === "string" ? p.AllowedViews.split(/[,;]/).map(s => s.trim()).filter(Boolean) : []);
+              // Anzeige gruppiert und sortiert wie das Menü links
+              const grp = profileViewGroups();
+              const viewGroupsHtml = grp.map(g => {
+                const hit = g.views.filter(v => views.includes(v.key));
+                if (!hit.length) return "";
+                const all = hit.length === g.views.length;
+                return `<div style="margin:2px 0"><span style="color:var(--text-faint);font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin-right:6px">${escape(g.name)}</span>${all ? `<span style="display:inline-block;background:var(--bg-elev);padding:2px 7px;border-radius:3px;margin:1px 3px 1px 0;color:var(--accent)">alle</span>` : hit.map(v => `<span style="display:inline-block;background:var(--bg-elev);padding:2px 7px;border-radius:3px;margin:1px 3px 1px 0">${escape(v.label)}</span>`).join("")}</div>`;
+              }).join("");
+              const unknown = views.filter(v => !VIEW_LABELS_FOR_PROFILE.some(x => x.key === v));
+              const displayEmail = p.Email || (p.UserPerson && p.UserPerson.email) || "(kein Email)";
+              const bgId = bg0.zuweisung[String(displayEmail).toLowerCase()] || ""; const bgG = bgId && bg0.gruppen[bgId];
+              const gruppeSel = `<select onchange="bgZuweisen(${tkJs(String(displayEmail).toLowerCase())}, this.value)" style="padding:3px 6px;font-size:12px;max-width:140px;${bgG ? "border-color:var(--accent)" : ""}"><option value="">— keine —</option>${Object.keys(bg0.gruppen).map(id => `<option value="${escape(id)}" ${id === bgId ? "selected" : ""}>${escape(bg0.gruppen[id].name)}</option>`).join("")}</select>`;
+              const roleBadge = p.Role === "Admin" || (bgG && bgG.admin)
+                ? `<span style="background:rgba(184,233,134,0.15);color:var(--accent);padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">Admin</span>`
+                : `<span style="color:var(--text-dim);font-size:12px">User</span>`;
+              const em = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase();
+              const nm = em ? mitarbeiterName(em) : String(p.Title || "").trim();
+              zeilen.push({ sort: String(nm || displayEmail).toLowerCase(), html: `
               <tr>
-                <td>${(() => { const em = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase();
-                  const nm = em ? mitarbeiterName(em) : String(p.Title || "").trim();
-                  return `<span style="font-weight:500">${escape(nm || displayEmail)}</span>${em && nm && nm !== em ? `<div style="color:var(--text-dim);font-size:11px">${escape(em)}</div>` : (!em ? `<div style="color:var(--warn);font-size:11px">(kein Email)</div>` : "")}`; })()}</td>
+                <td><span style="font-weight:500">${escape(nm || displayEmail)}</span>${em && nm && nm !== em ? `<div style="color:var(--text-dim);font-size:11px">${escape(em)}</div>` : (!em ? `<div style="color:var(--warn);font-size:11px">(kein Email) — darum zählt dieses Profil nirgends; E-Mail im Profil nachtragen</div>` : "")}</td>
                 <td>${roleBadge}</td>
-                <td style="text-align:center">${(() => { const em = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase();
-                  return em ? `<input type="checkbox" ${mitarbeiterDaten(em).entwickler ? "checked" : ""} onchange="rmEntwicklerFlag(${tkJs(em)}, this.checked)" title="In der Roadmap als Entwickler/in anbieten" style="accent-color:var(--accent);width:15px;height:15px;cursor:pointer">`
-                    : `<span title="Zuerst das Email-Feld im Profil nachtragen" style="color:var(--text-faint);cursor:help">—</span>`; })()}</td>
+                <td style="text-align:center">${em ? `<input type="checkbox" ${mitarbeiterDaten(em).entwickler ? "checked" : ""} onchange="rmEntwicklerFlag(${tkJs(em)}, this.checked)" title="In der Roadmap als Entwickler/in anbieten" style="accent-color:var(--accent);width:15px;height:15px;cursor:pointer">`
+                    : `<span title="Zuerst das Email-Feld im Profil nachtragen" style="color:var(--text-faint);cursor:help">—</span>`}</td>
                 <td>${gruppeSel}</td>
                 <td style="color:var(--text-dim);font-size:12px">
                   ${views.length === 0 ? (bgG ? `<span style="color:var(--text-faint)">— nur Gruppenrechte</span>` : `<span style="color:var(--warn)">— (kein Zugriff)</span>`)
@@ -16034,18 +16094,33 @@ function renderProfiles(el) {
                   <button class="btn btn-sm" style="color:var(--danger)" onclick="deleteProfile(${p.id})">✕</button>
                 </td>
               </tr>
-            `;
-          }).join("")}
-          ${(() => { const b = bgParam(); const ohne = Object.keys(b.zuweisung).filter(e => !profiles.some(p => String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase() === e)).sort();
-            return ohne.map(e => { const g = b.gruppen[b.zuweisung[e]] || {}; return `
+            ` });
+            });
+            const ohne = Object.keys(bg0.zuweisung).filter(e => !profiles.some(p => String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase() === e));
+            ohne.forEach(e => {
+              const g = bg0.gruppen[bg0.zuweisung[e]] || {};
+              const nm = mitarbeiterName(e);
+              // Diagnose: gibt es ein Profil, das wohl zu dieser Person gehört, aber wegen
+              // fehlender/abweichender E-Mail nicht zugeordnet werden kann?
+              const vorname = String((mitarbeiterDaten(e).vorname || mitarbeiterVornameAusEmail(e)) || "").toLowerCase();
+              const kandOhneMail = profiles.find(p => { const pe = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase(); const pt = String(p.Title || "").trim().toLowerCase(); return !pe && pt && (pt === String(nm).toLowerCase() || pt === e || pt === e.split("@")[0] || (vorname && pt.startsWith(vorname))); });
+              const kandAndereMail = !kandOhneMail && vorname && profiles.find(p => { const pe = String(p.Email || (p.UserPerson && p.UserPerson.email) || "").toLowerCase(); if (!pe || pe === e) return false; const pv = String((mitarbeiterDaten(pe).vorname || mitarbeiterVornameAusEmail(pe)) || "").toLowerCase(); return pv && pv === vorname; });
+              const hinweis = kandOhneMail ? `<div style="color:var(--warn);font-size:11px;margin-top:2px">⚠ Profil «${escape(String(kandOhneMail.Title || "?").trim())}» gefunden, aber ohne E-Mail — dort ${escape(e)} eintragen, dann verschmelzen die zwei Zeilen</div>`
+                : kandAndereMail ? `<div style="color:var(--warn);font-size:11px;margin-top:2px">⚠ Profil mit gleichem Vornamen, aber anderer Adresse (${escape(String(kandAndereMail.Email || (kandAndereMail.UserPerson && kandAndereMail.UserPerson.email) || ""))}) — falls dieselbe Person: eine der beiden Adressen angleichen</div>` : "";
+              zeilen.push({ sort: String(nm || e).toLowerCase(), html: `
               <tr>
-                <td><span style="font-weight:500">${escape(mitarbeiterName(e))}</span> <span style="font-size:10px;color:var(--text-faint);margin-left:4px" title="Hat keine eigene Zeile in der UserProfiles-Liste — Zugriff kommt allein aus der Gruppe">nur Gruppe</span><div style="color:var(--text-dim);font-size:11px">${escape(e)}</div></td>
+                <td><span style="font-weight:500">${escape(nm)}</span> <span style="font-size:10px;color:var(--text-faint);margin-left:4px" title="Für diese E-Mail-Adresse gibt es keine Zeile in der UserProfiles-Liste — Zugriff kommt allein aus der Gruppe">nur Gruppe</span><div style="color:var(--text-dim);font-size:11px">${escape(e)}</div>${hinweis}</td>
                 <td>${g.admin ? `<span style="background:rgba(184,233,134,0.15);color:var(--accent);padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">Admin</span>` : `<span style="color:var(--text-dim);font-size:12px">User</span>`}</td>
                 <td style="text-align:center"><input type="checkbox" ${mitarbeiterDaten(e).entwickler ? "checked" : ""} onchange="rmEntwicklerFlag(${tkJs(e)}, this.checked)" title="In der Roadmap als Entwickler/in anbieten" style="accent-color:var(--accent);width:15px;height:15px;cursor:pointer"></td>
-                <td><select onchange="bgZuweisen(${tkJs(e)}, this.value)" style="padding:3px 6px;font-size:12px;max-width:140px;border-color:var(--accent)"><option value="">— keine —</option>${Object.keys(b.gruppen).map(id => `<option value="${escape(id)}" ${b.zuweisung[e] === id ? "selected" : ""}>${escape(b.gruppen[id].name)}</option>`).join("")}</select></td>
+                <td><select onchange="bgZuweisen(${tkJs(e)}, this.value)" style="padding:3px 6px;font-size:12px;max-width:140px;border-color:var(--accent)"><option value="">— keine —</option>${Object.keys(bg0.gruppen).map(id => `<option value="${escape(id)}" ${bg0.zuweisung[e] === id ? "selected" : ""}>${escape(bg0.gruppen[id].name)}</option>`).join("")}</select></td>
                 <td style="color:var(--text-faint);font-size:12px">— nur Gruppenrechte (${escape(g.name || "?")})</td>
                 <td style="text-align:right"><button class="btn btn-sm" onclick="openProfileModal(null, ${tkJs(e)})" title="Profil anlegen, um zusätzliche Bereiche individuell freizugeben">Profil anlegen</button> <button class="btn btn-sm" style="color:var(--danger)" onclick="bgZuweisen(${tkJs(e)}, '')" title="Freischaltung entfernen">✕</button></td>
-              </tr>`; }).join(""); })()}
+              </tr>` });
+            });
+            if (!zeilen.length) return `<tr><td colspan="6" class="empty">Noch keine Profile angelegt. Klick auf "+ Profil hinzufügen".</td></tr>`;
+            zeilen.sort((a, b) => a.sort.localeCompare(b.sort, "de"));
+            return zeilen.map(z => z.html).join("");
+          })()}
         </tbody>
       </table>
     </div>
