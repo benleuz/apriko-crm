@@ -531,6 +531,16 @@
   .rm-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 20px; font-size: 11px; cursor: pointer; background: var(--bg-card); color: var(--text-dim); user-select: none; }
   .rm-chip:hover { border-color: var(--accent); }
   .rm-chip.an { border-color: var(--accent); color: var(--text); background: var(--bg-elev); }
+  .rm-bar.rm-ms { background: transparent !important; box-shadow: none; overflow: visible; padding: 0; }
+  .rm-bar.rm-ms::before { content: ""; position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; transform: translate(-50%, -50%) rotate(45deg); background: var(--ms); border: 2px solid var(--bg-card); box-shadow: 0 0 0 2px var(--ms), 0 2px 6px rgba(0,0,0,.4); border-radius: 2px; }
+  .rm-bar.rm-ms .rm-ms-txt { position: absolute; left: calc(100% + 4px); top: 50%; transform: translateY(-50%); font-size: 11px; font-weight: 700; color: var(--text); background: var(--bg-card); padding: 1px 6px; border-radius: 4px; border: 1px solid var(--ms); white-space: nowrap; pointer-events: none; }
+  .rm-label.rm-ms-label { background: color-mix(in srgb, var(--ms) 14%, var(--bg-card)); border-left: 3px solid var(--ms); }
+  .rm-label.rm-ms-label .t { color: var(--text); }
+  .rm-mslinie { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed var(--ms); opacity: .45; z-index: 3; pointer-events: none; }
+  #rm-tip { position: fixed; z-index: 9999; max-width: 380px; background: var(--bg-elev, #222); color: var(--text); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.35); padding: 8px 10px; font-size: 12px; line-height: 1.45; pointer-events: none; white-space: normal; }
+  #rm-tip .tt { font-weight: 700; font-size: 12.5px; margin-bottom: 3px; }
+  #rm-tip .tm { color: var(--text-dim); font-size: 11px; }
+  #rm-tip .tn { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--border-soft); white-space: pre-wrap; }
   .rm-heutelinie { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: .65; z-index: 4; pointer-events: none; }
   .rm-badge { position: fixed; z-index: 300; background: var(--bg-elev); border: 1px solid var(--accent); border-radius: 4px; padding: 2px 8px; font-size: 11px; font-family: var(--font-mono); pointer-events: none; }
   .rm-last { display: flex; align-items: flex-end; height: 26px; }
@@ -1079,7 +1089,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.519.0</span> · <span id="app-build-date">16.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.525.0</span> · <span id="app-build-date">16.10.2026</span>
     </div>
   </aside>
 
@@ -2207,7 +2217,7 @@ async function startApp() {
 
     render();
     crmLoadMitarbeiter().then(() => { if (currentView === "meinetasks") render(); });
-    setTimeout(feierHinweisZeigen, 800);
+    setTimeout(() => feierHinweisZeigen(false), 1500);   // unabhängig von der Startseite
     mehrbenutzerStart();
   } catch (e) {
     console.error(e);
@@ -10069,46 +10079,71 @@ function rmParam() {
     { id: "api", name: "API", farbe: "#f4c95d" }, { id: "design", name: "Design", farbe: "#ce93d8" },
     { id: "infra", name: "Infra", farbe: "#80cbc4" }, { id: "doku", name: "Doku", farbe: "#ffcc80" }];
   if (!Array.isArray(r.tasks)) r.tasks = [];
-  /* Pläne (16.10.2026): mehrere Varianten der Roadmap — z.B. «Standard» intern und eine
-     angepasste Kundenversion. Jeder Task gehört zu genau einem Plan; «Plan kopieren»
-     dupliziert alle Tasks des aktuellen Plans, das Original bleibt unberührt. */
-  if (!Array.isArray(r.plaene) || !r.plaene.length) r.plaene = [{ id: "standard", name: "Standard" }];
-  r.tasks.forEach(t => { if (!t.plan) t.plan = "standard"; });
+  if (!Array.isArray(r.projekte) || !r.projekte.length) r.projekte = [{ id: "standard", name: "Roadmap" }, { id: "ws", name: "WS Projekt" }];
   return r;
 }
-let rmPlan = "standard";
-function rmPlanName(r) { const p = (r || rmParam()).plaene.find(x => x.id === rmPlan); return p ? p.name : rmPlan; }
-function rmPlanKopieren() {
-  const name = prompt("Name der Kopie (z.B. «WS Kundenversion»):", rmPlanName() + " — Kunde");
-  if (!name || !name.trim()) return;
+/* Projekte (16.10.2026, v1.519): Umschalter oben zeigt NUR die Tasks des gewählten
+   Projekts. Task-Feld `projekt`; ohne Feld gilt «standard» — ausser den aus dem
+   WS-Pflichtenheft importierten Tasks (Titel «WS FO · …» / «◆ G…»), die ohne
+   Speichern automatisch zu «ws» zählen. */
+let rmProjekt = (() => { try { return localStorage.getItem("rm-projekt") || "standard"; } catch (e) { return "standard"; } })();
+function rmProjektVon(t) { return t.projekt || (/^(WS FO ·|◆ G\d)/.test(String(t.titel || "")) ? "ws" : "standard"); }
+/* Bereich (16.10.2026, v1.520): «Entwicklung» vs. «Rollout» (Einführung/Support).
+   Task-Feld `bereich` = entwicklung | rollout | beide; ohne Feld abgeleitet:
+   Meilenstein → beide, Attribut Doku/Migration → rollout, sonst entwicklung. */
+const RM_BEREICHE = [["entwicklung", "Entwicklung"], ["rollout", "Rollout"], ["beide", "Beide"]];
+let rmBereich = (() => { try { return localStorage.getItem("rm-bereich") || "alle"; } catch (e) { return "alle"; } })();
+function rmBereichVon(t) { if (t.bereich) return t.bereich; const g = t.tags || [];
+  return g.includes("meilenstein") ? "beide" : (g.includes("doku") || g.includes("migration")) ? "rollout" : "entwicklung"; }
+function rmBereichPasst(t, b) { const x = rmBereichVon(t); return b === "alle" || x === b || x === "beide"; }
+function rmBereichWaehlen(b) { rmBereich = b; try { localStorage.setItem("rm-bereich", b); } catch (e) {} render(); }
+function rmProjektWaehlen(id) { rmProjekt = id; try { localStorage.setItem("rm-projekt", id); } catch (e) {} rmFilterDev.clear(); rmFilterTag.clear(); render(); }
+function rmProjektAnlegen() { const n = prompt("Name des neuen Projekts:"); if (!n || !n.trim()) return;
   return paramEdit(async () => {
     await parameterLaden(true); const r = rmParam();
-    const id = "p" + Date.now().toString(36);
-    r.plaene.push({ id, name: name.trim() });
-    const quelle = r.tasks.filter(t => (t.plan || "standard") === rmPlan);
-    quelle.forEach((t, i) => r.tasks.push(Object.assign({}, JSON.parse(JSON.stringify(t)), { id: "rm" + Date.now().toString(36) + i.toString(36), plan: id })));
+    let id = String(n).toLowerCase().replace(/[^a-z0-9äöü]+/g, "-").replace(/^-|-$/g, "") || "p";
+    if (r.projekte.some(p => p.id === id)) id += "-" + Date.now().toString(36);
+    r.projekte.push({ id, name: n.trim() }); await parameterSpeichern(); rmProjektWaehlen(id);
+  }); }
+/* Projekt kopieren (16.10.2026, v1.525): dupliziert das aktuelle Projekt mit ALLEN Tasks
+   (neue IDs) als neue Variante — z.B. «WS Projekt» → angepasste Kundenversion. Das
+   Original bleibt unberührt; Kopien bekommen das projekt-Feld explizit gesetzt. */
+function rmProjektName(r) { const p = (r || rmParam()).projekte.find(x => x.id === rmProjekt); return p ? p.name : rmProjekt; }
+function rmProjektKopieren() {
+  const name = prompt("Name der Kopie (z.B. «WS Kundenversion»):", rmProjektName() + " — Kunde");
+  if (!name || !name.trim()) return;
+  const quelleId = rmProjekt;
+  return paramEdit(async () => {
+    await parameterLaden(true); const r = rmParam();
+    let id = String(name).toLowerCase().replace(/[^a-z0-9äöü]+/g, "-").replace(/^-|-$/g, "") || "p";
+    if (r.projekte.some(p => p.id === id)) id += "-" + Date.now().toString(36);
+    r.projekte.push({ id, name: name.trim() });
+    const quelle = r.tasks.filter(t => rmProjektVon(t) === quelleId);
+    quelle.forEach((t, i) => r.tasks.push(Object.assign(JSON.parse(JSON.stringify(t)), { id: "rm" + Date.now().toString(36) + i.toString(36), projekt: id })));
     await parameterSpeichern();
-    rmPlan = id; render(); toast(`Plan «${name.trim()}» angelegt — ${quelle.length} Task(s) kopiert ✓`);
+    toast("Projekt «" + name.trim() + "» angelegt — " + quelle.length + " Task(s) kopiert ✓");
+    rmProjektWaehlen(id);
   });
 }
-function rmPlanUmbenennen() {
-  const neu = prompt("Neuer Name für diesen Plan:", rmPlanName());
+function rmProjektUmbenennen() {
+  const neu = prompt("Neuer Name für dieses Projekt:", rmProjektName());
   if (!neu || !neu.trim()) return;
   return paramEdit(async () => {
-    await parameterLaden(true); const p = rmParam().plaene.find(x => x.id === rmPlan); if (!p) return;
+    await parameterLaden(true); const p = rmParam().projekte.find(x => x.id === rmProjekt); if (!p) return;
     p.name = neu.trim(); await parameterSpeichern(); render();
   });
 }
-function rmPlanLoeschen() {
-  if (rmPlan === "standard") { toast("Der Standard-Plan kann nicht gelöscht werden.", true); return; }
-  const r = rmParam(); const n = r.tasks.filter(t => (t.plan || "standard") === rmPlan).length;
-  if (!confirm(`Plan «${rmPlanName(r)}» mit ${n} Task(s) endgültig löschen?\nDer Standard-Plan bleibt unberührt.`)) return;
+function rmProjektLoeschen() {
+  if (rmProjekt === "standard") { toast("Das Projekt «Roadmap» kann nicht gelöscht werden.", true); return; }
+  const r = rmParam(); const n = r.tasks.filter(t => rmProjektVon(t) === rmProjekt).length;
+  if (!confirm("Projekt «" + rmProjektName(r) + "» mit " + n + " Task(s) endgültig löschen?\nDie übrigen Projekte bleiben unberührt.")) return;
+  const weg = rmProjekt;
   return paramEdit(async () => {
     await parameterLaden(true); const r2 = rmParam();
-    r2.plaene = r2.plaene.filter(x => x.id !== rmPlan);
-    r2.tasks = r2.tasks.filter(t => (t.plan || "standard") !== rmPlan);
+    r2.projekte = r2.projekte.filter(x => x.id !== weg);
+    r2.tasks = r2.tasks.filter(t => rmProjektVon(t) !== weg);
     await parameterSpeichern();
-    rmPlan = "standard"; render(); toast("Plan gelöscht ✓");
+    toast("Projekt gelöscht ✓"); rmProjektWaehlen("standard");
   });
 }
 /* ISO-Kalenderwochen */
@@ -10165,6 +10200,22 @@ function rmEntwickler() {
 }
 function rmInitialen(name) { const p = String(name).replace(/[._-]+/g, " ").trim().split(/\s+/); return ((p[0] || "")[0] || "?").toUpperCase() + (p.length > 1 ? (p[p.length - 1][0] || "").toUpperCase() : (p[0] || "").slice(1, 2)); }
 function rmDevFarbe(email) { let h = 0; for (const c of email) h = (h * 31 + c.charCodeAt(0)) >>> 0; return "hsl(" + (h % 360) + ",45%,42%)"; }
+/* Ansicht (16.10.2026, v1.524): «Rollend» = ab aktueller KW 53 Wochen jahresübergreifend,
+   sonst Kalenderjahr. Tasks bleiben gespeichert als { jahr, von, bis } (ISO-KW innerhalb eines Jahres);
+   gezeichnet wird über Spaltenindex = Wochen ab dem Montag der ersten sichtbaren KW. */
+let rmRollend = (() => { try { return localStorage.getItem("rm-rollend") !== "0"; } catch (e) { return true; } })();
+let rmView = null;
+const RM_ROLL_WOCHEN = 53;
+function rmRollendSetzen(an, jahr) { rmRollend = an; if (jahr) rmJahr = jahr; try { localStorage.setItem("rm-rollend", an ? "1" : "0"); } catch (e) {} render(); }
+function rmViewBauen() {
+  if (rmRollend) { const h = rmHeuteKw(); return { rollend: true, start: rmKwMontag(h.jahr, h.kw), n: RM_ROLL_WOCHEN }; }
+  return { rollend: false, start: rmKwMontag(rmJahr, 1), n: rmKwAnzahl(rmJahr) };
+}
+function rmColVon(v, jahr, kw) { return Math.round((rmKwMontag(jahr, kw) - v.start) / (7 * 86400000)); }
+function rmColDatum(v, i) { const d = new Date(v.start); d.setUTCDate(d.getUTCDate() + 7 * i); return d; }
+function rmColKw(v, i) { const d = rmColDatum(v, i); const th = new Date(d); th.setUTCDate(d.getUTCDate() + 3); return { jahr: th.getUTCFullYear(), kw: rmKwVon(d) }; }
+function rmSpan(v, t) { return { a: rmColVon(v, t.jahr, t.von), b: rmColVon(v, t.jahr, t.bis) }; }
+function rmSichtbar(v, t) { const x = rmSpan(v, t); return x.b >= 0 && x.a <= v.n - 1; }
 function rmTagVon(id) { return rmParam().tags.find(t => t.id === id); }
 function rmTaskFarbe(t) { const tg = (t.tags || []).map(rmTagVon).find(Boolean); return tg ? tg.farbe : "var(--accent)"; }
 
@@ -10172,9 +10223,7 @@ function rmTaskFarbe(t) { const tg = (t.tags || []).map(rmTagVon).find(Boolean);
 function rmTaskSchreiben(task) { return paramEdit(async () => {
   await parameterLaden(true); const r = rmParam();
   const i = r.tasks.findIndex(x => x.id === task.id);
-  // Felder mergen statt ersetzen, damit plan (und künftige Felder) beim Bearbeiten erhalten bleiben (16.10.2026)
-  if (i >= 0) r.tasks[i] = Object.assign({}, r.tasks[i], task);
-  else { if (!task.plan) task.plan = rmPlan; r.tasks.push(task); }
+  if (i >= 0) r.tasks[i] = task; else r.tasks.push(task);
   await parameterSpeichern(); closeModal(); render();
 }); }
 function rmTaskLoeschen(id) { return paramEdit(async () => {
@@ -10184,9 +10233,9 @@ function rmTaskLoeschen(id) { return paramEdit(async () => {
   r.tasks = r.tasks.filter(x => x.id !== id);
   await parameterSpeichern(); closeModal(); render();
 }); }
-function rmTaskZeit(id, von, bis) { return paramEdit(async () => {
+function rmTaskZeit(id, von, bis, jahr) { return paramEdit(async () => {
   await parameterLaden(true); const t = rmParam().tasks.find(x => x.id === id); if (!t) return;
-  t.von = von; t.bis = bis;
+  t.von = von; t.bis = bis; if (jahr) t.jahr = jahr;
   await parameterSpeichern(); render();
 }); }
 function rmTagAnlegen(name) { return paramEdit(async () => {
@@ -10196,6 +10245,130 @@ function rmTagAnlegen(name) { return paramEdit(async () => {
   r.tags.push({ id, name: String(name).trim(), farbe: RM_FARBEN[r.tags.length % RM_FARBEN.length] });
   await parameterSpeichern();
 }); }
+
+/* ---------- Import aus Excel/CSV (16.10.2026, v1.518) ----------
+   Spalten (Kopfzeile, Reihenfolge egal): Titel*, Jahr*, Von KW*, Bis KW*,
+   Attribute, Status, Entwickler, Notiz — weitere Spalten (z.B. «Phase») werden
+   ignoriert. Schlüssel = Jahr + Titel: vorhandener Task wird aktualisiert,
+   sonst neu angelegt; nichts wird gelöscht. Leere Zellen «Entwickler»/«Notiz»
+   behalten die bestehenden Werte. Unbekannte Attribute werden angelegt.
+   Entwickler per E-Mail oder per Name (wie in der Entwicklerliste). */
+let rmImportDaten = null;
+function rmProjektName(id) { const p = rmParam().projekte.find(x => x.id === id); return p ? p.name : id; }
+function rmNormKey(jahr, titel) { return jahr + "|" + String(titel || "").trim().toLowerCase(); }
+function rmTagIdAusName(name) { return String(name).toLowerCase().replace(/[^a-z0-9äöü]+/g, "-").replace(/^-|-$/g, ""); }
+async function rmImportLesen(input) {
+  const f = input.files && input.files[0]; input.value = ""; if (!f) return;
+  let rows;
+  try {
+    await lcLoadXlsx();
+    const wb = /\.xlsx?$/i.test(f.name) ? window.XLSX.read(await f.arrayBuffer(), { type: "array" }) : window.XLSX.read(await f.text(), { type: "string", raw: true });
+    const blatt = wb.SheetNames.find(n => /roadmap/i.test(n)) || wb.SheetNames[0];
+    rows = window.XLSX.utils.sheet_to_json(wb.Sheets[blatt], { defval: "", raw: false });
+  } catch (e) { toast("Datei nicht lesbar: " + (e.message || e), true); return; }
+  if (!rows.length) { toast("Keine Zeilen gefunden", true); return; }
+  const head = Object.keys(rows[0]);
+  const sp = re => head.find(h => re.test(String(h).trim())) || "";
+  const c = { titel: sp(/^(titel|task|aufgabe)$/i), jahr: sp(/^jahr$/i), von: sp(/^von(\s*kw)?$/i), bis: sp(/^bis(\s*kw)?$/i),
+              tags: sp(/^(attribute?|tags?)$/i), status: sp(/^status$/i), dev: sp(/^entwickler/i), notiz: sp(/^(notiz|bemerkung)/i), projekt: sp(/^projekt$/i), bereich: sp(/^bereich$/i),
+              id: sp(/^id$/i), altTitel: sp(/^(bisheriger|alter)\s*titel$/i) };
+  const fehlt = ["titel", "jahr", "von", "bis"].filter(k => !c[k]);
+  if (fehlt.length) { toast("Spalte(n) fehlen: " + fehlt.map(k => ({ titel: "Titel", jahr: "Jahr", von: "Von KW", bis: "Bis KW" })[k]).join(", "), true); return; }
+  const r = rmParam(); const devs = rmEntwickler();
+  const devPerName = new Map(devs.map(d => [String(d.name).trim().toLowerCase(), d.email]));
+  const vorhanden = new Map(r.tasks.map(t => [rmNormKey(t.jahr, t.titel), t]));
+  const tagBekannt = tg => r.tags.find(g => g.id === tg.toLowerCase() || g.name.toLowerCase() === tg.toLowerCase() || g.id === rmTagIdAusName(tg));
+  const neueTags = new Map(), warn = [], zeilen = [], gesehen = new Set();
+  rows.forEach((row, i) => {
+    const nr = i + 2, titel = String(row[c.titel] || "").trim();
+    if (!titel) return;
+    const jahr = parseInt(row[c.jahr]); let von = parseInt(String(row[c.von]).replace(/\D/g, "")), bis = parseInt(String(row[c.bis]).replace(/\D/g, ""));
+    if (!(jahr >= 2000 && jahr <= 2100)) { warn.push(`Zeile ${nr}: Jahr ungültig — übersprungen`); return; }
+    const maxKw = rmKwAnzahl(jahr);
+    if (!(von >= 1 && von <= maxKw) || !(bis >= 1 && bis <= maxKw)) { warn.push(`Zeile ${nr}: KW ausserhalb 1–${maxKw} — übersprungen`); return; }
+    if (bis < von) [von, bis] = [bis, von];
+    const key = rmNormKey(jahr, titel);
+    /* Zuordnung (v1.522): 1. Spalte ID, 2. «Bisheriger Titel» + Jahr (Umbenennen), 3. Titel + Jahr */
+    const xid = String(c.id ? row[c.id] : "").trim();
+    const altT = String(c.altTitel ? row[c.altTitel] : "").trim();
+    const treffer = (xid && r.tasks.find(t => t.id === xid)) || (altT && vorhanden.get(rmNormKey(jahr, altT))) || vorhanden.get(key) || null;
+    if (gesehen.has(key)) { warn.push(`Zeile ${nr}: «${titel}» ${jahr} doppelt in der Datei — nur die erste Zeile zählt`); return; }
+    gesehen.add(key);
+    const tags = [];
+    String(c.tags ? row[c.tags] : "").split(/[,;\n]/).map(x => x.trim()).filter(Boolean).forEach(tg => {
+      const g = tagBekannt(tg); const id = g ? g.id : rmTagIdAusName(tg);
+      if (!id) return;
+      if (!g && !neueTags.has(id)) neueTags.set(id, tg);
+      if (!tags.includes(id)) tags.push(id);
+    });
+    let status = String(c.status ? row[c.status] : "").trim().toLowerCase();
+    if (!["geplant", "laufend", "fertig"].includes(status)) { if (status) warn.push(`Zeile ${nr}: Status «${status}» unbekannt → geplant`); status = "geplant"; }
+    const devZelle = String(c.dev ? row[c.dev] : "").trim(), entwickler = [];
+    devZelle.split(/[,;\n]/).map(x => x.trim()).filter(Boolean).forEach(d => {
+      const e = d.includes("@") ? d.toLowerCase() : devPerName.get(d.toLowerCase());
+      if (e) { if (!entwickler.includes(e)) entwickler.push(e); } else warn.push(`Zeile ${nr}: Entwickler «${d}» nicht gefunden — weggelassen`);
+    });
+    const notiz = String(c.notiz ? row[c.notiz] : "").trim();
+    const pz = String(c.projekt ? row[c.projekt] : "").trim().toLowerCase();
+    const pr = pz ? r.projekte.find(p => p.id === pz || p.name.toLowerCase() === pz) : null;
+    if (pz && !pr) warn.push(`Zeile ${nr}: Projekt «${pz}» unbekannt → ${rmProjektName(rmProjekt)}`);
+    const bz = String(c.bereich ? row[c.bereich] : "").trim().toLowerCase();
+    const be = bz ? (RM_BEREICHE.find(([b, n]) => b === bz || n.toLowerCase() === bz) || [])[0] : "";
+    if (bz && !be) warn.push(`Zeile ${nr}: Bereich «${bz}» unbekannt → automatisch`);
+    zeilen.push({ key, xid, altId: treffer ? treffer.id : "", alt: treffer, daten: { bereich: be || "", projekt: pr ? pr.id : rmProjekt, jahr, titel, von, bis, tags, status, notiz, entwickler, devLeer: !devZelle } });
+  });
+  if (!zeilen.length) { toast("Keine gültigen Tasks in der Datei" + (warn.length ? " — " + warn[0] : ""), true); return; }
+  rmImportDaten = { zeilen, neueTags: [...neueTags.entries()] };
+  const nNeu = zeilen.filter(z => !z.alt).length, nAkt = zeilen.length - nNeu;
+  const jahre = [...new Set(zeilen.map(z => z.daten.jahr))].sort().join(", ");
+  showModal("Roadmap-Import", `
+    <div style="font-size:13px;line-height:1.7">
+      <b>${escape(f.name)}</b><br>
+      ${nNeu} neue Task(s), ${nAkt} bestehende werden aktualisiert · Jahr(e): ${jahre}<br>
+      Projekt: <b>${[...new Set(zeilen.map(z => rmProjektName(z.daten.projekt)))].map(escape).join(", ")}</b>${c.projekt ? "" : ` <span style="color:var(--text-dim)">(aktuell gewähltes Projekt)</span>`}<br>
+      ${neueTags.size ? `Neue Attribute: ${[...neueTags.values()].map(escape).join(", ")}<br>` : ""}
+      <span style="color:var(--text-dim)">Gelöscht wird nichts. Leere Zellen «Entwickler»/«Notiz» behalten bestehende Werte.</span>
+    </div>
+    ${warn.length ? `<details style="margin-top:8px" open><summary style="cursor:pointer;color:var(--danger);font-size:12px">${warn.length} Hinweis(e)</summary><div style="font-size:11.5px;max-height:160px;overflow:auto;margin-top:4px">${warn.map(escape).join("<br>")}</div></details>` : ""}
+    <div style="font-size:11.5px;max-height:220px;overflow:auto;margin-top:10px;border-top:1px solid var(--border);padding-top:6px">
+      ${zeilen.map(z => `<div>${z.alt ? "↻" : "＋"} ${z.daten.jahr} · KW ${z.daten.von}–${z.daten.bis} · ${escape(z.daten.titel)}${z.alt && z.alt.titel !== z.daten.titel ? ` <span style="color:var(--text-dim)">(bisher «${escape(z.alt.titel)}»)</span>` : ""}</div>`).join("")}
+    </div>`,
+    [`<button class="btn" onclick="closeModal()">Abbrechen</button>`,
+     `<button class="btn btn-primary" onclick="rmImportAusfuehren()">${zeilen.length} Task(s) übernehmen</button>`]);
+}
+function rmImportAusfuehren() {
+  const imp = rmImportDaten; if (!imp) return;
+  return paramEdit(async () => {
+    await parameterLaden(true); const r = rmParam();
+    imp.neueTags.forEach(([id, name]) => { if (!r.tags.some(g => g.id === id)) r.tags.push({ id, name, farbe: RM_FARBEN[r.tags.length % RM_FARBEN.length] }); });
+    const byId = new Map(r.tasks.map(t => [t.id, t]));   // nach frischem Laden neu zuordnen (über die beim Lesen gefundene ID)
+    let neu = 0, akt = 0, idx = 0;
+    imp.zeilen.forEach(z => {
+      const d = z.daten, t = z.altId ? byId.get(z.altId) : null;
+      if (t) {
+        if (z.xid && z.xid !== t.id && !byId.has(z.xid)) { byId.delete(t.id); t.id = z.xid; byId.set(t.id, t); }   // ID aus Excel übernehmen
+        Object.assign(t, { projekt: d.projekt, titel: d.titel, von: d.von, bis: d.bis, tags: d.tags, status: d.status });
+        if (!d.devLeer) t.entwickler = d.entwickler;
+        if (d.notiz) t.notiz = d.notiz;
+        if (d.bereich) t.bereich = d.bereich;
+        akt++;
+      } else {
+        const nid = z.xid && !byId.has(z.xid) ? z.xid : "rm" + Date.now().toString(36) + (idx++).toString(36);
+        byId.set(nid, true);
+        r.tasks.push({ id: nid, projekt: d.projekt, jahr: d.jahr, titel: d.titel, von: d.von, bis: d.bis,
+                       entwickler: d.entwickler, tags: d.tags, status: d.status, notiz: d.notiz, ...(d.bereich ? { bereich: d.bereich } : {}) });
+        neu++;
+      }
+    });
+    await parameterSpeichern();
+    rmImportDaten = null; closeModal();
+    const jahre = [...new Set(imp.zeilen.map(z => z.daten.jahr))].sort();
+    if (!jahre.includes(rmJahr)) rmJahr = jahre[0];
+    const pjs = [...new Set(imp.zeilen.map(z => z.daten.projekt))]; if (!pjs.includes(rmProjekt)) { rmProjekt = pjs[0]; try { localStorage.setItem("rm-projekt", rmProjekt); } catch (e) {} }
+    toast(`Roadmap-Import: ${neu} neu, ${akt} aktualisiert`);
+    render();
+  });
+}
 
 /* ---------- Datenrettung über die SharePoint-Versionsgeschichte (15.10.2026) ----------
    SharePoint legt bei jedem Speichern von parameter_v2.json eine Version an. Hier werden die
@@ -10245,15 +10418,21 @@ function rmWiederherstellen(versionId) { return paramEdit(async () => {
 /* ---------- Bearbeiten-Dialog ---------- */
 function rmDialog(id) {
   const r = rmParam(); const neu = !id;
-  const h = rmHeuteKw(); const maxKw = rmKwAnzahl(rmJahr);
-  const t = neu ? { id: "rm" + Date.now().toString(36), jahr: rmJahr, plan: rmPlan, titel: "", von: (rmJahr === h.jahr ? h.kw : 1), bis: Math.min((rmJahr === h.jahr ? h.kw : 1) + 3, maxKw), entwickler: [], tags: [], status: "geplant", notiz: "" }
+  const h = rmHeuteKw(); const nj = rmRollend ? h.jahr : rmJahr; const maxKw0 = rmKwAnzahl(nj);
+  const t = neu ? { id: "rm" + Date.now().toString(36), projekt: rmProjekt, jahr: nj, titel: "", von: (nj === h.jahr ? h.kw : 1), bis: Math.min((nj === h.jahr ? h.kw : 1) + 3, maxKw0), entwickler: [], tags: [], status: "geplant", notiz: "" }
             : JSON.parse(JSON.stringify(r.tasks.find(x => x.id === id)));
   if (!t) return;
+  const maxKw = rmKwAnzahl(t.jahr);
   const kwOpt = sel => Array.from({ length: maxKw }, (_, i) => `<option value="${i + 1}" ${i + 1 === sel ? "selected" : ""}>KW ${i + 1} · ${rmKwMontag(t.jahr, i + 1).toISOString().slice(8, 10)}.${rmKwMontag(t.jahr, i + 1).toISOString().slice(5, 7)}.</option>`).join("");
   const devs = rmEntwickler();
   showModal(neu ? "Neuer Roadmap-Task" : "Task bearbeiten", `
-    <div class="field"><label>Titel *</label><input id="rm-titel" value="${escape(t.titel)}" placeholder="z.B. Rapportscan v2"></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+    <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px">
+      <div class="field"><label>Titel *</label><input id="rm-titel" value="${escape(t.titel)}" placeholder="z.B. Rapportscan v2"></div>
+      <div class="field"><label>Projekt</label><select id="rm-projekt">${r.projekte.map(p => `<option value="${escape(p.id)}" ${p.id === (t.projekt || rmProjektVon(t)) ? "selected" : ""}>${escape(p.name)}</option>`).join("")}</select></div>
+      <div class="field"><label>Bereich</label><select id="rm-bereich">${RM_BEREICHE.map(([b, n]) => `<option value="${b}" ${b === rmBereichVon(t) ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+    </div>
+    <div style="display:grid;grid-template-columns:.8fr 1fr 1fr 1fr;gap:10px">
+      <div class="field"><label>Jahr</label><select id="rm-jahr" onchange="rmDialogTags('${t.id}')">${[h.jahr - 1, h.jahr, h.jahr + 1, h.jahr + 2].concat(t.jahr).filter((x, i, a) => a.indexOf(x) === i).sort().map(j => `<option value="${j}" ${j === t.jahr ? "selected" : ""}>${j}</option>`).join("")}</select></div>
       <div class="field"><label>Von</label><select id="rm-von">${kwOpt(t.von)}</select></div>
       <div class="field"><label>Bis</label><select id="rm-bis">${kwOpt(t.bis)}</select></div>
       <div class="field"><label>Status</label><select id="rm-status">${["geplant", "laufend", "fertig"].map(s => `<option value="${s}" ${t.status === s ? "selected" : ""}>${s[0].toUpperCase() + s.slice(1)}</option>`).join("")}</select></div>
@@ -10275,7 +10454,7 @@ function rmDialog(id) {
     <div class="field"><label>Notiz</label><textarea id="rm-notiz" rows="2">${escape(t.notiz || "")}</textarea></div>`,
     [ neu ? "" : `<button class="btn" style="color:var(--danger);border-color:var(--danger)" onclick="rmTaskLoeschen('${t.id}')">Löschen</button>`,
       `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
-      `<button class="btn btn-primary" onclick="rmDialogSpeichern('${t.id}', ${neu}, ${t.jahr})">Speichern</button>` ].filter(Boolean));
+      `<button class="btn btn-primary" onclick="rmDialogSpeichern('${t.id}', ${neu}, parseInt(document.getElementById('rm-jahr').value) || ${t.jahr})">Speichern</button>` ].filter(Boolean));
 }
 function rmDialogTags(taskId) {   // nach «+ Attribut»: nur die Chip-Zeile auffrischen, Eingaben behalten
   const titel = document.getElementById("rm-titel") ? document.getElementById("rm-titel").value : null;
@@ -10286,21 +10465,27 @@ function rmDialogTags(taskId) {   // nach «+ Attribut»: nur die Chip-Zeile auf
   basis.titel = titel !== null ? titel : (basis.titel || ""); basis.tags = gewaehlt; basis.entwickler = devs;
   basis.von = parseInt(document.getElementById("rm-von").value) || basis.von; basis.bis = parseInt(document.getElementById("rm-bis").value) || basis.bis;
   basis.status = document.getElementById("rm-status").value || basis.status; basis.notiz = document.getElementById("rm-notiz").value || "";
+  const pj = document.getElementById("rm-projekt"); if (pj) basis.projekt = pj.value;
+  const bj = document.getElementById("rm-bereich"); if (bj) basis.bereich = bj.value;
+  const jj = document.getElementById("rm-jahr"); if (jj) basis.jahr = parseInt(jj.value) || basis.jahr;
+  const mk = rmKwAnzahl(basis.jahr); basis.von = Math.min(basis.von, mk); basis.bis = Math.min(basis.bis, mk);
   const neu = !t;
-  const alt = r.tasks; if (neu) r.tasks = alt.concat([basis]);
-  try { rmDialog(taskId); const el = document.getElementById("rm-titel"); if (el) el.value = basis.titel; } finally { if (neu) r.tasks = alt; }
+  const alt = r.tasks; r.tasks = neu ? alt.concat([basis]) : alt.map(x => x.id === taskId ? basis : x);
+  try { rmDialog(taskId); const el = document.getElementById("rm-titel"); if (el) el.value = basis.titel; } finally { r.tasks = alt; }
   // Auswahl wiederherstellen
   document.querySelectorAll(".rm-dev-cb").forEach(c => { c.checked = devs.includes(c.value); c.closest("label").classList.toggle("an", c.checked); });
   document.querySelectorAll(".rm-tag-cb").forEach(c => { c.checked = gewaehlt.includes(c.value); c.closest("label").classList.toggle("an", c.checked); });
   document.getElementById("rm-von").value = basis.von; document.getElementById("rm-bis").value = basis.bis;
   document.getElementById("rm-status").value = basis.status; document.getElementById("rm-notiz").value = basis.notiz;
+  if (basis.projekt && document.getElementById("rm-projekt")) document.getElementById("rm-projekt").value = basis.projekt;
+  if (basis.bereich && document.getElementById("rm-bereich")) document.getElementById("rm-bereich").value = basis.bereich;
 }
 function rmDialogSpeichern(id, neu, jahr) {
   const titel = (document.getElementById("rm-titel").value || "").trim();
   if (!titel) { toast("Titel fehlt", true); return; }
   let von = parseInt(document.getElementById("rm-von").value), bis = parseInt(document.getElementById("rm-bis").value);
   if (bis < von) [von, bis] = [bis, von];
-  rmTaskSchreiben({ id, jahr, titel, von, bis,
+  rmTaskSchreiben({ id, projekt: (document.getElementById("rm-projekt") || {}).value || rmProjekt, bereich: (document.getElementById("rm-bereich") || {}).value || undefined, jahr, titel, von, bis,
     entwickler: Array.from(document.querySelectorAll(".rm-dev-cb:checked")).map(c => c.value),
     tags: Array.from(document.querySelectorAll(".rm-tag-cb:checked")).map(c => c.value),
     status: document.getElementById("rm-status").value,
@@ -10311,99 +10496,160 @@ function rmDialogSpeichern(id, neu, jahr) {
 let rmDrag = null;
 function rmBarDown(ev, id) {
   if (ev.button !== 0) return;
-  const bar = ev.currentTarget; const t = rmParam().tasks.find(x => x.id === id); if (!t) return;
+  const bar = ev.currentTarget; const t = rmParam().tasks.find(x => x.id === id); if (!t || !rmView) return;
   const griff = ev.target.classList.contains("griff") ? (ev.target.classList.contains("l") ? "l" : "r") : "m";
-  rmDrag = { id, griff, startX: ev.clientX, von0: t.von, bis0: t.bis, von: t.von, bis: t.bis, bar, bewegt: false, maxKw: rmKwAnzahl(rmJahr) };
+  const x = rmSpan(rmView, t);
+  rmDrag = { id, griff, startX: ev.clientX, a0: x.a, b0: x.b, a: x.a, b: x.b, bar, bewegt: false, ms: bar.classList.contains("rm-ms") };
   try { bar.setPointerCapture(ev.pointerId); } catch (e) { /* ältere Browser/Tests ohne Pointer Capture */ }
-  bar.classList.add("drag");
+  bar.classList.add("drag"); rmTipWeg();
   ev.preventDefault();
 }
 function rmBarMove(ev) {
   if (!rmDrag) return;
   const d = Math.round((ev.clientX - rmDrag.startX) / RM_KW_W);
   if (Math.abs(ev.clientX - rmDrag.startX) > 4) rmDrag.bewegt = true;
-  let von = rmDrag.von0, bis = rmDrag.bis0;
-  if (rmDrag.griff === "m") { const len = bis - von; von = Math.min(Math.max(1, von + d), rmDrag.maxKw - len); bis = von + len; }
-  else if (rmDrag.griff === "l") { von = Math.min(Math.max(1, von + d), bis); }
-  else { bis = Math.max(Math.min(rmDrag.maxKw, bis + d), von); }
-  rmDrag.von = von; rmDrag.bis = bis;
-  rmDrag.bar.style.left = ((von - 1) * RM_KW_W + 2) + "px";
-  rmDrag.bar.style.width = ((bis - von + 1) * RM_KW_W - 4) + "px";
-  let b = document.getElementById("rm-dragbadge");
-  if (!b) { b = document.createElement("div"); b.id = "rm-dragbadge"; b.className = "rm-badge"; document.body.appendChild(b); }
-  b.textContent = "KW " + von + " – " + bis;
-  b.style.left = (ev.clientX + 12) + "px"; b.style.top = (ev.clientY - 28) + "px";
+  let a = rmDrag.a0, b = rmDrag.b0; const max = rmView.n - 1;
+  if (rmDrag.griff === "m") { const len = b - a; a = Math.min(Math.max(rmView.rollend ? -len : 0, a + d), max - (rmView.rollend ? 0 : len)); b = a + len; }
+  else if (rmDrag.griff === "l") { a = Math.min(Math.max(0, a + d), b); }
+  else { b = Math.max(Math.min(max, b + d), a); }
+  rmDrag.a = a; rmDrag.b = b;
+  rmDrag.bar.style.left = (a * RM_KW_W + 2) + "px";
+  if (!rmDrag.ms) rmDrag.bar.style.width = ((b - a + 1) * RM_KW_W - 4) + "px";
+  const ka = rmColKw(rmView, a), kb = rmColKw(rmView, b);
+  let bd = document.getElementById("rm-dragbadge");
+  if (!bd) { bd = document.createElement("div"); bd.id = "rm-dragbadge"; bd.className = "rm-badge"; document.body.appendChild(bd); }
+  bd.textContent = ka.jahr !== kb.jahr ? "⚠ über Jahreswechsel — nicht möglich" : "KW " + ka.kw + (kb.kw !== ka.kw ? " – " + kb.kw : "") + (rmView.rollend ? " · " + ka.jahr : "");
+  bd.style.left = (ev.clientX + 12) + "px"; bd.style.top = (ev.clientY - 28) + "px";
 }
 function rmBarUp(ev, id) {
   if (!rmDrag) return;
-  const { bewegt, von, bis, von0, bis0, bar } = rmDrag; rmDrag = null;
+  const { bewegt, a, b, a0, b0, bar } = rmDrag; rmDrag = null;
   bar.classList.remove("drag");
-  const b = document.getElementById("rm-dragbadge"); if (b) b.remove();
+  const bd = document.getElementById("rm-dragbadge"); if (bd) bd.remove();
   if (!bewegt) { rmDialog(id); return; }
-  if (von !== von0 || bis !== bis0) rmTaskZeit(id, von, bis);
+  if (a === a0 && b === b0) return;
+  const ka = rmColKw(rmView, a), kb = rmColKw(rmView, b);
+  if (ka.jahr !== kb.jahr) { toast("Ein Task kann nicht über den Jahreswechsel laufen — bitte in zwei Tasks aufteilen (je Jahr einer).", true); render(); return; }
+  rmTaskZeit(id, ka.kw, kb.kw, ka.jahr);
 }
+
+/* ---------- Rollover (16.10.2026, v1.521): ganzer Text beim Überfahren ---------- */
+function rmTipZeigen(ev, id) {
+  if (rmDrag) return;
+  const t = rmParam().tasks.find(x => x.id === id); if (!t) return;
+  const dat = kw => { const d = rmKwMontag(t.jahr, kw); return d.toISOString().slice(8, 10) + "." + d.toISOString().slice(5, 7) + "."; };
+  const ende = (() => { const d = rmKwMontag(t.jahr, t.bis); d.setUTCDate(d.getUTCDate() + 4); return d.toISOString().slice(8, 10) + "." + d.toISOString().slice(5, 7) + "."; })();
+  const tags = (t.tags || []).map(rmTagVon).filter(Boolean).map(g => `<span class="rm-dot" style="display:inline-block;background:${g.farbe};margin-right:3px"></span>${escape(g.name)}`).join(" · ");
+  const devs = (t.entwickler || []).map(e => { const d = rmEntwickler().find(x => x.email === e); return escape(d ? d.name : e); }).join(", ");
+  const ber = (RM_BEREICHE.find(([b]) => b === rmBereichVon(t)) || [, ""])[1];
+  let tip = document.getElementById("rm-tip");
+  if (!tip) { tip = document.createElement("div"); tip.id = "rm-tip"; document.body.appendChild(tip); }
+  tip.innerHTML = `<div class="tt">${escape(t.titel)}</div>
+    <div class="tm">KW ${t.von}${t.bis !== t.von ? "–" + t.bis : ""} ${t.jahr} · ${dat(t.von)}–${ende} · ${t.status[0].toUpperCase() + t.status.slice(1)}${ber ? " · " + ber : ""}</div>
+    ${tags ? `<div class="tm" style="margin-top:2px">${tags}</div>` : ""}
+    ${devs ? `<div class="tm" style="margin-top:2px">👤 ${devs}</div>` : ""}
+    ${t.notiz ? `<div class="tn">${escape(t.notiz)}</div>` : ""}`;
+  rmTipPos(ev);
+}
+function rmTipPos(ev) {
+  const tip = document.getElementById("rm-tip"); if (!tip) return;
+  if (rmDrag) { tip.remove(); return; }
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = ev.clientX + 14, y = ev.clientY + 16;
+  if (x + w > window.innerWidth - 8) x = Math.max(8, ev.clientX - w - 14);
+  if (y + h > window.innerHeight - 8) y = Math.max(8, ev.clientY - h - 12);
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+}
+function rmTipWeg() { const tip = document.getElementById("rm-tip"); if (tip) tip.remove(); }
 
 /* ---------- Ansicht ---------- */
 async function renderRoadmap(el) {
+  rmTipWeg();
   if (!crmParameter) { await parameterLaden(false); }
   if (crmMitarbeiter === null) { try { await crmLoadMitarbeiter(); } catch (e0) {} }   // Mitarbeiterstamm für die Entwicklerliste
-  const r = rmParam(); const maxKw = rmKwAnzahl(rmJahr); const heute = rmHeuteKw();
-  if (!r.plaene.some(p => p.id === rmPlan)) rmPlan = r.plaene[0].id;
-  const imPlan = r.tasks.filter(t => (t.plan || "standard") === rmPlan);
-  const jahre = [...new Set([heute.jahr - 1, heute.jahr, heute.jahr + 1, heute.jahr + 2, ...imPlan.map(t => t.jahr)])].sort();
+  const r = rmParam(); const heute = rmHeuteKw();
+  const v = rmView = rmViewBauen(); const maxKw = v.n;
+  if (!r.projekte.some(p => p.id === rmProjekt)) rmProjekt = "standard";
+  const ptasks = r.tasks.filter(t => rmProjektVon(t) === rmProjekt);
+  const jahre = [...new Set([heute.jahr - 1, heute.jahr, heute.jahr + 1, heute.jahr + 2, ...ptasks.map(t => t.jahr)])].sort();
   document.getElementById("view-actions").innerHTML = `
-    <select onchange="rmPlan=this.value;render()" style="padding:4px 8px;${rmPlan === "standard" ? "" : "border-color:var(--accent);color:var(--accent);"}" title="Plan-Variante — «⧉» kopiert den aktuellen Plan als neue Variante (z.B. Kundenversion)">${r.plaene.map(p => `<option value="${escape(p.id)}" ${p.id === rmPlan ? "selected" : ""}>${escape(p.name)}</option>`).join("")}</select>
-    <button class="btn btn-sm" onclick="rmPlanKopieren()" title="Aktuellen Plan mit allen Tasks als neue Variante kopieren — das Original bleibt unberührt">⧉</button>
-    ${rmPlan !== "standard" ? `<button class="btn btn-sm" onclick="rmPlanUmbenennen()" title="Plan umbenennen">✎</button><button class="btn btn-sm" style="color:var(--danger)" onclick="rmPlanLoeschen()" title="Diesen Plan samt seinen Tasks löschen">✕</button>` : ""}
-    <select onchange="rmJahr=parseInt(this.value);render()" style="padding:4px 8px;font-weight:600">${jahre.map(j => `<option value="${j}" ${j === rmJahr ? "selected" : ""}>${j}</option>`).join("")}</select>
+    <span style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-right:6px">${r.projekte.map(p => {
+      const n = r.tasks.filter(t => rmProjektVon(t) === p.id).length;
+      return `<button class="btn btn-sm ${p.id === rmProjekt ? "btn-primary" : ""}" style="border:0;border-radius:0" onclick="rmProjektWaehlen('${escape(p.id)}')">${escape(p.name)} <span style="opacity:.65">${n}</span></button>`; }).join("")}<button class="btn btn-sm" style="border:0;border-radius:0" onclick="rmProjektAnlegen()" title="Neues Projekt anlegen">+</button><button class="btn btn-sm" style="border:0;border-radius:0" onclick="rmProjektKopieren()" title="Aktuelles Projekt mit allen Tasks als neue Variante kopieren (z.B. Kundenversion) — das Original bleibt unberührt">⧉</button>${rmProjekt !== "standard" ? `<button class="btn btn-sm" style="border:0;border-radius:0" onclick="rmProjektUmbenennen()" title="Projekt umbenennen">✎</button><button class="btn btn-sm" style="border:0;border-radius:0;color:var(--danger)" onclick="rmProjektLoeschen()" title="Dieses Projekt samt seinen Tasks löschen">✕</button>` : ""}</span>
+    <span style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-right:6px">${[["alle", "Alle"], ["entwicklung", "Entwicklung"], ["rollout", "Rollout"]].map(([b, n]) =>
+      `<button class="btn btn-sm ${b === rmBereich ? "btn-primary" : ""}" style="border:0;border-radius:0" onclick="rmBereichWaehlen('${b}')">${n} <span style="opacity:.65">${ptasks.filter(t => rmSichtbar(v, t) && rmBereichPasst(t, b)).length}</span></button>`).join("")}</span>
+    <span style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-right:6px">
+      <button class="btn btn-sm ${rmRollend ? "btn-primary" : ""}" style="border:0;border-radius:0" onclick="rmRollendSetzen(true)" title="Ab der aktuellen KW 52 Wochen voraus, über den Jahreswechsel">⟳ Rollend</button>
+      <select onchange="rmRollendSetzen(false, parseInt(this.value))" style="padding:4px 8px;font-weight:600;border:0;border-radius:0;${rmRollend ? "opacity:.6" : ""}" title="Kalenderjahr anzeigen">${rmRollend ? `<option selected disabled>Jahr …</option>` : ""}${jahre.map(j => `<option value="${j}" ${!rmRollend && j === rmJahr ? "selected" : ""}>${j}</option>`).join("")}</select>
+    </span>
     <button class="btn btn-sm" onclick="rmWiederherstellenZeigen()" title="Frühere Stände der Roadmap aus der SharePoint-Versionsgeschichte zurückholen">🕘 Frühere Stände</button>
+    <label class="btn btn-sm" style="cursor:pointer" title="Tasks aus Excel/CSV importieren: Titel, Jahr, Von KW, Bis KW, Attribute, Status, Entwickler, Notiz — gleicher Titel im gleichen Jahr wird aktualisiert, sonst neu angelegt, nichts wird gelöscht">⇧ Excel<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="rmImportLesen(this)"></label>
     <button class="btn btn-sm btn-primary" onclick="rmDialog()">+ Task</button>`;
 
-  const alle = imPlan.filter(t => t.jahr === rmJahr).sort((a, b) => a.von - b.von || a.bis - b.bis || String(a.titel).localeCompare(b.titel));
+  const alle = ptasks.filter(t => rmSichtbar(v, t) && rmBereichPasst(t, rmBereich)).map(t => [t, rmSpan(v, t)])
+    .sort((x, y) => x[1].a - y[1].a || x[1].b - y[1].b || String(x[0].titel).localeCompare(y[0].titel)).map(x => x[0]);
   const tasks = alle.filter(t => (!rmFilterDev.size || (t.entwickler || []).some(e => rmFilterDev.has(e)))
                              && (!rmFilterTag.size || (t.tags || []).some(g => rmFilterTag.has(g))));
   const devs = rmEntwickler().filter(d => alle.some(t => (t.entwickler || []).includes(d.email)));
   const tagsImJahr = r.tags.filter(g => alle.some(t => (t.tags || []).includes(g.id)));
   const chip = (an, click, inhalt, titel) => `<span class="rm-chip ${an ? "an" : ""}" onclick="${click}" title="${escape(titel || "")}">${inhalt}</span>`;
   const filterHtml = (devs.length || tagsImJahr.length) ? `<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px">
-      ${devs.map(d => chip(rmFilterDev.has(d.email), `rmFilterDev.has('${escape(d.email)}')?rmFilterDev.delete('${escape(d.email)}'):rmFilterDev.add('${escape(d.email)}');render()`, `<span class="rm-av" style="background:${rmDevFarbe(d.email)}">${escape(rmInitialen(d.name))}</span>${escape(mitarbeiterKurzname(d.email))}`, d.name + " · " + d.email)).join("")}
+      ${devs.map(d => chip(rmFilterDev.has(d.email), `rmFilterDev.has('${escape(d.email)}')?rmFilterDev.delete('${escape(d.email)}'):rmFilterDev.add('${escape(d.email)}');render()`, `<span class="rm-av" style="background:${rmDevFarbe(d.email)}">${escape(rmInitialen(d.name))}</span>${escape(mitarbeiterKurzname(d.email))}`, d.email)).join("")}
       ${tagsImJahr.length ? `<span style="color:var(--border);margin:0 2px">|</span>` : ""}
       ${tagsImJahr.map(g => chip(rmFilterTag.has(g.id), `rmFilterTag.has('${g.id}')?rmFilterTag.delete('${g.id}'):rmFilterTag.add('${g.id}');render()`, `<span class="rm-dot" style="background:${g.farbe}"></span>${escape(g.name)}`)).join("")}
       ${(rmFilterDev.size || rmFilterTag.size) ? `<a href="#" onclick="rmFilterDev.clear();rmFilterTag.clear();render();return false" style="font-size:11px;color:var(--danger)">✕ Filter löschen</a>` : ""}
     </div>` : "";
 
-  // Monats-Kopf: KWs nach Monat (des Donnerstags) gruppieren
+  // Monats-Kopf: KWs nach Monat (des Donnerstags) gruppieren; rollend mit Jahreszahl
   const monate = [];
-  for (let kw = 1; kw <= maxKw; kw++) {
-    const dow = rmKwMontag(rmJahr, kw); dow.setUTCDate(dow.getUTCDate() + 3);
-    const m = dow.toLocaleDateString("de-CH", { month: "short", timeZone: "UTC" });
-    if (monate.length && monate[monate.length - 1].name === m) monate[monate.length - 1].n++;
-    else monate.push({ name: m, n: 1 });
+  for (let i = 0; i < maxKw; i++) {
+    const dow = rmColDatum(v, i); dow.setUTCDate(dow.getUTCDate() + 3);
+    const key = dow.getUTCFullYear() + "-" + dow.getUTCMonth();
+    let m = dow.toLocaleDateString("de-CH", { month: "short", timeZone: "UTC" });
+    if (v.rollend && (dow.getUTCMonth() === 0 || !monate.length)) m += " " + dow.getUTCFullYear();
+    if (monate.length && monate[monate.length - 1].key === key) monate[monate.length - 1].n++;
+    else monate.push({ key, name: m, n: 1, neuJahr: monate.length > 0 && dow.getUTCMonth() === 0 });
   }
-  const istHeuteJahr = rmJahr === heute.jahr;
-  const heuteX = istHeuteJahr ? ((heute.kw - 1) + heute.tagInWoche / 7) * RM_KW_W : -1;
-  const spur = inhalt => `<div class="rm-track lanes" style="width:${maxKw * RM_KW_W}px;--rm-kw:${RM_KW_W}px">${inhalt}</div>`;
+  const kws = Array.from({ length: maxKw }, (_, i) => rmColKw(v, i));
+  const hCol = rmColVon(v, heute.jahr, heute.kw);
+  const heuteX = hCol >= 0 && hCol < maxKw ? (hCol + heute.tagInWoche / 7) * RM_KW_W : -1;
+  const spur = inhalt => `<div class="rm-track lanes" style="width:${maxKw * RM_KW_W}px;--rm-kw:${RM_KW_W}px;overflow:${v.rollend ? "hidden" : "visible"}">${inhalt}</div>`;
 
   const zeilen = tasks.map(t => {
     const farbe = rmTaskFarbe(t);
     const avs = (t.entwickler || []).slice(0, 4).map(e => { const d = rmEntwickler().find(x => x.email === e); return `<span class="rm-av" style="background:${rmDevFarbe(e)}" title="${escape(e)}">${escape(rmInitialen(d ? d.name : e))}</span>`; }).join("");
     const dots = (t.tags || []).map(g => { const tg = rmTagVon(g); return tg ? `<span class="rm-dot" style="background:${tg.farbe}" title="${escape(tg.name)}"></span>` : ""; }).join("");
-    const breit = (t.bis - t.von + 1) * RM_KW_W - 4;
+    const sp = rmSpan(v, t);
+    const breit = (sp.b - sp.a + 1) * RM_KW_W - 4;
+    const ms = (t.tags || []).includes("meilenstein");
+    const tipAttr = `onmouseenter="rmTipZeigen(event,'${t.id}')" onmousemove="rmTipPos(event)" onmouseleave="rmTipWeg()"`;
+    if (ms) return `<div class="rm-row">
+      <div class="rm-label rm-ms-label" style="--ms:${farbe}" onclick="rmDialog('${t.id}')" ${tipAttr}>
+        <span class="t">${t.status === "fertig" ? "✓ " : ""}${escape(t.titel)}</span>
+        <span class="m" style="font-size:9.5px;color:var(--text-dim)">Meilenstein · KW ${t.von}${v.rollend ? "/" + String(t.jahr).slice(2) : ""}${avs ? "<span style='width:4px'></span>" + avs : ""}</span>
+      </div>
+      ${spur(`<div class="rm-bar rm-ms ${t.status === "fertig" ? "fertig" : ""}" data-rmid="${t.id}" ${tipAttr}
+         style="left:${sp.a * RM_KW_W + 2}px;width:${RM_KW_W - 4}px;--ms:${farbe}"
+         onpointerdown="rmBarDown(event,'${t.id}')" onpointermove="rmBarMove(event)" onpointerup="rmBarUp(event,'${t.id}')" onpointercancel="rmBarUp(event,'${t.id}')">
+        <span class="rm-ms-txt">${escape(t.titel.replace(/^◆\s*/, ""))}</span>
+      </div>`)}
+    </div>`;
     return `<div class="rm-row">
-      <div class="rm-label" onclick="rmDialog('${t.id}')" title="${escape(t.titel)}${t.notiz ? "\n" + escape(t.notiz) : ""}">
+      <div class="rm-label" onclick="rmDialog('${t.id}')" ${tipAttr}>
         <span class="t">${t.status === "fertig" ? "✓ " : ""}${escape(t.titel)}</span>
         <span class="m">${dots}${dots && avs ? "<span style='width:4px'></span>" : ""}${avs}${t.status === "laufend" ? `<span style="font-size:9px;color:var(--accent);margin-left:4px">● läuft</span>` : ""}</span>
       </div>
-      ${spur(`<div class="rm-bar ${t.status === "fertig" ? "fertig" : ""}" data-rmid="${t.id}"
-         style="left:${(t.von - 1) * RM_KW_W + 2}px;width:${breit}px;background:${farbe}"
+      ${spur(`<div class="rm-bar ${t.status === "fertig" ? "fertig" : ""}" data-rmid="${t.id}" ${tipAttr}
+         style="left:${sp.a * RM_KW_W + 2}px;width:${breit}px;background:${farbe}"
          onpointerdown="rmBarDown(event,'${t.id}')" onpointermove="rmBarMove(event)" onpointerup="rmBarUp(event,'${t.id}')" onpointercancel="rmBarUp(event,'${t.id}')">
-        <span class="griff l"></span>${breit > 70 ? `<span style="overflow:hidden;text-overflow:ellipsis">${escape(t.titel)}</span>` : ""}${breit > 120 ? avs : ""}<span class="griff r"></span>
+        <span class="griff l"></span>${breit > 70 ? `<span style="overflow:hidden;text-overflow:ellipsis;${sp.a < 0 ? `padding-left:${-sp.a * RM_KW_W}px` : ""}">${escape(t.titel)}</span>` : ""}${breit > 120 ? avs : ""}<span class="griff r"></span>
       </div>`)}
     </div>`;
   }).join("");
 
   // Auslastung: Tasks pro KW (gefilterte Menge)
-  const last = Array.from({ length: maxKw }, (_, i) => tasks.filter(t => t.von <= i + 1 && t.bis >= i + 1).length);
+  const spans = tasks.map(t => rmSpan(v, t));
+  const last = Array.from({ length: maxKw }, (_, i) => spans.filter(x => x.a <= i && x.b >= i).length);
   const maxLast = Math.max(1, ...last);
   const lastHtml = `<div class="rm-row">
     <div class="rm-label" style="cursor:default"><span class="t" style="color:var(--text-dim);font-weight:400">Auslastung</span><span class="m" style="font-size:9px;color:var(--text-faint)">Tasks pro KW</span></div>
@@ -10414,18 +10660,19 @@ async function renderRoadmap(el) {
     <div class="rm-wrap">
       <div class="rm-grid" style="grid-template-columns:230px ${maxKw * RM_KW_W}px">
         <div class="rm-head">
-          <div class="rm-corner" style="grid-row:1/3;display:flex;align-items:flex-end;padding:6px 12px;font-size:11px;color:var(--text-dim)">${tasks.length} von ${alle.length} Tasks · ${rmJahr}</div>
-          <div class="rm-months">${monate.map(m => `<div class="rm-month" style="width:${m.n * RM_KW_W}px">${escape(m.name)}</div>`).join("")}</div>
-          <div class="rm-kws">${Array.from({ length: maxKw }, (_, i) => `<div class="rm-kw ${istHeuteJahr && i + 1 === heute.kw ? "heute" : ""}" style="width:${RM_KW_W}px">${i + 1}</div>`).join("")}</div>
+          <div class="rm-corner" style="grid-row:1/3;display:flex;align-items:flex-end;padding:6px 12px;font-size:11px;color:var(--text-dim)">${tasks.length} von ${alle.length} Tasks · ${v.rollend ? `KW ${kws[0].kw}/${String(kws[0].jahr).slice(2)} – ${kws[maxKw - 1].kw}/${String(kws[maxKw - 1].jahr).slice(2)}` : rmJahr}</div>
+          <div class="rm-months">${monate.map(m => `<div class="rm-month" style="width:${m.n * RM_KW_W}px;${m.neuJahr ? "border-left:2px solid var(--accent);color:var(--text);font-weight:700" : ""}">${escape(m.name)}</div>`).join("")}</div>
+          <div class="rm-kws">${kws.map((k, i) => `<div class="rm-kw ${i === hCol ? "heute" : ""}" style="width:${RM_KW_W}px;${v.rollend && k.kw === 1 && i > 0 ? "border-left:2px solid var(--accent)" : ""}">${k.kw}</div>`).join("")}</div>
         </div>
         ${zeilen || `<div class="rm-row"><div class="rm-label" style="cursor:default"><span class="t" style="color:var(--text-dim);font-weight:400">Noch keine Tasks</span></div>${spur(`<div style="padding:10px 14px;font-size:12px;color:var(--text-dim)">«+ Task» oben rechts — oder Jahr wechseln.${(() => {
           /* Jahr-Falle (15.10.2026): Tasks in anderen Jahren sind hier unsichtbar — das sah
              nach Datenverlust aus. Darum im Leerzustand direkt verlinken, wo etwas liegt. */
-          const aj = {}; imPlan.forEach(t => { if (t.jahr !== rmJahr) aj[t.jahr] = (aj[t.jahr] || 0) + 1; });
+          const aj = {}; ptasks.forEach(t => { if (!rmSichtbar(v, t)) aj[t.jahr] = (aj[t.jahr] || 0) + 1; });
           const e2 = Object.entries(aj).sort((a, b) => a[0] - b[0]);
-          return e2.length ? ` <span style="color:var(--warn)">Übrigens:</span> ` + e2.map(([j, n]) => `<a href="#" onclick="rmJahr=${j};render();return false" style="color:var(--accent)">${n} Task(s) in ${j}</a>`).join(" · ") : "";
+          return e2.length ? ` <span style="color:var(--warn)">Übrigens:</span> ` + e2.map(([j, n]) => `<a href="#" onclick="rmRollendSetzen(false, ${j});return false" style="color:var(--accent)">${n} Task(s) in ${j}</a>`).join(" · ") + (v.rollend ? " (ausserhalb der 52 Wochen)" : "") : "";
         })()}</div>`)}</div>`}
         ${tasks.length ? lastHtml : ""}
+        ${tasks.filter(t => (t.tags || []).includes("meilenstein")).map(t => `<div class="rm-mslinie" style="--ms:${rmTaskFarbe(t)};left:${230 + rmSpan(v, t).a * RM_KW_W + RM_KW_W / 2 - 1}px"></div>`).join("")}
         ${heuteX >= 0 ? `<div class="rm-heutelinie" style="left:${230 + heuteX}px;top:0;bottom:0"></div>` : ""}
       </div>
     </div>
@@ -15138,13 +15385,25 @@ function feierEreignisse(tageVoraus) {
   });
   return out.sort((a, b) => a.in - b.in || a.name.localeCompare(b.name, "de"));
 }
-async function feierHinweisZeigen(erzwingen) {
+/* v1.523 (16.10.2026, Pop-up erschien nicht zuverlässig):
+   - unabhängig von der Startseite (Meine Aufgaben / Dashboard): wartet, bis kein anderer Dialog offen ist
+   - gilt erst als «gesehen», wenn «Danke, gesehen» geklickt wurde (vorher reichte das blosse Anzeigen —
+     ein anderer Dialog oder ein Neuladen hat es dann für den ganzen Tag verschluckt)
+   - lokales Datum statt UTC; vor dem Wochenende bis und mit nächstem Arbeitstag (Fr → bis Mo) */
+function feierHeuteIso() { const d = new Date(); return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2); }
+function feierGesehen() { try { localStorage.setItem("crm-feier-gezeigt", feierHeuteIso()); } catch (e) {} closeModal(); }
+async function feierHinweisZeigen(erzwingen, versuch) {
+  erzwingen = erzwingen === true;
   try { await crmLoadMitarbeiter(); } catch (e) { return; }
-  const heuteIso = new Date().toISOString().slice(0, 10);
+  const heuteIso = feierHeuteIso();
   if (!erzwingen) { try { if (localStorage.getItem("crm-feier-gezeigt") === heuteIso) return; } catch (e) {} }
-  const tage = erzwingen ? 7 : 2;
+  if (!erzwingen) {
+    const offen = document.getElementById("modal") && document.getElementById("modal").classList.contains("open");
+    if (offen) { if ((versuch || 0) < 40) setTimeout(() => feierHinweisZeigen(false, (versuch || 0) + 1), 3000); return; }
+  }
+  const wt = new Date().getDay();   // 0 So … 5 Fr, 6 Sa
+  const tage = erzwingen ? 7 : (wt === 5 ? 3 : wt === 6 ? 2 : 2);
   const ev = feierEreignisse(tage); if (!ev.length) { if (erzwingen) toast("Keine Geburtstage oder Jubiläen in den nächsten 7 Tagen."); return; }
-  try { localStorage.setItem("crm-feier-gezeigt", heuteIso); } catch (e) {}
   const wtag = i => { const d = new Date(); d.setDate(d.getDate() + i); return d.toLocaleDateString("de-CH", { weekday: "short", day: "2-digit", month: "2-digit" }); };
   const wann = i => i === 0 ? "Heute" : i === 1 ? "Morgen" : i === 2 ? "Übermorgen" : wtag(i);
   showModal(erzwingen ? "Geburtstage & Jubiläen — nächste 7 Tage" : "Gratulieren nicht vergessen!", `<div style="display:flex;flex-direction:column;gap:10px">${ev.map(x => `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid ${x.in === 0 ? "var(--accent)" : "var(--border)"};border-radius:8px;background:${x.in === 0 ? "rgba(184,233,134,0.08)" : "transparent"}">
@@ -15152,7 +15411,7 @@ async function feierHinweisZeigen(erzwingen) {
       <div style="flex:1"><div style="font-weight:600">${escape(x.name)}</div><div style="font-size:12px;color:var(--text-dim)">${escape(x.text)}</div></div>
       <div style="font-size:12px;font-weight:600;color:${x.in === 0 ? "var(--accent)" : "var(--text-dim)"}">${wann(x.in)}</div>
       <a class="btn btn-sm" href="mailto:${escape(x.email)}?subject=${encodeURIComponent(x.art.slice(3) === "Geburtstag" ? "Alles Gute zum Geburtstag!" : "Herzliche Gratulation zum Jubiläum!")}">✉</a></div>`).join("")}</div>`,
-    [`<button class="btn btn-primary" onclick="closeModal()">Danke, gesehen</button>`]);
+    [`<button class="btn btn-primary" onclick="feierGesehen()">Danke, gesehen</button>`]);
 }
 function mitarbeiterTabelleHtml() {
   const p = internPersonenAlle();
