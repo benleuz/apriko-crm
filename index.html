@@ -1089,7 +1089,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.522.0</span> · <span id="app-build-date">16.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.524.0</span> · <span id="app-build-date">16.10.2026</span>
     </div>
   </aside>
 
@@ -2217,7 +2217,7 @@ async function startApp() {
 
     render();
     crmLoadMitarbeiter().then(() => { if (currentView === "meinetasks") render(); });
-    setTimeout(feierHinweisZeigen, 800);
+    setTimeout(() => feierHinweisZeigen(false), 1500);   // unabhängig von der Startseite
     mehrbenutzerStart();
   } catch (e) {
     console.error(e);
@@ -10159,6 +10159,22 @@ function rmEntwickler() {
 }
 function rmInitialen(name) { const p = String(name).replace(/[._-]+/g, " ").trim().split(/\s+/); return ((p[0] || "")[0] || "?").toUpperCase() + (p.length > 1 ? (p[p.length - 1][0] || "").toUpperCase() : (p[0] || "").slice(1, 2)); }
 function rmDevFarbe(email) { let h = 0; for (const c of email) h = (h * 31 + c.charCodeAt(0)) >>> 0; return "hsl(" + (h % 360) + ",45%,42%)"; }
+/* Ansicht (16.10.2026, v1.524): «Rollend» = ab aktueller KW 53 Wochen jahresübergreifend,
+   sonst Kalenderjahr. Tasks bleiben gespeichert als { jahr, von, bis } (ISO-KW innerhalb eines Jahres);
+   gezeichnet wird über Spaltenindex = Wochen ab dem Montag der ersten sichtbaren KW. */
+let rmRollend = (() => { try { return localStorage.getItem("rm-rollend") !== "0"; } catch (e) { return true; } })();
+let rmView = null;
+const RM_ROLL_WOCHEN = 53;
+function rmRollendSetzen(an, jahr) { rmRollend = an; if (jahr) rmJahr = jahr; try { localStorage.setItem("rm-rollend", an ? "1" : "0"); } catch (e) {} render(); }
+function rmViewBauen() {
+  if (rmRollend) { const h = rmHeuteKw(); return { rollend: true, start: rmKwMontag(h.jahr, h.kw), n: RM_ROLL_WOCHEN }; }
+  return { rollend: false, start: rmKwMontag(rmJahr, 1), n: rmKwAnzahl(rmJahr) };
+}
+function rmColVon(v, jahr, kw) { return Math.round((rmKwMontag(jahr, kw) - v.start) / (7 * 86400000)); }
+function rmColDatum(v, i) { const d = new Date(v.start); d.setUTCDate(d.getUTCDate() + 7 * i); return d; }
+function rmColKw(v, i) { const d = rmColDatum(v, i); const th = new Date(d); th.setUTCDate(d.getUTCDate() + 3); return { jahr: th.getUTCFullYear(), kw: rmKwVon(d) }; }
+function rmSpan(v, t) { return { a: rmColVon(v, t.jahr, t.von), b: rmColVon(v, t.jahr, t.bis) }; }
+function rmSichtbar(v, t) { const x = rmSpan(v, t); return x.b >= 0 && x.a <= v.n - 1; }
 function rmTagVon(id) { return rmParam().tags.find(t => t.id === id); }
 function rmTaskFarbe(t) { const tg = (t.tags || []).map(rmTagVon).find(Boolean); return tg ? tg.farbe : "var(--accent)"; }
 
@@ -10176,9 +10192,9 @@ function rmTaskLoeschen(id) { return paramEdit(async () => {
   r.tasks = r.tasks.filter(x => x.id !== id);
   await parameterSpeichern(); closeModal(); render();
 }); }
-function rmTaskZeit(id, von, bis) { return paramEdit(async () => {
+function rmTaskZeit(id, von, bis, jahr) { return paramEdit(async () => {
   await parameterLaden(true); const t = rmParam().tasks.find(x => x.id === id); if (!t) return;
-  t.von = von; t.bis = bis;
+  t.von = von; t.bis = bis; if (jahr) t.jahr = jahr;
   await parameterSpeichern(); render();
 }); }
 function rmTagAnlegen(name) { return paramEdit(async () => {
@@ -10361,10 +10377,11 @@ function rmWiederherstellen(versionId) { return paramEdit(async () => {
 /* ---------- Bearbeiten-Dialog ---------- */
 function rmDialog(id) {
   const r = rmParam(); const neu = !id;
-  const h = rmHeuteKw(); const maxKw = rmKwAnzahl(rmJahr);
-  const t = neu ? { id: "rm" + Date.now().toString(36), projekt: rmProjekt, jahr: rmJahr, titel: "", von: (rmJahr === h.jahr ? h.kw : 1), bis: Math.min((rmJahr === h.jahr ? h.kw : 1) + 3, maxKw), entwickler: [], tags: [], status: "geplant", notiz: "" }
+  const h = rmHeuteKw(); const nj = rmRollend ? h.jahr : rmJahr; const maxKw0 = rmKwAnzahl(nj);
+  const t = neu ? { id: "rm" + Date.now().toString(36), projekt: rmProjekt, jahr: nj, titel: "", von: (nj === h.jahr ? h.kw : 1), bis: Math.min((nj === h.jahr ? h.kw : 1) + 3, maxKw0), entwickler: [], tags: [], status: "geplant", notiz: "" }
             : JSON.parse(JSON.stringify(r.tasks.find(x => x.id === id)));
   if (!t) return;
+  const maxKw = rmKwAnzahl(t.jahr);
   const kwOpt = sel => Array.from({ length: maxKw }, (_, i) => `<option value="${i + 1}" ${i + 1 === sel ? "selected" : ""}>KW ${i + 1} · ${rmKwMontag(t.jahr, i + 1).toISOString().slice(8, 10)}.${rmKwMontag(t.jahr, i + 1).toISOString().slice(5, 7)}.</option>`).join("");
   const devs = rmEntwickler();
   showModal(neu ? "Neuer Roadmap-Task" : "Task bearbeiten", `
@@ -10373,7 +10390,8 @@ function rmDialog(id) {
       <div class="field"><label>Projekt</label><select id="rm-projekt">${r.projekte.map(p => `<option value="${escape(p.id)}" ${p.id === (t.projekt || rmProjektVon(t)) ? "selected" : ""}>${escape(p.name)}</option>`).join("")}</select></div>
       <div class="field"><label>Bereich</label><select id="rm-bereich">${RM_BEREICHE.map(([b, n]) => `<option value="${b}" ${b === rmBereichVon(t) ? "selected" : ""}>${n}</option>`).join("")}</select></div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+    <div style="display:grid;grid-template-columns:.8fr 1fr 1fr 1fr;gap:10px">
+      <div class="field"><label>Jahr</label><select id="rm-jahr" onchange="rmDialogTags('${t.id}')">${[h.jahr - 1, h.jahr, h.jahr + 1, h.jahr + 2].concat(t.jahr).filter((x, i, a) => a.indexOf(x) === i).sort().map(j => `<option value="${j}" ${j === t.jahr ? "selected" : ""}>${j}</option>`).join("")}</select></div>
       <div class="field"><label>Von</label><select id="rm-von">${kwOpt(t.von)}</select></div>
       <div class="field"><label>Bis</label><select id="rm-bis">${kwOpt(t.bis)}</select></div>
       <div class="field"><label>Status</label><select id="rm-status">${["geplant", "laufend", "fertig"].map(s => `<option value="${s}" ${t.status === s ? "selected" : ""}>${s[0].toUpperCase() + s.slice(1)}</option>`).join("")}</select></div>
@@ -10395,7 +10413,7 @@ function rmDialog(id) {
     <div class="field"><label>Notiz</label><textarea id="rm-notiz" rows="2">${escape(t.notiz || "")}</textarea></div>`,
     [ neu ? "" : `<button class="btn" style="color:var(--danger);border-color:var(--danger)" onclick="rmTaskLoeschen('${t.id}')">Löschen</button>`,
       `<button class="btn" onclick="closeModal()">Abbrechen</button>`,
-      `<button class="btn btn-primary" onclick="rmDialogSpeichern('${t.id}', ${neu}, ${t.jahr})">Speichern</button>` ].filter(Boolean));
+      `<button class="btn btn-primary" onclick="rmDialogSpeichern('${t.id}', ${neu}, parseInt(document.getElementById('rm-jahr').value) || ${t.jahr})">Speichern</button>` ].filter(Boolean));
 }
 function rmDialogTags(taskId) {   // nach «+ Attribut»: nur die Chip-Zeile auffrischen, Eingaben behalten
   const titel = document.getElementById("rm-titel") ? document.getElementById("rm-titel").value : null;
@@ -10408,9 +10426,11 @@ function rmDialogTags(taskId) {   // nach «+ Attribut»: nur die Chip-Zeile auf
   basis.status = document.getElementById("rm-status").value || basis.status; basis.notiz = document.getElementById("rm-notiz").value || "";
   const pj = document.getElementById("rm-projekt"); if (pj) basis.projekt = pj.value;
   const bj = document.getElementById("rm-bereich"); if (bj) basis.bereich = bj.value;
+  const jj = document.getElementById("rm-jahr"); if (jj) basis.jahr = parseInt(jj.value) || basis.jahr;
+  const mk = rmKwAnzahl(basis.jahr); basis.von = Math.min(basis.von, mk); basis.bis = Math.min(basis.bis, mk);
   const neu = !t;
-  const alt = r.tasks; if (neu) r.tasks = alt.concat([basis]);
-  try { rmDialog(taskId); const el = document.getElementById("rm-titel"); if (el) el.value = basis.titel; } finally { if (neu) r.tasks = alt; }
+  const alt = r.tasks; r.tasks = neu ? alt.concat([basis]) : alt.map(x => x.id === taskId ? basis : x);
+  try { rmDialog(taskId); const el = document.getElementById("rm-titel"); if (el) el.value = basis.titel; } finally { r.tasks = alt; }
   // Auswahl wiederherstellen
   document.querySelectorAll(".rm-dev-cb").forEach(c => { c.checked = devs.includes(c.value); c.closest("label").classList.toggle("an", c.checked); });
   document.querySelectorAll(".rm-tag-cb").forEach(c => { c.checked = gewaehlt.includes(c.value); c.closest("label").classList.toggle("an", c.checked); });
@@ -10435,9 +10455,10 @@ function rmDialogSpeichern(id, neu, jahr) {
 let rmDrag = null;
 function rmBarDown(ev, id) {
   if (ev.button !== 0) return;
-  const bar = ev.currentTarget; const t = rmParam().tasks.find(x => x.id === id); if (!t) return;
+  const bar = ev.currentTarget; const t = rmParam().tasks.find(x => x.id === id); if (!t || !rmView) return;
   const griff = ev.target.classList.contains("griff") ? (ev.target.classList.contains("l") ? "l" : "r") : "m";
-  rmDrag = { id, griff, startX: ev.clientX, von0: t.von, bis0: t.bis, von: t.von, bis: t.bis, bar, bewegt: false, maxKw: rmKwAnzahl(rmJahr) };
+  const x = rmSpan(rmView, t);
+  rmDrag = { id, griff, startX: ev.clientX, a0: x.a, b0: x.b, a: x.a, b: x.b, bar, bewegt: false, ms: bar.classList.contains("rm-ms") };
   try { bar.setPointerCapture(ev.pointerId); } catch (e) { /* ältere Browser/Tests ohne Pointer Capture */ }
   bar.classList.add("drag"); rmTipWeg();
   ev.preventDefault();
@@ -10446,25 +10467,29 @@ function rmBarMove(ev) {
   if (!rmDrag) return;
   const d = Math.round((ev.clientX - rmDrag.startX) / RM_KW_W);
   if (Math.abs(ev.clientX - rmDrag.startX) > 4) rmDrag.bewegt = true;
-  let von = rmDrag.von0, bis = rmDrag.bis0;
-  if (rmDrag.griff === "m") { const len = bis - von; von = Math.min(Math.max(1, von + d), rmDrag.maxKw - len); bis = von + len; }
-  else if (rmDrag.griff === "l") { von = Math.min(Math.max(1, von + d), bis); }
-  else { bis = Math.max(Math.min(rmDrag.maxKw, bis + d), von); }
-  rmDrag.von = von; rmDrag.bis = bis;
-  rmDrag.bar.style.left = ((von - 1) * RM_KW_W + 2) + "px";
-  rmDrag.bar.style.width = ((bis - von + 1) * RM_KW_W - 4) + "px";
-  let b = document.getElementById("rm-dragbadge");
-  if (!b) { b = document.createElement("div"); b.id = "rm-dragbadge"; b.className = "rm-badge"; document.body.appendChild(b); }
-  b.textContent = "KW " + von + " – " + bis;
-  b.style.left = (ev.clientX + 12) + "px"; b.style.top = (ev.clientY - 28) + "px";
+  let a = rmDrag.a0, b = rmDrag.b0; const max = rmView.n - 1;
+  if (rmDrag.griff === "m") { const len = b - a; a = Math.min(Math.max(rmView.rollend ? -len : 0, a + d), max - (rmView.rollend ? 0 : len)); b = a + len; }
+  else if (rmDrag.griff === "l") { a = Math.min(Math.max(0, a + d), b); }
+  else { b = Math.max(Math.min(max, b + d), a); }
+  rmDrag.a = a; rmDrag.b = b;
+  rmDrag.bar.style.left = (a * RM_KW_W + 2) + "px";
+  if (!rmDrag.ms) rmDrag.bar.style.width = ((b - a + 1) * RM_KW_W - 4) + "px";
+  const ka = rmColKw(rmView, a), kb = rmColKw(rmView, b);
+  let bd = document.getElementById("rm-dragbadge");
+  if (!bd) { bd = document.createElement("div"); bd.id = "rm-dragbadge"; bd.className = "rm-badge"; document.body.appendChild(bd); }
+  bd.textContent = ka.jahr !== kb.jahr ? "⚠ über Jahreswechsel — nicht möglich" : "KW " + ka.kw + (kb.kw !== ka.kw ? " – " + kb.kw : "") + (rmView.rollend ? " · " + ka.jahr : "");
+  bd.style.left = (ev.clientX + 12) + "px"; bd.style.top = (ev.clientY - 28) + "px";
 }
 function rmBarUp(ev, id) {
   if (!rmDrag) return;
-  const { bewegt, von, bis, von0, bis0, bar } = rmDrag; rmDrag = null;
+  const { bewegt, a, b, a0, b0, bar } = rmDrag; rmDrag = null;
   bar.classList.remove("drag");
-  const b = document.getElementById("rm-dragbadge"); if (b) b.remove();
+  const bd = document.getElementById("rm-dragbadge"); if (bd) bd.remove();
   if (!bewegt) { rmDialog(id); return; }
-  if (von !== von0 || bis !== bis0) rmTaskZeit(id, von, bis);
+  if (a === a0 && b === b0) return;
+  const ka = rmColKw(rmView, a), kb = rmColKw(rmView, b);
+  if (ka.jahr !== kb.jahr) { toast("Ein Task kann nicht über den Jahreswechsel laufen — bitte in zwei Tasks aufteilen (je Jahr einer).", true); render(); return; }
+  rmTaskZeit(id, ka.kw, kb.kw, ka.jahr);
 }
 
 /* ---------- Rollover (16.10.2026, v1.521): ganzer Text beim Überfahren ---------- */
@@ -10501,7 +10526,8 @@ async function renderRoadmap(el) {
   rmTipWeg();
   if (!crmParameter) { await parameterLaden(false); }
   if (crmMitarbeiter === null) { try { await crmLoadMitarbeiter(); } catch (e0) {} }   // Mitarbeiterstamm für die Entwicklerliste
-  const r = rmParam(); const maxKw = rmKwAnzahl(rmJahr); const heute = rmHeuteKw();
+  const r = rmParam(); const heute = rmHeuteKw();
+  const v = rmView = rmViewBauen(); const maxKw = v.n;
   if (!r.projekte.some(p => p.id === rmProjekt)) rmProjekt = "standard";
   const ptasks = r.tasks.filter(t => rmProjektVon(t) === rmProjekt);
   const jahre = [...new Set([heute.jahr - 1, heute.jahr, heute.jahr + 1, heute.jahr + 2, ...ptasks.map(t => t.jahr)])].sort();
@@ -10510,13 +10536,17 @@ async function renderRoadmap(el) {
       const n = r.tasks.filter(t => rmProjektVon(t) === p.id).length;
       return `<button class="btn btn-sm ${p.id === rmProjekt ? "btn-primary" : ""}" style="border:0;border-radius:0" onclick="rmProjektWaehlen('${escape(p.id)}')">${escape(p.name)} <span style="opacity:.65">${n}</span></button>`; }).join("")}<button class="btn btn-sm" style="border:0;border-radius:0" onclick="rmProjektAnlegen()" title="Neues Projekt anlegen">+</button></span>
     <span style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-right:6px">${[["alle", "Alle"], ["entwicklung", "Entwicklung"], ["rollout", "Rollout"]].map(([b, n]) =>
-      `<button class="btn btn-sm ${b === rmBereich ? "btn-primary" : ""}" style="border:0;border-radius:0" onclick="rmBereichWaehlen('${b}')">${n} <span style="opacity:.65">${ptasks.filter(t => t.jahr === rmJahr && rmBereichPasst(t, b)).length}</span></button>`).join("")}</span>
-    <select onchange="rmJahr=parseInt(this.value);render()" style="padding:4px 8px;font-weight:600">${jahre.map(j => `<option value="${j}" ${j === rmJahr ? "selected" : ""}>${j}</option>`).join("")}</select>
+      `<button class="btn btn-sm ${b === rmBereich ? "btn-primary" : ""}" style="border:0;border-radius:0" onclick="rmBereichWaehlen('${b}')">${n} <span style="opacity:.65">${ptasks.filter(t => rmSichtbar(v, t) && rmBereichPasst(t, b)).length}</span></button>`).join("")}</span>
+    <span style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-right:6px">
+      <button class="btn btn-sm ${rmRollend ? "btn-primary" : ""}" style="border:0;border-radius:0" onclick="rmRollendSetzen(true)" title="Ab der aktuellen KW 52 Wochen voraus, über den Jahreswechsel">⟳ Rollend</button>
+      <select onchange="rmRollendSetzen(false, parseInt(this.value))" style="padding:4px 8px;font-weight:600;border:0;border-radius:0;${rmRollend ? "opacity:.6" : ""}" title="Kalenderjahr anzeigen">${rmRollend ? `<option selected disabled>Jahr …</option>` : ""}${jahre.map(j => `<option value="${j}" ${!rmRollend && j === rmJahr ? "selected" : ""}>${j}</option>`).join("")}</select>
+    </span>
     <button class="btn btn-sm" onclick="rmWiederherstellenZeigen()" title="Frühere Stände der Roadmap aus der SharePoint-Versionsgeschichte zurückholen">🕘 Frühere Stände</button>
     <label class="btn btn-sm" style="cursor:pointer" title="Tasks aus Excel/CSV importieren: Titel, Jahr, Von KW, Bis KW, Attribute, Status, Entwickler, Notiz — gleicher Titel im gleichen Jahr wird aktualisiert, sonst neu angelegt, nichts wird gelöscht">⇧ Excel<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="rmImportLesen(this)"></label>
     <button class="btn btn-sm btn-primary" onclick="rmDialog()">+ Task</button>`;
 
-  const alle = ptasks.filter(t => t.jahr === rmJahr && rmBereichPasst(t, rmBereich)).sort((a, b) => a.von - b.von || a.bis - b.bis || String(a.titel).localeCompare(b.titel));
+  const alle = ptasks.filter(t => rmSichtbar(v, t) && rmBereichPasst(t, rmBereich)).map(t => [t, rmSpan(v, t)])
+    .sort((x, y) => x[1].a - y[1].a || x[1].b - y[1].b || String(x[0].titel).localeCompare(y[0].titel)).map(x => x[0]);
   const tasks = alle.filter(t => (!rmFilterDev.size || (t.entwickler || []).some(e => rmFilterDev.has(e)))
                              && (!rmFilterTag.size || (t.tags || []).some(g => rmFilterTag.has(g))));
   const devs = rmEntwickler().filter(d => alle.some(t => (t.entwickler || []).includes(d.email)));
@@ -10529,32 +10559,36 @@ async function renderRoadmap(el) {
       ${(rmFilterDev.size || rmFilterTag.size) ? `<a href="#" onclick="rmFilterDev.clear();rmFilterTag.clear();render();return false" style="font-size:11px;color:var(--danger)">✕ Filter löschen</a>` : ""}
     </div>` : "";
 
-  // Monats-Kopf: KWs nach Monat (des Donnerstags) gruppieren
+  // Monats-Kopf: KWs nach Monat (des Donnerstags) gruppieren; rollend mit Jahreszahl
   const monate = [];
-  for (let kw = 1; kw <= maxKw; kw++) {
-    const dow = rmKwMontag(rmJahr, kw); dow.setUTCDate(dow.getUTCDate() + 3);
-    const m = dow.toLocaleDateString("de-CH", { month: "short", timeZone: "UTC" });
-    if (monate.length && monate[monate.length - 1].name === m) monate[monate.length - 1].n++;
-    else monate.push({ name: m, n: 1 });
+  for (let i = 0; i < maxKw; i++) {
+    const dow = rmColDatum(v, i); dow.setUTCDate(dow.getUTCDate() + 3);
+    const key = dow.getUTCFullYear() + "-" + dow.getUTCMonth();
+    let m = dow.toLocaleDateString("de-CH", { month: "short", timeZone: "UTC" });
+    if (v.rollend && (dow.getUTCMonth() === 0 || !monate.length)) m += " " + dow.getUTCFullYear();
+    if (monate.length && monate[monate.length - 1].key === key) monate[monate.length - 1].n++;
+    else monate.push({ key, name: m, n: 1, neuJahr: monate.length > 0 && dow.getUTCMonth() === 0 });
   }
-  const istHeuteJahr = rmJahr === heute.jahr;
-  const heuteX = istHeuteJahr ? ((heute.kw - 1) + heute.tagInWoche / 7) * RM_KW_W : -1;
-  const spur = inhalt => `<div class="rm-track lanes" style="width:${maxKw * RM_KW_W}px;--rm-kw:${RM_KW_W}px">${inhalt}</div>`;
+  const kws = Array.from({ length: maxKw }, (_, i) => rmColKw(v, i));
+  const hCol = rmColVon(v, heute.jahr, heute.kw);
+  const heuteX = hCol >= 0 && hCol < maxKw ? (hCol + heute.tagInWoche / 7) * RM_KW_W : -1;
+  const spur = inhalt => `<div class="rm-track lanes" style="width:${maxKw * RM_KW_W}px;--rm-kw:${RM_KW_W}px;overflow:${v.rollend ? "hidden" : "visible"}">${inhalt}</div>`;
 
   const zeilen = tasks.map(t => {
     const farbe = rmTaskFarbe(t);
     const avs = (t.entwickler || []).slice(0, 4).map(e => { const d = rmEntwickler().find(x => x.email === e); return `<span class="rm-av" style="background:${rmDevFarbe(e)}" title="${escape(e)}">${escape(rmInitialen(d ? d.name : e))}</span>`; }).join("");
     const dots = (t.tags || []).map(g => { const tg = rmTagVon(g); return tg ? `<span class="rm-dot" style="background:${tg.farbe}" title="${escape(tg.name)}"></span>` : ""; }).join("");
-    const breit = (t.bis - t.von + 1) * RM_KW_W - 4;
+    const sp = rmSpan(v, t);
+    const breit = (sp.b - sp.a + 1) * RM_KW_W - 4;
     const ms = (t.tags || []).includes("meilenstein");
     const tipAttr = `onmouseenter="rmTipZeigen(event,'${t.id}')" onmousemove="rmTipPos(event)" onmouseleave="rmTipWeg()"`;
     if (ms) return `<div class="rm-row">
       <div class="rm-label rm-ms-label" style="--ms:${farbe}" onclick="rmDialog('${t.id}')" ${tipAttr}>
         <span class="t">${t.status === "fertig" ? "✓ " : ""}${escape(t.titel)}</span>
-        <span class="m" style="font-size:9.5px;color:var(--text-dim)">Meilenstein · KW ${t.von}${avs ? "<span style='width:4px'></span>" + avs : ""}</span>
+        <span class="m" style="font-size:9.5px;color:var(--text-dim)">Meilenstein · KW ${t.von}${v.rollend ? "/" + String(t.jahr).slice(2) : ""}${avs ? "<span style='width:4px'></span>" + avs : ""}</span>
       </div>
       ${spur(`<div class="rm-bar rm-ms ${t.status === "fertig" ? "fertig" : ""}" data-rmid="${t.id}" ${tipAttr}
-         style="left:${(t.von - 1) * RM_KW_W + 2}px;width:${RM_KW_W - 4}px;--ms:${farbe}"
+         style="left:${sp.a * RM_KW_W + 2}px;width:${RM_KW_W - 4}px;--ms:${farbe}"
          onpointerdown="rmBarDown(event,'${t.id}')" onpointermove="rmBarMove(event)" onpointerup="rmBarUp(event,'${t.id}')" onpointercancel="rmBarUp(event,'${t.id}')">
         <span class="rm-ms-txt">${escape(t.titel.replace(/^◆\s*/, ""))}</span>
       </div>`)}
@@ -10565,15 +10599,16 @@ async function renderRoadmap(el) {
         <span class="m">${dots}${dots && avs ? "<span style='width:4px'></span>" : ""}${avs}${t.status === "laufend" ? `<span style="font-size:9px;color:var(--accent);margin-left:4px">● läuft</span>` : ""}</span>
       </div>
       ${spur(`<div class="rm-bar ${t.status === "fertig" ? "fertig" : ""}" data-rmid="${t.id}" ${tipAttr}
-         style="left:${(t.von - 1) * RM_KW_W + 2}px;width:${breit}px;background:${farbe}"
+         style="left:${sp.a * RM_KW_W + 2}px;width:${breit}px;background:${farbe}"
          onpointerdown="rmBarDown(event,'${t.id}')" onpointermove="rmBarMove(event)" onpointerup="rmBarUp(event,'${t.id}')" onpointercancel="rmBarUp(event,'${t.id}')">
-        <span class="griff l"></span>${breit > 70 ? `<span style="overflow:hidden;text-overflow:ellipsis">${escape(t.titel)}</span>` : ""}${breit > 120 ? avs : ""}<span class="griff r"></span>
+        <span class="griff l"></span>${breit > 70 ? `<span style="overflow:hidden;text-overflow:ellipsis;${sp.a < 0 ? `padding-left:${-sp.a * RM_KW_W}px` : ""}">${escape(t.titel)}</span>` : ""}${breit > 120 ? avs : ""}<span class="griff r"></span>
       </div>`)}
     </div>`;
   }).join("");
 
   // Auslastung: Tasks pro KW (gefilterte Menge)
-  const last = Array.from({ length: maxKw }, (_, i) => tasks.filter(t => t.von <= i + 1 && t.bis >= i + 1).length);
+  const spans = tasks.map(t => rmSpan(v, t));
+  const last = Array.from({ length: maxKw }, (_, i) => spans.filter(x => x.a <= i && x.b >= i).length);
   const maxLast = Math.max(1, ...last);
   const lastHtml = `<div class="rm-row">
     <div class="rm-label" style="cursor:default"><span class="t" style="color:var(--text-dim);font-weight:400">Auslastung</span><span class="m" style="font-size:9px;color:var(--text-faint)">Tasks pro KW</span></div>
@@ -10584,19 +10619,19 @@ async function renderRoadmap(el) {
     <div class="rm-wrap">
       <div class="rm-grid" style="grid-template-columns:230px ${maxKw * RM_KW_W}px">
         <div class="rm-head">
-          <div class="rm-corner" style="grid-row:1/3;display:flex;align-items:flex-end;padding:6px 12px;font-size:11px;color:var(--text-dim)">${tasks.length} von ${alle.length} Tasks · ${rmJahr}</div>
-          <div class="rm-months">${monate.map(m => `<div class="rm-month" style="width:${m.n * RM_KW_W}px">${escape(m.name)}</div>`).join("")}</div>
-          <div class="rm-kws">${Array.from({ length: maxKw }, (_, i) => `<div class="rm-kw ${istHeuteJahr && i + 1 === heute.kw ? "heute" : ""}" style="width:${RM_KW_W}px">${i + 1}</div>`).join("")}</div>
+          <div class="rm-corner" style="grid-row:1/3;display:flex;align-items:flex-end;padding:6px 12px;font-size:11px;color:var(--text-dim)">${tasks.length} von ${alle.length} Tasks · ${v.rollend ? `KW ${kws[0].kw}/${String(kws[0].jahr).slice(2)} – ${kws[maxKw - 1].kw}/${String(kws[maxKw - 1].jahr).slice(2)}` : rmJahr}</div>
+          <div class="rm-months">${monate.map(m => `<div class="rm-month" style="width:${m.n * RM_KW_W}px;${m.neuJahr ? "border-left:2px solid var(--accent);color:var(--text);font-weight:700" : ""}">${escape(m.name)}</div>`).join("")}</div>
+          <div class="rm-kws">${kws.map((k, i) => `<div class="rm-kw ${i === hCol ? "heute" : ""}" style="width:${RM_KW_W}px;${v.rollend && k.kw === 1 && i > 0 ? "border-left:2px solid var(--accent)" : ""}">${k.kw}</div>`).join("")}</div>
         </div>
         ${zeilen || `<div class="rm-row"><div class="rm-label" style="cursor:default"><span class="t" style="color:var(--text-dim);font-weight:400">Noch keine Tasks</span></div>${spur(`<div style="padding:10px 14px;font-size:12px;color:var(--text-dim)">«+ Task» oben rechts — oder Jahr wechseln.${(() => {
           /* Jahr-Falle (15.10.2026): Tasks in anderen Jahren sind hier unsichtbar — das sah
              nach Datenverlust aus. Darum im Leerzustand direkt verlinken, wo etwas liegt. */
-          const aj = {}; ptasks.forEach(t => { if (t.jahr !== rmJahr) aj[t.jahr] = (aj[t.jahr] || 0) + 1; });
+          const aj = {}; ptasks.forEach(t => { if (!rmSichtbar(v, t)) aj[t.jahr] = (aj[t.jahr] || 0) + 1; });
           const e2 = Object.entries(aj).sort((a, b) => a[0] - b[0]);
-          return e2.length ? ` <span style="color:var(--warn)">Übrigens:</span> ` + e2.map(([j, n]) => `<a href="#" onclick="rmJahr=${j};render();return false" style="color:var(--accent)">${n} Task(s) in ${j}</a>`).join(" · ") : "";
+          return e2.length ? ` <span style="color:var(--warn)">Übrigens:</span> ` + e2.map(([j, n]) => `<a href="#" onclick="rmRollendSetzen(false, ${j});return false" style="color:var(--accent)">${n} Task(s) in ${j}</a>`).join(" · ") + (v.rollend ? " (ausserhalb der 52 Wochen)" : "") : "";
         })()}</div>`)}</div>`}
         ${tasks.length ? lastHtml : ""}
-        ${tasks.filter(t => (t.tags || []).includes("meilenstein")).map(t => `<div class="rm-mslinie" style="--ms:${rmTaskFarbe(t)};left:${230 + (t.von - 1) * RM_KW_W + RM_KW_W / 2 - 1}px"></div>`).join("")}
+        ${tasks.filter(t => (t.tags || []).includes("meilenstein")).map(t => `<div class="rm-mslinie" style="--ms:${rmTaskFarbe(t)};left:${230 + rmSpan(v, t).a * RM_KW_W + RM_KW_W / 2 - 1}px"></div>`).join("")}
         ${heuteX >= 0 ? `<div class="rm-heutelinie" style="left:${230 + heuteX}px;top:0;bottom:0"></div>` : ""}
       </div>
     </div>
@@ -15282,13 +15317,25 @@ function feierEreignisse(tageVoraus) {
   });
   return out.sort((a, b) => a.in - b.in || a.name.localeCompare(b.name, "de"));
 }
-async function feierHinweisZeigen(erzwingen) {
+/* v1.523 (16.10.2026, Pop-up erschien nicht zuverlässig):
+   - unabhängig von der Startseite (Meine Aufgaben / Dashboard): wartet, bis kein anderer Dialog offen ist
+   - gilt erst als «gesehen», wenn «Danke, gesehen» geklickt wurde (vorher reichte das blosse Anzeigen —
+     ein anderer Dialog oder ein Neuladen hat es dann für den ganzen Tag verschluckt)
+   - lokales Datum statt UTC; vor dem Wochenende bis und mit nächstem Arbeitstag (Fr → bis Mo) */
+function feierHeuteIso() { const d = new Date(); return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2); }
+function feierGesehen() { try { localStorage.setItem("crm-feier-gezeigt", feierHeuteIso()); } catch (e) {} closeModal(); }
+async function feierHinweisZeigen(erzwingen, versuch) {
+  erzwingen = erzwingen === true;
   try { await crmLoadMitarbeiter(); } catch (e) { return; }
-  const heuteIso = new Date().toISOString().slice(0, 10);
+  const heuteIso = feierHeuteIso();
   if (!erzwingen) { try { if (localStorage.getItem("crm-feier-gezeigt") === heuteIso) return; } catch (e) {} }
-  const tage = erzwingen ? 7 : 2;
+  if (!erzwingen) {
+    const offen = document.getElementById("modal") && document.getElementById("modal").classList.contains("open");
+    if (offen) { if ((versuch || 0) < 40) setTimeout(() => feierHinweisZeigen(false, (versuch || 0) + 1), 3000); return; }
+  }
+  const wt = new Date().getDay();   // 0 So … 5 Fr, 6 Sa
+  const tage = erzwingen ? 7 : (wt === 5 ? 3 : wt === 6 ? 2 : 2);
   const ev = feierEreignisse(tage); if (!ev.length) { if (erzwingen) toast("Keine Geburtstage oder Jubiläen in den nächsten 7 Tagen."); return; }
-  try { localStorage.setItem("crm-feier-gezeigt", heuteIso); } catch (e) {}
   const wtag = i => { const d = new Date(); d.setDate(d.getDate() + i); return d.toLocaleDateString("de-CH", { weekday: "short", day: "2-digit", month: "2-digit" }); };
   const wann = i => i === 0 ? "Heute" : i === 1 ? "Morgen" : i === 2 ? "Übermorgen" : wtag(i);
   showModal(erzwingen ? "Geburtstage & Jubiläen — nächste 7 Tage" : "Gratulieren nicht vergessen!", `<div style="display:flex;flex-direction:column;gap:10px">${ev.map(x => `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid ${x.in === 0 ? "var(--accent)" : "var(--border)"};border-radius:8px;background:${x.in === 0 ? "rgba(184,233,134,0.08)" : "transparent"}">
@@ -15296,7 +15343,7 @@ async function feierHinweisZeigen(erzwingen) {
       <div style="flex:1"><div style="font-weight:600">${escape(x.name)}</div><div style="font-size:12px;color:var(--text-dim)">${escape(x.text)}</div></div>
       <div style="font-size:12px;font-weight:600;color:${x.in === 0 ? "var(--accent)" : "var(--text-dim)"}">${wann(x.in)}</div>
       <a class="btn btn-sm" href="mailto:${escape(x.email)}?subject=${encodeURIComponent(x.art.slice(3) === "Geburtstag" ? "Alles Gute zum Geburtstag!" : "Herzliche Gratulation zum Jubiläum!")}">✉</a></div>`).join("")}</div>`,
-    [`<button class="btn btn-primary" onclick="closeModal()">Danke, gesehen</button>`]);
+    [`<button class="btn btn-primary" onclick="feierGesehen()">Danke, gesehen</button>`]);
 }
 function mitarbeiterTabelleHtml() {
   const p = internPersonenAlle();
