@@ -1079,7 +1079,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.518.0</span> · <span id="app-build-date">16.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.520.0</span> · <span id="app-build-date">16.10.2026</span>
     </div>
   </aside>
 
@@ -10069,8 +10069,32 @@ function rmParam() {
     { id: "api", name: "API", farbe: "#f4c95d" }, { id: "design", name: "Design", farbe: "#ce93d8" },
     { id: "infra", name: "Infra", farbe: "#80cbc4" }, { id: "doku", name: "Doku", farbe: "#ffcc80" }];
   if (!Array.isArray(r.tasks)) r.tasks = [];
+  if (!Array.isArray(r.projekte) || !r.projekte.length) r.projekte = [{ id: "standard", name: "Roadmap" }, { id: "ws", name: "WS Projekt" }];
   return r;
 }
+/* Projekte (16.10.2026, v1.519): Umschalter oben zeigt NUR die Tasks des gewählten
+   Projekts. Task-Feld `projekt`; ohne Feld gilt «standard» — ausser den aus dem
+   WS-Pflichtenheft importierten Tasks (Titel «WS FO · …» / «◆ G…»), die ohne
+   Speichern automatisch zu «ws» zählen. */
+let rmProjekt = (() => { try { return localStorage.getItem("rm-projekt") || "standard"; } catch (e) { return "standard"; } })();
+function rmProjektVon(t) { return t.projekt || (/^(WS FO ·|◆ G\d)/.test(String(t.titel || "")) ? "ws" : "standard"); }
+/* Bereich (16.10.2026, v1.520): «Entwicklung» vs. «Rollout» (Einführung/Support).
+   Task-Feld `bereich` = entwicklung | rollout | beide; ohne Feld abgeleitet:
+   Meilenstein → beide, Attribut Doku/Migration → rollout, sonst entwicklung. */
+const RM_BEREICHE = [["entwicklung", "Entwicklung"], ["rollout", "Rollout"], ["beide", "Beide"]];
+let rmBereich = (() => { try { return localStorage.getItem("rm-bereich") || "alle"; } catch (e) { return "alle"; } })();
+function rmBereichVon(t) { if (t.bereich) return t.bereich; const g = t.tags || [];
+  return g.includes("meilenstein") ? "beide" : (g.includes("doku") || g.includes("migration")) ? "rollout" : "entwicklung"; }
+function rmBereichPasst(t, b) { const x = rmBereichVon(t); return b === "alle" || x === b || x === "beide"; }
+function rmBereichWaehlen(b) { rmBereich = b; try { localStorage.setItem("rm-bereich", b); } catch (e) {} render(); }
+function rmProjektWaehlen(id) { rmProjekt = id; try { localStorage.setItem("rm-projekt", id); } catch (e) {} rmFilterDev.clear(); rmFilterTag.clear(); render(); }
+function rmProjektAnlegen() { const n = prompt("Name des neuen Projekts:"); if (!n || !n.trim()) return;
+  return paramEdit(async () => {
+    await parameterLaden(true); const r = rmParam();
+    let id = String(n).toLowerCase().replace(/[^a-z0-9äöü]+/g, "-").replace(/^-|-$/g, "") || "p";
+    if (r.projekte.some(p => p.id === id)) id += "-" + Date.now().toString(36);
+    r.projekte.push({ id, name: n.trim() }); await parameterSpeichern(); rmProjektWaehlen(id);
+  }); }
 /* ISO-Kalenderwochen */
 function rmKwAnzahl(jahr) { const d = new Date(Date.UTC(jahr, 11, 28)); return rmKwVon(d); }
 function rmKwVon(d) { const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())); const tag = (x.getUTCDay() + 6) % 7; x.setUTCDate(x.getUTCDate() - tag + 3); const j1 = new Date(Date.UTC(x.getUTCFullYear(), 0, 4)); return 1 + Math.round(((x - j1) / 86400000 - 3 + ((j1.getUTCDay() + 6) % 7)) / 7); }
@@ -10163,6 +10187,7 @@ function rmTagAnlegen(name) { return paramEdit(async () => {
    behalten die bestehenden Werte. Unbekannte Attribute werden angelegt.
    Entwickler per E-Mail oder per Name (wie in der Entwicklerliste). */
 let rmImportDaten = null;
+function rmProjektName(id) { const p = rmParam().projekte.find(x => x.id === id); return p ? p.name : id; }
 function rmNormKey(jahr, titel) { return jahr + "|" + String(titel || "").trim().toLowerCase(); }
 function rmTagIdAusName(name) { return String(name).toLowerCase().replace(/[^a-z0-9äöü]+/g, "-").replace(/^-|-$/g, ""); }
 async function rmImportLesen(input) {
@@ -10178,7 +10203,7 @@ async function rmImportLesen(input) {
   const head = Object.keys(rows[0]);
   const sp = re => head.find(h => re.test(String(h).trim())) || "";
   const c = { titel: sp(/^(titel|task|aufgabe)$/i), jahr: sp(/^jahr$/i), von: sp(/^von(\s*kw)?$/i), bis: sp(/^bis(\s*kw)?$/i),
-              tags: sp(/^(attribute?|tags?)$/i), status: sp(/^status$/i), dev: sp(/^entwickler/i), notiz: sp(/^(notiz|bemerkung)/i) };
+              tags: sp(/^(attribute?|tags?)$/i), status: sp(/^status$/i), dev: sp(/^entwickler/i), notiz: sp(/^(notiz|bemerkung)/i), projekt: sp(/^projekt$/i), bereich: sp(/^bereich$/i) };
   const fehlt = ["titel", "jahr", "von", "bis"].filter(k => !c[k]);
   if (fehlt.length) { toast("Spalte(n) fehlen: " + fehlt.map(k => ({ titel: "Titel", jahr: "Jahr", von: "Von KW", bis: "Bis KW" })[k]).join(", "), true); return; }
   const r = rmParam(); const devs = rmEntwickler();
@@ -10212,7 +10237,13 @@ async function rmImportLesen(input) {
       if (e) { if (!entwickler.includes(e)) entwickler.push(e); } else warn.push(`Zeile ${nr}: Entwickler «${d}» nicht gefunden — weggelassen`);
     });
     const notiz = String(c.notiz ? row[c.notiz] : "").trim();
-    zeilen.push({ key, alt: vorhanden.get(key) || null, daten: { jahr, titel, von, bis, tags, status, notiz, entwickler, devLeer: !devZelle } });
+    const pz = String(c.projekt ? row[c.projekt] : "").trim().toLowerCase();
+    const pr = pz ? r.projekte.find(p => p.id === pz || p.name.toLowerCase() === pz) : null;
+    if (pz && !pr) warn.push(`Zeile ${nr}: Projekt «${pz}» unbekannt → ${rmProjektName(rmProjekt)}`);
+    const bz = String(c.bereich ? row[c.bereich] : "").trim().toLowerCase();
+    const be = bz ? (RM_BEREICHE.find(([b, n]) => b === bz || n.toLowerCase() === bz) || [])[0] : "";
+    if (bz && !be) warn.push(`Zeile ${nr}: Bereich «${bz}» unbekannt → automatisch`);
+    zeilen.push({ key, alt: vorhanden.get(key) || null, daten: { bereich: be || "", projekt: pr ? pr.id : rmProjekt, jahr, titel, von, bis, tags, status, notiz, entwickler, devLeer: !devZelle } });
   });
   if (!zeilen.length) { toast("Keine gültigen Tasks in der Datei" + (warn.length ? " — " + warn[0] : ""), true); return; }
   rmImportDaten = { zeilen, neueTags: [...neueTags.entries()] };
@@ -10222,6 +10253,7 @@ async function rmImportLesen(input) {
     <div style="font-size:13px;line-height:1.7">
       <b>${escape(f.name)}</b><br>
       ${nNeu} neue Task(s), ${nAkt} bestehende werden aktualisiert · Jahr(e): ${jahre}<br>
+      Projekt: <b>${[...new Set(zeilen.map(z => rmProjektName(z.daten.projekt)))].map(escape).join(", ")}</b>${c.projekt ? "" : ` <span style="color:var(--text-dim)">(aktuell gewähltes Projekt)</span>`}<br>
       ${neueTags.size ? `Neue Attribute: ${[...neueTags.values()].map(escape).join(", ")}<br>` : ""}
       <span style="color:var(--text-dim)">Gelöscht wird nichts. Leere Zellen «Entwickler»/«Notiz» behalten bestehende Werte.</span>
     </div>
@@ -10242,13 +10274,14 @@ function rmImportAusfuehren() {
     imp.zeilen.forEach(z => {
       const d = z.daten, t = map.get(z.key);
       if (t) {
-        Object.assign(t, { titel: d.titel, von: d.von, bis: d.bis, tags: d.tags, status: d.status });
+        Object.assign(t, { projekt: d.projekt, titel: d.titel, von: d.von, bis: d.bis, tags: d.tags, status: d.status });
         if (!d.devLeer) t.entwickler = d.entwickler;
         if (d.notiz) t.notiz = d.notiz;
+        if (d.bereich) t.bereich = d.bereich;
         akt++;
       } else {
-        r.tasks.push({ id: "rm" + Date.now().toString(36) + (idx++).toString(36), jahr: d.jahr, titel: d.titel, von: d.von, bis: d.bis,
-                       entwickler: d.entwickler, tags: d.tags, status: d.status, notiz: d.notiz });
+        r.tasks.push({ id: "rm" + Date.now().toString(36) + (idx++).toString(36), projekt: d.projekt, jahr: d.jahr, titel: d.titel, von: d.von, bis: d.bis,
+                       entwickler: d.entwickler, tags: d.tags, status: d.status, notiz: d.notiz, ...(d.bereich ? { bereich: d.bereich } : {}) });
         neu++;
       }
     });
@@ -10256,6 +10289,7 @@ function rmImportAusfuehren() {
     rmImportDaten = null; closeModal();
     const jahre = [...new Set(imp.zeilen.map(z => z.daten.jahr))].sort();
     if (!jahre.includes(rmJahr)) rmJahr = jahre[0];
+    const pjs = [...new Set(imp.zeilen.map(z => z.daten.projekt))]; if (!pjs.includes(rmProjekt)) { rmProjekt = pjs[0]; try { localStorage.setItem("rm-projekt", rmProjekt); } catch (e) {} }
     toast(`Roadmap-Import: ${neu} neu, ${akt} aktualisiert`);
     render();
   });
@@ -10310,13 +10344,17 @@ function rmWiederherstellen(versionId) { return paramEdit(async () => {
 function rmDialog(id) {
   const r = rmParam(); const neu = !id;
   const h = rmHeuteKw(); const maxKw = rmKwAnzahl(rmJahr);
-  const t = neu ? { id: "rm" + Date.now().toString(36), jahr: rmJahr, titel: "", von: (rmJahr === h.jahr ? h.kw : 1), bis: Math.min((rmJahr === h.jahr ? h.kw : 1) + 3, maxKw), entwickler: [], tags: [], status: "geplant", notiz: "" }
+  const t = neu ? { id: "rm" + Date.now().toString(36), projekt: rmProjekt, jahr: rmJahr, titel: "", von: (rmJahr === h.jahr ? h.kw : 1), bis: Math.min((rmJahr === h.jahr ? h.kw : 1) + 3, maxKw), entwickler: [], tags: [], status: "geplant", notiz: "" }
             : JSON.parse(JSON.stringify(r.tasks.find(x => x.id === id)));
   if (!t) return;
   const kwOpt = sel => Array.from({ length: maxKw }, (_, i) => `<option value="${i + 1}" ${i + 1 === sel ? "selected" : ""}>KW ${i + 1} · ${rmKwMontag(t.jahr, i + 1).toISOString().slice(8, 10)}.${rmKwMontag(t.jahr, i + 1).toISOString().slice(5, 7)}.</option>`).join("");
   const devs = rmEntwickler();
   showModal(neu ? "Neuer Roadmap-Task" : "Task bearbeiten", `
-    <div class="field"><label>Titel *</label><input id="rm-titel" value="${escape(t.titel)}" placeholder="z.B. Rapportscan v2"></div>
+    <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px">
+      <div class="field"><label>Titel *</label><input id="rm-titel" value="${escape(t.titel)}" placeholder="z.B. Rapportscan v2"></div>
+      <div class="field"><label>Projekt</label><select id="rm-projekt">${r.projekte.map(p => `<option value="${escape(p.id)}" ${p.id === (t.projekt || rmProjektVon(t)) ? "selected" : ""}>${escape(p.name)}</option>`).join("")}</select></div>
+      <div class="field"><label>Bereich</label><select id="rm-bereich">${RM_BEREICHE.map(([b, n]) => `<option value="${b}" ${b === rmBereichVon(t) ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+    </div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
       <div class="field"><label>Von</label><select id="rm-von">${kwOpt(t.von)}</select></div>
       <div class="field"><label>Bis</label><select id="rm-bis">${kwOpt(t.bis)}</select></div>
@@ -10350,6 +10388,8 @@ function rmDialogTags(taskId) {   // nach «+ Attribut»: nur die Chip-Zeile auf
   basis.titel = titel !== null ? titel : (basis.titel || ""); basis.tags = gewaehlt; basis.entwickler = devs;
   basis.von = parseInt(document.getElementById("rm-von").value) || basis.von; basis.bis = parseInt(document.getElementById("rm-bis").value) || basis.bis;
   basis.status = document.getElementById("rm-status").value || basis.status; basis.notiz = document.getElementById("rm-notiz").value || "";
+  const pj = document.getElementById("rm-projekt"); if (pj) basis.projekt = pj.value;
+  const bj = document.getElementById("rm-bereich"); if (bj) basis.bereich = bj.value;
   const neu = !t;
   const alt = r.tasks; if (neu) r.tasks = alt.concat([basis]);
   try { rmDialog(taskId); const el = document.getElementById("rm-titel"); if (el) el.value = basis.titel; } finally { if (neu) r.tasks = alt; }
@@ -10358,13 +10398,15 @@ function rmDialogTags(taskId) {   // nach «+ Attribut»: nur die Chip-Zeile auf
   document.querySelectorAll(".rm-tag-cb").forEach(c => { c.checked = gewaehlt.includes(c.value); c.closest("label").classList.toggle("an", c.checked); });
   document.getElementById("rm-von").value = basis.von; document.getElementById("rm-bis").value = basis.bis;
   document.getElementById("rm-status").value = basis.status; document.getElementById("rm-notiz").value = basis.notiz;
+  if (basis.projekt && document.getElementById("rm-projekt")) document.getElementById("rm-projekt").value = basis.projekt;
+  if (basis.bereich && document.getElementById("rm-bereich")) document.getElementById("rm-bereich").value = basis.bereich;
 }
 function rmDialogSpeichern(id, neu, jahr) {
   const titel = (document.getElementById("rm-titel").value || "").trim();
   if (!titel) { toast("Titel fehlt", true); return; }
   let von = parseInt(document.getElementById("rm-von").value), bis = parseInt(document.getElementById("rm-bis").value);
   if (bis < von) [von, bis] = [bis, von];
-  rmTaskSchreiben({ id, jahr, titel, von, bis,
+  rmTaskSchreiben({ id, projekt: (document.getElementById("rm-projekt") || {}).value || rmProjekt, bereich: (document.getElementById("rm-bereich") || {}).value || undefined, jahr, titel, von, bis,
     entwickler: Array.from(document.querySelectorAll(".rm-dev-cb:checked")).map(c => c.value),
     tags: Array.from(document.querySelectorAll(".rm-tag-cb:checked")).map(c => c.value),
     status: document.getElementById("rm-status").value,
@@ -10412,14 +10454,21 @@ async function renderRoadmap(el) {
   if (!crmParameter) { await parameterLaden(false); }
   if (crmMitarbeiter === null) { try { await crmLoadMitarbeiter(); } catch (e0) {} }   // Mitarbeiterstamm für die Entwicklerliste
   const r = rmParam(); const maxKw = rmKwAnzahl(rmJahr); const heute = rmHeuteKw();
-  const jahre = [...new Set([heute.jahr - 1, heute.jahr, heute.jahr + 1, heute.jahr + 2, ...r.tasks.map(t => t.jahr)])].sort();
+  if (!r.projekte.some(p => p.id === rmProjekt)) rmProjekt = "standard";
+  const ptasks = r.tasks.filter(t => rmProjektVon(t) === rmProjekt);
+  const jahre = [...new Set([heute.jahr - 1, heute.jahr, heute.jahr + 1, heute.jahr + 2, ...ptasks.map(t => t.jahr)])].sort();
   document.getElementById("view-actions").innerHTML = `
+    <span style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-right:6px">${r.projekte.map(p => {
+      const n = r.tasks.filter(t => rmProjektVon(t) === p.id).length;
+      return `<button class="btn btn-sm ${p.id === rmProjekt ? "btn-primary" : ""}" style="border:0;border-radius:0" onclick="rmProjektWaehlen('${escape(p.id)}')">${escape(p.name)} <span style="opacity:.65">${n}</span></button>`; }).join("")}<button class="btn btn-sm" style="border:0;border-radius:0" onclick="rmProjektAnlegen()" title="Neues Projekt anlegen">+</button></span>
+    <span style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-right:6px">${[["alle", "Alle"], ["entwicklung", "Entwicklung"], ["rollout", "Rollout"]].map(([b, n]) =>
+      `<button class="btn btn-sm ${b === rmBereich ? "btn-primary" : ""}" style="border:0;border-radius:0" onclick="rmBereichWaehlen('${b}')">${n} <span style="opacity:.65">${ptasks.filter(t => t.jahr === rmJahr && rmBereichPasst(t, b)).length}</span></button>`).join("")}</span>
     <select onchange="rmJahr=parseInt(this.value);render()" style="padding:4px 8px;font-weight:600">${jahre.map(j => `<option value="${j}" ${j === rmJahr ? "selected" : ""}>${j}</option>`).join("")}</select>
     <button class="btn btn-sm" onclick="rmWiederherstellenZeigen()" title="Frühere Stände der Roadmap aus der SharePoint-Versionsgeschichte zurückholen">🕘 Frühere Stände</button>
     <label class="btn btn-sm" style="cursor:pointer" title="Tasks aus Excel/CSV importieren: Titel, Jahr, Von KW, Bis KW, Attribute, Status, Entwickler, Notiz — gleicher Titel im gleichen Jahr wird aktualisiert, sonst neu angelegt, nichts wird gelöscht">⇧ Excel<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="rmImportLesen(this)"></label>
     <button class="btn btn-sm btn-primary" onclick="rmDialog()">+ Task</button>`;
 
-  const alle = r.tasks.filter(t => t.jahr === rmJahr).sort((a, b) => a.von - b.von || a.bis - b.bis || String(a.titel).localeCompare(b.titel));
+  const alle = ptasks.filter(t => t.jahr === rmJahr && rmBereichPasst(t, rmBereich)).sort((a, b) => a.von - b.von || a.bis - b.bis || String(a.titel).localeCompare(b.titel));
   const tasks = alle.filter(t => (!rmFilterDev.size || (t.entwickler || []).some(e => rmFilterDev.has(e)))
                              && (!rmFilterTag.size || (t.tags || []).some(g => rmFilterTag.has(g))));
   const devs = rmEntwickler().filter(d => alle.some(t => (t.entwickler || []).includes(d.email)));
@@ -10481,7 +10530,7 @@ async function renderRoadmap(el) {
         ${zeilen || `<div class="rm-row"><div class="rm-label" style="cursor:default"><span class="t" style="color:var(--text-dim);font-weight:400">Noch keine Tasks</span></div>${spur(`<div style="padding:10px 14px;font-size:12px;color:var(--text-dim)">«+ Task» oben rechts — oder Jahr wechseln.${(() => {
           /* Jahr-Falle (15.10.2026): Tasks in anderen Jahren sind hier unsichtbar — das sah
              nach Datenverlust aus. Darum im Leerzustand direkt verlinken, wo etwas liegt. */
-          const aj = {}; r.tasks.forEach(t => { if (t.jahr !== rmJahr) aj[t.jahr] = (aj[t.jahr] || 0) + 1; });
+          const aj = {}; ptasks.forEach(t => { if (t.jahr !== rmJahr) aj[t.jahr] = (aj[t.jahr] || 0) + 1; });
           const e2 = Object.entries(aj).sort((a, b) => a[0] - b[0]);
           return e2.length ? ` <span style="color:var(--warn)">Übrigens:</span> ` + e2.map(([j, n]) => `<a href="#" onclick="rmJahr=${j};render();return false" style="color:var(--accent)">${n} Task(s) in ${j}</a>`).join(" · ") : "";
         })()}</div>`)}</div>`}
