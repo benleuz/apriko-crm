@@ -1079,7 +1079,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.517.8</span> · <span id="app-build-date">15.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.518.0</span> · <span id="app-build-date">16.10.2026</span>
     </div>
   </aside>
 
@@ -10155,6 +10155,112 @@ function rmTagAnlegen(name) { return paramEdit(async () => {
   await parameterSpeichern();
 }); }
 
+/* ---------- Import aus Excel/CSV (16.10.2026, v1.518) ----------
+   Spalten (Kopfzeile, Reihenfolge egal): Titel*, Jahr*, Von KW*, Bis KW*,
+   Attribute, Status, Entwickler, Notiz — weitere Spalten (z.B. «Phase») werden
+   ignoriert. Schlüssel = Jahr + Titel: vorhandener Task wird aktualisiert,
+   sonst neu angelegt; nichts wird gelöscht. Leere Zellen «Entwickler»/«Notiz»
+   behalten die bestehenden Werte. Unbekannte Attribute werden angelegt.
+   Entwickler per E-Mail oder per Name (wie in der Entwicklerliste). */
+let rmImportDaten = null;
+function rmNormKey(jahr, titel) { return jahr + "|" + String(titel || "").trim().toLowerCase(); }
+function rmTagIdAusName(name) { return String(name).toLowerCase().replace(/[^a-z0-9äöü]+/g, "-").replace(/^-|-$/g, ""); }
+async function rmImportLesen(input) {
+  const f = input.files && input.files[0]; input.value = ""; if (!f) return;
+  let rows;
+  try {
+    await lcLoadXlsx();
+    const wb = /\.xlsx?$/i.test(f.name) ? window.XLSX.read(await f.arrayBuffer(), { type: "array" }) : window.XLSX.read(await f.text(), { type: "string", raw: true });
+    const blatt = wb.SheetNames.find(n => /roadmap/i.test(n)) || wb.SheetNames[0];
+    rows = window.XLSX.utils.sheet_to_json(wb.Sheets[blatt], { defval: "", raw: false });
+  } catch (e) { toast("Datei nicht lesbar: " + (e.message || e), true); return; }
+  if (!rows.length) { toast("Keine Zeilen gefunden", true); return; }
+  const head = Object.keys(rows[0]);
+  const sp = re => head.find(h => re.test(String(h).trim())) || "";
+  const c = { titel: sp(/^(titel|task|aufgabe)$/i), jahr: sp(/^jahr$/i), von: sp(/^von(\s*kw)?$/i), bis: sp(/^bis(\s*kw)?$/i),
+              tags: sp(/^(attribute?|tags?)$/i), status: sp(/^status$/i), dev: sp(/^entwickler/i), notiz: sp(/^(notiz|bemerkung)/i) };
+  const fehlt = ["titel", "jahr", "von", "bis"].filter(k => !c[k]);
+  if (fehlt.length) { toast("Spalte(n) fehlen: " + fehlt.map(k => ({ titel: "Titel", jahr: "Jahr", von: "Von KW", bis: "Bis KW" })[k]).join(", "), true); return; }
+  const r = rmParam(); const devs = rmEntwickler();
+  const devPerName = new Map(devs.map(d => [String(d.name).trim().toLowerCase(), d.email]));
+  const vorhanden = new Map(r.tasks.map(t => [rmNormKey(t.jahr, t.titel), t]));
+  const tagBekannt = tg => r.tags.find(g => g.id === tg.toLowerCase() || g.name.toLowerCase() === tg.toLowerCase() || g.id === rmTagIdAusName(tg));
+  const neueTags = new Map(), warn = [], zeilen = [], gesehen = new Set();
+  rows.forEach((row, i) => {
+    const nr = i + 2, titel = String(row[c.titel] || "").trim();
+    if (!titel) return;
+    const jahr = parseInt(row[c.jahr]); let von = parseInt(String(row[c.von]).replace(/\D/g, "")), bis = parseInt(String(row[c.bis]).replace(/\D/g, ""));
+    if (!(jahr >= 2000 && jahr <= 2100)) { warn.push(`Zeile ${nr}: Jahr ungültig — übersprungen`); return; }
+    const maxKw = rmKwAnzahl(jahr);
+    if (!(von >= 1 && von <= maxKw) || !(bis >= 1 && bis <= maxKw)) { warn.push(`Zeile ${nr}: KW ausserhalb 1–${maxKw} — übersprungen`); return; }
+    if (bis < von) [von, bis] = [bis, von];
+    const key = rmNormKey(jahr, titel);
+    if (gesehen.has(key)) { warn.push(`Zeile ${nr}: «${titel}» ${jahr} doppelt in der Datei — nur die erste Zeile zählt`); return; }
+    gesehen.add(key);
+    const tags = [];
+    String(c.tags ? row[c.tags] : "").split(/[,;\n]/).map(x => x.trim()).filter(Boolean).forEach(tg => {
+      const g = tagBekannt(tg); const id = g ? g.id : rmTagIdAusName(tg);
+      if (!id) return;
+      if (!g && !neueTags.has(id)) neueTags.set(id, tg);
+      if (!tags.includes(id)) tags.push(id);
+    });
+    let status = String(c.status ? row[c.status] : "").trim().toLowerCase();
+    if (!["geplant", "laufend", "fertig"].includes(status)) { if (status) warn.push(`Zeile ${nr}: Status «${status}» unbekannt → geplant`); status = "geplant"; }
+    const devZelle = String(c.dev ? row[c.dev] : "").trim(), entwickler = [];
+    devZelle.split(/[,;\n]/).map(x => x.trim()).filter(Boolean).forEach(d => {
+      const e = d.includes("@") ? d.toLowerCase() : devPerName.get(d.toLowerCase());
+      if (e) { if (!entwickler.includes(e)) entwickler.push(e); } else warn.push(`Zeile ${nr}: Entwickler «${d}» nicht gefunden — weggelassen`);
+    });
+    const notiz = String(c.notiz ? row[c.notiz] : "").trim();
+    zeilen.push({ key, alt: vorhanden.get(key) || null, daten: { jahr, titel, von, bis, tags, status, notiz, entwickler, devLeer: !devZelle } });
+  });
+  if (!zeilen.length) { toast("Keine gültigen Tasks in der Datei" + (warn.length ? " — " + warn[0] : ""), true); return; }
+  rmImportDaten = { zeilen, neueTags: [...neueTags.entries()] };
+  const nNeu = zeilen.filter(z => !z.alt).length, nAkt = zeilen.length - nNeu;
+  const jahre = [...new Set(zeilen.map(z => z.daten.jahr))].sort().join(", ");
+  showModal("Roadmap-Import", `
+    <div style="font-size:13px;line-height:1.7">
+      <b>${escape(f.name)}</b><br>
+      ${nNeu} neue Task(s), ${nAkt} bestehende werden aktualisiert · Jahr(e): ${jahre}<br>
+      ${neueTags.size ? `Neue Attribute: ${[...neueTags.values()].map(escape).join(", ")}<br>` : ""}
+      <span style="color:var(--text-dim)">Gelöscht wird nichts. Leere Zellen «Entwickler»/«Notiz» behalten bestehende Werte.</span>
+    </div>
+    ${warn.length ? `<details style="margin-top:8px" open><summary style="cursor:pointer;color:var(--danger);font-size:12px">${warn.length} Hinweis(e)</summary><div style="font-size:11.5px;max-height:160px;overflow:auto;margin-top:4px">${warn.map(escape).join("<br>")}</div></details>` : ""}
+    <div style="font-size:11.5px;max-height:220px;overflow:auto;margin-top:10px;border-top:1px solid var(--border);padding-top:6px">
+      ${zeilen.map(z => `<div>${z.alt ? "↻" : "＋"} ${z.daten.jahr} · KW ${z.daten.von}–${z.daten.bis} · ${escape(z.daten.titel)}</div>`).join("")}
+    </div>`,
+    [`<button class="btn" onclick="closeModal()">Abbrechen</button>`,
+     `<button class="btn btn-primary" onclick="rmImportAusfuehren()">${zeilen.length} Task(s) übernehmen</button>`]);
+}
+function rmImportAusfuehren() {
+  const imp = rmImportDaten; if (!imp) return;
+  return paramEdit(async () => {
+    await parameterLaden(true); const r = rmParam();
+    imp.neueTags.forEach(([id, name]) => { if (!r.tags.some(g => g.id === id)) r.tags.push({ id, name, farbe: RM_FARBEN[r.tags.length % RM_FARBEN.length] }); });
+    const map = new Map(r.tasks.map(t => [rmNormKey(t.jahr, t.titel), t]));   // nach frischem Laden neu zuordnen
+    let neu = 0, akt = 0, idx = 0;
+    imp.zeilen.forEach(z => {
+      const d = z.daten, t = map.get(z.key);
+      if (t) {
+        Object.assign(t, { titel: d.titel, von: d.von, bis: d.bis, tags: d.tags, status: d.status });
+        if (!d.devLeer) t.entwickler = d.entwickler;
+        if (d.notiz) t.notiz = d.notiz;
+        akt++;
+      } else {
+        r.tasks.push({ id: "rm" + Date.now().toString(36) + (idx++).toString(36), jahr: d.jahr, titel: d.titel, von: d.von, bis: d.bis,
+                       entwickler: d.entwickler, tags: d.tags, status: d.status, notiz: d.notiz });
+        neu++;
+      }
+    });
+    await parameterSpeichern();
+    rmImportDaten = null; closeModal();
+    const jahre = [...new Set(imp.zeilen.map(z => z.daten.jahr))].sort();
+    if (!jahre.includes(rmJahr)) rmJahr = jahre[0];
+    toast(`Roadmap-Import: ${neu} neu, ${akt} aktualisiert`);
+    render();
+  });
+}
+
 /* ---------- Datenrettung über die SharePoint-Versionsgeschichte (15.10.2026) ----------
    SharePoint legt bei jedem Speichern von parameter_v2.json eine Version an. Hier werden die
    letzten Versionen durchsucht und gezielt NUR der roadmap-Schlüssel zurückgeholt —
@@ -10310,6 +10416,7 @@ async function renderRoadmap(el) {
   document.getElementById("view-actions").innerHTML = `
     <select onchange="rmJahr=parseInt(this.value);render()" style="padding:4px 8px;font-weight:600">${jahre.map(j => `<option value="${j}" ${j === rmJahr ? "selected" : ""}>${j}</option>`).join("")}</select>
     <button class="btn btn-sm" onclick="rmWiederherstellenZeigen()" title="Frühere Stände der Roadmap aus der SharePoint-Versionsgeschichte zurückholen">🕘 Frühere Stände</button>
+    <label class="btn btn-sm" style="cursor:pointer" title="Tasks aus Excel/CSV importieren: Titel, Jahr, Von KW, Bis KW, Attribute, Status, Entwickler, Notiz — gleicher Titel im gleichen Jahr wird aktualisiert, sonst neu angelegt, nichts wird gelöscht">⇧ Excel<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="rmImportLesen(this)"></label>
     <button class="btn btn-sm btn-primary" onclick="rmDialog()">+ Task</button>`;
 
   const alle = r.tasks.filter(t => t.jahr === rmJahr).sort((a, b) => a.von - b.von || a.bis - b.bis || String(a.titel).localeCompare(b.titel));
