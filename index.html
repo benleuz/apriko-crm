@@ -531,6 +531,16 @@
   .rm-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 20px; font-size: 11px; cursor: pointer; background: var(--bg-card); color: var(--text-dim); user-select: none; }
   .rm-chip:hover { border-color: var(--accent); }
   .rm-chip.an { border-color: var(--accent); color: var(--text); background: var(--bg-elev); }
+  .rm-bar.rm-ms { background: transparent !important; box-shadow: none; overflow: visible; padding: 0; }
+  .rm-bar.rm-ms::before { content: ""; position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; transform: translate(-50%, -50%) rotate(45deg); background: var(--ms); border: 2px solid var(--bg-card); box-shadow: 0 0 0 2px var(--ms), 0 2px 6px rgba(0,0,0,.4); border-radius: 2px; }
+  .rm-bar.rm-ms .rm-ms-txt { position: absolute; left: calc(100% + 4px); top: 50%; transform: translateY(-50%); font-size: 11px; font-weight: 700; color: var(--text); background: var(--bg-card); padding: 1px 6px; border-radius: 4px; border: 1px solid var(--ms); white-space: nowrap; pointer-events: none; }
+  .rm-label.rm-ms-label { background: color-mix(in srgb, var(--ms) 14%, var(--bg-card)); border-left: 3px solid var(--ms); }
+  .rm-label.rm-ms-label .t { color: var(--text); }
+  .rm-mslinie { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed var(--ms); opacity: .45; z-index: 3; pointer-events: none; }
+  #rm-tip { position: fixed; z-index: 9999; max-width: 380px; background: var(--bg-elev, #222); color: var(--text); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.35); padding: 8px 10px; font-size: 12px; line-height: 1.45; pointer-events: none; white-space: normal; }
+  #rm-tip .tt { font-weight: 700; font-size: 12.5px; margin-bottom: 3px; }
+  #rm-tip .tm { color: var(--text-dim); font-size: 11px; }
+  #rm-tip .tn { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--border-soft); white-space: pre-wrap; }
   .rm-heutelinie { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: .65; z-index: 4; pointer-events: none; }
   .rm-badge { position: fixed; z-index: 300; background: var(--bg-elev); border: 1px solid var(--accent); border-radius: 4px; padding: 2px 8px; font-size: 11px; font-family: var(--font-mono); pointer-events: none; }
   .rm-last { display: flex; align-items: flex-end; height: 26px; }
@@ -1079,7 +1089,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.520.0</span> · <span id="app-build-date">16.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.522.0</span> · <span id="app-build-date">16.10.2026</span>
     </div>
   </aside>
 
@@ -10203,7 +10213,8 @@ async function rmImportLesen(input) {
   const head = Object.keys(rows[0]);
   const sp = re => head.find(h => re.test(String(h).trim())) || "";
   const c = { titel: sp(/^(titel|task|aufgabe)$/i), jahr: sp(/^jahr$/i), von: sp(/^von(\s*kw)?$/i), bis: sp(/^bis(\s*kw)?$/i),
-              tags: sp(/^(attribute?|tags?)$/i), status: sp(/^status$/i), dev: sp(/^entwickler/i), notiz: sp(/^(notiz|bemerkung)/i), projekt: sp(/^projekt$/i), bereich: sp(/^bereich$/i) };
+              tags: sp(/^(attribute?|tags?)$/i), status: sp(/^status$/i), dev: sp(/^entwickler/i), notiz: sp(/^(notiz|bemerkung)/i), projekt: sp(/^projekt$/i), bereich: sp(/^bereich$/i),
+              id: sp(/^id$/i), altTitel: sp(/^(bisheriger|alter)\s*titel$/i) };
   const fehlt = ["titel", "jahr", "von", "bis"].filter(k => !c[k]);
   if (fehlt.length) { toast("Spalte(n) fehlen: " + fehlt.map(k => ({ titel: "Titel", jahr: "Jahr", von: "Von KW", bis: "Bis KW" })[k]).join(", "), true); return; }
   const r = rmParam(); const devs = rmEntwickler();
@@ -10220,6 +10231,10 @@ async function rmImportLesen(input) {
     if (!(von >= 1 && von <= maxKw) || !(bis >= 1 && bis <= maxKw)) { warn.push(`Zeile ${nr}: KW ausserhalb 1–${maxKw} — übersprungen`); return; }
     if (bis < von) [von, bis] = [bis, von];
     const key = rmNormKey(jahr, titel);
+    /* Zuordnung (v1.522): 1. Spalte ID, 2. «Bisheriger Titel» + Jahr (Umbenennen), 3. Titel + Jahr */
+    const xid = String(c.id ? row[c.id] : "").trim();
+    const altT = String(c.altTitel ? row[c.altTitel] : "").trim();
+    const treffer = (xid && r.tasks.find(t => t.id === xid)) || (altT && vorhanden.get(rmNormKey(jahr, altT))) || vorhanden.get(key) || null;
     if (gesehen.has(key)) { warn.push(`Zeile ${nr}: «${titel}» ${jahr} doppelt in der Datei — nur die erste Zeile zählt`); return; }
     gesehen.add(key);
     const tags = [];
@@ -10243,7 +10258,7 @@ async function rmImportLesen(input) {
     const bz = String(c.bereich ? row[c.bereich] : "").trim().toLowerCase();
     const be = bz ? (RM_BEREICHE.find(([b, n]) => b === bz || n.toLowerCase() === bz) || [])[0] : "";
     if (bz && !be) warn.push(`Zeile ${nr}: Bereich «${bz}» unbekannt → automatisch`);
-    zeilen.push({ key, alt: vorhanden.get(key) || null, daten: { bereich: be || "", projekt: pr ? pr.id : rmProjekt, jahr, titel, von, bis, tags, status, notiz, entwickler, devLeer: !devZelle } });
+    zeilen.push({ key, xid, altId: treffer ? treffer.id : "", alt: treffer, daten: { bereich: be || "", projekt: pr ? pr.id : rmProjekt, jahr, titel, von, bis, tags, status, notiz, entwickler, devLeer: !devZelle } });
   });
   if (!zeilen.length) { toast("Keine gültigen Tasks in der Datei" + (warn.length ? " — " + warn[0] : ""), true); return; }
   rmImportDaten = { zeilen, neueTags: [...neueTags.entries()] };
@@ -10259,7 +10274,7 @@ async function rmImportLesen(input) {
     </div>
     ${warn.length ? `<details style="margin-top:8px" open><summary style="cursor:pointer;color:var(--danger);font-size:12px">${warn.length} Hinweis(e)</summary><div style="font-size:11.5px;max-height:160px;overflow:auto;margin-top:4px">${warn.map(escape).join("<br>")}</div></details>` : ""}
     <div style="font-size:11.5px;max-height:220px;overflow:auto;margin-top:10px;border-top:1px solid var(--border);padding-top:6px">
-      ${zeilen.map(z => `<div>${z.alt ? "↻" : "＋"} ${z.daten.jahr} · KW ${z.daten.von}–${z.daten.bis} · ${escape(z.daten.titel)}</div>`).join("")}
+      ${zeilen.map(z => `<div>${z.alt ? "↻" : "＋"} ${z.daten.jahr} · KW ${z.daten.von}–${z.daten.bis} · ${escape(z.daten.titel)}${z.alt && z.alt.titel !== z.daten.titel ? ` <span style="color:var(--text-dim)">(bisher «${escape(z.alt.titel)}»)</span>` : ""}</div>`).join("")}
     </div>`,
     [`<button class="btn" onclick="closeModal()">Abbrechen</button>`,
      `<button class="btn btn-primary" onclick="rmImportAusfuehren()">${zeilen.length} Task(s) übernehmen</button>`]);
@@ -10269,18 +10284,21 @@ function rmImportAusfuehren() {
   return paramEdit(async () => {
     await parameterLaden(true); const r = rmParam();
     imp.neueTags.forEach(([id, name]) => { if (!r.tags.some(g => g.id === id)) r.tags.push({ id, name, farbe: RM_FARBEN[r.tags.length % RM_FARBEN.length] }); });
-    const map = new Map(r.tasks.map(t => [rmNormKey(t.jahr, t.titel), t]));   // nach frischem Laden neu zuordnen
+    const byId = new Map(r.tasks.map(t => [t.id, t]));   // nach frischem Laden neu zuordnen (über die beim Lesen gefundene ID)
     let neu = 0, akt = 0, idx = 0;
     imp.zeilen.forEach(z => {
-      const d = z.daten, t = map.get(z.key);
+      const d = z.daten, t = z.altId ? byId.get(z.altId) : null;
       if (t) {
+        if (z.xid && z.xid !== t.id && !byId.has(z.xid)) { byId.delete(t.id); t.id = z.xid; byId.set(t.id, t); }   // ID aus Excel übernehmen
         Object.assign(t, { projekt: d.projekt, titel: d.titel, von: d.von, bis: d.bis, tags: d.tags, status: d.status });
         if (!d.devLeer) t.entwickler = d.entwickler;
         if (d.notiz) t.notiz = d.notiz;
         if (d.bereich) t.bereich = d.bereich;
         akt++;
       } else {
-        r.tasks.push({ id: "rm" + Date.now().toString(36) + (idx++).toString(36), projekt: d.projekt, jahr: d.jahr, titel: d.titel, von: d.von, bis: d.bis,
+        const nid = z.xid && !byId.has(z.xid) ? z.xid : "rm" + Date.now().toString(36) + (idx++).toString(36);
+        byId.set(nid, true);
+        r.tasks.push({ id: nid, projekt: d.projekt, jahr: d.jahr, titel: d.titel, von: d.von, bis: d.bis,
                        entwickler: d.entwickler, tags: d.tags, status: d.status, notiz: d.notiz, ...(d.bereich ? { bereich: d.bereich } : {}) });
         neu++;
       }
@@ -10421,7 +10439,7 @@ function rmBarDown(ev, id) {
   const griff = ev.target.classList.contains("griff") ? (ev.target.classList.contains("l") ? "l" : "r") : "m";
   rmDrag = { id, griff, startX: ev.clientX, von0: t.von, bis0: t.bis, von: t.von, bis: t.bis, bar, bewegt: false, maxKw: rmKwAnzahl(rmJahr) };
   try { bar.setPointerCapture(ev.pointerId); } catch (e) { /* ältere Browser/Tests ohne Pointer Capture */ }
-  bar.classList.add("drag");
+  bar.classList.add("drag"); rmTipWeg();
   ev.preventDefault();
 }
 function rmBarMove(ev) {
@@ -10449,8 +10467,38 @@ function rmBarUp(ev, id) {
   if (von !== von0 || bis !== bis0) rmTaskZeit(id, von, bis);
 }
 
+/* ---------- Rollover (16.10.2026, v1.521): ganzer Text beim Überfahren ---------- */
+function rmTipZeigen(ev, id) {
+  if (rmDrag) return;
+  const t = rmParam().tasks.find(x => x.id === id); if (!t) return;
+  const dat = kw => { const d = rmKwMontag(t.jahr, kw); return d.toISOString().slice(8, 10) + "." + d.toISOString().slice(5, 7) + "."; };
+  const ende = (() => { const d = rmKwMontag(t.jahr, t.bis); d.setUTCDate(d.getUTCDate() + 4); return d.toISOString().slice(8, 10) + "." + d.toISOString().slice(5, 7) + "."; })();
+  const tags = (t.tags || []).map(rmTagVon).filter(Boolean).map(g => `<span class="rm-dot" style="display:inline-block;background:${g.farbe};margin-right:3px"></span>${escape(g.name)}`).join(" · ");
+  const devs = (t.entwickler || []).map(e => { const d = rmEntwickler().find(x => x.email === e); return escape(d ? d.name : e); }).join(", ");
+  const ber = (RM_BEREICHE.find(([b]) => b === rmBereichVon(t)) || [, ""])[1];
+  let tip = document.getElementById("rm-tip");
+  if (!tip) { tip = document.createElement("div"); tip.id = "rm-tip"; document.body.appendChild(tip); }
+  tip.innerHTML = `<div class="tt">${escape(t.titel)}</div>
+    <div class="tm">KW ${t.von}${t.bis !== t.von ? "–" + t.bis : ""} ${t.jahr} · ${dat(t.von)}–${ende} · ${t.status[0].toUpperCase() + t.status.slice(1)}${ber ? " · " + ber : ""}</div>
+    ${tags ? `<div class="tm" style="margin-top:2px">${tags}</div>` : ""}
+    ${devs ? `<div class="tm" style="margin-top:2px">👤 ${devs}</div>` : ""}
+    ${t.notiz ? `<div class="tn">${escape(t.notiz)}</div>` : ""}`;
+  rmTipPos(ev);
+}
+function rmTipPos(ev) {
+  const tip = document.getElementById("rm-tip"); if (!tip) return;
+  if (rmDrag) { tip.remove(); return; }
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = ev.clientX + 14, y = ev.clientY + 16;
+  if (x + w > window.innerWidth - 8) x = Math.max(8, ev.clientX - w - 14);
+  if (y + h > window.innerHeight - 8) y = Math.max(8, ev.clientY - h - 12);
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+}
+function rmTipWeg() { const tip = document.getElementById("rm-tip"); if (tip) tip.remove(); }
+
 /* ---------- Ansicht ---------- */
 async function renderRoadmap(el) {
+  rmTipWeg();
   if (!crmParameter) { await parameterLaden(false); }
   if (crmMitarbeiter === null) { try { await crmLoadMitarbeiter(); } catch (e0) {} }   // Mitarbeiterstamm für die Entwicklerliste
   const r = rmParam(); const maxKw = rmKwAnzahl(rmJahr); const heute = rmHeuteKw();
@@ -10498,12 +10546,25 @@ async function renderRoadmap(el) {
     const avs = (t.entwickler || []).slice(0, 4).map(e => { const d = rmEntwickler().find(x => x.email === e); return `<span class="rm-av" style="background:${rmDevFarbe(e)}" title="${escape(e)}">${escape(rmInitialen(d ? d.name : e))}</span>`; }).join("");
     const dots = (t.tags || []).map(g => { const tg = rmTagVon(g); return tg ? `<span class="rm-dot" style="background:${tg.farbe}" title="${escape(tg.name)}"></span>` : ""; }).join("");
     const breit = (t.bis - t.von + 1) * RM_KW_W - 4;
+    const ms = (t.tags || []).includes("meilenstein");
+    const tipAttr = `onmouseenter="rmTipZeigen(event,'${t.id}')" onmousemove="rmTipPos(event)" onmouseleave="rmTipWeg()"`;
+    if (ms) return `<div class="rm-row">
+      <div class="rm-label rm-ms-label" style="--ms:${farbe}" onclick="rmDialog('${t.id}')" ${tipAttr}>
+        <span class="t">${t.status === "fertig" ? "✓ " : ""}${escape(t.titel)}</span>
+        <span class="m" style="font-size:9.5px;color:var(--text-dim)">Meilenstein · KW ${t.von}${avs ? "<span style='width:4px'></span>" + avs : ""}</span>
+      </div>
+      ${spur(`<div class="rm-bar rm-ms ${t.status === "fertig" ? "fertig" : ""}" data-rmid="${t.id}" ${tipAttr}
+         style="left:${(t.von - 1) * RM_KW_W + 2}px;width:${RM_KW_W - 4}px;--ms:${farbe}"
+         onpointerdown="rmBarDown(event,'${t.id}')" onpointermove="rmBarMove(event)" onpointerup="rmBarUp(event,'${t.id}')" onpointercancel="rmBarUp(event,'${t.id}')">
+        <span class="rm-ms-txt">${escape(t.titel.replace(/^◆\s*/, ""))}</span>
+      </div>`)}
+    </div>`;
     return `<div class="rm-row">
-      <div class="rm-label" onclick="rmDialog('${t.id}')" title="${escape(t.titel)}${t.notiz ? "\n" + escape(t.notiz) : ""}">
+      <div class="rm-label" onclick="rmDialog('${t.id}')" ${tipAttr}>
         <span class="t">${t.status === "fertig" ? "✓ " : ""}${escape(t.titel)}</span>
         <span class="m">${dots}${dots && avs ? "<span style='width:4px'></span>" : ""}${avs}${t.status === "laufend" ? `<span style="font-size:9px;color:var(--accent);margin-left:4px">● läuft</span>` : ""}</span>
       </div>
-      ${spur(`<div class="rm-bar ${t.status === "fertig" ? "fertig" : ""}" data-rmid="${t.id}"
+      ${spur(`<div class="rm-bar ${t.status === "fertig" ? "fertig" : ""}" data-rmid="${t.id}" ${tipAttr}
          style="left:${(t.von - 1) * RM_KW_W + 2}px;width:${breit}px;background:${farbe}"
          onpointerdown="rmBarDown(event,'${t.id}')" onpointermove="rmBarMove(event)" onpointerup="rmBarUp(event,'${t.id}')" onpointercancel="rmBarUp(event,'${t.id}')">
         <span class="griff l"></span>${breit > 70 ? `<span style="overflow:hidden;text-overflow:ellipsis">${escape(t.titel)}</span>` : ""}${breit > 120 ? avs : ""}<span class="griff r"></span>
@@ -10535,6 +10596,7 @@ async function renderRoadmap(el) {
           return e2.length ? ` <span style="color:var(--warn)">Übrigens:</span> ` + e2.map(([j, n]) => `<a href="#" onclick="rmJahr=${j};render();return false" style="color:var(--accent)">${n} Task(s) in ${j}</a>`).join(" · ") : "";
         })()}</div>`)}</div>`}
         ${tasks.length ? lastHtml : ""}
+        ${tasks.filter(t => (t.tags || []).includes("meilenstein")).map(t => `<div class="rm-mslinie" style="--ms:${rmTaskFarbe(t)};left:${230 + (t.von - 1) * RM_KW_W + RM_KW_W / 2 - 1}px"></div>`).join("")}
         ${heuteX >= 0 ? `<div class="rm-heutelinie" style="left:${230 + heuteX}px;top:0;bottom:0"></div>` : ""}
       </div>
     </div>
