@@ -1090,7 +1090,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.528.0</span> · <span id="app-build-date">19.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.528.1</span> · <span id="app-build-date">19.10.2026</span>
     </div>
   </aside>
 
@@ -12244,7 +12244,16 @@ function renderCheckliste(el, typ) {
       const gew = kontakte.find(k => k.id === extSel);
       const termin = clLohnTermin(monat, f.lohnTag, f.lohnWe || "vor");
       const wtage = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+      // Interne Zuständigkeiten: beim Kunden per Chip definiert (INTERN_ROLLEN), hier nur Anzeige (19.10.2026)
+      const rollen = [["apLohnIntern", "Lohn intern"], ["apLohnInternBackup", "Backup"], ["apLohn", "Lohn"], ["apLohnBackup", "Lohn Backup"]]
+        .map(([k, l]) => ({ l, e: String(f[k] || "").toLowerCase() })).filter(x => x.e);
       return `<div class="card" style="margin-bottom:14px;padding:10px 16px;display:flex;gap:20px;align-items:center;flex-wrap:wrap;font-size:12px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="color:var(--text-dim)">Zuständig intern:</span>
+          ${rollen.length ? rollen.map(x => `<span title="${escape(x.l + " · " + x.e)}" style="display:inline-flex;align-items:center;gap:5px;border:1px solid var(--border);border-radius:10px;padding:1px 8px"><span style="color:var(--text-faint);font-size:10px">${escape(x.l)}</span><b style="font-weight:600">${escape(mitarbeiterKurzname(x.e))}</b></span>`).join("")
+            : `<span style="color:var(--text-faint)">— noch niemand zugeteilt</span>`}
+          <a href="#" onclick="openCustomer(${parseInt(sel)});return false" title="Zuständigkeiten in der Kundenansicht per Chip setzen" style="color:var(--text-faint);text-decoration:none">✎</a>
+        </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span style="color:var(--text-dim)">Zuständig beim Kunden:</span>
           <select onchange="clLohnSet('${sel}','lohnExt',this.value)" style="padding:4px 8px;font-size:12px;max-width:220px">
