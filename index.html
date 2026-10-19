@@ -1089,7 +1089,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.525.0</span> · <span id="app-build-date">16.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.526.1</span> · <span id="app-build-date">19.10.2026</span>
     </div>
   </aside>
 
@@ -8871,13 +8871,21 @@ const ABA_HELVA_STANDARD = {
   kontierung: { "1066": { soll: "5400", haben: "1091" }, "1100": { soll: "5400", haben: "1091" }, "3001": { soll: "1096", haben: "1091" }, "5091": { soll: "2272", haben: "1091" }, "5401": { soll: "2278", haben: "1091" },
     "6310": { soll: "5490", haben: "1091" }, "6390": { soll: "6990", haben: "1091" }, "8020": { soll: "1091", haben: "2215" }, "8030": { soll: "1091", haben: "2216" }, "8040": { soll: "1091", haben: "1094" }, "8050": { soll: "1091", haben: "2218" },
     "8105": { soll: "1140", haben: "1091" }, "8115": { soll: "1020", haben: "1091" }, "8120": { soll: "2215", haben: "1091" }, "8125": { soll: "1020", haben: "1091" }, "8130": { soll: "2216", haben: "1091" }, "8135": { soll: "1020", haben: "1091" },
-    "8150": { soll: "2218", haben: "1091" }, "8155": { soll: "1020", haben: "1091" }, "8300": { soll: "1142", haben: "1091" }, "8900": { soll: "1091", haben: "1020" },
+    "8150": { soll: "2218", haben: "1091" }, "8155": { soll: "1020", haben: "1091" }, "8900": { soll: "1091", haben: "1020" },
     // Aus den Monaten Jan–Aug 2026 zusätzlich nötig (im Juli 0, daher nicht in der Buchungsmaske): Konto noch offen = ""
     "6300": { soll: "1094", haben: "1091" }, "2000": { soll: "", haben: "1091" }, "8110": { soll: "", haben: "1091" } },
   aggregat: { "1005": ["1000", "1160", "1161", "1200"] },
   zusatz: { "5091": { soll: "2272", haben: "5472" } },
-  nichtBuchen: ["3500", "4500", "4900", "5500", "5900", "6500", "6900", "7500", "8500", "86*", "87*", "8995", "9*"]
+  nichtBuchen: ["3500", "4500", "4900", "5500", "5900", "6500", "6900", "7500", "8500", "86*", "87*", "8995", "9*"],
+  auszahlungKorrektur: { ziel: "8900", nurRechnen: ["8300"], auchBuchen: ["8995"] }
 };
+/* Auszahlungs-Korrektur (19.10.2026, v1.526 — einheitlich für alle Kunden):
+   Auszahlung (8900) = 8900 − 8300 − 8995, d.h. negativer Betrag → addieren, positiver → abziehen.
+   8300 (Ausgleich Negativlohn) wird NUR verrechnet, nie gebucht; 8995 (negativer Gehaltssaldo)
+   wird verrechnet UND wie bisher gebucht. Pro Regelwerk unter Parameter → Abacus anpassbar. */
+const ABA_AUSZ_KORR = { ziel: "8900", nurRechnen: ["8300"], auchBuchen: ["8995"] };
+function abaAuszKorr(pa) { const k = (pa && pa.auszahlungKorrektur) || {};
+  return { ziel: String(k.ziel || ABA_AUSZ_KORR.ziel), nurRechnen: (k.nurRechnen || ABA_AUSZ_KORR.nurRechnen).map(String), auchBuchen: (k.auchBuchen || ABA_AUSZ_KORR.auchBuchen).map(String) }; }
 function abaParam(global) {
   if (!crmParameter) return Object.assign({ erzwungen: [], ausgeschlossen: [] }, JSON.parse(JSON.stringify(ABA_HELVA_STANDARD)));
   if (!crmParameter.abacus) { crmParameter.abacus = JSON.parse(JSON.stringify(ABA_HELVA_STANDARD)); crmParameter.abacus.standardGeladen = "Helva Juli 2026"; }
@@ -8886,9 +8894,16 @@ function abaParam(global) {
     crmParameter.abacusKunden = crmParameter.abacusKunden || {};
     const k = String(abaState.kunde);
     if (!crmParameter.abacusKunden[k]) {
-      const vorlage = JSON.parse(JSON.stringify(abaParam(true)));
-      vorlage.standardGeladen = "Vorlage kopiert " + new Date().toLocaleDateString("de-CH");
-      vorlage.erzwungen = []; vorlage.ausgeschlossen = []; vorlage.mandant = {};
+      /* Standard-Kunde (19.10.2026, Beni: «die Grunddaten von Tyson gelten als Standard, sofern ein Kunde
+         noch nichts parametriert hat»): Regelwerk + Mandant-Grunddaten (ohne Mandant-Nr.) vom Standard-Kunden
+         kopieren; ohne Standard-Kunde wie bisher aus der Vorlage. */
+      const stdId = abaStandardKundeId();
+      const stdBlock = stdId && stdId !== k ? crmParameter.abacusKunden[stdId] : null;
+      const vorlage = JSON.parse(JSON.stringify(stdBlock || abaParam(true)));
+      vorlage.standardGeladen = stdBlock ? "Standard «" + abaKundeName(stdId) + "» kopiert " + new Date().toLocaleDateString("de-CH") : "Vorlage kopiert " + new Date().toLocaleDateString("de-CH");
+      vorlage.erzwungen = stdBlock ? (vorlage.erzwungen || []) : []; vorlage.ausgeschlossen = stdBlock ? (vorlage.ausgeschlossen || []) : [];
+      vorlage.mandant = stdBlock ? Object.assign({}, vorlage.mandant || {}) : {};
+      delete vorlage.mandant.client;   // Mandant-Nr. ist kundenspezifisch
       crmParameter.abacusKunden[k] = vorlage;
       abaParamSpeichern();
     }
@@ -8914,6 +8929,16 @@ function abaParam(global) {
   a.umkontierung = a.umkontierung || {}; a.aggregat = a.aggregat || {}; a.zusatz = a.zusatz || {}; a.nichtBuchen = a.nichtBuchen || [];
   return a;
 }
+function abaKundeName(id) { return ((cache.customers || []).find(c => String(c.id) === String(id)) || {}).Title || String(id); }
+/* Standard-Kunde: explizit gesetzt (parameter.json abacusStandardKunde), sonst der Kunde «Tyson», falls vorhanden */
+function abaStandardKundeId() {
+  if (!crmParameter) return "";
+  const kb = crmParameter.abacusKunden || {};
+  const x = crmParameter.abacusStandardKunde;
+  if (x && kb[String(x)]) return String(x);
+  const t = (cache.customers || []).find(c => /tyson/i.test(c.Title || "") && kb[String(c.id)]);
+  return t ? String(t.id) : "";
+}
 function abaNichtBuchen(code, pa) {
   return (pa.nichtBuchen || []).some(m => m.endsWith("*") ? String(code).startsWith(m.slice(0, -1)) : String(code) === m);
 }
@@ -8925,6 +8950,47 @@ function abaStandardLaden() { return paramEdit(async () => {
   const std = JSON.parse(JSON.stringify(ABA_HELVA_STANDARD)); std.standardGeladen = "Helva Juli 2026";
   if (abaState.kunde) { crmParameter.abacusKunden = crmParameter.abacusKunden || {}; std.mandant = (crmParameter.abacusKunden[String(abaState.kunde)] || {}).mandant || {}; crmParameter.abacusKunden[String(abaState.kunde)] = std; }
   else crmParameter.abacus = std;
+  await abaParamSpeichern(); render();
+}); }
+/* Regelwerk des gewählten Kunden (z.B. Tyson) übernehmen (19.10.2026) — Regel von Beni: NUR für Kunden,
+   die noch nichts parametriert haben. Als «nichts parametriert» gilt: kein Regelwerk gespeichert, oder das
+   gespeicherte Regelwerk ist unverändert die Vorlage bzw. der Helva-Standard (beim ersten Öffnen automatisch
+   kopiert). Kunden mit eigener Parametrierung bleiben unangetastet. Die Vorlage für neue Kunden wird ersetzt. */
+const ABA_REGEL_FELDER = ["durchlauf", "umkontierung", "kontierung", "aggregat", "zusatz", "nichtBuchen", "erzwungen", "ausgeschlossen", "auszahlungKorrektur"];
+function abaRegelnSchluessel(block) {
+  const sortiert = v => Array.isArray(v) ? v.map(sortiert) : (v && typeof v === "object") ? Object.keys(v).sort().reduce((o, k) => (o[k] = sortiert(v[k]), o), {}) : v;
+  const leer = { durchlauf: "", umkontierung: {}, kontierung: {}, aggregat: {}, zusatz: {}, nichtBuchen: [], erzwungen: [], ausgeschlossen: [], auszahlungKorrektur: null };
+  return JSON.stringify(sortiert(ABA_REGEL_FELDER.reduce((o, f) => (o[f] = block && block[f] !== undefined ? block[f] : leer[f], o), {})));
+}
+function abaUnparametriert(block) {
+  if (!block) return true;
+  const k = abaRegelnSchluessel(block);
+  const vgl = [crmParameter.abacus, ABA_HELVA_STANDARD].filter(Boolean).map(abaRegelnSchluessel);
+  return vgl.includes(k) || vgl.includes(abaRegelnSchluessel(Object.assign({}, block, { erzwungen: [], ausgeschlossen: [] })));
+}
+function abaRegelwerkAufAlle() { return paramEdit(async () => {
+  if (!abaState.kunde) { toast("Zuerst den Kunden wählen, dessen Regelwerk übernommen werden soll.", true); return; }
+  await parameterLaden(true);
+  const kb = crmParameter.abacusKunden = crmParameter.abacusKunden || {};
+  const quelle = kb[String(abaState.kunde)]; if (!quelle) { toast("Dieser Kunde hat noch kein Regelwerk", true); return; }
+  const qName = abaKundeName(abaState.kunde);
+  const andere = abaFibuKunden().filter(c => String(c.id) !== String(abaState.kunde));
+  const ziele = andere.filter(c => abaUnparametriert(kb[String(c.id)]));
+  const behalten = andere.filter(c => !ziele.includes(c));
+  if (!confirm(`Regelwerk von «${qName}» übernehmen — nur wo noch nichts parametriert ist:\n\n• Vorlage für neue Kunden\n${ziele.map(c => "• " + c.Title + (kb[String(c.id)] ? " (unveränderte Vorlage)" : " (noch kein Regelwerk)")).join("\n")}${behalten.length ? `\n\nBleiben unverändert (eigene Parametrierung):\n${behalten.map(c => "• " + c.Title).join("\n")}` : ""}\n\nMandant-Parameter (Mandant-Nr., Client, Texte) bleiben überall erhalten. «${qName}» gilt danach als Standard für künftige Kunden.`)) return;
+  const kopie = () => { const k = JSON.parse(JSON.stringify(quelle)); delete k.mandant; k.standardGeladen = "Regelwerk von " + qName + " übernommen " + new Date().toLocaleDateString("de-CH"); return k; };
+  ziele.forEach(c => { const alt = kb[String(c.id)]; const m = alt ? (alt.mandant || {}) : (() => { const x = Object.assign({}, quelle.mandant || {}); delete x.client; return x; })(); kb[String(c.id)] = Object.assign(kopie(), { mandant: m }); });
+  crmParameter.abacus = Object.assign(kopie(), { mandant: (crmParameter.abacus || {}).mandant });
+  crmParameter.abacusStandardKunde = String(abaState.kunde);
+  await abaParamSpeichern(); abaState.xml = ""; render();
+  toast(`Regelwerk von «${qName}» übernommen: Vorlage + ${ziele.length} Kunde(n)` + (behalten.length ? ` · ${behalten.length} mit eigener Parametrierung unverändert` : "") + " ✓");
+}); }
+function paramAbaKorr(feld, wert) { return paramEdit(async () => {
+  await parameterLaden(true); const a = abaParam();
+  const k = abaAuszKorr(a);
+  if (feld === "ziel") k.ziel = String(wert || "").trim() || ABA_AUSZ_KORR.ziel;
+  else k[feld] = String(wert || "").split(/[,;\s]+/).map(x => x.trim()).filter(Boolean);
+  a.auszahlungKorrektur = k; abaState.xml = "";
   await abaParamSpeichern(); render();
 }); }
 async function abaParamSpeichern() {
@@ -8975,8 +9041,16 @@ function abaBuchungen() {
   const pa = abaParam();
   const sett = abaSettings();
   const ns = { lohnart: sett.negSaldoLohnart || "8995", soll: sett.negSaldoSoll || "1142", haben: sett.negSaldoHaben || "1091", auszahlung: sett.negSaldoAuszahlung || "8900" };
-  // Auszahlung (nur Anzeige, z.B. 8900) um den negativen Gehaltssaldo erhöhen: 310'122.26 + 9'148.55 = 319'270.81
-  if (summen[ns.lohnart] && summen[ns.lohnart].betrag < 0 && summen[ns.auszahlung]) { summen[ns.auszahlung].betrag += Math.abs(summen[ns.lohnart].betrag); summen[ns.auszahlung].aggregatInfo = "inkl. negativer Gehaltssaldo " + ns.lohnart; }
+  // Auszahlung (8900) = 8900 − Σ Korrektur-Lohnarten (8300, 8995): negativ → addiert, positiv → abgezogen
+  const kz = abaAuszKorr(pa);
+  const korrTeile = kz.nurRechnen.concat(kz.auchBuchen).filter(c => summen[c] && Math.abs(summen[c].betrag) >= 0.005);
+  if (korrTeile.length) {
+    if (!summen[kz.ziel]) summen[kz.ziel] = { code: kz.ziel, bezeichnung: (idx[kz.ziel] || {}).bezeichnung || "Auszahlung", betrag: 0 };
+    const ursprung = summen[kz.ziel].betrag;
+    korrTeile.forEach(c => { summen[kz.ziel].betrag -= summen[c].betrag; });
+    const f = x => x.toLocaleString("de-CH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    summen[kz.ziel].aggregatInfo = f(ursprung) + korrTeile.map(c => (summen[c].betrag < 0 ? " + " : " − ") + f(Math.abs(summen[c].betrag)) + " (" + c + ")").join("") + " = " + f(summen[kz.ziel].betrag);
+  }
   // Aggregat-Regeln: enthaltene Lohnarten vom Aggregat abziehen (nur der Rest wird gebucht).
   // Seit Okt. 2026 führt Apriko die LoA 1005 (Stundenlohn) nicht mehr als Aggregat, sondern mit dem effektiven Betrag
   // (z.B. 1'520.00 statt 618'268.01). Erkennung: ist das «Aggregat» kleiner als die Summe seiner Teile, ist es bereits
@@ -8999,6 +9073,7 @@ function abaBuchungen() {
     if (Math.abs(b.betrag) < 0.005) return false;   // 0 nach Aggregat-Abzug → nichts zu buchen
     const st = idx[b.code];
     const kont = pa.kontierung[b.code];
+    if (kz.nurRechnen.includes(String(b.code))) { abaState.ausgelassen.push({ code: b.code, bezeichnung: b.bezeichnung, betrag: b.betrag, grund: "nur in Auszahlung " + kz.ziel + " verrechnet — keine eigene Buchung" }); return false; }
     if (pa.ausgeschlossen.includes(b.code)) { abaState.ausgelassen.push({ code: b.code, bezeichnung: b.bezeichnung, betrag: b.betrag, grund: "manuell ausgeschlossen" }); return false; }
     if (pa.erzwungen.includes(b.code)) { b.grund = "manuell eingeschlossen"; return true; }
     if (kont && (kont.soll || kont.haben)) { b.grund = "Lohnart-Kontierung (Parameter)"; return true; }
@@ -10973,7 +11048,10 @@ function paramAbacusBlock() {
   return `
     <div class="card" style="padding:14px 16px;margin-bottom:14px">
       <h3 style="margin:0 0 4px">Abacus-Schnittstelle</h3>
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">Regelwerk für ${kundenSel}${a.standardGeladen ? ` · Basis: ${escape(a.standardGeladen)}` : ""}. Pro Kunde eigenes Regelwerk (beim ersten Öffnen aus der Vorlage kopiert). Änderungen werden sofort gespeichert. <a href="#" onclick="abaStandardLaden();return false;" style="color:var(--accent-3)">Helva-Standard laden</a></div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">Regelwerk für ${kundenSel}${a.standardGeladen ? ` · Basis: ${escape(a.standardGeladen)}` : ""}. Pro Kunde eigenes Regelwerk (beim ersten Öffnen aus der Vorlage kopiert). Änderungen werden sofort gespeichert. <a href="#" onclick="abaStandardLaden();return false;" style="color:var(--accent-3)">Helva-Standard laden</a>${abaStandardKundeId() ? ` · Standard für neue Kunden: <b>${escape(abaKundeName(abaStandardKundeId()))}</b>` : ""}${abaState.kunde ? ` · <a href="#" onclick="abaRegelwerkAufAlle();return false;" style="color:var(--accent)" title="Dieses Regelwerk für alle Kunden übernehmen, die noch nichts parametriert haben, und als Standard für künftige Kunden festlegen — Kunden mit eigener Parametrierung bleiben unverändert">⇉ Als Standard für noch nicht parametrierte Kunden übernehmen</a>` : ""}</div>
+      ${(() => { const k = abaAuszKorr(a); return `<div style="font-size:12px;margin-bottom:12px;padding:8px 10px;border:1px solid var(--border);border-radius:8px">
+        <b>Auszahlungs-Korrektur</b> <span style="color:var(--text-faint);font-size:11px">— Auszahlung = Betrag − Korrektur-Lohnarten (negativ → addiert, positiv → abgezogen)</span><br>
+        Auszahlung ${inp(k.ziel, "paramAbaKorr('ziel', this.value)", 50)} · nur verrechnen, nicht buchen ${inp(k.nurRechnen.join(", "), "paramAbaKorr('nurRechnen', this.value)", 90)} · verrechnen und buchen ${inp(k.auchBuchen.join(", "), "paramAbaKorr('auchBuchen', this.value)", 90)}</div>`; })()}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
         <div>
           <div style="font-size:11px;font-weight:600;margin-bottom:4px">Durchlaufkonto</div>
