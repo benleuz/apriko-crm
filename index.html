@@ -1061,6 +1061,7 @@
         <div class="nav-group-items">
           <button data-view="onboarding"><span class="ic">✅</span> Checkliste</button>
           <button data-view="onbparam"><span class="ic">📝</span> Parametrierung</button>
+          <button data-view="importcheck"><span class="ic">🔍</span> Datenimport Check</button>
         </div>
       </div>
       <div class="nav-group" data-group="spielwiese">
@@ -1089,7 +1090,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.526.1</span> · <span id="app-build-date">19.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.527.0</span> · <span id="app-build-date">19.10.2026</span>
     </div>
   </aside>
 
@@ -1373,7 +1374,7 @@ function saasIsPercentEver(customer) {
   return segmentShowsSaaS(customer?.Segment) && customer?.SaaSModel === "Prozentual";
 }
 function saasOfMonth(rec, customer, pricePerLic, year, month) {
-  if (!segmentShowsSaaS(customer?.Segment)) return 0;
+  if (!segmentShowsSaaS(segmentFuer(customer, year || parseInt(rec?.Year) || 0, month || parseInt(rec?.Month) || 0))) return 0;
   if (saasIsPercent(customer, year, month)) {
     return (parseFloat(rec?.ExternalRevenue) || 0) * (parseFloat(customer?.SaaSRate) || 0) / 100;
   }
@@ -1396,6 +1397,20 @@ function segmentChargesSaaS(segment) {
   return segment === "Nur SaaS" || segment === "SaaS und BPO";
 }
 
+/* Segment-Wechsel gültig ab Datum (Benis Wunsch, 19.10.2026): Kundenflags `segAb`
+   (YYYY-MM-DD) + `segAlt` (bisheriges Segment). Monate VOR segAb rechnen mit segAlt —
+   eine Segment-Änderung wirkt damit nicht mehr rückwirkend aufs ganze Jahr (Monatsabschluss,
+   Statistik, Fakturierung). Ohne year/month gilt der heutige Monat. Es wird nur der
+   LETZTE Wechsel datiert (wie bpoStdFrom/saasPctFrom). */
+function segmentFuer(customer, year, month) {
+  const seg = customer?.Segment || "Nur SaaS";
+  if (customer?.id == null) return seg;
+  const f = (crmKundenFlags || {})[String(customer.id)] || {};
+  if (!f.segAb || !f.segAlt) return seg;
+  const now = new Date(); const y = year || now.getFullYear(), m = month || (now.getMonth() + 1);
+  return (y * 100 + m) >= (parseInt(f.segAb.slice(0, 4)) * 100 + parseInt(f.segAb.slice(5, 7))) ? seg : f.segAlt;
+}
+
 /* BPO-Modell Stundensatz optional erst ab einem Datum (Kundenflag bpoStdFrom, z.B. 2026-09-01) — davor gilt Prozentual
    auf Aussenumsatz (14.10.2026). Ohne year/month wird der heutige Monat angenommen. */
 function bpoStdFrom(customer) {
@@ -1408,19 +1423,20 @@ function bpoModel(customer, year, month) {
   const now = new Date(); const y = year || now.getFullYear(), m = month || (now.getMonth() + 1);
   return (y * 100 + m) >= (parseInt(from.slice(0, 4)) * 100 + parseInt(from.slice(5, 7))) ? "Stundensatz" : "Prozentual";
 }
-// Was wird vom BPO-Modell als Input gebraucht?
-function needsExternal(customer) {
-  return (segmentNeedsBPO(customer?.Segment) && ((customer?.BPOModel || "Prozentual") === "Prozentual" || !!bpoStdFrom(customer)))
+// Was wird vom BPO-Modell als Input gebraucht? (year/month optional: Segment per Datum, 19.10.2026)
+function needsExternal(customer, year, month) {
+  return (segmentNeedsBPO(segmentFuer(customer, year, month)) && ((customer?.BPOModel || "Prozentual") === "Prozentual" || !!bpoStdFrom(customer)))
     || saasIsPercentEver(customer);
 }
-function needsHours(customer) {
-  return segmentNeedsBPO(customer?.Segment) && customer?.BPOModel === "Stundensatz";
+function needsHours(customer, year, month) {
+  return segmentNeedsBPO(segmentFuer(customer, year, month)) && customer?.BPOModel === "Stundensatz";
 }
 
 // Brutto-BPO eines einzelnen Monats (ohne YTD-Logik); Jahr/Monat aus dem Datensatz, falls nicht übergeben
 function grossBPOofMonth(rec, customer, year, month) {
-  if (!segmentNeedsBPO(customer?.Segment)) return 0;
-  const model = bpoModel(customer, year || parseInt(rec?.Year) || 0, month || parseInt(rec?.Month) || 0);
+  const y0 = year || parseInt(rec?.Year) || 0, m0 = month || parseInt(rec?.Month) || 0;
+  if (!segmentNeedsBPO(segmentFuer(customer, y0, m0))) return 0;
+  const model = bpoModel(customer, y0, m0);
   if (model === "Stundensatz") {
     const rate = parseFloat(customer?.HourlyRate) || 0;
     const hours = parseFloat(rec?.Hours) || 0;
@@ -1461,7 +1477,7 @@ function getPriceForMonth(customer, year, month) {
 }
 
 function calcRevenue(rec, customer, year, month) {
-  const seg = customer?.Segment || "Nur SaaS";
+  const seg = segmentFuer(customer, year || parseInt(rec?.Year) || 0, month || parseInt(rec?.Month) || 0);
   // Preis hängt vom Monat ab (Historie wenn vorhanden, sonst aktueller Preis)
   const pricePerLic = year && month
     ? getPriceForMonth(customer, year, month)
@@ -1624,7 +1640,7 @@ const EXTRA_VIEWS_BY_EMAIL = {
   "leutrim@apriko.com": ["abacus"],
   "nicolas@apriko.com": ["abacus"]
 };
-const ALL_VIEWS = ["meinetasks","dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","onboarding","onbparam","lohncheck","parameter","apipoc","abacus","auszpdf","uzcheck","grad360","tickets","roadmap","profiles"];
+const ALL_VIEWS = ["meinetasks","dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","onboarding","onbparam","importcheck","lohncheck","parameter","apipoc","abacus","auszpdf","uzcheck","grad360","tickets","roadmap","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
@@ -1637,7 +1653,7 @@ const VIEW_TITLES = {
   lohnartenstamm: "Lohnartenstamm",
   tarifarten: "Tarifarten",
   rapport: "Rapport", einsatzdash: "Kundendashboard", konzern: "Konzernanalyse",
-  onboarding: "Onboarding-Checkliste", onbparam: "Parametrierung (Fragebogen für Neukunden)", lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)", abacus: "Abacus Schnittstelle", auszpdf: "Auszahlungsliste → PDF (nur ausbezahlte Lohnabrechnungen)", uzcheck: "Überzeit-Check", grad360: "360 Grad — Ökosystem statt nur Software", tickets: "Tickets Auswertung (Zendesk-Export)", roadmap: "Roadmap",
+  onboarding: "Onboarding-Checkliste", onbparam: "Parametrierung (Fragebogen für Neukunden)", importcheck: "Datenimport Check (Migration)", lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)", abacus: "Abacus Schnittstelle", auszpdf: "Auszahlungsliste → PDF (nur ausbezahlte Lohnabrechnungen)", uzcheck: "Überzeit-Check", grad360: "360 Grad — Ökosystem statt nur Software", tickets: "Tickets Auswertung (Zendesk-Export)", roadmap: "Roadmap",
   profiles: "Profile"
 };
 
@@ -2280,7 +2296,7 @@ async function mehrbenutzerTick() {
       for (const l of ["Companies", "Contacts", "Deals", "Activities", "Customers", "MonthlyRevenue"]) { if (listIds[l]) await reload(l); }
       if (mtAufgaben !== null) { try { await mtLaden(true); } catch (e) {} }
       const tippt = /^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || "");
-      if (!document.getElementById("modal").classList.contains("open") && !tippt && !["rapport", "apipoc", "tickets", "abacus", "lohncheck", "auszpdf", "roadmap"].includes(currentView)) render();
+      if (!document.getElementById("modal").classList.contains("open") && !tippt && !["rapport", "apipoc", "tickets", "abacus", "lohncheck", "auszpdf", "roadmap", "importcheck"].includes(currentView)) render();
     } catch (e) { console.warn("Auto-Aktualisierung:", e.message); }
     mbLaeuft = false;
   }
@@ -2468,6 +2484,7 @@ function renderInner() {
   else if (currentView === "parameter") viewPromise = renderParameter(content);
   else if (currentView === "onboarding") viewPromise = renderOnboarding(content);
   else if (currentView === "onbparam") viewPromise = renderOnbParam(content);
+  else if (currentView === "importcheck") viewPromise = renderImportcheck(content);
   else if (currentView === "abacus") renderAbacus(content);
   else if (currentView === "auszpdf") renderAuszPdf(content);
   else if (currentView === "uzcheck") renderUeberzeitCheck(content);
@@ -5416,11 +5433,11 @@ async function fkAutoMarkieren(year, month, leise) {
   kunden.forEach(c => {
     const m = bx.proKunde[c.id] || []; if (!m.length) return;
     const r = findRev(c.id, year, month) || {}; const calc = calcRevenue(r, c, year, month);
-    const soll = (segmentChargesSaaS(c.Segment) ? calc.saas : 0) + (segmentNeedsBPO(c.Segment) ? calc.bpo : 0);
+    const soll = (segmentChargesSaaS(segmentFuer(c, year, month)) ? calc.saas : 0) + (segmentNeedsBPO(segmentFuer(c, year, month)) ? calc.bpo : 0);
     const ist = m.reduce((a, x) => a + x.betrag, 0);
     if (!(soll > 0) || Math.abs(ist - soll) >= 1) return;
-    if (segmentChargesSaaS(c.Segment) && calc.saas > 0 && !r.InvoicedSaaS) todo.push([c, "SaaS"]);
-    if (segmentNeedsBPO(c.Segment) && calc.bpo > 0 && !r.InvoicedBPO) todo.push([c, "BPO"]);
+    if (segmentChargesSaaS(segmentFuer(c, year, month)) && calc.saas > 0 && !r.InvoicedSaaS) todo.push([c, "SaaS"]);
+    if (segmentNeedsBPO(segmentFuer(c, year, month)) && calc.bpo > 0 && !r.InvoicedBPO) todo.push([c, "BPO"]);
   });
   let n = 0;
   for (const [c, t] of todo) { try { await toggleInvoiced(c.id, year, month, t); n++; } catch (e) { toast(c.Title + ": " + e.message, true); } }
@@ -5441,15 +5458,15 @@ function fkKontrolle() {
   const zeilen = kunden.map(c => {
     const r = findRev(c.id, year, month) || {};
     const calc = calcRevenue(r, c, year, month);
-    const needLic = segmentNeedsLicenses(c.Segment), useExt = needsExternal(c), useHrs = needsHours(c);
+    const needLic = segmentNeedsLicenses(segmentFuer(c, year, month)), useExt = needsExternal(c, year, month), useHrs = needsHours(c, year, month);
     const stdMonat = useHrs && bpoModel(c, year, month) === "Stundensatz";
     const lic = parseInt(r.Licenses) || 0, ext = parseFloat(r.ExternalRevenue) || 0, hrs = parseFloat(r.Hours) || 0;
     const fehlend = [];
     if (needLic && !saasIsPercent(c, year, month) && !lic) fehlend.push("Lizenzen");
     if (stdMonat) { if (!hrs) fehlend.push("Stunden"); }
     else if (useExt && !ext && !(c.BPOYtd && calc.ytd)) fehlend.push("Aussenumsatz");
-    const saasOffen = segmentChargesSaaS(c.Segment) && calc.saas > 0 && !r.InvoicedSaaS;
-    const bpoOffen = segmentNeedsBPO(c.Segment) && calc.bpo > 0 && !r.InvoicedBPO;
+    const saasOffen = segmentChargesSaaS(segmentFuer(c, year, month)) && calc.saas > 0 && !r.InvoicedSaaS;
+    const bpoOffen = segmentNeedsBPO(segmentFuer(c, year, month)) && calc.bpo > 0 && !r.InvoicedBPO;
     const saasLeer = !!r.InvoicedSaaS && !(calc.saas > 0), bpoLeer = !!r.InvoicedBPO && !(calc.bpo > 0);
     const comp = cache.companies.find(x => x.id == c.CompanyId);
     return { c, comp, r, calc, fehlend, saasOffen, bpoOffen, saasLeer, bpoLeer };
@@ -5505,8 +5522,8 @@ async function fkMarkierenAlle(year, month) {
   const bx = fkBexio ? fkBexioAbgleich(zeilen, year, month) : null; if (!bx) return;
   const todo = [];
   kunden.forEach(c => { if (!(bx.proKunde[c.id] || []).length) return; const r = findRev(c.id, year, month) || {}; const calc = calcRevenue(r, c, year, month);
-    if (segmentChargesSaaS(c.Segment) && calc.saas > 0 && !r.InvoicedSaaS) todo.push([c, "SaaS"]);
-    if (segmentNeedsBPO(c.Segment) && calc.bpo > 0 && !r.InvoicedBPO) todo.push([c, "BPO"]); });
+    if (segmentChargesSaaS(segmentFuer(c, year, month)) && calc.saas > 0 && !r.InvoicedSaaS) todo.push([c, "SaaS"]);
+    if (segmentNeedsBPO(segmentFuer(c, year, month)) && calc.bpo > 0 && !r.InvoicedBPO) todo.push([c, "BPO"]); });
   if (!todo.length) { toast("Nichts zu markieren."); return; }
   if (!confirm(`${todo.length} Honorar(e) als fakturiert markieren (nur das Häkchen «Fakt.» mit Datum, keine Umsätze)?\n\n` + todo.map(([c, t]) => `• ${c.Title} · ${t}`).join("\n"))) return;
   for (const [c, t] of todo) { try { await toggleInvoiced(c.id, year, month, t); } catch (e) { toast(c.Title + ": " + e.message, true); } }
@@ -5601,11 +5618,11 @@ function renderRevenueByMonth(el) {
     if (hasBPOrev) bpoCust++;
     else if (hasSaaSrev) saasOnlyCust++;
 
-    if (segmentChargesSaaS(c.Segment) && calc.saas > 0) {
+    if (segmentChargesSaaS(segmentFuer(c, year, month)) && calc.saas > 0) {
       saasNeedCount++;
       if (r?.InvoicedSaaS) saasInvCount++;
     }
-    if (segmentNeedsBPO(c.Segment) && calc.bpo > 0) {
+    if (segmentNeedsBPO(segmentFuer(c, year, month)) && calc.bpo > 0) {
       bpoNeedCount++;
       if (r?.InvoicedBPO) bpoInvCount++;
     }
@@ -5648,12 +5665,13 @@ function renderRevenueByMonth(el) {
         ${activeCust.map(c => {
           const r = findRev(c.id, year, month) || {};
           const calc = calcRevenue(r, c, year, month);
-          const needLic = segmentNeedsLicenses(c.Segment);
-          const useExt = needsExternal(c);
-          const useHrs = needsHours(c);
-          const showsSaaS = segmentShowsSaaS(c.Segment);
-          const chargesSaaS = segmentChargesSaaS(c.Segment);
-          const hasBPO = segmentNeedsBPO(c.Segment);
+          const segM = segmentFuer(c, year, month);   // Segment des Monats (Wechsel per Datum, 19.10.2026)
+          const needLic = segmentNeedsLicenses(segM);
+          const useExt = needsExternal(c, year, month);
+          const useHrs = needsHours(c, year, month);
+          const showsSaaS = segmentShowsSaaS(segM);
+          const chargesSaaS = segmentChargesSaaS(segM);
+          const hasBPO = segmentNeedsBPO(segM);
 
           // BPO-Input-Cell: entweder Aussenumsatz, Stunden oder gar nichts — bei Modellwechsel per Datum zählt der Monat
           let bpoInputCell;
@@ -10135,6 +10153,400 @@ function renderTickets(el) {
     ${tkState.tab === "aufwand" ? tkAufwandHtml(zeilen, kunden) : ""}
     ${tkState.tab === "liste" ? tkListeHtml(zeilen) : ""}
     <details class="card" style="padding:10px 14px;margin-top:10px"><summary style="cursor:pointer;font-weight:600;font-size:12px">ⓘ Legende — was steckt hinter den Anliegen</summary><div style="font-size:11.5px;color:var(--text-dim);line-height:1.6;margin-top:6px;columns:2;column-gap:28px">${arten.filter(([k]) => TK_BESCHREIBUNG[k]).map(([k, v]) => `<div style="break-inside:avoid;margin-bottom:4px"><strong style="color:var(--text)">${escape(k)}</strong> <span style="color:var(--text-faint)">(${v})</span><br>${escape(TK_BESCHREIBUNG[k])}</div>`).join("")}<div style="margin-top:6px;color:var(--text-faint)">Die Zuordnung erfolgt über Wortmuster in Betreff und Verlauf; bis zu drei Anliegen pro Ticket, das wichtigste zuerst. Generische Tags («Dokumente», «Sonstige») nur, wenn nichts Spezifisches gefunden wurde.</div></div></details>`;
+}
+
+/* ============ Onboarding → Datenimport Check (19.10.2026, v1.527) ============
+   Drei Prüf-Checklisten zur Datenmigration pro Onboarding-Kunde (aus Benis Excel-Vorlagen):
+   1) Mengen- & Summenabgleich: Wert Altsystem vs. Wert Apriko, Status automatisch (OK/Abweichung/offen)
+   2) Stichprobe Kunden: 10 geprüfte Kunden × Prüfpunkte, Häkchen pro Zelle
+   3) Stichprobe Mitarbeiter: 10 geprüfte MA × Prüfpunkte
+   Die Vorlagen (Prüfpunkte) sind fest im Code; die Ergebnisse liegen pro Kunde in
+   parameter.json → importcheck.kunden[<custId>], alle Mutationen via paramEdit-Kette. */
+const IC_MENGEN = [
+{nr:"1",bereich:"Mitarbeiter",punkt:"Anzahl Mitarbeiter total",typ:"Anzahl"},
+{nr:"2",bereich:"Mitarbeiter",punkt:"Anzahl Mitarbeiter aktiv",typ:"Anzahl"},
+{nr:"3",bereich:"Mitarbeiter",punkt:"Anzahl Mitarbeiter inaktiv",typ:"Anzahl"},
+{nr:"4",bereich:"Mitarbeiter",punkt:"Anzahl mit Quellensteuerpflicht",typ:"Anzahl"},
+{nr:"5",bereich:"Mitarbeiter",punkt:"Anzahl mit BVG-Pflicht",typ:"Anzahl"},
+{nr:"6",bereich:"Mitarbeiter",punkt:"Anzahl Bankverbindungen",typ:"Anzahl"},
+{nr:"7",bereich:"Mitarbeiter",punkt:"Anzahl Geburtsdatum",typ:"Anzahl"},
+{nr:"8",bereich:"Mitarbeiter",punkt:"Anzahl Strasse und Nr.",typ:"Anzahl"},
+{nr:"9",bereich:"Mitarbeiter",punkt:"Anzahl Adresszusatz",typ:"Anzahl"},
+{nr:"10",bereich:"Mitarbeiter",punkt:"Anzahl E-Mail Adresse",typ:"Anzahl"},
+{nr:"11",bereich:"Mitarbeiter",punkt:"Anzahl Einträge Fähigkeiten",typ:"Anzahl"},
+{nr:"12",bereich:"Mitarbeiter",punkt:"Anzahl Einträge Soziale Fähigkeiten",typ:"Anzahl"},
+{nr:"13",bereich:"Mitarbeiter",punkt:"Anzahl Einträge Weitere Fähigkeiten",typ:"Anzahl"},
+{nr:"14",bereich:"Mitarbeiter",punkt:"Anzahl Lohnpfändungen",typ:"Anzahl"},
+{nr:"15",bereich:"Mitarbeiter",punkt:"Summe Lohnguthaben",typ:"Summe"},
+{nr:"16",bereich:"Mitarbeiter",punkt:"Summe Negativlohn",typ:"Summe"},
+{nr:"17",bereich:"Mitarbeiter",punkt:"Summe Ferienguthaben",typ:"Summe"},
+{nr:"18",bereich:"Mitarbeiter",punkt:"Summe Guthaben 13. Monatslohn",typ:"Summe"},
+{nr:"19",bereich:"Mitarbeiter",punkt:"Summe Gleitstunden",typ:"Summe"},
+{nr:"20",bereich:"Recruiter",punkt:"Anzahl Recruiter",typ:"Anzahl"},
+{nr:"21",bereich:"Kunden",punkt:"Anzahl Kunden total",typ:"Anzahl"},
+{nr:"22",bereich:"Kunden",punkt:"Anzahl Kunden aktiv",typ:"Anzahl"},
+{nr:"23",bereich:"Kunden",punkt:"Anzahl Kunden inaktiv",typ:"Anzahl"},
+{nr:"24",bereich:"Kunden",punkt:"Anzahl Identifikations-Nummer",typ:"Anzahl"},
+{nr:"25",bereich:"Kunden",punkt:"Anzahl Strasse und Nr.",typ:"Anzahl"},
+{nr:"26",bereich:"Kunden",punkt:"Anzahl Adresszusatz",typ:"Anzahl"},
+{nr:"27",bereich:"Kunden",punkt:"Anzahl Telefonnummer",typ:"Anzahl"},
+{nr:"28",bereich:"Kunden",punkt:"Anzahl E-Mail Adressen",typ:"Anzahl"},
+{nr:"29",bereich:"Kunden",punkt:"Anzahl Rechnungen",typ:"Anzahl"},
+{nr:"30",bereich:"Kunden",punkt:"Summe Offene Posten",typ:"Summe"},
+{nr:"31",bereich:"Kundenkontakte",punkt:"Anzahl Kontakte total",typ:"Anzahl"},
+{nr:"32",bereich:"Kundenkontakte",punkt:"Anzahl Mobilnummer",typ:"Anzahl"},
+{nr:"33",bereich:"Kundenkontakte",punkt:"Anzahl E-Mail Adresse",typ:"Anzahl"},
+{nr:"34",bereich:"Einsätze",punkt:"Anzahl Einsätze total (Temporäranstellung)",typ:"Anzahl"},
+{nr:"35",bereich:"Einsätze",punkt:"Anzahl Eintrittsdatum",typ:"Anzahl"},
+{nr:"36",bereich:"Einsätze",punkt:"Anzahl Austrittsdatum",typ:"Anzahl"},
+{nr:"37",bereich:"Debitoren",punkt:"Anzahl Rechnungen",typ:"Anzahl"},
+{nr:"38",bereich:"Debitoren",punkt:"Anzahl offene Posten",typ:"Anzahl"},
+{nr:"39",bereich:"Debitoren",punkt:"Summe offene Posten",typ:"Summe"},
+{nr:"40",bereich:"Debitoren",punkt:"Summe offene Posten pro Kunde (Stichprobe)",typ:"Summe"},
+{nr:"41",bereich:"Debitoren",punkt:"Summe offene Posten Mahnstufe 1 (Stichprobe)",typ:"Summe"},
+{nr:"42",bereich:"Debitoren",punkt:"Summe offene Posten Mahnstufe 2 (Stichprobe)",typ:"Summe"},
+{nr:"43",bereich:"Debitoren",punkt:"Summe offene Posten letzte Mahnung (Stichprobe)",typ:"Summe"}];
+const IC_JP = [
+{nr:"1",bereich:"Profil",punkt:"Kundennummer"},
+{nr:"2",bereich:"Profil",punkt:"Firmenname"},
+{nr:"3",bereich:"Profil",punkt:"Unternehmens-Identifikationsnummer (UID)"},
+{nr:"4",bereich:"Profil",punkt:"Rechtsform"},
+{nr:"5",bereich:"Profil",punkt:"BUR-Nummer"},
+{nr:"6",bereich:"Profil",punkt:"Korrespondenzsprache"},
+{nr:"7",bereich:"Weitere Informationen",punkt:"Gründungsjahr"},
+{nr:"8",bereich:"Weitere Informationen",punkt:"Anzahl Mitarbeiter"},
+{nr:"9",bereich:"Weitere Informationen",punkt:"NOGA-Code"},
+{nr:"10",bereich:"Weitere Informationen",punkt:"DUNS-Nummer"},
+{nr:"11",bereich:"Weitere Informationen",punkt:"Anzahl Mitarbeiter von/bis"},
+{nr:"12",bereich:"Weitere Informationen",punkt:"Anzahl Manager von/bis"},
+{nr:"13",bereich:"Weitere Informationen",punkt:"Einsatzgebiet"},
+{nr:"14",bereich:"Kommunikationsmittel",punkt:"Strasse & Nr. (inkl. Gültigkeit)"},
+{nr:"15",bereich:"Kommunikationsmittel",punkt:"Zusatzzeile 1 / 2 (inkl. Gültigkeit)"},
+{nr:"16",bereich:"Kommunikationsmittel",punkt:"Postfach (inkl. Gültigkeit)"},
+{nr:"17",bereich:"Kommunikationsmittel",punkt:"PLZ & Ort (inkl. Gültigkeit)"},
+{nr:"18",bereich:"Kommunikationsmittel",punkt:"Land (inkl. Gültigkeit)"},
+{nr:"19",bereich:"Kommunikationsmittel",punkt:"Ist Wohnsitz (Aktiv)"},
+{nr:"20",bereich:"Kommunikationsmittel",punkt:"E-Mail-Adresse"},
+{nr:"21",bereich:"Kommunikationsmittel",punkt:"Fax-Nummer"},
+{nr:"22",bereich:"Indirektes Kommunikationsmittel",punkt:"Indirektes Kommunikationsmittel"},
+{nr:"23",bereich:"Kommunikationsmittel",punkt:"Festnetznummer"},
+{nr:"24",bereich:"Kommunikationsmittel",punkt:"Mobilnummer"},
+{nr:"25",bereich:"Kommunikationsmittel",punkt:"Webadresse"},
+{nr:"26",bereich:"Dokumente",punkt:"Dokumente & Typ"},
+{nr:"27",bereich:"Branchen",punkt:"Branchen"},
+{nr:"28",bereich:"Tags",punkt:"Tag"},
+{nr:"29",bereich:"Arbeitszeitmodell",punkt:"Arbeitszeitmodell"},
+{nr:"30",bereich:"Beziehungen / Kontakte",punkt:"Kontakte"},
+{nr:"31",bereich:"Beziehungen / Kontakte",punkt:"Kontakte"},
+{nr:"32",bereich:"Beziehungen / Kontakte",punkt:"Zuordnung zum richtigen Kunden"},
+{nr:"33",bereich:"Beziehungen / Kontakte",punkt:"Personennummer Kontakt"},
+{nr:"34",bereich:"Beziehungen / Kontakte",punkt:"Name"},
+{nr:"35",bereich:"Beziehungen / Kontakte",punkt:"Vorname"},
+{nr:"36",bereich:"Beziehungen / Kontakte",punkt:"Geschlecht / Anrede"},
+{nr:"37",bereich:"Beziehungen / Kontakte",punkt:"Funktion & Abteilung"},
+{nr:"38",bereich:"Beziehungen / Kontakte",punkt:"Zuständig für"},
+{nr:"39",bereich:"Beziehungen / Kontakte",punkt:"Aktiv, gültig von / bis"},
+{nr:"40",bereich:"Beziehungen / Kontakte",punkt:"Geburtsdatum"},
+{nr:"41",bereich:"Beziehungen / Kontakte",punkt:"Telefonnummer Privat / Mobil / Geschäft"},
+{nr:"42",bereich:"Beziehungen / Kontakte",punkt:"E-Mail-Adresse"},
+{nr:"43",bereich:"Beziehungen / Kontakte",punkt:"Korrespondenzsprache Kontakt"},
+{nr:"44",bereich:"Beziehungen",punkt:"Zuständiger Recruiter"},
+{nr:"45",bereich:"Beziehungen",punkt:"Andere"},
+{nr:"46",bereich:"Gesamtarbeitsverträge",punkt:"Gesamtarbeitsverträge"},
+{nr:"47",bereich:"Vereinbarungen mit Kunden",punkt:"Spesen/Vereinbarung/Kundenrapportvorlage/Kundenrapport"},
+{nr:"48",bereich:"Zahlungsmittel",punkt:"IBAN (inkl. Gültigkeit)"},
+{nr:"49",bereich:"Zahlungsmittel",punkt:"Bankname"},
+{nr:"50",bereich:"Zahlungsmittel",punkt:"Bank-Clearing-Nr."},
+{nr:"51",bereich:"Zahlungsmittel",punkt:"BIC"},
+{nr:"52",bereich:"Zahlungsmittel",punkt:"Bank Ort"},
+{nr:"53",bereich:"Zahlungsmittel",punkt:"Referenzangabe (bei Betreibungsamt relevant)"},
+{nr:"54",bereich:"Zahlungsmittel",punkt:"Abweichender Kontoinhaber"},
+{nr:"55",bereich:"Jobs / Einsätze",punkt:"Status, Eintritt, Austritt, Kündigungsgrund"},
+{nr:"56",bereich:"Jobs / Einsätze",punkt:"Recruiter Einsatz / Kunde"},
+{nr:"57",bereich:"Jobs / Einsätze",punkt:"Lohn / Tarif"},
+{nr:"58",bereich:"Jobs / Einsätze",punkt:"Job Titel"},
+{nr:"59",bereich:"Jobs / Einsätze",punkt:"GAV-Unterstellung"},
+{nr:"60",bereich:"Jobs / Einsätze",punkt:"Einsatzort"},
+{nr:"61",bereich:"Jobs / Einsätze",punkt:"Kostenstelle"},
+{nr:"62",bereich:"Jobs / Einsätze",punkt:"Anstellungsart"},
+{nr:"63",bereich:"Jobs / Einsätze",punkt:"Arbeitspensum"},
+{nr:"64",bereich:"Jobs / Einsätze",punkt:"Beteiligung"},
+{nr:"65",bereich:"Kostenstellen",punkt:"Kostenstellen Name (inkl. Gültigkeit)"},
+{nr:"66",bereich:"Kostenstellen",punkt:"Kostenstellen-Nr. (inkl. Gültigkeit)"},
+{nr:"67",bereich:"Kostenstellen",punkt:"Kostenstellen-Adressen (inkl. Gültigkeit)"},
+{nr:"68",bereich:"Kickbacks",punkt:"Kickback"},
+{nr:"69",bereich:"Rechnungen",punkt:"Rechnungen"},
+{nr:"70",bereich:"Debitorenzuschlag",punkt:"Debitorenzuschlag"},
+{nr:"71",bereich:"Debitor Einstellungen",punkt:"alternative Rechnungsadresse"},
+{nr:"72",bereich:"Debitor Einstellungen",punkt:"E-Mail für Rechnungsversand"},
+{nr:"73",bereich:"Debitor Einstellungen",punkt:"CC Email für Rechnungsversand"},
+{nr:"74",bereich:"Debitor Einstellungen",punkt:"Rechnung Versandart"},
+{nr:"75",bereich:"Debitor Einstellungen",punkt:"Rechnungs-Frequenz"},
+{nr:"76",bereich:"Debitor Einstellungen",punkt:"Rechnung pro Mitarbeiter"},
+{nr:"77",bereich:"Debitor Einstellungen",punkt:"Rechnung pro Kostenstelle"},
+{nr:"78",bereich:"Debitor Einstellungen",punkt:"Rechnung pro Kalenderwoche"},
+{nr:"79",bereich:"Debitor Einstellungen",punkt:"Rechnung pro Kalendermonat"},
+{nr:"80",bereich:"Debitor Einstellungen",punkt:"Rechnungspositionen sortiert nach Woche"},
+{nr:"81",bereich:"Debitor Einstellungen",punkt:"Fälligkeit in Tagen"},
+{nr:"82",bereich:"Debitor Einstellungen",punkt:"Arbeitsrapport der Rechnung beifügen"},
+{nr:"83",bereich:"Debitor Einstellungen",punkt:"Kundenkontakt auf Rechnung anzeigen"},
+{nr:"84",bereich:"Debitor Einstellungen",punkt:"Factoring verhindern"},
+{nr:"85",bereich:"Debitor Einstellungen",punkt:"Rechnungen einzeln versenden"},
+{nr:"86",bereich:"Debitor Einstellungen",punkt:"Mahnungsversand Postadresse"},
+{nr:"87",bereich:"Debitor Einstellungen",punkt:"Mahnungsversand E-Mail"},
+{nr:"88",bereich:"Debitor Einstellungen",punkt:"Skonto"},
+{nr:"89",bereich:"Weitere Angaben",punkt:"Notizen / Gesprächsverlauf"},
+{nr:"Anzahl angehakt (✔)"},
+{nr:"Anzahl offen oder Fehler"},
+{nr:"Vollständig geprüft?"}];
+const IC_MA = [
+{nr:"1",bereich:"Profil",punkt:"Personennummer"},
+{nr:"2",bereich:"Profil",punkt:"Personalstatus (aktiv, inaktiv, ausgetreten)"},
+{nr:"3",bereich:"Profil",punkt:"Geschlecht"},
+{nr:"4",bereich:"Profil",punkt:"Name"},
+{nr:"5",bereich:"Profil",punkt:"Vorname"},
+{nr:"6",bereich:"Profil",punkt:"Geburtsdatum"},
+{nr:"7",bereich:"Profil",punkt:"Sozialversicherungs-Nr."},
+{nr:"8",bereich:"Profil",punkt:"Korrespondenzsprache"},
+{nr:"9",bereich:"Konfession, Akad. Titel, Unterschrift",punkt:"Akademischer / zusätzlicher Titel"},
+{nr:"10",bereich:"Konfession, Akad. Titel, Unterschrift",punkt:"PEID Liechtenstein"},
+{nr:"11",bereich:"Konfession, Akad. Titel, Unterschrift",punkt:"Konfession"},
+{nr:"12",bereich:"Konfession, Akad. Titel, Unterschrift",punkt:"Vorstrafen"},
+{nr:"13",bereich:"Zivilstand",punkt:"Zivilstand (inkl. Gültigkeit)"},
+{nr:"14",bereich:"Nationalitäten",punkt:"Nationalität (inkl. Gültigkeit)"},
+{nr:"15",bereich:"Nationalitäten",punkt:"Heimatort / Bürgerort"},
+{nr:"16",bereich:"Berufserfahrungen",punkt:"Berufserfahrungen"},
+{nr:"17",bereich:"Ausbildungen",punkt:"Ausbildungen"},
+{nr:"18",bereich:"Aufenthaltsbewilligungen",punkt:"Aufenthaltsbewilligung (inkl. Gültigkeit)"},
+{nr:"19",bereich:"Kommunikationsmittel",punkt:"Postadresse (inkl. Gültigkeit)"},
+{nr:"20",bereich:"Kommunikationsmittel",punkt:"Zusatzzeile 1"},
+{nr:"21",bereich:"Kommunikationsmittel",punkt:"Zusatzzeile 2"},
+{nr:"22",bereich:"Kommunikationsmittel",punkt:"PLZ & Ort"},
+{nr:"23",bereich:"Kommunikationsmittel",punkt:"Ist Wohnsitz (Ja)"},
+{nr:"24",bereich:"Kommunikationsmittel",punkt:"Postadresse Kategorie"},
+{nr:"25",bereich:"Kommunikationsmittel",punkt:"Werbung erlaubt"},
+{nr:"26",bereich:"Kommunikationsmittel",punkt:"Notfallkontakt (inkl. Gültigkeit)"},
+{nr:"27",bereich:"Kommunikationsmittel",punkt:"E-Mail-Adresse (inkl. Gültigkeit)"},
+{nr:"28",bereich:"Kommunikationsmittel",punkt:"Telefonnummer Festnetz (inkl. Gültigkeit)"},
+{nr:"29",bereich:"Kommunikationsmittel",punkt:"Telefonnummer Mobil (inkl. Gültigkeit)"},
+{nr:"30",bereich:"Kommunikationsmittel",punkt:"Telefonnummer Geschäft (inkl. Gültigkeit)"},
+{nr:"31",bereich:"Kommunikationsmittel",punkt:"Fax-Nummer (inkl. Gültigkeit)"},
+{nr:"32",bereich:"Kommunikationsmittel",punkt:"Webadresse (inkl. Gültigkeit)"},
+{nr:"33",bereich:"Medizinische Profile",punkt:"Medizinische Profile"},
+{nr:"34",bereich:"Branchen",punkt:"Branchen"},
+{nr:"35",bereich:"Dokumente",punkt:"Dokumente & Dokumenttyp"},
+{nr:"36",bereich:"Beziehungen",punkt:"Zuständiger Recruiter"},
+{nr:"37",bereich:"Beziehungen",punkt:"Familie"},
+{nr:"38",bereich:"Beziehungen",punkt:"Andere"},
+{nr:"39",bereich:"Sprachen",punkt:"Sprachfähigkeit schriftlich inkl. Klassifizierung"},
+{nr:"40",bereich:"Sprachen",punkt:"Sprachfähigkeit mündlich inkl. Klassifizierung"},
+{nr:"41",bereich:"Mobilität",punkt:"Führerausweis / Kategorie (inkl. Gültigkeit)"},
+{nr:"42",bereich:"Mobilität",punkt:"Transportmittel / Verfügbare Transportmittel"},
+{nr:"43",bereich:"Tags",punkt:"Tag"},
+{nr:"44",bereich:"Zahlungsmittel",punkt:"IBAN (inkl. Gültigkeit)"},
+{nr:"45",bereich:"Zahlungsmittel",punkt:"Bankname"},
+{nr:"46",bereich:"Zahlungsmittel",punkt:"Bank-Clearing-Nr."},
+{nr:"47",bereich:"Zahlungsmittel",punkt:"BIC"},
+{nr:"48",bereich:"Zahlungsmittel",punkt:"Bank Ort"},
+{nr:"49",bereich:"Zahlungsmittel",punkt:"Referenzangabe"},
+{nr:"50",bereich:"Zahlungsmittel",punkt:"Abweichender Kontoinhaber"},
+{nr:"51",bereich:"Fähigkeiten",punkt:"Berufliche inkl. Klassifizierung"},
+{nr:"52",bereich:"Fähigkeiten",punkt:"Soziale inkl. Klassifizierung"},
+{nr:"53",bereich:"Fähigkeiten",punkt:"Weitere inkl. Klassifizierung"},
+{nr:"54",bereich:"Kandidatensperrungen",punkt:"Kandidatensperrung"},
+{nr:"55",bereich:"Jobs / Einsätze",punkt:"Rahmenvertrag"},
+{nr:"56",bereich:"Jobs / Einsätze",punkt:"Status, Eintritt, Austritt, Kündigungsgrund"},
+{nr:"57",bereich:"Jobs / Einsätze",punkt:"Recruiter Einsatz / Kunde"},
+{nr:"58",bereich:"Jobs / Einsätze",punkt:"Lohn / Tarif"},
+{nr:"59",bereich:"Jobs / Einsätze",punkt:"Job Titel"},
+{nr:"60",bereich:"Jobs / Einsätze",punkt:"GAV-Unterstellung"},
+{nr:"61",bereich:"Jobs / Einsätze",punkt:"Einsatzort"},
+{nr:"62",bereich:"Jobs / Einsätze",punkt:"Kostenstelle"},
+{nr:"63",bereich:"Jobs / Einsätze",punkt:"Anstellungsart"},
+{nr:"64",bereich:"Jobs / Einsätze",punkt:"Arbeitspensum"},
+{nr:"65",bereich:"Jobs / Einsätze",punkt:"Beteiligung"},
+{nr:"66",bereich:"Job-Präferenzen",punkt:"Verfügbarkeit / Beschäftigungsgrad"},
+{nr:"67",bereich:"Job-Präferenzen",punkt:"Reisebereitschaft"},
+{nr:"68",bereich:"Job-Präferenzen",punkt:"Standortbezogener Einsatzbereich"},
+{nr:"69",bereich:"Job-Präferenzen",punkt:"Tätigkeitsbereich"},
+{nr:"70",bereich:"Job-Präferenzen",punkt:"Gehaltsvorstellung"},
+{nr:"71",bereich:"Job-Präferenzen",punkt:"Bevorzugte Berufe"},
+{nr:"72",bereich:"Lohnzahlungspräferenzen",punkt:"Ferienanteil (Ja)"},
+{nr:"73",bereich:"Lohnzahlungspräferenzen",punkt:"13. Monatslohn"},
+{nr:"74",bereich:"Lohnzahlungspräferenzen",punkt:"Gleitzeit"},
+{nr:"75",bereich:"Lohnzahlungspräferenzen",punkt:"Lohnabrechnung Versandart"},
+{nr:"76",bereich:"Lohnzahlungspräferenzen",punkt:"Abweichende Versandadresse Lohnabrechnung Post"},
+{nr:"77",bereich:"Lohnzahlungspräferenzen",punkt:"Abweichende Versandadresse Lohnabrechnung Mail"},
+{nr:"78",bereich:"Lohnzahlungspräferenzen",punkt:"Vorschusshäufigkeit"},
+{nr:"79",bereich:"Lohnzahlungspräferenzen",punkt:"Bevorzugte Zahlungsmethode Bar"},
+{nr:"80",bereich:"Lohnzahlungspräferenzen",punkt:"Bevorzugte Zahlungsmethode Bank"},
+{nr:"81",bereich:"Mitarbeiterkonto",punkt:"Lohnguthaben"},
+{nr:"82",bereich:"Mitarbeiterkonto",punkt:"Ferienguthaben"},
+{nr:"83",bereich:"Mitarbeiterkonto",punkt:"Guthaben Gleitzeit"},
+{nr:"84",bereich:"Mitarbeiterkonto",punkt:"Guthaben 13. Monatslohn"},
+{nr:"85",bereich:"Lohnzahlungsparameter",punkt:"Standardgruppe für Temporärangestellte"},
+{nr:"86",bereich:"Lohnzahlungsparameter",punkt:"BVG-Pflicht"},
+{nr:"87",bereich:"Lohnzahlungsparameter",punkt:"BVG Pflicht ab"},
+{nr:"88",bereich:"Lohnzahlungsparameter",punkt:"Anzahl Kinder"},
+{nr:"89",bereich:"Lohnzahlungsparameter",punkt:"Zwischenverdiener"},
+{nr:"90",bereich:"Lohnpfändungen",punkt:"Existenzminimum + Referenz (inkl. Gültigkeit)"},
+{nr:"91",bereich:"Lohnpfändungen",punkt:"Fixbetrag + Referenz (inkl. Gültigkeit)"},
+{nr:"92",bereich:"Lohnpfändungen",punkt:"Gesamtlohn + Referenz (inkl. Gültigkeit)"},
+{nr:"93",bereich:"Zulagen (Kinder/Ausbildung)",punkt:"Name / Vorname"},
+{nr:"94",bereich:"Zulagen (Kinder/Ausbildung)",punkt:"Geburtsdatum"},
+{nr:"95",bereich:"Zulagen (Kinder/Ausbildung)",punkt:"Sozialversicherungs-Nr."},
+{nr:"96",bereich:"Zulagen (Kinder/Ausbildung)",punkt:"Art Familienzulage"},
+{nr:"97",bereich:"Zulagen (Kinder/Ausbildung)",punkt:"Betrag Familienzulage"},
+{nr:"98",bereich:"Zulagen (Kinder/Ausbildung)",punkt:"Familienzulage von / bis"},
+{nr:"99",bereich:"Quellensteuer Einstellungen",punkt:"Quellensteuerkanton"},
+{nr:"100",bereich:"Quellensteuer Einstellungen",punkt:"Erwerbsform"},
+{nr:"101",bereich:"Quellensteuer Einstellungen",punkt:"Quellensteuercode (inkl. Gültigkeit)"},
+{nr:"102",bereich:"Weitere Angaben",punkt:"Notizen / Gesprächsverlauf"},
+{nr:"Anzahl angehakt (✔)"},
+{nr:"Anzahl offen oder Fehler"},
+{nr:"Vollständig geprüft?"}];
+const IC_JP_KRIT = ["Kunde mit laufenden Einsätzen", "Kunde ohne Einsatz im laufenden Jahr / inaktiv", "Hauptsitz mit Niederlassungen", "Mehrere Kontaktpersonen", "Alternative Rechnungsadresse", "Mehrere Kostenstellen", "Einsätze mit verschiedenen GAV", "Kickback-Vereinbarung", "Mit Debitorenzuschlag oder Skonto", "Spezielle Rechnungseinstellungen (pro Mitarbeiter, Kostenstelle, Woche)", "Factoring verhindert", "Kunde im Ausland", "Sonderzeichen im Firmennamen", "Korrespondenzsprache Französisch / Italienisch", "Spesen- oder Rapportvereinbarung", "Durch Duplikat-Bereinigung zusammengeführt", "Abgedeckte Kriterien"];
+const IC_MA_KRIT = ["Aktiv mit laufendem Einsatz", "Ausgetreten im laufenden Jahr", "Mehrere Einsätze (auch bei verschiedenen Kunden)", "Quellensteuerpflichtig (Bewilligung B oder L)", "Grenzgänger (Bewilligung G)", "Verheiratet, Tarif C bzw. Ehepartner erwerbstätig", "Mit Kindern / Familienzulagen", "BVG-pflichtig", "Mit Lohnpfändung oder Lohnsperre", "Mit Vorschuss oder Negativlohn", "Mit Guthaben (Ferien, 13. ML, Gleitzeit)", "Im Zwischenverdienst", "Mehrere Adressen oder Bankverbindungen", "Sonderzeichen im Namen (Umlaute, Akzente, Doppelname)", "AHV-Rentner", "Bewilligung läuft bald ab", "Durch Duplikat-Bereinigung zusammengeführt", "Viele Dokumente / Qualifikationen", "Abgedeckte Kriterien"];
+
+let icKunde = "", icTab = "mengen";
+function icParam() { if (!crmParameter.importcheck) crmParameter.importcheck = {}; const ic = crmParameter.importcheck; if (!ic.kunden) ic.kunden = {}; return ic; }
+function icDaten(custId) { const ic = icParam(); const k = String(custId); if (!ic.kunden[k]) ic.kunden[k] = {};
+  const d = ic.kunden[k];
+  if (!d.kopf) d.kopf = {}; if (!d.mengen) d.mengen = {};
+  ["jp", "ma"].forEach(a => { if (!d[a]) d[a] = {}; if (!Array.isArray(d[a].obj)) d[a].obj = []; if (!d[a].zellen) d[a].zellen = {}; if (!d[a].krit) d[a].krit = {}; });
+  return d; }
+function icNum(v) { const s = String(v == null ? "" : v).replace(/['’\s]/g, "").replace(",", "."); if (s === "") return null; const n = parseFloat(s); return isFinite(n) ? n : null; }
+function icStatus(z) {
+  const at = String((z && z.alt) || "").trim(), bt = String((z && z.apr) || "").trim();
+  if (!at || !bt) return "offen";
+  const a = icNum(at), b = icNum(bt);
+  if (a != null && b != null) return Math.abs(a - b) < 0.005 ? "ok" : "diff";
+  return at === bt ? "ok" : "diff";
+}
+/* ---- Mutatoren (alle in der paramEdit-Kette) ---- */
+function icEdit(fn) { const k = icKunde; return paramEdit(async () => { await parameterLaden(true); fn(icDaten(k)); await parameterSpeichern(); render(); }); }
+function icKopfSet(feld, wert) { return icEdit(d => { d.kopf[feld] = wert; }); }
+function icMengenSet(nr, feld, wert) { return icEdit(d => { const z = d.mengen[nr] || (d.mengen[nr] = {}); z[feld] = wert; if (feld !== "bem") { z.wer = (currentUser && currentUser.email) || ""; z.am = new Date().toISOString().slice(0, 10); } }); }
+function icObjSet(art, idx, feld, wert) { return icEdit(d => { const o = d[art].obj; while (o.length <= idx) o.push({}); o[idx][feld] = wert; }); }
+function icZelle(art, nr, idx, an) { return icEdit(d => { const z = d[art].zellen[nr] || (d[art].zellen[nr] = {}); z.c = z.c || []; z.c[idx] = !!an; }); }
+function icZeileAlle(art, nr, an) { return icEdit(d => { const z = d[art].zellen[nr] || (d[art].zellen[nr] = {}); z.c = Array.from({ length: 10 }, () => !!an); }); }
+function icBem(art, nr, wert) { return icEdit(d => { const z = d[art].zellen[nr] || (d[art].zellen[nr] = {}); z.bem = wert; }); }
+function icKritSet(art, idx, wert) { return icEdit(d => { d[art].krit[idx] = wert; }); }
+
+async function renderImportcheck(el) {
+  if (!crmParameter) { try { await parameterLaden(false); } catch (e) {} }
+  if (!crmParameter) { el.innerHTML = `<div style="padding:20px 28px"><div class="empty">Parameter nicht ladbar.</div></div>`; return; }
+  const o = onbParam();
+  const kunden = Object.keys(o.kunden || {}).map(id => ({ id: String(id), c: cache.customers.find(x => String(x.id) === String(id)) })).filter(x => x.c)
+    .sort((a, b) => String(a.c.Title).localeCompare(String(b.c.Title), "de"));
+  if (!icKunde || !kunden.some(k => k.id === String(icKunde))) icKunde = kunden.length ? kunden[0].id : "";
+  document.getElementById("view-actions").innerHTML = kunden.length ? `
+    <select onchange="icKunde=this.value;render()" style="padding:4px 8px;font-weight:600;max-width:260px">${kunden.map(k => `<option value="${escape(k.id)}" ${k.id === String(icKunde) ? "selected" : ""}>${escape(k.c.Title)}</option>`).join("")}</select>` : "";
+  if (!kunden.length) { el.innerHTML = `<div style="padding:20px 28px"><div class="empty">Noch keine Kunden im Onboarding — zuerst unter Onboarding → Checkliste einen Kunden aufnehmen.</div></div>`; return; }
+  const d = icDaten(icKunde);
+  const inp = (wert, on, platz, breite) => `<input value="${escape(wert || "")}" placeholder="${escape(platz || "")}" onchange="${on}" style="width:${breite || "100%"};padding:4px 6px;font-size:12px">`;
+
+  // Fortschritt Mengen
+  const mStat = IC_MENGEN.map(r => icStatus(d.mengen[r.nr] || {}));
+  const nOk = mStat.filter(s => s === "ok").length, nDiff = mStat.filter(s => s === "diff").length, nOffen = mStat.filter(s => s === "offen").length;
+  const stCount = art => { const liste = art === "jp" ? IC_JP : IC_MA; return liste.filter(r => { const z = d[art].zellen[r.nr]; return z && (z.c || []).some(Boolean); }).length; };
+  const tabBtn = (id, label) => `<button class="btn btn-sm ${icTab === id ? "btn-primary" : ""}" style="border-radius:0;border:0" onclick="icTab='${id}';render()">${label}</button>`;
+
+  const kopfHtml = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px 14px;margin-bottom:14px">
+    ${[["altsoftware", "Altsoftware", "z.B. zvoove"], ["migration", "Migration (Nr. / Datum)", ""], ["stichtag", "Stichtag Daten", ""], ["geprueft", "Geprüft von", mitarbeiterKurzname(myEmail())], ["datum", "Datum Prüfung", new Date().toLocaleDateString("de-CH")]].map(([f, l, p]) =>
+      `<div class="field" style="margin:0"><label>${l}</label>${inp(d.kopf[f], `icKopfSet('${f}', this.value)`, p)}</div>`).join("")}
+  </div>`;
+
+  const statusBadge = s => s === "ok" ? `<span style="background:rgba(184,233,134,0.15);color:var(--accent);padding:1px 8px;border-radius:3px;font-size:11px;font-weight:600">OK</span>`
+    : s === "diff" ? `<span style="background:rgba(255,107,107,0.15);color:var(--danger);padding:1px 8px;border-radius:3px;font-size:11px;font-weight:600">Abweichung</span>`
+    : `<span style="color:var(--text-faint);font-size:11px">offen</span>`;
+
+  let inhalt = "";
+  if (icTab === "mengen") {
+    let letzterBereich = null;
+    inhalt = `<table class="table" style="font-size:12.5px"><thead><tr>
+        <th style="width:34px">Nr.</th><th>Prüfpunkt</th><th style="width:70px">Typ</th>
+        <th style="width:130px">Wert Altsystem</th><th style="width:130px">Wert Apriko</th>
+        <th style="width:110px;text-align:right">Differenz</th><th style="width:100px">Status</th><th>Bemerkung</th>
+      </tr></thead><tbody>
+      ${IC_MENGEN.map(r => {
+        const z = d.mengen[r.nr] || {}; const s = icStatus(z);
+        const a = icNum(z.alt), b = icNum(z.apr);
+        const diffTxt = a != null && b != null ? (b - a === 0 ? "0" : (b - a).toLocaleString("de-CH", { maximumFractionDigits: 2 })) : "";
+        const titel = letzterBereich !== r.bereich ? `<tr><td colspan="8" style="background:var(--bg);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);padding:8px 8px 4px">${escape(r.bereich)}</td></tr>` : "";
+        letzterBereich = r.bereich;
+        return titel + `<tr>
+          <td style="color:var(--text-faint);font-family:var(--font-mono);font-size:11px">${escape(r.nr)}</td>
+          <td>${escape(r.punkt)}</td>
+          <td style="color:var(--text-dim);font-size:11px">${escape(r.typ)}</td>
+          <td>${inp(z.alt, `icMengenSet('${r.nr}','alt',this.value)`)}</td>
+          <td>${inp(z.apr, `icMengenSet('${r.nr}','apr',this.value)`)}</td>
+          <td style="text-align:right;font-family:var(--font-mono);${diffTxt && diffTxt !== "0" ? "color:var(--danger)" : "color:var(--text-dim)"}">${escape(diffTxt)}</td>
+          <td>${statusBadge(s)}${z.am ? `<div style="font-size:10px;color:var(--text-faint)" title="${escape(z.wer || "")}">${escape(z.am.slice(8, 10) + "." + z.am.slice(5, 7) + ".")} ${escape(mitarbeiterKurzname(z.wer || ""))}</div>` : ""}</td>
+          <td>${inp(z.bem, `icMengenSet('${r.nr}','bem',this.value)`)}</td>
+        </tr>`;
+      }).join("")}
+      </tbody></table>`;
+  } else {
+    const art = icTab;   // "jp" | "ma"
+    const liste = art === "jp" ? IC_JP : IC_MA;
+    const krit = art === "jp" ? IC_JP_KRIT : IC_MA_KRIT;
+    const einheit = art === "jp" ? "Kunde" : "MA";
+    const objZeile = (feld, label) => `<tr><td style="font-size:11px;color:var(--text-dim);white-space:nowrap">${label}</td>${Array.from({ length: 10 }, (_, i) =>
+      `<td>${inp((d[art].obj[i] || {})[feld], `icObjSet('${art}',${i},'${feld}',this.value)`, "", "90px")}</td>`).join("")}</tr>`;
+    let letzterBereich = null;
+    inhalt = `
+      <details style="margin-bottom:12px" ${d[art].obj.some(x => x && (x.nr || x.name)) ? "" : "open"}>
+        <summary style="cursor:pointer;font-size:12px;font-weight:600">Geprüfte ${einheit === "Kunde" ? "Kunden" : "Mitarbeitende"} 1–10 erfassen</summary>
+        <div class="table-wrap" style="margin-top:8px"><table style="font-size:11.5px"><thead><tr><th></th>${Array.from({ length: 10 }, (_, i) => `<th style="text-align:center">${einheit} ${i + 1}</th>`).join("")}</tr></thead><tbody>
+          ${objZeile("nr", art === "jp" ? "Kundennummer" : "Personennummer")}
+          ${objZeile("name", art === "jp" ? "Firmenname" : "Name, Vorname")}
+          ${objZeile("grund", "Auswahlgrund")}
+        </tbody></table></div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:8px"><b>Auswahl der Stichprobe</b> — möglichst viele Sonderfälle abdecken (ein ${einheit} kann mehrere Kriterien abdecken):</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:2px 20px;margin-top:4px">
+          ${krit.map((k, i) => `<div style="display:flex;align-items:center;gap:6px;font-size:11.5px"><span style="flex:1">${escape(k)}</span>${inp(d[art].krit[i], `icKritSet('${art}',${i},this.value)`, "Nr.", "60px")}</div>`).join("")}
+        </div>
+      </details>
+      <div class="table-wrap"><table style="font-size:12px"><thead><tr>
+        <th style="width:34px">Nr.</th><th style="min-width:220px">Prüfpunkt</th>
+        ${Array.from({ length: 10 }, (_, i) => `<th style="text-align:center;width:30px" title="${escape((d[art].obj[i] || {}).name || (d[art].obj[i] || {}).nr || "")}">${i + 1}</th>`).join("")}
+        <th style="width:40px;text-align:right">✔</th><th style="width:34px;text-align:center" title="Ganze Zeile an/aus">⇄</th><th style="min-width:140px">Bemerkung</th>
+      </tr></thead><tbody>
+      ${liste.map(r => {
+        const z = d[art].zellen[r.nr] || {}; const c = z.c || []; const n = c.filter(Boolean).length;
+        const titel = letzterBereich !== r.bereich ? `<tr><td colspan="15" style="background:var(--bg);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);padding:8px 8px 4px">${escape(r.bereich || "Weitere")}</td></tr>` : "";
+        letzterBereich = r.bereich;
+        return titel + `<tr>
+          <td style="color:var(--text-faint);font-family:var(--font-mono);font-size:11px">${escape(r.nr)}</td>
+          <td title="${escape([r.quelle ? "Quelle: " + r.quelle : "", r.hinweis].filter(Boolean).join("\n"))}">${escape(r.punkt)}${r.hinweis ? ` <span style="color:var(--text-faint);cursor:help">ⓘ</span>` : ""}</td>
+          ${Array.from({ length: 10 }, (_, i) => `<td style="text-align:center"><input type="checkbox" ${c[i] ? "checked" : ""} onchange="icZelle('${art}','${escape(r.nr)}',${i},this.checked)" style="accent-color:var(--accent);width:14px;height:14px;cursor:pointer"></td>`).join("")}
+          <td style="text-align:right;font-family:var(--font-mono);${n === 10 ? "color:var(--accent)" : n ? "" : "color:var(--text-faint)"}">${n}</td>
+          <td style="text-align:center"><input type="checkbox" ${n === 10 ? "checked" : ""} onchange="icZeileAlle('${art}','${escape(r.nr)}',this.checked)" title="Ganze Zeile an/aus" style="width:14px;height:14px;cursor:pointer"></td>
+          <td>${inp(z.bem, `icBem('${art}','${escape(r.nr)}',this.value)`)}</td>
+        </tr>`;
+      }).join("")}
+      </tbody></table></div>`;
+  }
+
+  el.innerHTML = `<div style="padding:20px 28px">
+    <div style="background:rgba(184,233,134,0.05);border:1px solid var(--border-soft);border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--text-dim)">
+      Prüfung der Datenmigration für <b style="color:var(--text)">${escape((kunden.find(k => k.id === String(icKunde)) || {}).c.Title)}</b> — Stand wird pro Kunde gespeichert und ist für alle sichtbar.
+    </div>
+    ${kopfHtml}
+    <div style="display:flex;align-items:center;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden;width:fit-content;margin-bottom:4px">
+      ${tabBtn("mengen", `Mengen &amp; Summen <span style="opacity:.7">${nOk + nDiff}/${IC_MENGEN.length}</span>`)}
+      ${tabBtn("jp", `Stichprobe Kunden <span style="opacity:.7">${stCount("jp")}/${IC_JP.length}</span>`)}
+      ${tabBtn("ma", `Stichprobe Mitarbeiter <span style="opacity:.7">${stCount("ma")}/${IC_MA.length}</span>`)}
+    </div>
+    ${icTab === "mengen" ? `<div style="display:flex;gap:14px;font-size:12px;margin:8px 0 10px">
+      <span style="color:var(--accent)">OK: <b>${nOk}</b></span>
+      <span style="color:${nDiff ? "var(--danger)" : "var(--text-dim)"}">Abweichung: <b>${nDiff}</b></span>
+      <span style="color:var(--text-dim)">Offen: <b>${nOffen}</b></span>
+      <span style="color:var(--text-faint)">Total ${IC_MENGEN.length} Prüfpunkte · Status automatisch aus Altsystem- und Apriko-Wert</span>
+    </div>` : `<div style="margin:8px 0 10px"></div>`}
+    ${inhalt}
+  </div>`;
 }
 
 /* ============ Spielwiese → Roadmap ============
@@ -15155,7 +15567,7 @@ function openCustomer(id) {
         return `<dt>Website</dt><dd>${comp.Website ? `<a href="${escape(normalizeUrl(comp.Website) || comp.Website)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent-2)">${escape(comp.Website)} ↗</a>` : "—"}</dd>
       <dt>Adresse</dt><dd>${escape([st.strasse, [comp.City, comp.Country].filter(Boolean).join(", ")].filter(Boolean).join(" · ") || "—")}</dd>
 `; })() : ""}
-      <dt>Segment</dt><dd>${escape(c.Segment||"—")}</dd>
+      <dt>Segment</dt><dd>${escape(c.Segment||"—")}${(() => { const f0 = (crmKundenFlags || {})[String(c.id)] || {}; return f0.segAb && f0.segAlt ? ` <span style="color:var(--text-dim);font-size:11px">ab ${escape(String(f0.segAb).slice(8,10) + "." + String(f0.segAb).slice(5,7) + "." + String(f0.segAb).slice(0,4))} (davor ${escape(f0.segAlt)})</span>` : ""; })()}</dd>
       <dt>Status</dt><dd>${escape(c.Status||"—")}</dd>
       <dt>Start</dt><dd>${c.StartDate ? c.StartDate.slice(0,10) : "—"}</dd>
       <dt>Owner</dt><dd>${escape(ownerLabel(c.Owner)||"—")}</dd>
@@ -15696,9 +16108,15 @@ function editCustomer(id) {
       <div id="kunde-firmenfelder" style="margin-top:8px">${c.CompanyId && cache.companies.find(x => x.id == c.CompanyId) ? firmenFelderHtml(cache.companies.find(x => x.id == c.CompanyId), "fc-") : `<div style="font-size:11px;color:var(--warn)">Keine Firma zugeordnet — oben eine Firma wählen, dann lassen sich Website, Adresse, Ansprechperson, Entscheidungsträger und User hier pflegen (sie gehören zur Firma, nicht zum Vertrag).</div>`}</div>
     </details>
     <div class="field-row">
-      <div class="field"><label>Segment</label><select id="f-segment" onchange="updateCustomerTitle()">${SEGMENTS.map(s => `<option ${s===(c.Segment||"Nur SaaS")?"selected":""}>${s}</option>`).join("")}</select></div>
+      <div class="field"><label>Segment</label><select id="f-segment" data-alt="${escape(c.Segment||"Nur SaaS")}" onchange="updateCustomerTitle();segAbToggle(this)">${SEGMENTS.map(s => `<option ${s===(c.Segment||"Nur SaaS")?"selected":""}>${s}</option>`).join("")}</select></div>
       <div class="field"><label>Status</label><select id="f-status">${CUSTOMER_STATUS.map(s => `<option ${s===(c.Status||"Aktiv")?"selected":""}>${s}</option>`).join("")}</select></div>
     </div>
+    ${(() => { const f0 = (crmKundenFlags || {})[String(c.id)] || {}; const da = !!(f0.segAb && f0.segAlt); return `
+    <div class="field" id="seg-ab-row" style="display:${da ? "block" : "none"};border:1px solid var(--warn);border-radius:6px;padding:8px 10px;margin-bottom:12px">
+      <label>Segment-Wechsel gültig ab</label>
+      <input id="f-segab" type="date" value="${escape(da ? String(f0.segAb).slice(0, 10) : "")}">
+      <div style="font-size:11px;color:var(--text-dim);margin-top:4px">Monate <b>vor</b> diesem Datum rechnen weiter mit «<span id="seg-ab-alt">${escape(da ? f0.segAlt : "")}</span>» (Monatsabschluss, Statistik, Fakturierung). Leer lassen = Wechsel gilt rückwirkend fürs ganze Jahr.</div>
+    </div>`; })()}
     <div class="field-row">
       <div class="field"><label>Risiko</label><select id="f-risk">${RISK_LEVELS.map(s => `<option ${s===(c.Risk||"Grün")?"selected":""}>${s}</option>`).join("")}</select></div>
       <div class="field"><label>Owner</label><select id="f-owner">${internUserOptionsHtml(c.Owner||myEmail())}</select></div>
@@ -15877,6 +16295,17 @@ function kundeFirmenBlockFuellen() {
   const el = document.getElementById("kunde-firmenfelder");
   if (el) el.innerHTML = compId && cache.companies.find(x => x.id === compId) ? firmenFelderHtml(cache.companies.find(x => x.id === compId), "fc-") : `<div style="font-size:11px;color:var(--warn)">Keine Firma zugeordnet — oben eine Firma wählen, dann lassen sich die Firmendaten hier pflegen.</div>`;
 }
+/* «Gültig ab»-Zeile zeigen, sobald das Segment vom gespeicherten Wert abweicht (19.10.2026) */
+function segAbToggle(sel) {
+  const row = document.getElementById("seg-ab-row"); if (!row) return;
+  const geaendert = sel.value !== sel.dataset.alt;
+  row.style.display = geaendert ? "block" : row.style.display === "block" && document.getElementById("f-segab").value ? "block" : "none";
+  if (geaendert) {
+    const span = document.getElementById("seg-ab-alt"); if (span) span.textContent = sel.dataset.alt;
+    const f = document.getElementById("f-segab");
+    if (f && !f.value) { const d = new Date(); d.setMonth(d.getMonth() + 1); f.value = d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-01"; }
+  }
+}
 async function saveCustomer(id) {
   const compId = val("f-company");
   if (!compId) { toast("Ein Kunde braucht immer eine Firma — bitte oben eine Firma wählen (oder zuerst unter Firmen anlegen).", true); const sel = document.getElementById("f-company"); if (sel) { sel.focus(); sel.style.borderColor = "var(--danger)"; } return; }
@@ -15957,16 +16386,30 @@ async function saveCustomer(id) {
       const neuFactoring = document.getElementById("f-factoring")?.checked || false;
       const neuFactoringNotiz = val("f-factoring-notiz").trim();
       const alt = crmKundenFlags[key] || {};
+      // Segment-Wechsel per Datum (19.10.2026): wurde das Segment im Dialog geändert, datiert
+      // «gültig ab» den Wechsel (segAb + bisheriges Segment in segAlt); leeres Datum = rückwirkend.
+      const segSel0 = document.getElementById("f-segment");
+      const segVorher = (segSel0 && segSel0.dataset && segSel0.dataset.alt) || "";
+      const segAbFeld = val("f-segab");
+      let neuSegAb = alt.segAb || "", neuSegAlt = alt.segAlt || "";
+      if (id && segVorher && val("f-segment") !== segVorher) {
+        if (segAbFeld) { neuSegAb = segAbFeld; neuSegAlt = segVorher; }
+        else { neuSegAb = ""; neuSegAlt = ""; }
+      } else if (alt.segAb || alt.segAlt) {
+        if (segAbFeld) neuSegAb = segAbFeld;         // Datum eines bestehenden Wechsels angepasst
+        else { neuSegAb = ""; neuSegAlt = ""; }      // Feld geleert = Datierung aufheben
+      }
       const apGeaendert = Object.keys(ap).some(k => (ap[k] || "") !== (alt[k] || ""));
       const apGesetzt = Object.values(ap).some(Boolean);
       if (apGeaendert || neuIntern !== !!alt.intern || neuFibu !== !!alt.fibu || neuHatDb !== !alt.keineDb || neuMinfee !== (alt.minfee || "") || neuApplink !== (alt.applink || "")
           || neuMinSaas !== (parseFloat(alt.minSaas) || 0) || neuMinBpo !== (parseFloat(alt.minBpo) || 0)
           || neuZielExt !== (parseFloat(alt.zielExt) || 0) || neuPctFrom !== (alt.saasPctFrom || "") || neuStdFrom !== (alt.bpoStdFrom || "")
+          || neuSegAb !== (alt.segAb || "") || neuSegAlt !== (alt.segAlt || "")
           || neuFactoring !== !!alt.factoring || neuFactoringNotiz !== (alt.factoringNotiz || "")) {
         // Nicht vom Formular verwaltete Schlüssel (z.B. aus Importen) bleiben erhalten
-        const verwaltet = ["intern", "fibu", "minfee", "applink", "keineDb", "minSaas", "minBpo", "zielExt", "saasPctFrom", "bpoStdFrom", "factoring", "factoringNotiz"].concat(Object.keys(ap));
+        const verwaltet = ["intern", "fibu", "minfee", "applink", "keineDb", "minSaas", "minBpo", "zielExt", "saasPctFrom", "bpoStdFrom", "segAb", "segAlt", "factoring", "factoringNotiz"].concat(Object.keys(ap));
         const rest = {}; Object.keys(alt).forEach(k => { if (!verwaltet.includes(k)) rest[k] = alt[k]; });
-        if (neuIntern || neuFibu || !neuHatDb || neuMinfee || neuApplink || neuMinSaas || neuMinBpo || neuZielExt || neuPctFrom || neuStdFrom || apGesetzt || neuFactoring || neuFactoringNotiz || Object.keys(rest).length) {
+        if (neuIntern || neuFibu || !neuHatDb || neuMinfee || neuApplink || neuMinSaas || neuMinBpo || neuZielExt || neuPctFrom || neuStdFrom || neuSegAb || apGesetzt || neuFactoring || neuFactoringNotiz || Object.keys(rest).length) {
           crmKundenFlags[key] = Object.assign(rest, { intern: neuIntern, fibu: neuFibu, minfee: neuMinfee, applink: neuApplink });
           if (neuFactoring) crmKundenFlags[key].factoring = true;
           if (neuFactoringNotiz) crmKundenFlags[key].factoringNotiz = neuFactoringNotiz;
@@ -15977,6 +16420,7 @@ async function saveCustomer(id) {
           if (neuZielExt) crmKundenFlags[key].zielExt = neuZielExt;
           if (neuPctFrom) crmKundenFlags[key].saasPctFrom = neuPctFrom;
           if (neuStdFrom) crmKundenFlags[key].bpoStdFrom = neuStdFrom;
+          if (neuSegAb && neuSegAlt) { crmKundenFlags[key].segAb = neuSegAb; crmKundenFlags[key].segAlt = neuSegAlt; }
         }
         else crmKundenFlags[key] = {};   // leer lassen statt löschen: so werden auch die SharePoint-Spalten geleert (Sync); leere Einträge fliegen beim Speichern aus der JSON-Datei
         await crmSaveKundenFlags();
