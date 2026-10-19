@@ -1090,7 +1090,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.527.0</span> · <span id="app-build-date">19.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.528.0</span> · <span id="app-build-date">19.10.2026</span>
     </div>
   </aside>
 
@@ -12119,6 +12119,31 @@ function wfVisum(eintrag) {
   return `${escape(ownerLabel(eintrag.w))} · ${dat}`;
 }
 
+/* Lohn-Einstellungen pro Kunde in der internen Lohn-Checkliste (Beni, 19.10.2026, v1.528):
+   zuständige EXTERNE Person (Kontakt aus dem Kundenstamm, Kundenflag `lohnExt` = Kontakt-ID)
+   und Auszahlungstag (`lohnTag` = 1–31, `lohnWe` = "vor"|"nach": fällt der Tag auf ein
+   Wochenende, geht der Lohn am Freitag davor bzw. Montag danach raus). Gespeichert in
+   crm_kunden_flags.json (konfliktsicher via Merge); saveCustomer lässt fremde Flags stehen. */
+async function clLohnSet(custId, feld, wert) {
+  try {
+    await crmLoadKundenFlags();
+    const key = String(custId); const f = Object.assign({}, crmKundenFlags[key] || {});
+    if (wert) f[feld] = wert; else delete f[feld];
+    if (Object.keys(f).length) crmKundenFlags[key] = f; else delete crmKundenFlags[key];
+    await crmSaveKundenFlags();
+  } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  render();
+}
+function clLohnTermin(monat, tag, weRegel) {
+  if (!tag) return null;
+  const [y, m] = String(monat).split("-").map(Number);
+  const maxTag = new Date(y, m, 0).getDate();
+  const d = new Date(y, m - 1, Math.min(parseInt(tag) || 1, maxTag));
+  const wd = d.getDay(); let verschoben = "";
+  if (wd === 6) { d.setDate(d.getDate() + (weRegel === "nach" ? 2 : -1)); verschoben = "Sa"; }
+  else if (wd === 0) { d.setDate(d.getDate() + (weRegel === "nach" ? 1 : -2)); verschoben = "So"; }
+  return { datum: d, verschoben };
+}
 function renderCheckliste(el, typ) {
   const def = CHECKLISTEN[typ];
   const monat = wfMonat();
@@ -12208,6 +12233,40 @@ function renderCheckliste(el, typ) {
         <span style="font-size:11px;color:var(--text-dim);white-space:nowrap">${doneCount}/${alleItems.length}</span>
       </div>
     </div>
+    ${typ === "intern" ? (() => {
+      const selCust2 = cache.customers.find(c => String(c.id) === sel) || {};
+      const f = (crmKundenFlags || {})[sel] || {};
+      const kontakte = (cache.contacts || []).filter(k => String(k.CompanyId) === String(selCust2.CompanyId || ""))
+        .map(k => { const n = kontaktNamen(k); return { id: String(k.id), name: [n.vorname, n.name].filter(Boolean).join(" ") || String(k.Title || "Kontakt " + k.id), email: k.Email || "" }; })
+        .sort((a, b) => a.name.localeCompare(b.name, "de"));
+      const extSel = String(f.lohnExt || "");
+      const extra = extSel && !kontakte.some(k => k.id === extSel) ? `<option value="${escape(extSel)}" selected>(Kontakt nicht mehr vorhanden)</option>` : "";
+      const gew = kontakte.find(k => k.id === extSel);
+      const termin = clLohnTermin(monat, f.lohnTag, f.lohnWe || "vor");
+      const wtage = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+      return `<div class="card" style="margin-bottom:14px;padding:10px 16px;display:flex;gap:20px;align-items:center;flex-wrap:wrap;font-size:12px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="color:var(--text-dim)">Zuständig beim Kunden:</span>
+          <select onchange="clLohnSet('${sel}','lohnExt',this.value)" style="padding:4px 8px;font-size:12px;max-width:220px">
+            <option value="">— wählen —</option>${extra}${kontakte.map(k => `<option value="${escape(k.id)}" ${k.id === extSel ? "selected" : ""} title="${escape(k.email)}">${escape(k.name)}</option>`).join("")}
+          </select>
+          ${gew && gew.email ? `<a href="mailto:${escape(gew.email)}?subject=${encodeURIComponent("Lohnlauf " + selName + " — " + mLabel)}" title="${escape(gew.email)}" style="text-decoration:none">✉</a>` : ""}
+          ${!kontakte.length ? `<span style="color:var(--text-faint);font-size:11px">keine Kontakte bei dieser Firma erfasst — unter Kontakte anlegen</span>` : ""}
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="color:var(--text-dim)">Lohn-Auszahlung am</span>
+          <select onchange="clLohnSet('${sel}','lohnTag',this.value)" style="padding:4px 8px;font-size:12px">
+            <option value="">—</option>${Array.from({ length: 31 }, (_, i) => i + 1).map(t => `<option value="${t}" ${String(f.lohnTag || "") === String(t) ? "selected" : ""}>${t}.</option>`).join("")}
+          </select>
+          <span style="color:var(--text-dim)">des Monats, bei Wochenende</span>
+          <select onchange="clLohnSet('${sel}','lohnWe',this.value)" style="padding:4px 8px;font-size:12px">
+            <option value="vor" ${(f.lohnWe || "vor") === "vor" ? "selected" : ""}>davor (Freitag)</option>
+            <option value="nach" ${f.lohnWe === "nach" ? "selected" : ""}>danach (Montag)</option>
+          </select>
+          ${termin ? `<span style="font-weight:600;color:var(--accent-2)">→ ${wtage[termin.datum.getDay()]}, ${("0" + termin.datum.getDate()).slice(-2)}.${("0" + (termin.datum.getMonth() + 1)).slice(-2)}.${termin.datum.getFullYear()}</span>${termin.verschoben ? `<span style="color:var(--warn);font-size:11px">(${escape(String(f.lohnTag))}. fällt auf ${termin.verschoben} → ${(f.lohnWe || "vor") === "vor" ? "Freitag davor" : "Montag danach"})</span>` : ""}` : ""}
+        </div>
+      </div>`;
+    })() : ""}
     ${def.hinweis ? `<div style="font-size:11px;color:var(--text-faint);margin-bottom:10px">ⓘ ${escape(def.hinweis)}</div>` : ""}
     ${def.disclaimer ? `<div style="border:1px solid var(--warn);border-left:4px solid var(--warn);border-radius:4px;padding:9px 12px;margin-bottom:14px;font-size:11.5px;color:var(--text-dim)"><strong style="color:var(--warn)">Wichtig:</strong> ${escape(def.disclaimer)}</div>` : ""}
     ${lockBanner}
