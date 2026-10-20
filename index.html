@@ -1090,7 +1090,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.529.0</span> · <span id="app-build-date">20.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.529.1</span> · <span id="app-build-date">20.10.2026</span>
     </div>
   </aside>
 
@@ -2580,7 +2580,7 @@ function budgetSerialize(b) {
 function budgetRows() {
   return cache.budget.map(budgetParse).filter(Boolean);
 }
-async function budgetSave(b) {
+async function budgetSave(b, felder) {
   // Optimistisch: Cache SOFORT aktualisieren, damit der fokus-erhaltende
   // Sofort-Render bereits den neuen Wert zeigt (sonst überholt das Rendern
   // den Netzwerk-Save und die erste Eingabe "verschwindet" wieder).
@@ -2588,7 +2588,25 @@ async function budgetSave(b) {
   const alt = raw ? raw.Title : null;
   if (raw) raw.Title = budgetSerialize(b);
   try {
-    await updateItem("Budget", b.id, { Title: budgetSerialize(b) });
+    // Lost-Update-Schutz (20.10.2026, v1.529.1): Budget-Zeilen wurden als Ganzes überschrieben —
+    // ein Tab mit älterem Stand löschte so z.B. das DB-Häkchen («fliegen immer wieder raus»)
+    // oder «ab Monat» anderer Benutzer. Wenn der Aufrufer die geänderten Felder nennt, wird die
+    // Zeile frisch vom Server gelesen und NUR diese Felder übernommen; der Rest bleibt, wie ihn
+    // andere zuletzt gespeichert haben. Ohne Serverzugriff (Fehler) gilt der lokale Stand.
+    let speichern = b;
+    if (felder && felder.length && typeof siteId !== "undefined" && siteId && listIds["Budget"]) {
+      try {
+        const it = await graph(`/sites/${siteId}/lists/${listIds["Budget"]}/items/${b.id}?expand=fields($select=Title)`);
+        const frisch = budgetParse({ id: b.id, Title: it && it.fields && it.fields.Title });
+        if (frisch) {
+          speichern = frisch;
+          felder.forEach(f => { speichern[f] = b[f]; });
+          if (raw) raw.Title = budgetSerialize(speichern);
+          Object.assign(b, speichern);   // lokale Zeile auf den gemergten Stand bringen
+        }
+      } catch (e0) { /* Einzelabruf fehlgeschlagen → wie bisher ganze Zeile schreiben */ }
+    }
+    await updateItem("Budget", b.id, { Title: budgetSerialize(speichern) });
   } catch (e) {
     if (raw && alt !== null) raw.Title = alt;   // Rollback bei Fehler
     throw e;
@@ -2766,7 +2784,7 @@ async function budgetRedistributeBPO(saison) {
   for (const b of rows) {
     const mw = budgetFormulaMonths(b, saison);
     BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
-    await budgetSave(b);
+    await budgetSave(b, BUDGET_MONTH_FIELDS);
   }
 }
 
@@ -2893,7 +2911,7 @@ function zielArrHinweis() {
 async function budgetDbToggle(id, on) {
   const b = budgetRows().find(x => x.id === id); if (!b) return;
   b.Db = !!on;
-  try { await budgetSave(b); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  try { await budgetSave(b, ["Db"]); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
   render();
 }
 /* Anzahl Datenbanken pro Monat im Planjahr (für Hostingkosten): eine DB pro Kunde/Lead mit DB-Flag
@@ -2985,13 +3003,15 @@ async function budgetParamChange(id, field, value) {
   const b = budgetRows().find(x => x.id == id);
   if (!b) return;
   b[field] = parseFloat(value) || 0;
+  let felder = [field];
   if (!(b.BType === "BPOStd" && field === "Rate")) {
     const mw = budgetFormulaMonths(b);
     BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
+    felder = felder.concat(BUDGET_MONTH_FIELDS);
   }
   budgetRenderKeepFocus();
   try {
-    await budgetSave(b);
+    await budgetSave(b, felder);
   } catch (e) { budgetLastError = e.message; toast("Fehler: " + e.message, true); render(); }
 }
 
@@ -3005,7 +3025,7 @@ async function budgetCellChange(id, field, value) {
   // der SharePoint-Save läuft im Hintergrund
   budgetRenderKeepFocus();
   try {
-    await budgetSave(b);
+    await budgetSave(b, [field]);
   } catch (e) { budgetLastError = e.message; toast("Fehler: " + e.message, true); render(); }
 }
 
@@ -3031,7 +3051,7 @@ async function budgetTypeChange(id, newType) {
     BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
   }
   try {
-    await budgetSave(b);
+    await budgetSave(b, ["BType", "Lic", "Price", "ExtRev", "Rate"].concat(BUDGET_MONTH_FIELDS));
     render();
   } catch (e) { budgetLastError = e.message; toast("Fehler: " + e.message, true); render(); }
 }
@@ -3044,7 +3064,7 @@ async function budgetRefill(id) {
   const mw = budgetFormulaMonths(b);
   BUDGET_MONTH_FIELDS.forEach((f, i) => b[f] = mw[i]);
   try {
-    await budgetSave(b);
+    await budgetSave(b, BUDGET_MONTH_FIELDS);
     render();
   } catch (e) { budgetLastError = e.message; toast("Fehler: " + e.message, true); render(); }
 }
