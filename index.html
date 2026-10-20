@@ -1090,7 +1090,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.529.1</span> · <span id="app-build-date">20.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.531.0</span> · <span id="app-build-date">20.10.2026</span>
     </div>
   </aside>
 
@@ -2909,7 +2909,7 @@ function zielArrHinweis() {
   el.innerHTML = txt;
 }
 async function budgetDbToggle(id, on) {
-  const b = budgetRows().find(x => x.id === id); if (!b) return;
+  const b = budgetRows().find(x => x.id == id); if (!b) return;   // == statt ===: SharePoint-IDs sind Strings (20.10.2026, eigentliche Ursache der verschwindenden DB-Häkchen)
   b.Db = !!on;
   try { await budgetSave(b, ["Db"]); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
   render();
@@ -16490,7 +16490,7 @@ function editCustomer(id) {
     </div>
     <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-bpoytd" ${c.BPOYtd?"checked":""} style="width:auto;margin:0"> BPO-Abrechnung YTD-kumulativ (Jahresbasis, Vormonate werden automatisch abgezogen)</label></div>
     <div class="field"><label>Link</label><input id="f-link" type="text" value="${escape(appLinkText(c.id || "", c.Link))}" placeholder="z.B. helva.apriko.app"></div>
-    ${VERTRAG_ARTEN.map(([art, label]) => { const u = vertragLink(c.id || "", art); return `<div class="field"><label>${label}${u ? ` — <a href="${escape(u)}" target="_blank" rel="noopener" style="color:var(--accent-2);text-transform:none;letter-spacing:0" title="${escape(u)}">📄 ${escape(vertragName(u))} ↗</a>` : ""}</label><input id="f-vertrag-${art}" type="text" value="${escape(u)}" placeholder="In SharePoint: Dokument → Link kopieren → hier einfügen" style="font-size:11px;color:var(--text-dim)"></div>`; }).join("")}
+    ${VERTRAG_ARTEN.map(([art, label]) => { const u = vertragLink(c.id || "", art); return `<div class="field"><label>${label}${u ? ` — <a href="${escape(u)}" target="_blank" rel="noopener" style="color:var(--accent-2);text-transform:none;letter-spacing:0" title="${escape(u)}">📄 ${escape(vertragName(u))} ↗</a>` : ""}</label><div style="display:flex;gap:6px;align-items:center"><input id="f-vertrag-${art}" type="text" value="${escape(u)}" placeholder="📁 klicken: in SharePoint suchen oder hochladen — oder Link einfügen" style="flex:1;font-size:11px;color:var(--text-dim)"><button type="button" class="btn btn-sm" onclick="spPickOeffnen('f-vertrag-${art}')" title="Datei in der Dokumentbibliothek suchen, durchblättern oder vom Computer hochladen">📁</button><button type="button" class="btn btn-sm" onclick="vxLesen('${art}')" title="Verlinkten Vertrag lesen und Mindesthonorar + Vertragsbeginn vorschlagen (mit Zitat zum Prüfen)">🔎</button></div></div>`; }).join("")}
     <div class="field-row">
       <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-wf-intern" ${kundenFlag(c.id || "", "intern") ? "checked" : ""} style="width:auto;margin:0"> Interner Lohn</label></div>
       <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f-wf-fibu" ${kundenFlag(c.id || "", "fibu") ? "checked" : ""} style="width:auto;margin:0"> FIBU Monatsabschluss</label></div>
@@ -18546,6 +18546,213 @@ function escape(s) {
 }
 
 // URL normalisieren: leerer Wert → null, sonst https:// ergänzen falls Schema fehlt
+/* ---------- SharePoint-Dateiwähler für Vertragsfelder (Benis Wunsch, 20.10.2026, v1.530) ----------
+   📁 neben dem Feld öffnet einen Browser über die Dokumentbibliothek: Ordner durchblättern,
+   Suche über die ganze Bibliothek, Datei anklicken → Link wird eingetragen; «⇧ Hochladen»
+   lädt eine Datei vom Computer in den aktuellen Ordner (grosse Dateien per Upload-Session).
+   Der zuletzt besuchte Ordner wird gemerkt (localStorage sp-pick-pfad). */
+let spPickZiel = null, spPickPfad = "";
+function spPickOeffnen(inputId) {
+  spPickZiel = inputId;
+  try { spPickPfad = localStorage.getItem("sp-pick-pfad") || ""; } catch (e) { spPickPfad = ""; }
+  let ov = document.getElementById("sp-picker");
+  if (!ov) { ov = document.createElement("div"); ov.id = "sp-picker"; document.body.appendChild(ov); }
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px";
+  ov.innerHTML = `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;width:min(680px,95vw);max-height:84vh;display:flex;flex-direction:column;overflow:hidden">
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border)">
+      <b style="font-size:13px">Vertrag wählen</b>
+      <input id="sp-pick-suche" placeholder="In der ganzen Bibliothek suchen …" style="flex:1;padding:5px 9px;font-size:12px" onkeydown="if(event.key==='Enter')spPickLaden(this.value)">
+      <button class="btn btn-sm" onclick="spPickLaden(document.getElementById('sp-pick-suche').value)">Suchen</button>
+      <button class="btn btn-sm" onclick="spPickZu()" title="Schliessen">✕</button>
+    </div>
+    <div id="sp-pick-brot" style="padding:8px 16px;font-size:11px;color:var(--text-dim);border-bottom:1px solid var(--border-soft)"></div>
+    <div id="sp-pick-liste" style="overflow:auto;flex:1;padding:6px 8px;font-size:12.5px"></div>
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid var(--border)">
+      <label class="btn btn-sm" style="cursor:pointer">⇧ Vom Computer in diesen Ordner hochladen<input type="file" hidden onchange="spPickUpload(this)"></label>
+      <span id="sp-pick-status" style="font-size:11px;color:var(--text-faint)"></span>
+    </div>
+  </div>`;
+  spPickLaden();
+}
+function spPickZu() { const ov = document.getElementById("sp-picker"); if (ov) ov.remove(); }
+function spPickGehe(pfad) { spPickPfad = pfad; try { localStorage.setItem("sp-pick-pfad", pfad); } catch (e) {} const s = document.getElementById("sp-pick-suche"); if (s) s.value = ""; spPickLaden(); }
+async function spPickLaden(suche) {
+  const liste = document.getElementById("sp-pick-liste"), brot = document.getElementById("sp-pick-brot");
+  if (!liste) return;
+  liste.innerHTML = `<div style="padding:14px;color:var(--text-faint)">Lade …</div>`;
+  // Brotkrumen
+  const teile = spPickPfad ? spPickPfad.split("/") : [];
+  brot.innerHTML = suche && suche.trim()
+    ? `Suchergebnisse für «${escape(suche.trim())}» — <a href="#" onclick="spPickLaden();return false" style="color:var(--accent-2)">zurück zum Ordner</a>`
+    : `<a href="#" onclick="spPickGehe('');return false" style="color:var(--accent-2)">Bibliothek</a>` +
+      teile.map((t, i) => ` / <a href="#" onclick="spPickGehe(${tkJs(teile.slice(0, i + 1).join("/"))});return false" style="color:var(--accent-2)">${escape(t)}</a>`).join("");
+  try {
+    let items;
+    if (suche && suche.trim()) {
+      const d = await graph(`/sites/${siteId}/drive/root/search(q='${encodeURIComponent(suche.trim().replace(/'/g, ""))}')?$top=60`);
+      items = (d.value || []);
+    } else {
+      const url = spPickPfad ? `/sites/${siteId}/drive/root:/${spPickPfad}:/children?$top=500` : `/sites/${siteId}/drive/root/children?$top=500`;
+      const d = await graph(url);
+      items = (d.value || []);
+    }
+    items.sort((a, b) => (!!b.folder - !!a.folder) || String(a.name).localeCompare(String(b.name), "de"));
+    if (!items.length) { liste.innerHTML = `<div style="padding:14px;color:var(--text-faint)">${suche ? "Nichts gefunden." : "Leerer Ordner."}</div>`; return; }
+    liste.innerHTML = items.map(it => {
+      const ort = suche ? String((it.parentReference && it.parentReference.path) || "").replace(/^\/drives\/[^/]+\/root:?\/?/, "").replace(/^\/drive\/root:?\/?/, "") : "";
+      if (it.folder) {
+        const pfad = (ort ? ort + "/" : (spPickPfad ? spPickPfad + "/" : "")) + it.name;
+        return `<div onclick="spPickGehe(${tkJs(pfad)})" style="display:flex;gap:8px;align-items:center;padding:6px 10px;border-radius:5px;cursor:pointer" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''">📁 <span style="flex:1">${escape(it.name)}</span><span style="color:var(--text-faint);font-size:10px">${it.folder.childCount} Element(e)</span></div>`;
+      }
+      const kb = it.size ? (it.size > 1048576 ? (it.size / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(it.size / 1024)) + " KB") : "";
+      return `<div onclick="spPickWaehl(${tkJs(it.webUrl || "")}, ${tkJs(it.name)})" style="display:flex;gap:8px;align-items:center;padding:6px 10px;border-radius:5px;cursor:pointer" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''">📄 <span style="flex:1">${escape(it.name)}${ort ? `<div style="font-size:10px;color:var(--text-faint)">${escape(ort)}</div>` : ""}</span><span style="color:var(--text-faint);font-size:10px">${kb}</span></div>`;
+    }).join("");
+  } catch (e) {
+    liste.innerHTML = `<div style="padding:14px;color:var(--danger)">Konnte nicht laden: ${escape(e.message || String(e))}</div>`;
+  }
+}
+function spPickWaehl(url, name) {
+  const inp = spPickZiel && document.getElementById(spPickZiel);
+  if (inp) { inp.value = url; inp.dispatchEvent(new Event("change")); }
+  spPickZu();
+  toast("«" + name + "» verknüpft — beim Speichern des Kunden wird der Link übernommen.");
+}
+async function spPickUpload(input) {
+  const f = input.files && input.files[0]; if (!f) return;
+  const status = document.getElementById("sp-pick-status");
+  const setz = t => { if (status) status.textContent = t; };
+  try {
+    setz("Lade «" + f.name + "» hoch …");
+    const pfad = (spPickPfad ? spPickPfad + "/" : "") + f.name;
+    const token = await getToken();
+    let item = null;
+    if (f.size < 4 * 1024 * 1024) {
+      const res = await fetch("https://graph.microsoft.com/v1.0/sites/" + siteId + "/drive/root:/" + encodeURI(pfad) + ":/content", { method: "PUT", headers: { Authorization: "Bearer " + token }, body: f });
+      if (!res.ok) throw new Error("Upload HTTP " + res.status);
+      item = await res.json();
+    } else {
+      const s = await graph(`/sites/${siteId}/drive/root:/${pfad}:/createUploadSession`, { method: "POST", body: JSON.stringify({ item: { "@microsoft.graph.conflictBehavior": "rename" } }) });
+      const chunk = 5 * 1024 * 1024;
+      for (let off = 0; off < f.size; off += chunk) {
+        const ende = Math.min(off + chunk, f.size);
+        setz("Lade hoch … " + Math.round(ende / f.size * 100) + "%");
+        const res = await fetch(s.uploadUrl, { method: "PUT", headers: { "Content-Range": "bytes " + off + "-" + (ende - 1) + "/" + f.size }, body: f.slice(off, ende) });
+        if (!(res.status === 200 || res.status === 201 || res.status === 202)) throw new Error("Upload HTTP " + res.status);
+        if (res.status === 200 || res.status === 201) item = await res.json();
+      }
+    }
+    if (!item || !item.webUrl) throw new Error("Upload ohne Ergebnis");
+    setz("");
+    spPickWaehl(item.webUrl, item.name);
+    toast("«" + item.name + "» hochgeladen und verknüpft ✓");
+  } catch (e) {
+    setz(""); toast("Upload fehlgeschlagen: " + (e.message || e), true);
+  } finally { input.value = ""; }
+}
+
+/* ---------- Vertrag lesen: Mindesthonorar + Vertragsbeginn vorschlagen (20.10.2026, v1.531) ----------
+   🔎 neben dem Vertragsfeld lädt das verlinkte PDF (Graph shares-API, funktioniert mit jedem
+   SharePoint-Link), liest den Text mit pdf.js und sucht Vertragsbeginn und Mindesthonorare.
+   Jeder Fund wird MIT Original-Zitat angezeigt; «übernehmen» füllt nur das Formularfeld —
+   gespeichert wird erst mit dem normalen Kunden-Speichern. Nichts passiert automatisch. */
+const VX_MONATE = { januar: 1, februar: 2, märz: 3, maerz: 3, april: 4, mai: 5, juni: 6, juli: 7, august: 8, september: 9, oktober: 10, november: 11, dezember: 12 };
+function vxBetrag(s) { const n = parseFloat(String(s).replace(/['’\s]/g, "").replace(/,(\d{2})$/, ".$1").replace(/,/g, "")); return isFinite(n) ? n : 0; }
+function vxZitat(text, i, len) { const a = Math.max(0, i - 70), b = Math.min(text.length, i + len + 70); return (a > 0 ? "…" : "") + text.slice(a, b).replace(/\s+/g, " ").trim() + (b < text.length ? "…" : ""); }
+function vxAnalysieren(text) {
+  const t = String(text || "");
+  // --- Vertragsbeginn: Daten (01.03.2026 oder «1. Januar 2027») mit Beginn-Kontext ---
+  const beginn = [];
+  const datumRe = /\b(\d{1,2})\.\s?(?:(\d{1,2})\.\s?(\d{4})|(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s(\d{4}))\b/gi;
+  let m;
+  while ((m = datumRe.exec(t))) {
+    const tag = parseInt(m[1]), mon = m[2] ? parseInt(m[2]) : VX_MONATE[(m[4] || "").toLowerCase()], jahr = parseInt(m[3] || m[5]);
+    if (!tag || !mon || tag > 31 || mon > 12 || jahr < 2015 || jahr > 2040) continue;
+    const ctx = t.slice(Math.max(0, m.index - 90), m.index + m[0].length + 40).toLowerCase();
+    let score = 0;
+    if (/vertragsbeginn|vertragsbeginns/.test(ctx)) score += 5;
+    if (/in kraft|inkrafttreten/.test(ctx)) score += 4;
+    if (/gültig ab|gueltig ab|wirksam ab/.test(ctx)) score += 3;
+    if (/beginn|startet|aufnahme der/.test(ctx)) score += 2;
+    if (/\bper\b|\bab dem\b|\bab\b/.test(ctx)) score += 1;
+    if (/unterzeichnet|unterschrift|datum:|basel|zürich|bern, /.test(ctx)) score -= 2;   // Unterschriften-/Ortsdatum
+    if (score <= 0) continue;
+    beginn.push({ iso: jahr + "-" + ("0" + mon).slice(-2) + "-" + ("0" + tag).slice(-2), score, zitat: vxZitat(t, m.index, m[0].length) });
+  }
+  beginn.sort((a, b) => b.score - a.score);
+  const beginnUniq = []; beginn.forEach(x => { if (!beginnUniq.some(y => y.iso === x.iso)) beginnUniq.push(x); });
+  // --- Mindesthonorare: CHF-Beträge mit Mindest-Kontext, Zuordnung SaaS/BPO aus dem Umfeld ---
+  const minima = [];
+  const chfRe = /(?:CHF|Fr\.?|SFr\.?)\s*([\d'’.,]+)|([\d'’]+(?:\.\d{2})?)\s*(?:CHF|Franken)/gi;
+  while ((m = chfRe.exec(t))) {
+    const betrag = vxBetrag(m[1] || m[2]);
+    if (!(betrag >= 50 && betrag <= 100000)) continue;
+    const ctx = t.slice(Math.max(0, m.index - 140), m.index + m[0].length + 90).toLowerCase();
+    if (!/mindest|minimal|minimum|mind\./.test(ctx)) continue;
+    let art = null;
+    const saas = /saas|lizenz|software|applikation/.test(ctx), bpo = /bpo|lohnadministration|payroll|outsourcing|back\s?office|abwicklung/.test(ctx);
+    if (saas && !bpo) art = "saas"; else if (bpo && !saas) art = "bpo";
+    if (!minima.some(x => x.betrag === betrag && x.art === art)) minima.push({ betrag, art, zitat: vxZitat(t, m.index, m[0].length) });
+  }
+  return { beginn: beginnUniq.slice(0, 3), minima: minima.slice(0, 6) };
+}
+async function vxPdfText(url) {
+  const token = await getToken();
+  const enc = "u!" + btoa(unescape(encodeURIComponent(url))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const res = await fetch("https://graph.microsoft.com/v1.0/shares/" + enc + "/driveItem/content", { headers: { Authorization: "Bearer " + token } });
+  if (!res.ok) throw new Error("Datei nicht ladbar (HTTP " + res.status + ") — ist der Link eine SharePoint-Datei?");
+  const ab = await res.arrayBuffer();
+  await kaLoadPdfJs();
+  const doc = await window.pdfjsLib.getDocument({ data: ab }).promise;
+  let text = "";
+  for (let p = 1; p <= Math.min(doc.numPages, 40); p++) {
+    const tc = await (await doc.getPage(p)).getTextContent();
+    text += tc.items.map(i => i.str).join(" ") + "\n";
+  }
+  return text;
+}
+function vxZu() { const ov = document.getElementById("vx-overlay"); if (ov) ov.remove(); }
+function vxFeld(id, wert) {
+  const f = document.getElementById(id);
+  if (!f) { toast("Feld nicht gefunden — Dialog noch offen?", true); return; }
+  f.value = wert; f.dispatchEvent(new Event("change"));
+  f.style.outline = "2px solid var(--accent)"; setTimeout(() => { f.style.outline = ""; }, 1500);
+  toast("Übernommen — mit «Speichern» des Kunden wird es wirksam.");
+}
+async function vxLesen(art) {
+  const inp = document.getElementById("f-vertrag-" + art);
+  const url = inp && inp.value.trim();
+  if (!url) { toast("Zuerst einen Vertrag verlinken (📁 oder Link einfügen).", true); return; }
+  let ov = document.getElementById("vx-overlay");
+  if (!ov) { ov = document.createElement("div"); ov.id = "vx-overlay"; document.body.appendChild(ov); }
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px";
+  const shell = inhalt => `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;width:min(640px,95vw);max-height:84vh;display:flex;flex-direction:column;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border)"><b style="font-size:13px">🔎 Vertrag gelesen — Vorschläge</b><span style="flex:1"></span><button class="btn btn-sm" onclick="vxZu()">✕</button></div>
+      <div style="overflow:auto;padding:14px 16px;font-size:12.5px">${inhalt}</div>
+      <div style="padding:8px 16px;border-top:1px solid var(--border);font-size:10.5px;color:var(--text-faint)">Vorschläge füllen nur das Formular — gespeichert wird erst mit «Speichern» beim Kunden. Bitte Zitate prüfen.</div>
+    </div>`;
+  ov.innerHTML = shell(`<div style="color:var(--text-dim)">Lade und lese das PDF …</div>`);
+  try {
+    const text = await vxPdfText(url);
+    if (String(text).replace(/\s/g, "").length < 60) { ov.innerHTML = shell(`<div style="color:var(--warn)">Das PDF enthält kaum Text — vermutlich ein Scan ohne Textebene. Werte bitte von Hand eintragen.</div>`); return; }
+    const erg = vxAnalysieren(text);
+    const z = s => `<div style="font-size:11px;color:var(--text-faint);border-left:3px solid var(--border);padding:4px 8px;margin:4px 0 10px">«${escape(s)}»</div>`;
+    const fmtD = iso => iso.slice(8, 10) + "." + iso.slice(5, 7) + "." + iso.slice(0, 4);
+    let html = "";
+    if (erg.beginn.length) {
+      html += `<div style="font-weight:600;margin-bottom:4px">Vertragsbeginn</div>`;
+      html += erg.beginn.map(b => `<div style="display:flex;align-items:center;gap:10px"><b style="font-family:var(--font-mono)">${fmtD(b.iso)}</b><button class="btn btn-sm btn-primary" onclick="vxFeld('f-start','${b.iso}')">→ als Start übernehmen</button></div>` + z(b.zitat)).join("");
+    }
+    if (erg.minima.length) {
+      html += `<div style="font-weight:600;margin:8px 0 4px">Mindesthonorar</div>`;
+      html += erg.minima.map(x => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-family:var(--font-mono)">CHF ${x.betrag.toLocaleString("de-CH")}</b>${x.art ? `<span style="font-size:10px;color:var(--text-dim)">(klingt nach ${x.art.toUpperCase()})</span>` : ""}<button class="btn btn-sm ${x.art === "saas" ? "btn-primary" : ""}" onclick="vxFeld('f-minsaas',${x.betrag})">→ SaaS</button><button class="btn btn-sm ${x.art === "bpo" ? "btn-primary" : ""}" onclick="vxFeld('f-minbpo',${x.betrag})">→ BPO</button></div>` + z(x.zitat)).join("");
+    }
+    if (!html) html = `<div style="color:var(--text-dim)">Nichts Eindeutiges gefunden — weder ein Datum mit Beginn-Formulierung noch ein Betrag mit «Mindest…»-Umfeld. Lieber kein Vorschlag als ein falscher.</div>`;
+    ov.innerHTML = shell(html);
+  } catch (e) {
+    ov.innerHTML = shell(`<div style="color:var(--danger)">Konnte den Vertrag nicht lesen: ${escape(e.message || String(e))}</div>`);
+  }
+}
+
 function normalizeUrl(s) {
   const v = (s || "").trim();
   if (!v) return null;
