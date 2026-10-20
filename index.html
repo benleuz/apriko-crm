@@ -1090,7 +1090,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.528.1</span> · <span id="app-build-date">19.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.529.0</span> · <span id="app-build-date">20.10.2026</span>
     </div>
   </aside>
 
@@ -10595,9 +10595,10 @@ function rmProjektAnlegen() { const n = prompt("Name des neuen Projekts:"); if (
 /* Projekt kopieren (16.10.2026, v1.525): dupliziert das aktuelle Projekt mit ALLEN Tasks
    (neue IDs) als neue Variante — z.B. «WS Projekt» → angepasste Kundenversion. Das
    Original bleibt unberührt; Kopien bekommen das projekt-Feld explizit gesetzt. */
-function rmProjektName(r) { const p = (r || rmParam()).projekte.find(x => x.id === rmProjekt); return p ? p.name : rmProjekt; }
+/* Name des AKTIVEN Projekts — nicht mit rmProjektName(id) verwechseln (Dublette behoben 20.10.2026) */
+function rmProjektNameAktiv() { const p = rmParam().projekte.find(x => x.id === rmProjekt); return p ? p.name : rmProjekt; }
 function rmProjektKopieren() {
-  const name = prompt("Name der Kopie (z.B. «WS Kundenversion»):", rmProjektName() + " — Kunde");
+  const name = prompt("Name der Kopie (z.B. «WS Kundenversion»):", rmProjektNameAktiv() + " — Kunde");
   if (!name || !name.trim()) return;
   const quelleId = rmProjekt;
   return paramEdit(async () => {
@@ -10613,7 +10614,7 @@ function rmProjektKopieren() {
   });
 }
 function rmProjektUmbenennen() {
-  const neu = prompt("Neuer Name für dieses Projekt:", rmProjektName());
+  const neu = prompt("Neuer Name für dieses Projekt:", rmProjektNameAktiv());
   if (!neu || !neu.trim()) return;
   return paramEdit(async () => {
     await parameterLaden(true); const p = rmParam().projekte.find(x => x.id === rmProjekt); if (!p) return;
@@ -10623,7 +10624,7 @@ function rmProjektUmbenennen() {
 function rmProjektLoeschen() {
   if (rmProjekt === "standard") { toast("Das Projekt «Roadmap» kann nicht gelöscht werden.", true); return; }
   const r = rmParam(); const n = r.tasks.filter(t => rmProjektVon(t) === rmProjekt).length;
-  if (!confirm("Projekt «" + rmProjektName(r) + "» mit " + n + " Task(s) endgültig löschen?\nDie übrigen Projekte bleiben unberührt.")) return;
+  if (!confirm("Projekt «" + rmProjektNameAktiv() + "» mit " + n + " Task(s) endgültig löschen?\nDie übrigen Projekte bleiben unberührt.")) return;
   const weg = rmProjekt;
   return paramEdit(async () => {
     await parameterLaden(true); const r2 = rmParam();
@@ -10902,6 +10903,223 @@ function rmWiederherstellen(versionId) { return paramEdit(async () => {
   closeModal(); render(); toast(r.tasks.length + " Task(s) übernommen — Jahr " + rmJahr + " ✓");
 }); }
 
+/* ---------- Interaktiver HTML-Export (Benis Wunsch, 20.10.2026, v1.529) ----------
+   Lädt das aktuelle Projekt als eigenständige HTML-Datei herunter: Kunde kann Zeitraum
+   (rollend/Jahr), Bereich, Entwickler und Attribute selbst anwählen, Tasks antippen für
+   Details. Nur Ansicht, kein Login, KEINE internen Notizen im Export. */
+function rmExportHtml() {
+  const r = rmParam();
+  const pName = rmProjektNameAktiv();
+  const tasks = r.tasks.filter(t => rmProjektVon(t) === rmProjekt).map(t => ({
+    titel: String(t.titel || ""), jahr: t.jahr, von: t.von, bis: t.bis,
+    status: t.status || "geplant", entwickler: t.entwickler || [], tags: t.tags || [],
+    bereich: rmBereichVon(t)
+  }));
+  if (!tasks.length) { toast("Dieses Projekt hat keine Tasks — nichts zu exportieren.", true); return; }
+  const devs = {};
+  const devListe = rmEntwickler();
+  tasks.forEach(t => t.entwickler.forEach(e => {
+    if (devs[e]) return;
+    const d = devListe.find(x => x.email === e);
+    devs[e] = { n: mitarbeiterKurzname(e), i: rmInitialen(d ? d.name : e), f: rmDevFarbe(e) };
+  }));
+  const daten = { projekt: pName, stand: new Date().toLocaleDateString("de-CH"), tags: r.tags, devs, tasks };
+  const html = RM_EXPORT_TPL.replace("__DATEN__", JSON.stringify(daten).replace(/</g, "\\u003c"));
+  const blob = new Blob([html], { type: "text/html" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "Roadmap_" + pName.replace(/[^\w\u00c0-\u017f-]+/g, "_") + "_" + new Date().toISOString().slice(0, 10) + ".html";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  toast("Interaktive Roadmap «" + pName + "» heruntergeladen \u2713");
+}
+const RM_EXPORT_TPL = `<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Roadmap</title>
+<style>
+:root{--tx:#1d2a22;--dim:#5c6b61;--faint:#97a69b;--bg:#f6f8f5;--card:#ffffff;--line:#e3e9e2;--acc:#3f7d4e;--acc2:#2f6fab;--warn:#b2772a}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font:14px/1.5 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:26px 30px}
+h1{font-size:21px;margin-bottom:2px}
+.sub{color:var(--dim);font-size:12px;margin-bottom:18px}
+.ctrl{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--card)}
+.seg button{border:0;background:transparent;padding:6px 13px;font:inherit;font-size:12.5px;cursor:pointer;color:var(--dim)}
+.seg button.an{background:var(--acc);color:#fff}
+.seg select{border:0;padding:6px 10px;font:inherit;font-size:12.5px;background:transparent;color:var(--tx)}
+.chips{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:3px 10px;font-size:12px;cursor:pointer;color:var(--dim)}
+.chip.an{border-color:var(--acc);color:var(--acc);background:#eef5ef}
+.av{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;color:#fff;font-size:8.5px;font-weight:700}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%}
+.reset{font-size:11.5px;color:var(--warn);cursor:pointer;background:none;border:none;font-family:inherit}
+.wrap{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:auto;box-shadow:0 1px 3px rgba(20,40,25,.06)}
+.grid{position:relative;min-width:fit-content}
+.hd{display:flex;position:sticky;top:0;background:var(--card);z-index:3;border-bottom:1px solid var(--line)}
+.hd .corner{flex:0 0 240px;position:sticky;left:0;background:var(--card);z-index:4;display:flex;align-items:flex-end;padding:6px 12px;font-size:11px;color:var(--dim);border-right:1px solid var(--line)}
+.mrow{display:flex}
+.mcell{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--dim);padding:5px 0 0 6px;border-left:1px solid var(--line);white-space:nowrap;overflow:hidden}
+.krow{display:flex}
+.kcell{width:26px;flex:0 0 26px;text-align:center;font-size:8.5px;color:var(--faint);padding:2px 0 4px}
+.kcell.heute{color:var(--acc);font-weight:700}
+.kcell.j1{border-left:2px solid var(--acc)}
+.row{display:flex;border-bottom:1px solid #eef2ed}
+.row:last-child{border-bottom:0}
+.label{flex:0 0 240px;position:sticky;left:0;background:var(--card);z-index:2;padding:7px 12px;border-right:1px solid var(--line);cursor:pointer}
+.label .t{display:block;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.label .m{display:flex;align-items:center;gap:3px;font-size:10px;color:var(--faint);margin-top:2px}
+.track{position:relative;height:40px;background:repeating-linear-gradient(to right,transparent 0,transparent 25px,#edf1ec 25px,#edf1ec 26px);overflow:hidden}
+.bar{position:absolute;top:8px;height:24px;border-radius:6px;color:#fff;font-size:10.5px;font-weight:600;display:flex;align-items:center;gap:4px;padding:0 8px;white-space:nowrap;cursor:pointer;box-shadow:0 1px 2px rgba(20,40,25,.25)}
+.bar.fertig{opacity:.55}
+.bar span{overflow:hidden;text-overflow:ellipsis}
+.ms{position:absolute;top:9px;width:22px;height:22px;transform:rotate(45deg);border-radius:4px;cursor:pointer;box-shadow:0 1px 2px rgba(20,40,25,.3)}
+.mslinie{position:absolute;top:0;bottom:0;width:2px;opacity:.22;pointer-events:none}
+.heutelinie{position:absolute;top:0;bottom:0;width:2px;background:var(--acc);z-index:1;pointer-events:none}
+.heutelinie:after{content:"heute";position:sticky;top:44px;font-size:8.5px;color:var(--acc);padding-left:3px}
+.leer{padding:30px;text-align:center;color:var(--faint)}
+.tip{position:fixed;z-index:50;background:#243329;color:#f2f6f1;border-radius:8px;padding:10px 13px;font-size:12px;max-width:320px;pointer-events:none;display:none;box-shadow:0 4px 14px rgba(10,20,12,.35)}
+.tip b{display:block;font-size:13px;margin-bottom:3px}
+.tip .z{color:#b9c7bb;font-size:11px}
+.foot{margin-top:14px;font-size:11px;color:var(--faint);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+@media print{body{padding:8mm;background:#fff}.ctrl,.chips,.reset{display:none}.wrap{border:0;box-shadow:none;overflow:visible}}
+</style>
+</head>
+<body>
+<h1 id="titel"></h1>
+<div class="sub" id="sub"></div>
+<div class="ctrl">
+  <span class="seg" id="seg-zeit"></span>
+  <span class="seg" id="seg-bereich"></span>
+</div>
+<div class="chips" id="chips"></div>
+<div class="wrap"><div class="grid" id="grid"></div></div>
+<div class="foot"><span id="foot-n"></span><span>Interaktive Roadmap · nur Ansicht</span></div>
+<div class="tip" id="tip"></div>
+<script>
+var D = __DATEN__;
+var W = 26, ROLL = 53, MON = ["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
+var S = { rollend: true, jahr: (new Date()).getFullYear(), bereich: "alle", dev: {}, tag: {} };
+
+function kwVon(d){ var x=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate())); var t=(x.getUTCDay()+6)%7; x.setUTCDate(x.getUTCDate()-t+3); var j1=new Date(Date.UTC(x.getUTCFullYear(),0,4)); return 1+Math.round(((x-j1)/86400000-3+((j1.getUTCDay()+6)%7))/7); }
+function kwAnzahl(j){ return kwVon(new Date(Date.UTC(j,11,28))); }
+function kwMontag(j,kw){ var j4=new Date(Date.UTC(j,0,4)); var mo=new Date(j4); mo.setUTCDate(j4.getUTCDate()-((j4.getUTCDay()+6)%7)); var d=new Date(mo); d.setUTCDate(mo.getUTCDate()+(kw-1)*7); return d; }
+function heuteKw(){ var h=new Date(); var x=new Date(Date.UTC(h.getFullYear(),h.getMonth(),h.getDate())); var t=(x.getUTCDay()+6)%7; x.setUTCDate(x.getUTCDate()-t+3); return { jahr:x.getUTCFullYear(), kw:kwVon(h), tiw:(h.getDay()+6)%7 }; }
+function view(){ if(S.rollend){ var h=heuteKw(); return { rollend:true, start:kwMontag(h.jahr,h.kw), n:ROLL }; } return { rollend:false, start:kwMontag(S.jahr,1), n:kwAnzahl(S.jahr) }; }
+function colVon(v,j,kw){ return Math.round((kwMontag(j,kw)-v.start)/(7*86400000)); }
+function colDatum(v,i){ var d=new Date(v.start); d.setUTCDate(d.getUTCDate()+7*i); return d; }
+function colKw(v,i){ var d=colDatum(v,i); var th=new Date(d); th.setUTCDate(d.getUTCDate()+3); return { jahr:th.getUTCFullYear(), kw:kwVon(d) }; }
+function span(v,t){ return { a:colVon(v,t.jahr,t.von), b:colVon(v,t.jahr,t.bis) }; }
+function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function tagVon(id){ for(var i=0;i<D.tags.length;i++) if(D.tags[i].id===id) return D.tags[i]; return null; }
+function farbe(t){ for(var i=0;i<(t.tags||[]).length;i++){ var g=tagVon(t.tags[i]); if(g) return g.farbe; } return "#3f7d4e"; }
+function fmtD(d){ return ("0"+d.getUTCDate()).slice(-2)+"."+("0"+(d.getUTCMonth()+1)).slice(-2)+"."+d.getUTCFullYear(); }
+function aktiv(o){ var r=[]; for(var k in o) if(o[k]) r.push(k); return r; }
+
+function sichtbar(v){
+  var fd=aktiv(S.dev), ft=aktiv(S.tag);
+  return D.tasks.filter(function(t){
+    var sp=span(v,t); if(sp.b<0||sp.a>v.n-1) return false;
+    if(S.bereich!=="alle" && t.bereich!==S.bereich && t.bereich!=="beide") return false;
+    if(fd.length && !(t.entwickler||[]).some(function(e){return S.dev[e];})) return false;
+    if(ft.length && !(t.tags||[]).some(function(g){return S.tag[g];})) return false;
+    return true;
+  }).map(function(t){ return [t,span(v,t)]; }).sort(function(x,y){ return x[1].a-y[1].a||x[1].b-y[1].b||String(x[0].titel).localeCompare(y[0].titel); }).map(function(x){return x[0];});
+}
+
+function render(){
+  var v=view(), h=heuteKw();
+  document.getElementById("titel").textContent = D.projekt;
+  document.getElementById("sub").textContent = "Roadmap · Stand " + D.stand;
+  // Zeit-Umschalter
+  var jahre={}; D.tasks.forEach(function(t){ jahre[t.jahr]=1; }); jahre[h.jahr]=1;
+  var jl=Object.keys(jahre).map(Number).sort();
+  var z='<button class="'+(S.rollend?"an":"")+'" onclick="S.rollend=true;render()" title="Ab der aktuellen Woche 52 Wochen voraus">&#10227; Rollend</button>';
+  z+='<select onchange="S.rollend=false;S.jahr=parseInt(this.value);render()">'+(S.rollend?'<option selected disabled>Jahr …</option>':'');
+  jl.forEach(function(j){ z+='<option value="'+j+'"'+(!S.rollend&&j===S.jahr?' selected':'')+'>'+j+'</option>'; });
+  document.getElementById("seg-zeit").innerHTML=z+'</select>';
+  // Bereich
+  var alleT=sichtbar(v);
+  var hatBereiche = D.tasks.some(function(t){ return t.bereich==="rollout"||t.bereich==="beide"; }) && D.tasks.some(function(t){ return t.bereich==="entwicklung"||t.bereich==="beide"; });
+  var bz="";
+  if(hatBereiche){ [["alle","Alle"],["entwicklung","Entwicklung"],["rollout","Rollout"]].forEach(function(p){ bz+='<button class="'+(S.bereich===p[0]?"an":"")+'" onclick="S.bereich=\\''+p[0]+'\\';render()">'+p[1]+'</button>'; }); }
+  document.getElementById("seg-bereich").innerHTML=bz;
+  // Chips: Entwickler + Tags, die im sichtbaren Fenster vorkommen
+  var imFenster=D.tasks.filter(function(t){ var sp=span(v,t); return sp.b>=0&&sp.a<=v.n-1; });
+  var devs={}, tags={};
+  imFenster.forEach(function(t){ (t.entwickler||[]).forEach(function(e){devs[e]=1;}); (t.tags||[]).forEach(function(g){tags[g]=1;}); });
+  var c="";
+  var devKeys=Object.keys(devs).sort(function(a,b){ return (D.devs[a]?D.devs[a].n:a).localeCompare(D.devs[b]?D.devs[b].n:b); });
+  window.__devKeys=devKeys;
+  devKeys.forEach(function(e,di){
+    var d=D.devs[e]||{n:e,i:"?",f:"#888"};
+    c+='<span class="chip '+(S.dev[e]?"an":"")+'" onclick="devToggle('+di+')"><span class="av" style="background:'+d.f+'">'+esc(d.i)+'</span>'+esc(d.n)+'</span>';
+  });
+  if(Object.keys(devs).length&&Object.keys(tags).length) c+='<span style="color:var(--line)">|</span>';
+  Object.keys(tags).forEach(function(g){ var tg=tagVon(g); if(!tg||g==="meilenstein") return;
+    c+='<span class="chip '+(S.tag[g]?"an":"")+'" onclick="S.tag[\\''+g+'\\']=!S.tag[\\''+g+'\\'];render()"><span class="dot" style="background:'+tg.farbe+'"></span>'+esc(tg.name)+'</span>';
+  });
+  if(aktiv(S.dev).length||aktiv(S.tag).length) c+='<button class="reset" onclick="S.dev={};S.tag={};render()">&#10005; Filter zurücksetzen</button>';
+  document.getElementById("chips").innerHTML=c;
+  // Kopf: Monate + KWs
+  var kws=[]; for(var i=0;i<v.n;i++) kws.push(colKw(v,i));
+  var monate=[]; for(var i=0;i<v.n;i++){ var dow=colDatum(v,i); var th=new Date(dow); th.setUTCDate(dow.getUTCDate()+3);
+    var key=th.getUTCFullYear()*12+th.getUTCMonth();
+    var m=MON[th.getUTCMonth()]+(v.rollend&&(th.getUTCMonth()===0||!monate.length)?" "+th.getUTCFullYear():"");
+    if(!monate.length||monate[monate.length-1].k!==key) monate.push({k:key,m:m,n:1}); else monate[monate.length-1].n++; }
+  var hCol=-1; for(var i=0;i<v.n;i++){ if(kws[i].jahr===h.jahr&&kws[i].kw===h.kw){hCol=i;break;} }
+  var g='<div class="hd"><div class="corner">'+alleT.length+' von '+imFenster.length+' Tasks</div><div>';
+  g+='<div class="mrow">'; monate.forEach(function(mo){ g+='<div class="mcell" style="width:'+(mo.n*W)+'px;flex:0 0 '+(mo.n*W)+'px">'+esc(mo.m)+'</div>'; }); g+='</div>';
+  g+='<div class="krow">'; kws.forEach(function(k,i){ g+='<div class="kcell'+(i===hCol?" heute":"")+(v.rollend&&k.kw===1&&i>0?" j1":"")+'">'+k.kw+'</div>'; }); g+='</div>';
+  g+='</div></div>';
+  // Zeilen
+  if(!alleT.length) g+='<div class="leer">Keine Tasks in dieser Ansicht — Filter zurücksetzen oder Zeitraum wechseln.</div>';
+  alleT.forEach(function(t,ix){
+    var sp=span(v,t), f=farbe(t), breit=(sp.b-sp.a+1)*W-4;
+    var ms=(t.tags||[]).indexOf("meilenstein")>=0;
+    var avs=(t.entwickler||[]).slice(0,4).map(function(e){ var d=D.devs[e]||{i:"?",f:"#888",n:e}; return '<span class="av" title="'+esc(d.n)+'" style="background:'+d.f+'">'+esc(d.i)+'</span>'; }).join("");
+    var dots=(t.tags||[]).map(function(gg){ var tg=tagVon(gg); return tg&&gg!=="meilenstein"?'<span class="dot" title="'+esc(tg.name)+'" style="background:'+tg.farbe+'"></span>':""; }).join("");
+    var tip=' onmouseenter="tipZeig(event,'+ix+')" onmousemove="tipPos(event)" onmouseleave="tipWeg()" onclick="tipZeig(event,'+ix+');tipPos(event)"';
+    g+='<div class="row"><div class="label"'+tip+'><span class="t">'+(t.status==="fertig"?"&#10003; ":"")+esc(t.titel)+'</span><span class="m">'+(ms?'Meilenstein · KW '+t.von+(v.rollend?"/"+String(t.jahr).slice(2):""):dots)+avs+(t.status==="laufend"?'<span style="color:var(--acc);font-size:9px">&#9679; läuft</span>':"")+'</span></div>';
+    g+='<div class="track" style="width:'+(v.n*W)+'px;flex:0 0 '+(v.n*W)+'px">';
+    if(ms) g+='<div class="ms'+(t.status==="fertig"?" fertig":"")+'" style="left:'+(sp.a*W+2)+'px;background:'+f+'"'+tip+'></div>';
+    else g+='<div class="bar'+(t.status==="fertig"?" fertig":"")+'" style="left:'+(sp.a*W+2)+'px;width:'+breit+'px;background:'+f+'"'+tip+'>'+(breit>70?'<span'+(sp.a<0?' style="padding-left:'+(-sp.a*W)+'px"':'')+'>'+esc(t.titel)+'</span>':"")+'</div>';
+    g+='</div></div>';
+  });
+  document.getElementById("grid").innerHTML=g;
+  // Meilenstein-Linien + Heute-Linie
+  var grid=document.getElementById("grid");
+  alleT.forEach(function(t){ if((t.tags||[]).indexOf("meilenstein")<0) return; var sp=span(v,t);
+    var l=document.createElement("div"); l.className="mslinie"; l.style.background=farbe(t); l.style.left=(240+sp.a*W+W/2-1)+"px"; grid.appendChild(l); });
+  if(hCol>=0){ var hl=document.createElement("div"); hl.className="heutelinie"; hl.style.left=(240+hCol*W+Math.round(h.tiw/7*W))+"px"; grid.appendChild(hl); }
+  document.getElementById("foot-n").textContent = D.tasks.length + " Tasks insgesamt · " + D.projekt;
+  window.__alleT = alleT;
+}
+
+function tipZeig(ev,ix){
+  var t=window.__alleT[ix]; if(!t) return; var v=view();
+  var von=kwMontag(t.jahr,t.von), bis=kwMontag(t.jahr,t.bis); bis=new Date(bis); bis.setUTCDate(bis.getUTCDate()+6);
+  var devs=(t.entwickler||[]).map(function(e){ return (D.devs[e]||{n:e}).n; }).join(", ");
+  var tags=(t.tags||[]).map(function(g){ var tg=tagVon(g); return tg&&g!=="meilenstein"?tg.name:null; }).filter(Boolean).join(", ");
+  var st={geplant:"geplant",laufend:"läuft",fertig:"abgeschlossen"}[t.status]||t.status;
+  var html="<b>"+esc(t.titel)+"</b><div class='z'>KW "+t.von+"–"+t.bis+" "+t.jahr+" · "+fmtD(von)+" – "+fmtD(bis)+"</div><div class='z'>Status: "+esc(st)+"</div>";
+  if(devs) html+="<div class='z'>Team: "+esc(devs)+"</div>";
+  if(tags) html+="<div class='z'>Bereich: "+esc(tags)+"</div>";
+  var tip=document.getElementById("tip"); tip.innerHTML=html; tip.style.display="block";
+}
+function tipPos(ev){ var tip=document.getElementById("tip"); var x=ev.clientX+14,y=ev.clientY+14;
+  if(x+330>window.innerWidth) x=ev.clientX-330; if(y+120>window.innerHeight) y=ev.clientY-110;
+  tip.style.left=x+"px"; tip.style.top=y+"px"; }
+function tipWeg(){ document.getElementById("tip").style.display="none"; }
+function devToggle(i){ var e=window.__devKeys[i]; if(e==null) return; S.dev[e]=!S.dev[e]; render(); }
+render();
+<\/script>
+</body>
+</html>
+`;
+
 /* ---------- Bearbeiten-Dialog ---------- */
 function rmDialog(id) {
   const r = rmParam(); const neu = !id;
@@ -11071,6 +11289,7 @@ async function renderRoadmap(el) {
     </span>
     <button class="btn btn-sm" onclick="rmWiederherstellenZeigen()" title="Frühere Stände der Roadmap aus der SharePoint-Versionsgeschichte zurückholen">🕘 Frühere Stände</button>
     <label class="btn btn-sm" style="cursor:pointer" title="Tasks aus Excel/CSV importieren: Titel, Jahr, Von KW, Bis KW, Attribute, Status, Entwickler, Notiz — gleicher Titel im gleichen Jahr wird aktualisiert, sonst neu angelegt, nichts wird gelöscht">⇧ Excel<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="rmImportLesen(this)"></label>
+    <button class="btn btn-sm" onclick="rmExportHtml()" title="Aktuelles Projekt als interaktive HTML-Datei herunterladen — zum Versand an Kunden (nur Ansicht, ohne Notizen)">⇩ HTML</button>
     <button class="btn btn-sm btn-primary" onclick="rmDialog()">+ Task</button>`;
 
   const alle = ptasks.filter(t => rmSichtbar(v, t) && rmBereichPasst(t, rmBereich)).map(t => [t, rmSpan(v, t)])
