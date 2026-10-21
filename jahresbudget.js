@@ -19,7 +19,7 @@
    budgetRows, budgetChfOf, budgetIsSaaS, budgetErloes, BUDGET_MONTH_FIELDS,
    deleteItem, reload, escape, toast, render, currentView. */
 
-const JB_VERSION = "1.470.0";
+const JB_VERSION = "1.532.1";
 const JB_GES = ["Apriko AG", "Maverix AG"];
 const JB_PERSONAL = new Set(["SW_Lohn", "SW_SV", "SW_UebrPA", "BO_Lohn", "BO_SV", "BO_UebrPA"]);
 const JB_ERTRAG = new Set(["SW_Ertrag", "BO_Ertrag"]);
@@ -277,12 +277,58 @@ async function jbTransfer() {
   } catch (e) { toast("Übertragung fehlgeschlagen: " + e.message, true); }
   jbState.busy = false; render();
 }
-function jbExport() {
+/* Excel-Export (21.10.2026, v1.532 — vorher CSV, das in Excel «komisch» aussah):
+   richtige .xlsx mit Spaltenbreiten und Tausender-Zahlenformat; Unterpositionen in
+   EIGENER Spalte ohne wiederholte Hauptzeilen-Texte und ohne Baum-Zeichen; Zwischentotale
+   und EBITDA-Kette (S-Zeilen) wie in der Ansicht, mit Leerzeile nach jedem Block. */
+function jbExportAoa(m, y) {
+  const num = v => (v == null || v === "") ? "" : Math.round(v);
+  const sumIst = k => (m.byKey[k] || []).reduce((s, r) => s + (r.ist || 0), 0) * jbErSign(k);
+  const sumHoch = k => (m.byKey[k] || []).reduce((s, r) => s + (r.hoch || 0), 0) * jbErSign(k);
+  const sumBud = k => (m.byKey[k] || []).reduce((s, r) => s + jbRowBudget(r), 0) * jbErSign(k);
+  const vi = fbCompute(sumIst), vh = fbCompute(sumHoch), vb = fbCompute(sumBud);
+  const aoa = [["Position", "Ges", "Konto", "Bezeichnung", "Unterposition", "Ist " + m.basis, "Hochrechnung", "Budget " + y, "Abweichung", "Notiz"]];
+  const abw = (bud, hoch) => { const d = Math.round(bud || 0) - Math.round(hoch || 0); return d === 0 ? "" : d; };
+  FB_PLAN.forEach(row => {
+    const art = row[0], key = row[1];
+    if (art === "d" || art === "d2") {
+      (FB_SRC[key] || [key]).forEach(k => (m.byKey[k] || []).forEach(r => {
+        const bud = jbRowBudget(r);
+        aoa.push([FB_LABELS[k] || k, (typeof bpGesKurz === "function" ? bpGesKurz(r.g) : r.g), String(r.kt || ""), r.b || "", "", r.ist === null ? "" : num(r.ist), num(r.hoch), num(bud), abw(bud, r.hoch), r.note || ""]);
+        (r.pos || []).forEach(p => aoa.push(["", "", String((typeof bpPosKonto === "function" ? bpPosKonto(r, p) : "") || r.kt || ""), "", p.t || "", "", "", num(p.v || 0), "", p.n || ""]));
+      }));
+    } else if (art === "c" || art === "g") {
+      aoa.push(["\u03a3 " + row[2], "", "", "", "", num(vi[key]), num(vh[key]), num(vb[key]), abw(vb[key], vh[key]), ""]);
+      aoa.push(["", "", "", "", "", "", "", "", "", ""]);
+    }
+  });
+  return aoa;
+}
+async function jbExport() {
+  if (typeof lcLoadXlsx === "function") await lcLoadXlsx();
   const y = jbState.year, m = jbBuild(y);
-  const q = v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
-  const lines = [["Position", "Gesellschaft", "Konto", "Bezeichnung", "Ist " + m.basis, "Hochrechnung", "Budget " + y, "Notiz"].map(q).join(";")];
-  FB_PLAN.forEach(row => { if (row[0] !== "d" && row[0] !== "d2") return; (FB_SRC[row[1]] || [row[1]]).forEach(k => (m.byKey[k] || []).forEach(r => { lines.push([FB_LABELS[k] || k, r.g, r.kt, r.b, r.ist === null ? "" : Math.round(r.ist), Math.round(r.hoch), Math.round(jbRowBudget(r)), r.note].map(q).join(";")); (r.pos || []).forEach(p => lines.push([FB_LABELS[k] || k, r.g, (typeof bpPosKonto === "function" ? bpPosKonto(r, p) : "") || r.kt, "  └ " + (p.t || ""), "", "", Math.round(p.v || 0), p.n || ""].map(q).join(";"))); })); });
-  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" })); a.download = "jahresbudget-" + y + ".csv"; a.click();
+  const aoa = jbExportAoa(m, y);
+  const ws = window.XLSX.utils.aoa_to_sheet(aoa);
+  // Tausender-Format auf den drei Zahlenspalten (F/G/H)
+  for (let r = 1; r < aoa.length; r++) [5, 6, 7, 8].forEach(c => {
+    const adr = window.XLSX.utils.encode_cell({ r: r, c: c });
+    if (ws[adr] && typeof ws[adr].v === "number") ws[adr].z = "#,##0";
+  });
+  ws["!cols"] = [26, 5, 7, 30, 34, 12, 12, 12, 12, 30].map(w => ({ wch: w }));
+  const wb = window.XLSX.utils.book_new();
+  window.XLSX.utils.book_append_sheet(wb, ws, "Jahresbudget " + y);
+  const info = window.XLSX.utils.aoa_to_sheet([["Spalte", "Bedeutung"],
+    ["Position", "Budgetposition wie in der Jahresbudget-Ansicht; \u03a3-Zeilen = Zwischentotale/EBITDA-Kette"],
+    ["Ges", "A = Apriko AG, M = maverix ag"],
+    ["Konto", "FIBU-Konto der Zeile bzw. der Unterposition"],
+    ["Unterposition", "Manuelle und automatische Positionen des Kontos (Budget-Spalte = ihr Jahresbetrag)"],
+    ["Ist " + m.basis, "Importierte Ist-Zahlen (YTD-Basis " + m.basis + ")"],
+    ["Hochrechnung", "Ist aufs Jahr hochgerechnet"],
+    ["Budget " + y, "Budgetwert (Zeile = Summe ihrer Positionen)"],
+    ["Abweichung", "Budget " + y + " minus Hochrechnung — positiv = mehr budgetiert als der hochgerechnete Ist-Verlauf"]]);
+  info["!cols"] = [16, 95].map(w => ({ wch: w }));
+  window.XLSX.utils.book_append_sheet(wb, info, "Anleitung");
+  window.XLSX.writeFile(wb, "Jahresbudget_" + y + ".xlsx");
 }
 
 /* ---------- Rendering ---------- */
@@ -296,7 +342,7 @@ function renderJahresbudget(el) {
     <button class="btn btn-sm" style="${jbState.view === "jahr" ? "background:var(--accent);color:#fff" : ""}" onclick="jbState.view='jahr';render()">Jahr</button>
     <button class="btn btn-sm" style="${jbState.view === "monate" ? "background:var(--accent);color:#fff" : ""}" onclick="jbState.view='monate';render()">Monate</button>
     <button class="btn btn-sm" onclick="jbState.onlyChanged=!jbState.onlyChanged;render()" style="${jbState.onlyChanged ? "background:var(--accent);color:#fff" : ""}" title="Nur Konten ohne Positionen (noch offen)">⚠ nur offene</button>
-    <button class="btn btn-sm" onclick="jbExport()">⇩ CSV</button>
+    <button class="btn btn-sm" onclick="jbExport()" title="Jahresbudget als formatierte Excel-Datei herunterladen">⇩ Excel</button>
     <button class="btn btn-sm btn-primary" onclick="jbTransfer()" title="Alle Positionen (inkl. Personalaufwand + Zusatzpositionen) als fb-Positionen ins Budgetvergleich-Jahr schreiben">→ Budgetvergleich ${y}</button>`;
   if (jbState.busy) { el.innerHTML = `<div class="full-loading"><div class="loading"></div></div>`; return; }
   const m = jbBuild(y), basis = m.basis;
