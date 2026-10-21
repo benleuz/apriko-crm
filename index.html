@@ -32,7 +32,7 @@
 <script src="apriko-api.js?v=1.512.0"></script>
 <script src="lohncheck.js?v=1.512.0"></script>
 <script src="personalbudget.js?v=1.512.0"></script>
-<script src="jahresbudget.js?v=1.532.1"></script>
+<script src="jahresbudget.js?v=1.533.0"></script>
 <script src="budgetpositionen.js?v=1.512.0"></script>
 <script src="lohnchecklistetemp.js?v=1.512.0"></script>
 <script src="apriko-endpunkte.js?v=1.512.0"></script>
@@ -1090,7 +1090,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.532.1</span> · <span id="app-build-date">21.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.533.0</span> · <span id="app-build-date">21.10.2026</span>
     </div>
   </aside>
 
@@ -16903,9 +16903,12 @@ function winPctBadge(pct) {
    Daten: crm_aufgaben.json (alle Aufgaben, je Zeile id/owner) und crm_notizen.json ({ email: text }).
    Speichern = frisch laden, meine Änderung einmischen, schreiben (kein Überschreiben fremder Aufgaben).
    ===================================================================== */
-const MT_STATUS = ["Todo", "In Progress", "On Hold", "Done"];
-const MT_PRIO = ["Hoch", "Mittel", "Tief"];
-const MT_PRIO_FARBE = { Hoch: "var(--danger)", Mittel: "var(--warn)", Tief: "var(--text-faint)" };
+const MT_STATUS = ["Todo", "In Progress", "In Review", "Done", "On Hold"];
+const MT_PRIO = ["Urgent", "High", "Normal", "Low"];
+const MT_PRIO_FARBE = { Urgent: "var(--danger)", High: "var(--warn)", Normal: "var(--accent-2)", Low: "var(--text-faint)" };
+// Alt gespeicherte Werte (vor v1.533) auf die neuen abbilden — Daten bleiben unverändert lesbar
+const MT_PRIO_ALT = { Hoch: "High", Mittel: "Normal", Tief: "Low" };
+function mtPrioVon(t) { const p = (t && t.prio) || "Normal"; return MT_PRIO_ALT[p] || p; }
 let mtAufgaben = null, mtNotizen = null, mtLaedt = null;
 const mtFilter = { scope: "mine", doneZeigen: false };
 async function mtLaden(force) {
@@ -16947,16 +16950,16 @@ function renderMeineTasks(el) {
   if (mtAufgaben === null) { el.innerHTML = `<div class="empty">Lade Aufgaben …</div>`; mtLaden().then(() => { if (currentView === "meinetasks") render(); }); return; }
   const alle = mtAufgaben.slice();
   const liste = alle.filter(t => mtFilter.scope === "all" ? true : mtFilter.scope === "vonmir" ? (t.erstelltVon === me && t.owner !== me) : (t.owner === me || (!t.owner && t.erstelltVon === me)));
-  const prioRang = p => MT_PRIO.indexOf(p) < 0 ? 1 : MT_PRIO.indexOf(p);
-  const sortiert = l => l.sort((a, b) => prioRang(a.prio) - prioRang(b.prio) || (a.faellig || "9999").localeCompare(b.faellig || "9999") || (b.geaendert || "").localeCompare(a.geaendert || ""));
+  const prioRang = t => { const i = MT_PRIO.indexOf(mtPrioVon(t)); return i < 0 ? MT_PRIO.indexOf("Normal") : i; };
+  const sortiert = l => l.sort((a, b) => prioRang(a) - prioRang(b) || (a.faellig || "9999").localeCompare(b.faellig || "9999") || (b.geaendert || "").localeCompare(a.geaendert || ""));
   const heute = new Date().toISOString().slice(0, 10);
   const karte = t => {
     const ueber = t.faellig && t.status !== "Done" && t.faellig < heute, heuteF = t.faellig === heute && t.status !== "Done";
-    return `<div class="card" onclick="mtBearbeiten(${tkJs(t.id)})" style="padding:10px 12px;cursor:pointer;border-left:3px solid ${MT_PRIO_FARBE[t.prio] || "var(--border)"};${t.status === "Done" ? "opacity:.6" : ""}">
+    return `<div class="card" onclick="mtBearbeiten(${tkJs(t.id)})" style="padding:10px 12px;cursor:pointer;border-left:3px solid ${MT_PRIO_FARBE[mtPrioVon(t)] || "var(--border)"};${t.status === "Done" ? "opacity:.6" : ""}">
       <div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1;font-weight:600;font-size:13px;${t.status === "Done" ? "text-decoration:line-through" : ""}">${escape(t.titel)}</div>
         <select onclick="event.stopPropagation()" onchange="event.stopPropagation();mtStatusSetzen(${tkJs(t.id)}, this.value)" style="font-size:11px;padding:2px 4px" title="Status ändern">${MT_STATUS.map(st => `<option ${st === t.status ? "selected" : ""}>${st}</option>`).join("")}</select></div>
       <div style="font-size:11px;color:var(--text-dim);margin-top:4px;display:flex;gap:8px;flex-wrap:wrap">
-        <span style="color:${MT_PRIO_FARBE[t.prio] || "inherit"}">● ${escape(t.prio || "Mittel")}</span>
+        <span style="color:${MT_PRIO_FARBE[mtPrioVon(t)] || "inherit"}">● ${escape(mtPrioVon(t))}</span>
         ${t.faellig ? `<span style="${ueber ? "color:var(--danger);font-weight:600" : heuteF ? "color:var(--warn);font-weight:600" : ""}">${ueber ? "Überfällig " : heuteF ? "Heute " : "Fällig "}${escape(datumCH(t.faellig))}</span>` : ""}
         ${t.owner && t.owner !== me ? `<span style="color:var(--accent-2)">@${escape(mitarbeiterName(t.owner))}</span>` : ""}
         ${t.erstelltVon && t.erstelltVon !== me && t.owner === me ? `<span>von ${escape(mitarbeiterName(t.erstelltVon))}</span>` : ""}
@@ -16969,9 +16972,9 @@ function renderMeineTasks(el) {
   const notiz = (mtNotizen || {})[me] || "";
   el.innerHTML = `
     <div style="padding:16px 20px">
-      <div style="display:flex;gap:8px;margin-bottom:14px"><input id="mt-schnell" placeholder="Neue Aufgabe eingeben und Enter drücken … (landet unter Todo, Priorität Mittel, zuständig: ich)" style="flex:1;padding:9px 12px" onkeydown="if(event.key==='Enter'){mtSchnell(this.value);this.value='';}"></div>
-      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:start">
-        ${spalten.map(({ st, l }) => `<div><div style="display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);margin-bottom:8px"><span style="width:8px;height:8px;border-radius:50%;background:${st === "Done" ? "var(--accent)" : st === "In Progress" ? "var(--accent-2)" : st === "On Hold" ? "var(--warn)" : "var(--text-faint)"}"></span>${escape(st)} <span style="color:var(--text-faint)">${l.length}</span>${st === "Done" && l.length ? `<button class="btn btn-sm" style="margin-left:auto;font-size:10px" onclick="mtFilter.doneZeigen=!mtFilter.doneZeigen;render()">${mtFilter.doneZeigen ? "ausblenden" : "anzeigen"}</button>` : ""}</div>
+      <div style="display:flex;gap:8px;margin-bottom:14px"><input id="mt-schnell" placeholder="Neue Aufgabe eingeben und Enter drücken … (landet unter Todo, Priorität Normal, zuständig: ich)" style="flex:1;padding:9px 12px" onkeydown="if(event.key==='Enter'){mtSchnell(this.value);this.value='';}"></div>
+      <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;align-items:start">
+        ${spalten.map(({ st, l }) => `<div><div style="display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);margin-bottom:8px"><span style="width:8px;height:8px;border-radius:50%;background:${st === "Done" ? "var(--accent)" : st === "In Progress" ? "var(--accent-2)" : st === "In Review" ? "var(--accent-3)" : st === "On Hold" ? "var(--warn)" : "var(--text-faint)"}"></span>${escape(st)} <span style="color:var(--text-faint)">${l.length}</span>${st === "Done" && l.length ? `<button class="btn btn-sm" style="margin-left:auto;font-size:10px" onclick="mtFilter.doneZeigen=!mtFilter.doneZeigen;render()">${mtFilter.doneZeigen ? "ausblenden" : "anzeigen"}</button>` : ""}</div>
           <div style="display:flex;flex-direction:column;gap:8px">${(st === "Done" && !mtFilter.doneZeigen ? [] : l).map(karte).join("") || `<div style="font-size:12px;color:var(--text-faint);padding:8px;border:1px dashed var(--border);border-radius:6px;text-align:center">${st === "Done" && l.length ? l.length + " erledigt" : "—"}</div>`}</div></div>`).join("")}
       </div>
       <div style="margin-top:22px">
@@ -16991,7 +16994,7 @@ async function mtNotizSpeichern() {
 async function mtSchnell(text) {
   text = String(text || "").trim(); if (!text) return;
   const jetzt = new Date().toISOString();
-  const t = { id: mtNeuId(), titel: text, prio: "Mittel", status: "Todo", owner: myEmail(), erstelltVon: myEmail(), erstellt: jetzt, geaendert: jetzt };
+  const t = { id: mtNeuId(), titel: text, prio: "Normal", status: "Todo", owner: myEmail(), erstelltVon: myEmail(), erstellt: jetzt, geaendert: jetzt };
   try { await mtSpeichernAufgabe(t); render(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
 }
 async function mtStatusSetzen(id, status) {
@@ -17000,12 +17003,12 @@ async function mtStatusSetzen(id, status) {
   try { await mtSpeichernAufgabe(t); render(); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
 }
 function mtBearbeiten(id) {
-  const t = id ? (mtAufgaben || []).find(x => x.id === id) : { prio: "Mittel", status: "Todo", owner: myEmail() }; if (!t) return;
+  const t = id ? (mtAufgaben || []).find(x => x.id === id) : { prio: "Normal", status: "Todo", owner: myEmail() }; if (!t) return;
   const personen = mtPersonen(); if (t.owner && !personen.includes(t.owner)) personen.push(t.owner);
   showModal(id ? "Aufgabe bearbeiten" : "Neue Aufgabe", `
     <div class="field"><label>Titel *</label><input id="f-mt-titel" value="${escape(t.titel || "")}"></div>
     <div class="field-row">
-      <div class="field"><label>Priorität</label><select id="f-mt-prio">${MT_PRIO.map(p => `<option ${p === (t.prio || "Mittel") ? "selected" : ""}>${p}</option>`).join("")}</select></div>
+      <div class="field"><label>Priorität</label><select id="f-mt-prio">${MT_PRIO.map(p => `<option ${p === mtPrioVon(t) ? "selected" : ""}>${p}</option>`).join("")}</select></div>
       <div class="field"><label>Status</label><select id="f-mt-status">${MT_STATUS.map(st => `<option ${st === (t.status || "Todo") ? "selected" : ""}>${st}</option>`).join("")}</select></div>
       <div class="field"><label>Fällig</label><input id="f-mt-faellig" type="date" value="${escape(t.faellig || "")}"></div>
     </div>
