@@ -32,7 +32,7 @@
 <script src="apriko-api.js?v=1.512.0"></script>
 <script src="lohncheck.js?v=1.512.0"></script>
 <script src="personalbudget.js?v=1.512.0"></script>
-<script src="jahresbudget.js?v=1.533.0"></script>
+<script src="jahresbudget.js?v=1.535.1"></script>
 <script src="budgetpositionen.js?v=1.512.0"></script>
 <script src="lohnchecklistetemp.js?v=1.512.0"></script>
 <script src="apriko-endpunkte.js?v=1.512.0"></script>
@@ -1090,7 +1090,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.533.0</span> · <span id="app-build-date">21.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.535.1</span> · <span id="app-build-date">21.10.2026</span>
     </div>
   </aside>
 
@@ -2792,12 +2792,15 @@ async function budgetRedistributeBPO(saison) {
    Dezember gleicht Rundungsdifferenzen aus, damit das Jahrestotal exakt
    ExtRev × Satz ergibt. */
 function budgetFormulaMonths(b, saisonOverride) {
-  // Vertragsende im Planjahr (Kundenstamm «Ende»): spätere Monate bleiben 0
+  // Vertragsende im Planjahr (Kundenstamm «Ende»): spätere Monate bleiben 0.
+  // Vertragsstart (Kundenstamm «Start»): frühere Monate bleiben 0 — der effektive
+  // Startmonat ist das Maximum aus Zeilen-«Ab Monat» und Kundenstamm-Start.
   const cEnd = b.RefType === "customer" ? cache.customers.find(c => c.id == b.RefId) : null;
   const endM = cEnd ? budgetEndMonat(cEnd, b.BYear) : null;
+  const startC = cEnd ? budgetStartMonat(cEnd, b.BYear) : 1;
   const nachEnde = i => endM !== null && (i + 1) > endM;
   if (b.BType === "SaaS") {
-    const smS = parseInt(b.StartMonth) || 1;
+    const smS = Math.max(parseInt(b.StartMonth) || 1, startC);
     const m = Math.round((parseFloat(b.Lic) || 0) * (parseFloat(b.Price) || 0));
     return BUDGET_MONTH_FIELDS.map((f, i) => (i + 1) < smS || nachEnde(i) ? 0 : m);
   }
@@ -2807,7 +2810,7 @@ function budgetFormulaMonths(b, saisonOverride) {
     // Vertragsende); ohne Jahresstunden bleiben sie manuell gepflegt.
     const jahresStd = parseFloat(b.ExtRev) || 0;
     if (!jahresStd) return BUDGET_MONTH_FIELDS.map(f => parseFloat(b[f]) || 0);
-    const smH = parseInt(b.StartMonth) || 1;
+    const smH = Math.max(parseInt(b.StartMonth) || 1, startC);
     const aktiv = BUDGET_MONTH_FIELDS.map((f, i) => (i + 1) >= smH && !nachEnde(i));
     const n = aktiv.filter(Boolean).length;
     if (!n) return BUDGET_MONTH_FIELDS.map(() => 0);
@@ -2820,7 +2823,7 @@ function budgetFormulaMonths(b, saisonOverride) {
   // BPO (prozentual) und SaaSPct (% vom Umsatz): saisonal verteilt.
   // Startmonat > Jan: frühere Monate bleiben 0, das Total ist der
   // Restjahres-Anteil der Saisonkurve (ExtRev = Jahres-Run-Rate).
-  const sm = parseInt(b.StartMonth) || 1;
+  const sm = Math.max(parseInt(b.StartMonth) || 1, startC);
   const saison = saisonOverride || budgetSaison();
   const jahr = (parseFloat(b.ExtRev) || 0) * (parseFloat(b.Rate) || 0) / 100;
   const werte = saison.map((p, i) => (i + 1) < sm || nachEnde(i) ? 0 : Math.round(jahr * p / 100));
@@ -2924,7 +2927,7 @@ function budgetDbProMonat(year) {
     const hat = (c ? kundenHatDb(c.id) : false) || b.Db;
     if (!hat) return;
     const key = b.RefType + ":" + (b.RefId || b.RefName);
-    const sm = parseInt(b.StartMonth) || 1;
+    const sm = Math.max(parseInt(b.StartMonth) || 1, c ? budgetStartMonat(c, year) : 1);
     let em = 12;
     if (c) { const e = budgetEndMonat(c, year); if (e === 0) em = 0; else if (e) em = e; }
     for (let m = sm; m <= em; m++) { if (!seen[m - 1].has(key)) { seen[m - 1].add(key); out[m - 1]++; } }
@@ -2946,8 +2949,21 @@ function budgetEndMonat(c, year) {
   if (y > year) return null;
   return m;
 }
+/* Vertragsstart eines Kunden im Planjahr (Kundenstamm «Start»): 1 = läuft schon
+   (oder kein Start erfasst), 1..12 = erster aktiver Monat, 13 = startet erst NACH
+   dem Planjahr (kein aktiver Monat). Gegenstück zu budgetEndMonat (21.10.2026 —
+   vorher wurde der Start ignoriert und z.B. ein Kunde mit Start 01.07. das ganze
+   Jahr budgetiert). */
+function budgetStartMonat(c, year) {
+  if (!c || !c.StartDate) return 1;
+  const y = parseInt(c.StartDate.slice(0, 4)), m = parseInt(c.StartDate.slice(5, 7));
+  if (y < year) return 1;
+  if (y > year) return 13;
+  return m || 1;
+}
 function budgetKundeAktivImJahr(c, year) {
   if ((c.Status || "Aktiv") !== "Aktiv") return false;
+  if (budgetStartMonat(c, year) > 12) return false;   // startet erst nach dem Planjahr
   const e = budgetEndMonat(c, year);
   return e !== 0;
 }
@@ -2976,7 +2992,7 @@ async function budgetCreate(refType, refId, btype, opts) {
     budgetShowLoading("Budget-Position wird angelegt …", "");
     const s = budgetSuggest(refType, refId, btype);
     const b = { BYear: year, RefType: refType, RefId: refType === "text" ? 0 : parseInt(refId), BType: btype,
-      RefName: opts.name || "", StartMonth: parseInt(opts.startMonth) || 1,
+      RefName: opts.name || "", StartMonth: Math.max(parseInt(opts.startMonth) || 1, refType === "customer" ? budgetStartMonat(cache.customers.find(c => c.id == refId), year) : 1),
       Lic: s.Lic, Price: s.Price, ExtRev: s.ExtRev, Rate: s.Rate };
     if (btype === "BPOStd") {
       b.ExtRev = 0;
@@ -3089,8 +3105,11 @@ async function budgetTakeoverActive() {
   const jobs = [], veraltet = [];
   // Kunden, die vor dem Planjahr gekündigt/beendet sind: bestehende Zeilen fallen weg
   cache.customers.filter(c => !budgetKundeAktivImJahr(c, year)).forEach(c => {
+    const grund = budgetEndMonat(c, year) === 0 ? "Ende " + c.EndDate.slice(0, 10)
+      : budgetStartMonat(c, year) > 12 ? "Start erst " + String(c.StartDate).slice(0, 10)
+      : c.Status;
     existing.filter(b => b.BYear == year && b.RefType === "customer" && b.RefId == c.id)
-      .forEach(b => veraltet.push({ id: b.id, name: c.Title + " (" + (budgetEndMonat(c, year) === 0 ? "Ende " + c.EndDate.slice(0, 10) : c.Status) + ")", t: b.BType }));
+      .forEach(b => veraltet.push({ id: b.id, name: c.Title + " (" + grund + ")", t: b.BType }));
   });
   active.forEach(c => {
     const want = [];
@@ -3101,7 +3120,7 @@ async function budgetTakeoverActive() {
     if (!want.length) want.push(c.Segment === "BPO inkl. SaaS" ? bpoTyp : saasTyp);
     want.forEach(t => {
       const exists = existing.find(b => b.BYear == year && b.RefType === "customer" && b.RefId == c.id && b.BType === t);
-      if (!exists) jobs.push({ id: c.id, t });
+      if (!exists) jobs.push({ id: c.id, t, sm: budgetStartMonat(c, year) });
     });
     // Modell im Planjahr gewechselt → Zeile des alten Modells fällt weg (ein SaaS- und ein BPO-Vertrag pro Kunde)
     if (segmentChargesSaaS(c.Segment)) {
@@ -3130,7 +3149,7 @@ async function budgetTakeoverActive() {
       budgetShowLoading("Budget wird befüllt …", "Position " + done + "/" + jobs.length);
       const s = budgetSuggest("customer", j.id, j.t);
       const b = { BYear: year, RefType: "customer", RefId: parseInt(j.id), BType: j.t,
-        Lic: s.Lic, Price: s.Price, ExtRev: s.ExtRev, Rate: s.Rate };
+        StartMonth: j.sm || 1, Lic: s.Lic, Price: s.Price, ExtRev: s.ExtRev, Rate: s.Rate };
       if (j.t === "BPOStd") {
         b.ExtRev = 0;
         BUDGET_MONTH_FIELDS.forEach(f => b[f] = 0);   // BPO h: keine Stunden-Übernahme
@@ -5124,7 +5143,7 @@ function renderBudget(el) {
       <tbody>
         ${rows.map(b => `
           <tr>
-            <td title="${escape(budgetRefName(b))}${b.StartMonth > 1 ? " — ab " + MONTH_NAMES[b.StartMonth-1] : ""}" style="max-width:190px;white-space:nowrap"><div style="display:flex;align-items:center;gap:3px;min-width:0"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">${escape(budgetRefName(b))}</span>${b.RefType === "company" || b.RefType === "text" ? ` <span style="font-size:9px;color:var(--text-faint)">(Lead)</span>` : ""}${(() => { const c = b.RefType === "customer" ? cache.customers.find(x => x.id == b.RefId) : null; if (!c) return ""; const e = budgetEndMonat(c, year); if (e === 0 || (c.Status || "Aktiv") !== "Aktiv") return ` <span style="font-size:9px;color:var(--danger)" title="Vertrag beendet — Zeile mit «Aktive Kunden übernehmen» oder ✕ entfernen">beendet</span>`; if (e) return ` <span style="font-size:9px;color:var(--warn)" title="Vertragsende ${c.EndDate.slice(0,10)}">bis ${MONTH_NAMES[e-1]}</span>`; return ""; })()}${b.StartMonth > 1 ? ` <span style="font-size:9px;color:var(--accent-2)">ab ${MONTH_NAMES[b.StartMonth-1]}</span>` : ""}${(() => { const kd = b.RefType === "customer" && kundenHatDb(b.RefId); return ` <label style="font-size:9px;color:var(--text-faint);cursor:pointer;white-space:nowrap" title="${kd ? "Datenbank gemäss Kundenstamm «Hat Datenbank» — wird für die Hostingkosten gezählt (im Kundenstamm ändern)" : "Kein DB-Flag im Kundenstamm — hier ankreuzen, falls diese Zeile trotzdem eine Datenbank hat (Hostingkosten Konto 4400)"}">${kd ? `<span style="color:var(--accent);font-weight:600">🗄 DB</span>` : `<input type="checkbox" ${b.Db ? "checked" : ""} onchange="budgetDbToggle(${b.id}, this.checked)" style="width:auto;margin:0;vertical-align:middle"> DB`}</label>`; })()}</div></td>
+            <td title="${escape(budgetRefName(b))}${b.StartMonth > 1 ? " — ab " + MONTH_NAMES[b.StartMonth-1] : ""}" style="max-width:190px;white-space:nowrap"><div style="display:flex;align-items:center;gap:3px;min-width:0"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">${escape(budgetRefName(b))}</span>${b.RefType === "company" || b.RefType === "text" ? ` <span style="font-size:9px;color:var(--text-faint)">(Lead)</span>` : ""}${(() => { const c = b.RefType === "customer" ? cache.customers.find(x => x.id == b.RefId) : null; if (!c) return ""; const e = budgetEndMonat(c, year); if (e === 0 || (c.Status || "Aktiv") !== "Aktiv") return ` <span style="font-size:9px;color:var(--danger)" title="Vertrag beendet — Zeile mit «Aktive Kunden übernehmen» oder ✕ entfernen">beendet</span>`; if (e) return ` <span style="font-size:9px;color:var(--warn)" title="Vertragsende ${c.EndDate.slice(0,10)}">bis ${MONTH_NAMES[e-1]}</span>`; return ""; })()}${(() => { const c2 = b.RefType === "customer" ? cache.customers.find(x => x.id == b.RefId) : null; const sc = c2 ? budgetStartMonat(c2, year) : 1; const eff = Math.max(parseInt(b.StartMonth) || 1, sc); const vor = BUDGET_MONTH_FIELDS.some((f, i) => (i + 1) < eff && (parseFloat(b[f]) || 0) !== 0); const warn = vor ? ` <span style="font-size:9px;color:var(--warn)" title="Diese Zeile hat noch Monatswerte VOR dem Vertragsstart — mit ↺ neu nach Formel füllen">⚠ Werte vor Start</span>` : ""; if (sc > 12 && c2) return ` <span style="font-size:9px;color:var(--danger)" title="Kundenstamm-Start ${String(c2.StartDate).slice(0,10)} liegt nach dem Planjahr — Zeile mit «Aktive Kunden übernehmen» oder ✕ entfernen">startet erst ${String(c2.StartDate).slice(0,10)}</span>` + warn; if (eff > 1) return ` <span style="font-size:9px;color:var(--accent-2)" title="${sc > (parseInt(b.StartMonth) || 1) ? "Vertragsstart gemäss Kundenstamm («Start» im Kunden-Dialog)" : "«Ab Monat» dieser Budget-Zeile"}">ab ${MONTH_NAMES[eff-1]}</span>` + warn; return warn; })()}${(() => { const kd = b.RefType === "customer" && kundenHatDb(b.RefId); return ` <label style="font-size:9px;color:var(--text-faint);cursor:pointer;white-space:nowrap" title="${kd ? "Datenbank gemäss Kundenstamm «Hat Datenbank» — wird für die Hostingkosten gezählt (im Kundenstamm ändern)" : "Kein DB-Flag im Kundenstamm — hier ankreuzen, falls diese Zeile trotzdem eine Datenbank hat (Hostingkosten Konto 4400)"}">${kd ? `<span style="color:var(--accent);font-weight:600">🗄 DB</span>` : `<input type="checkbox" ${b.Db ? "checked" : ""} onchange="budgetDbToggle(${b.id}, this.checked)" style="width:auto;margin:0;vertical-align:middle"> DB`}</label>`; })()}</div></td>
             <td>${typCell(b)}</td>
             <td>${paramCell(b)}</td>
             ${BUDGET_MONTH_FIELDS.map(f => `<td style="text-align:right"><input id="bud-c-${b.id}-${f}" class="bud-in bud-in-m" ${b.BType === "BPOStd" ? `style="color:var(--accent-2)" title="${num(b[f])} h × ${num(b.Rate)} = CHF ${Math.round(budgetChfOf(b, b[f])).toLocaleString("de-CH")}"` : ""} value="${num(b[f])}" onchange="budgetCellChange(${b.id},'${f}',this.value)">${b.BType === "BPOStd" ? `<div style="font-size:8.5px;color:var(--text-faint);text-align:right;padding-right:4px">${Math.round(budgetChfOf(b, b[f])).toLocaleString("de-CH")}</div>` : ""}</td>`).join("")}
@@ -8907,6 +8926,11 @@ const ABA_HELVA_STANDARD = {
   durchlauf: "1091",
   umkontierung: { "4400": "5400", "4401": "5400", "4491": "5490", "4492": "5490", "4470": "5470", "4471": "5471", "4472": "5472", "4473": "5473", "4474": "5474", "4475": "5475", "4476": "5476", "1094": "1096", "2271": "2270", "2270": "2272", "2272": "2271", "2277": "2275", "2279": "2278" },
   kontierung: { "1066": { soll: "5400", haben: "1091" }, "1100": { soll: "5400", haben: "1091" }, "3001": { soll: "1096", haben: "1091" }, "5091": { soll: "2272", haben: "1091" }, "5401": { soll: "2278", haben: "1091" },
+    // 7091 BVG Korrektur AG (Vorgabe Beni, 23.10.2026): NICHT übers Durchlaufkonto, sondern Aufwand/
+    // Verbindlichkeit — zu Gunsten AG (positiv) → 2272/5472, zu Lasten AG (negativ) wird von der
+    // Vorzeichen-Regel gedreht → 5472/2272 mit positivem Betrag. Die Lohnart ist in Apriko noch nicht
+    // konfiguriert; falls sie unter einer anderen Nummer kommt, Kontierung unter Parameter → Abacus erfassen.
+    "7091": { soll: "2272", haben: "5472" },
     "6310": { soll: "5490", haben: "1091" }, "6390": { soll: "6990", haben: "1091" }, "8020": { soll: "1091", haben: "2215" }, "8030": { soll: "1091", haben: "2216" }, "8040": { soll: "1091", haben: "1094" }, "8050": { soll: "1091", haben: "2218" },
     "8105": { soll: "1140", haben: "1091" }, "8115": { soll: "1020", haben: "1091" }, "8120": { soll: "2215", haben: "1091" }, "8125": { soll: "1020", haben: "1091" }, "8130": { soll: "2216", haben: "1091" }, "8135": { soll: "1020", haben: "1091" },
     "8150": { soll: "2218", haben: "1091" }, "8155": { soll: "1020", haben: "1091" }, "8900": { soll: "1091", haben: "1020" },
@@ -9075,6 +9099,19 @@ function abaBuchungen() {
     if (!summen[code]) summen[code] = { code, bezeichnung: z[sp.bezeichnung] || (idx[code] || {}).bezeichnung || "", betrag: 0 };
     summen[code].betrag += betrag;
   });
+  // ── Vorzeichen-Format (Okt. 2026): Apriko liefert Abzüge AN (5xxx) und AG (7xxx) sowie die
+  // Rückbehalte (8020/8030/8040/8050) neu im MINUS; Korrekturen zu Gunsten der Mitarbeiter stehen
+  // im PLUS (z.B. 5091 BVG Korrektur, 5401 QST Korrektur — wie bisher). Die Buchungslogik bleibt
+  // wie früher: erkannte Minus-Abzüge werden aufs bisherige Vorzeichen zurückgedreht (Abzug erhöht
+  // die Verbindlichkeit, z.B. 1091/2272). Danach gilt unverändert «keine Minusbuchungen» — ein
+  // negativer Betrag (Korrektur) dreht den Buchungssatz (2272/1091), umgesetzt in XML,
+  // Kontenübersicht und Durchlauf-Check. Alte Lohnkontoblätter werden unverändert verarbeitet.
+  const istKorrektur = t => /korrektur/i.test(String(t || ""));
+  const istAbzugsLa = b => { const n = parseInt(b.code); return ((n >= 5000 && n < 5500) || (n >= 7000 && n < 7500)) && !istKorrektur(b.bezeichnung); };
+  const istRueckbehalt = b => { const n = parseInt(b.code); return n >= 8000 && n < 8100 && /r[üu]ckbehalt/i.test(String(b.bezeichnung || "")); };
+  const vzAbzuege = Object.values(summen).filter(b => istAbzugsLa(b) && Math.abs(b.betrag) >= 0.005);
+  abaState.formatNeu = vzAbzuege.length > 0 && vzAbzuege.filter(b => b.betrag < 0).length > vzAbzuege.length / 2;
+  if (abaState.formatNeu) Object.values(summen).forEach(b => { if (istAbzugsLa(b) || istRueckbehalt(b)) b.betrag = -b.betrag; });
   abaState.ausgelassen = [];
   const pa = abaParam();
   const sett = abaSettings();
@@ -9353,6 +9390,7 @@ function renderAbacus(el) {
           <td style="font-size:11px;color:${b.ok ? (abaNurAnzeige(b) ? "var(--text-dim)" : "var(--accent-2)") : "var(--danger)"}">${b.ok ? (abaNurAnzeige(b) ? `<span title="Konto ${escape(abaAnzeigeNurKonten().join(", "))}: wird angezeigt und abgestimmt, aber nicht ins Abacus-XML geschrieben">👁 nur Anzeige</span>` : "✓") : "Konto fehlt"} ${b.zusatz ? "" : `<a href="#" onclick="abaErzwingen('${escape(b.code)}', false);return false;" style="color:var(--text-faint);font-size:10px" title="Diese Lohnart nicht buchen">✕</a>`}</td>
         </tr>`; }).join("")}</tbody>
       </table></div>
+      ${abaState.formatNeu ? `<div style="margin-top:10px;padding:8px 12px;border:1px solid var(--accent-2);border-radius:6px;font-size:11.5px;color:var(--text-dim)">ℹ Neues Lohnkonto-Format erkannt (Abzüge AN/AG und Rückbehalte im Minus): Vorzeichen wurden für die Buchung aufs bisherige Schema normalisiert — die Buchungslogik ist unverändert (Abzug erhöht die Verbindlichkeit; Korrekturen zu Gunsten MA drehen den Buchungssatz, keine Minusbuchungen).</div>` : ""}
       ${(abaState.aggregatHinweise || []).length ? `<div style="margin-top:10px;padding:8px 12px;border:1px solid var(--accent);border-radius:6px;font-size:11.5px;color:var(--text-dim)">ℹ ${abaState.aggregatHinweise.map(escape).join("<br>")}</div>` : ""}
       ${(abaState.ausgelassen || []).length ? `<details style="margin-top:10px"><summary style="font-size:11px;color:var(--text-dim);cursor:pointer">${abaState.ausgelassen.length} Lohnarten nicht gebucht (Basen, Info, manuell ausgeschlossen)</summary>
         <table style="font-size:11px;margin-top:6px"><tbody>${abaState.ausgelassen.map(x => `<tr><td style="font-family:var(--font-mono)">${escape(x.code)}</td><td>${escape(x.bezeichnung)}</td><td style="text-align:right;font-family:var(--font-mono)">${fmt(x.betrag)}</td><td style="color:var(--text-faint)">${escape(x.grund)}</td><td><a href="#" onclick="abaErzwingen('${escape(x.code)}', ${x.grund === "manuell ausgeschlossen" ? "null" : "true"});return false;" style="color:var(--accent-3)">${x.grund === "manuell ausgeschlossen" ? "wieder automatisch" : "doch buchen"}</a></td></tr>`).join("")}</tbody></table></details>` : ""}
