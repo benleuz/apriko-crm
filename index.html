@@ -32,7 +32,7 @@
 <script src="apriko-api.js?v=1.512.0"></script>
 <script src="lohncheck.js?v=1.512.0"></script>
 <script src="personalbudget.js?v=1.512.0"></script>
-<script src="jahresbudget.js?v=1.536.1"></script>
+<script src="jahresbudget.js?v=1.537.0"></script>
 <script src="budgetpositionen.js?v=1.512.0"></script>
 <script src="lohnchecklistetemp.js?v=1.512.0"></script>
 <script src="apriko-endpunkte.js?v=1.512.0"></script>
@@ -1090,7 +1090,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.536.1</span> · <span id="app-build-date">21.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.537.0</span> · <span id="app-build-date">21.10.2026</span>
     </div>
   </aside>
 
@@ -5246,6 +5246,8 @@ function renderDashboard(el) {
         <button class="btn btn-sm" onclick="crmExportCustomerEmails()" title="Excel mit ALLEN Kunden (aktuelle Auswahl) und ihren E-Mails — auch Kunden ohne Adresse, damit Lücken sichtbar sind">⇩ E-Mails exportieren</button>
         ${isAdmin() ? `<button class="btn btn-sm" onclick="crmUserNachfuehren()" title="Alle Kontakte der Kunden (aktuelle Auswahl) mit E-Mail, die weder Entscheidungsträger noch User sind, als «User» markieren">👥 User nachführen</button>` : ""}
         <button class="btn btn-sm" onclick="crmKundenumgebungenOeffnen()" title="Öffnet die App-Links aller aktiven Kunden der Auswahl in je einem neuen Tab (Pop-ups für das CRM einmalig erlauben)">🌐 Alle Kundenumgebungen öffnen</button>
+        <button class="btn btn-sm" onclick="crmExportUmgebungen()" title="Excel mit allen AKTIVEN Kunden der Auswahl: Firma + Umgebung (z.B. kskpersonal.apriko.app); Kunden ohne Link mit leerer Umgebung">⇩ Umgebungen</button>
+        <button class="btn btn-sm" onclick="crmExportUmgebungen(true)" title="Dasselbe als CSV (Firma,Umgebung)">⇩ CSV</button>
         <button class="btn btn-sm" id="hc-btn" onclick="hcStart()" title="Fragt /healthchecks-api aller aktiven Kundenumgebungen der Auswahl ab (wie Production-Healthcheck.ps1)">💓 Healthcheck</button>
         <span style="font-size:11px;color:var(--text-faint);margin-left:4px">Öffnet eine neue Mail mit den Adressen der Kunden (Kennzeichnung «Ist Kunde») in Bcc. Adressen kommen aus den Kontakten mit Funktion Entscheidungsträger/User (und den alten Firmenfeldern).</span>
       </div>
@@ -17752,6 +17754,34 @@ function crmCustomerEmailCounts(scope) {
 }
 /* Excel-Export: alle Kunden der Auswahl mit Entscheidungsträger-/User-Mails, interner Ansprechperson und Owner —
    Kunden OHNE Adresse bleiben drin und werden mit «FEHLT» markiert (jeder Kunde braucht mindestens eine). */
+/* Export «Kundenumgebungen» (Benis Wunsch, 25.10.2026): alle AKTIVEN Kunden der Auswahl mit
+   Firma + Umgebung (App-Link-Host, z.B. kskpersonal.apriko.app) als Excel oder CSV. Kunden ohne
+   Link stehen mit leerer Umgebung drin, damit Lücken sichtbar sind. */
+async function crmExportUmgebungen(csv) {
+  if (crmKundenFlags === null) { try { await crmLoadKundenFlags(); } catch (e) {} }
+  const scope = filters.dashboardEmailScope || "alle";
+  const z = cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv" && c.CompanyId && crmCompanyMatchesScope(c.CompanyId, scope))
+    .map(c => ({ firma: c.Title || "", umgebung: appLinkHost(c.id, c.Link) || "" }))
+    .sort((a, b) => a.firma.localeCompare(b.firma, "de"));
+  if (!z.length) { toast("Keine aktiven Kunden in der Auswahl.", true); return; }
+  const ohne = z.filter(x => !x.umgebung).length;
+  const datum = new Date().toISOString().slice(0, 10);
+  if (csv) {
+    const q = s => /[",;\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    const txt = "Firma,Umgebung\n" + z.map(x => q(x.firma) + "," + q(x.umgebung)).join("\n");
+    const blob = new Blob(["﻿" + txt], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "Kundenumgebungen_" + datum + ".csv"; a.click(); URL.revokeObjectURL(a.href);
+  } else {
+    await lcLoadXlsx();
+    const ws = window.XLSX.utils.aoa_to_sheet([["Firma", "Umgebung"]].concat(z.map(x => [x.firma, x.umgebung])));
+    ws["!cols"] = [34, 38].map(w => ({ wch: w }));
+    ws["!autofilter"] = { ref: "A1:B" + (z.length + 1) };
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, ws, "Kundenumgebungen");
+    window.XLSX.writeFile(wb, "Kundenumgebungen_" + datum + ".xlsx");
+  }
+  toast(z.length + " aktive Kunden exportiert" + (ohne ? " — " + ohne + " ohne Umgebung (Feld «Link» leer)" : "") + ".");
+}
 async function crmExportCustomerEmails() {
   if (crmStamm === null) { await crmLoadStamm(); }
   const scope = filters.dashboardEmailScope || "alle";
