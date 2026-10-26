@@ -32,7 +32,7 @@
 <script src="apriko-api.js?v=1.512.0"></script>
 <script src="lohncheck.js?v=1.512.0"></script>
 <script src="personalbudget.js?v=1.512.0"></script>
-<script src="jahresbudget.js?v=1.536.0"></script>
+<script src="jahresbudget.js?v=1.536.1"></script>
 <script src="budgetpositionen.js?v=1.512.0"></script>
 <script src="lohnchecklistetemp.js?v=1.512.0"></script>
 <script src="apriko-endpunkte.js?v=1.512.0"></script>
@@ -1090,7 +1090,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.536.0</span> · <span id="app-build-date">21.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.536.1</span> · <span id="app-build-date">21.10.2026</span>
     </div>
   </aside>
 
@@ -9148,14 +9148,16 @@ function abaBuchungen() {
     if (Math.abs(b.betrag) < 0.005) return false;   // 0 nach Aggregat-Abzug → nichts zu buchen
     const st = idx[b.code];
     const kont = pa.kontierung[b.code];
+    // Gehaltssaldo (Standard LoA 8995): wird IMMER gebucht, egal ob positiv oder negativ (Beni, 23.10.2026;
+    // vorher nur negativ). Steht VOR dem manuellen Ausschluss und «nicht buchen» — auch ein altes
+    // «ausgeschlossen» im Regelwerk kann 8995 nicht mehr unterdrücken. Konten stehen als 1091/1142 —
+    // negativ dreht die Vorzeichen-Regel im XML zu 1142/1091, positiv bleibt 1091/1142. Die Verrechnung
+    // in der Auszahlung (8900) läuft unverändert mit.
+    if (String(b.code) === String(ns.lohnart)) { b.grund = (b.betrag < 0 ? "Negativer Gehaltssaldo → " + ns.soll + "/" + ns.haben : "Gehaltssaldo positiv → " + ns.haben + "/" + ns.soll) + " (wird immer gebucht" + (pa.ausgeschlossen.includes(b.code) ? " — manueller Ausschluss wird ignoriert" : "") + ")"; b.negSaldo = true; return true; }
     if (kz.nurRechnen.includes(String(b.code))) { abaState.ausgelassen.push({ code: b.code, bezeichnung: b.bezeichnung, betrag: b.betrag, grund: "nur in Auszahlung " + kz.ziel + " verrechnet — keine eigene Buchung" }); return false; }
     if (pa.ausgeschlossen.includes(b.code)) { abaState.ausgelassen.push({ code: b.code, bezeichnung: b.bezeichnung, betrag: b.betrag, grund: "manuell ausgeschlossen" }); return false; }
     if (pa.erzwungen.includes(b.code)) { b.grund = "manuell eingeschlossen"; return true; }
     if (kont && (kont.soll || kont.haben)) { b.grund = "Lohnart-Kontierung (Parameter)"; return true; }
-    // Gehaltssaldo (Standard LoA 8995): wird IMMER gebucht, egal ob positiv oder negativ (Beni, 23.10.2026;
-    // vorher nur negativ). Konten stehen als 1091/1142 — negativ dreht die Vorzeichen-Regel im XML zu
-    // 1142/1091, positiv bleibt 1091/1142. Die Verrechnung in der Auszahlung (8900) läuft unverändert mit.
-    if (String(b.code) === String(ns.lohnart)) { b.grund = (b.betrag < 0 ? "Negativer Gehaltssaldo → " + ns.soll + "/" + ns.haben : "Gehaltssaldo positiv → " + ns.haben + "/" + ns.soll) + " (wird immer gebucht)"; b.negSaldo = true; return true; }
     if (abaNichtBuchen(b.code, pa)) { abaState.ausgelassen.push({ code: b.code, bezeichnung: b.bezeichnung, betrag: b.betrag, grund: "Regel «nicht buchen» (Total/Basis/Umbuchung)" }); return false; }
     if (st && st.relevant) { b.grund = st.grund; return true; }
     abaState.ausgelassen.push({ code: b.code, bezeichnung: b.bezeichnung, betrag: b.betrag, grund: st ? st.grund : "nicht im Stamm" });
