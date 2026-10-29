@@ -794,6 +794,60 @@ Besten Dank für Ihre Unterstützung</div>
   var STORAGE_KEY = "apriko_param_" + (kundeSlug || "default");
   if(kunde){ document.getElementById("kundeName").textContent = kunde; }
 
+  /* ---------- Online-Modus (?t=<token>, v1.540): Antworten landen automatisch bei Apriko (Supabase), kein Login.
+     Ohne ?t= verhält sich die Seite wie bisher (lokales Speichern im Browser + XML/PDF-Versand). ---------- */
+  var SUPA_URL = "https://doidwhwjmdqnazcullsq.supabase.co";
+  var SUPA_KEY = "sb_publishable_-CChsDaC2wuqOCF5VobHfQ_LG02deLD";
+  var onlineTok = (params.get("t") || "").trim();
+  if(onlineTok && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(onlineTok)) onlineTok = "";
+  var onlineBadge = null, onlineSaveT = null, onlineDirty = false, onlineBusy = false, onlineReady = false;
+  function onlineRpc(fn, body){
+    return fetch(SUPA_URL + "/rest/v1/rpc/" + fn, { method: "POST", headers: { "Content-Type": "application/json", "apikey": SUPA_KEY }, body: JSON.stringify(body) })
+      .then(function(r){ if(!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
+  }
+  function onlineStatus(txt, warn){
+    if(!onlineTok) return;
+    if(!onlineBadge){ onlineBadge = document.createElement("div"); onlineBadge.id = "onlineBadge";
+      onlineBadge.style.cssText = "position:fixed;right:14px;bottom:14px;z-index:999;padding:7px 14px;border-radius:999px;font-size:12.5px;font-weight:600;box-shadow:0 2px 12px rgba(0,0,0,.3);background:#1f6f52;color:#fff;max-width:70vw";
+      document.body.appendChild(onlineBadge); }
+    onlineBadge.textContent = txt; onlineBadge.style.background = warn ? "#a33434" : "#1f6f52";
+  }
+  function onlinePush(){
+    if(!onlineTok || !onlineReady) return;
+    onlineDirty = true;
+    clearTimeout(onlineSaveT);
+    onlineSaveT = setTimeout(function(){
+      if(onlineBusy){ onlinePush(); return; }
+      onlineBusy = true; onlineDirty = false;
+      onlineRpc("param_save", { tok: onlineTok, d: buildData() })
+        .then(function(ok){ onlineBusy = false;
+          if(ok === false){ onlineStatus("⚠ Link ungültig — bitte Apriko kontaktieren", true); return; }
+          onlineStatus("☁ Gespeichert " + new Date().toLocaleTimeString("de-CH", { hour: "2-digit", minute: "2-digit" }));
+          if(onlineDirty) onlinePush(); })
+        .catch(function(){ onlineBusy = false; onlineStatus("⚠ Nicht gespeichert — Verbindung prüfen, es wird erneut versucht", true); setTimeout(onlinePush, 5000); });
+    }, 800);
+  }
+  function onlineFlush(){
+    if(!onlineTok || !onlineReady || (!onlineDirty && !onlineSaveT)) return;
+    try { navigator.sendBeacon(SUPA_URL + "/rest/v1/rpc/param_save?apikey=" + SUPA_KEY,
+      new Blob([JSON.stringify({ tok: onlineTok, d: buildData() })], { type: "application/json" })); } catch(e) {}
+  }
+  document.addEventListener("visibilitychange", function(){ if(document.visibilityState === "hidden") onlineFlush(); });
+  function onlineLoad(){
+    if(!onlineTok) return;
+    onlineStatus("☁ Daten werden geladen …");
+    onlineRpc("param_get", { tok: onlineTok }).then(function(res){
+      if(!res){ onlineStatus("⚠ Link ungültig — bitte Apriko kontaktieren (admin@apriko.com)", true); onlineTok = ""; return; }
+      if(res.kunde){ kunde = res.kunde; var kn = document.getElementById("kundeName"); if(kn) kn.textContent = res.kunde; }
+      if(res.daten && Object.keys(res.daten).length){ try { applyData(res.daten); } catch(e) {} }
+      if(typeof update === "function") update();
+      if(typeof setPrintMeta === "function") setPrintMeta();
+      onlineReady = true;
+      onlineStatus("☁ Online-Modus — Ihre Eingaben werden automatisch gespeichert");
+    }).catch(function(){ onlineReady = false; onlineStatus("⚠ Keine Verbindung — Eingaben werden NICHT übertragen, bitte später erneut öffnen", true); });
+  }
+
+
   /* ---------- Dynamische Tabellen ---------- */
   // Bruttoprämiensätze je Betriebsteil (SUVA-Vorgabewerte): [code, name, BUV, NBUV]
   var branchen = [
@@ -1064,7 +1118,7 @@ Besten Dank für Ihre Unterstützung</div>
     }); }
     return data;
   }
-  function save(){ try{ localStorage.setItem(STORAGE_KEY,JSON.stringify(buildData())); }catch(e){} }
+  function save(){ try{ localStorage.setItem(STORAGE_KEY,JSON.stringify(buildData())); }catch(e){} onlinePush(); }
   function debouncedSave(){ clearTimeout(saveT); saveT=setTimeout(function(){save();},250); }
   function applyData(data){
     Object.keys(data.keys||{}).forEach(function(k){
@@ -1403,6 +1457,7 @@ Besten Dank für Ihre Unterstützung</div>
 
   /* ---------- Init ---------- */
   load();
+  onlineLoad();
   if(branchRows.querySelectorAll('.subblock').length===0) addBranch();
   if(typeof signRows!=="undefined" && signRows && signRows.querySelectorAll('.subblock').length===0) addSign();
   setPrintMeta();

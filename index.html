@@ -32,7 +32,7 @@
 <script src="apriko-api.js?v=1.512.0"></script>
 <script src="lohncheck.js?v=1.512.0"></script>
 <script src="personalbudget.js?v=1.512.0"></script>
-<script src="jahresbudget.js?v=1.539.1"></script>
+<script src="jahresbudget.js?v=1.540.0"></script>
 <script src="budgetpositionen.js?v=1.512.0"></script>
 <script src="lohnchecklistetemp.js?v=1.512.0"></script>
 <script src="apriko-endpunkte.js?v=1.512.0"></script>
@@ -1090,7 +1090,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.539.1</span> · <span id="app-build-date">21.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.540.0</span> · <span id="app-build-date">21.10.2026</span>
     </div>
   </aside>
 
@@ -11541,8 +11541,64 @@ async function render360(el) {
    pro Kunde erzeugen: Vorlage laden, Platzhalter ersetzen ({{KUNDE}}, {{DATUM}}, {{SEGMENT}}, {{ANSPRECHPERSON}}),
    Vorschau, Download (zum Versand an den Kunden). Variante folgt dem Segment (BPO → mit BPO), manuell umschaltbar. */
 const ONBP_VORLAGEN = { bpo: { datei: "parametrierung/mit-bpo.html", titel: "mit BPO (SaaS + Lohn/BPO)" }, saas: { datei: "parametrierung/ohne-bpo.html", titel: "ohne BPO (nur SaaS)" } };
-let onbpState = { kunde: "", variante: "", html: "", lade: false, fehler: "" };
+let onbpState = { kunde: "", variante: "", html: "", lade: false, fehler: "", stand: null, antworten: null };
 function onbpVarianteFuer(c) { return String((c && c.Segment) || "").toLowerCase().includes("bpo") ? "bpo" : "saas"; }
+/* ---------- Online-Modus (v1.540): eindeutiger Link pro Kunde (?t=<token>, ohne Login), Antworten in Supabase.
+   Tabelle «parametrierung» ist gesperrt; Zugriff nur über die RPCs param_get/param_save/param_create (Token = Schlüssel).
+   Der Token liegt im Kundenflag pmTok; der Link zeigt je nach Variante auf mit-bpo.html bzw. ohne-bpo.html. ---------- */
+const ONBP_SUPA_URL = "https://doidwhwjmdqnazcullsq.supabase.co";
+const ONBP_SUPA_KEY = "sb_publishable_-CChsDaC2wuqOCF5VobHfQ_LG02deLD";
+const ONBP_BASE_URL = "https://benleuz.github.io/apriko-crm/";
+function onbpRpc(fn, body) {
+  return fetch(ONBP_SUPA_URL + "/rest/v1/rpc/" + fn, { method: "POST", headers: { "Content-Type": "application/json", "apikey": ONBP_SUPA_KEY }, body: JSON.stringify(body) })
+    .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
+}
+function onbpTok(c) { return String(((crmKundenFlags || {})[String(c.id)] || {}).pmTok || ""); }
+function onbpLink(c) { const v = onbpState.variante || onbpVarianteFuer(c); const tok = onbpTok(c); return tok ? ONBP_BASE_URL + (v === "bpo" ? "mit-bpo.html" : "ohne-bpo.html") + "?t=" + tok : ""; }
+/* Vorbefüllung aus dem Kundenstamm (gleiches Format wie {{SAVEDDATA}} im Download) */
+function onbpSavedFuer(c) {
+  const comp = cache.companies.find(x => String(x.id) === String(c.CompanyId)) || {};
+  const st = (crmStamm && crmStamm[String(comp.id)]) || {};
+  const kundeName = String(comp.Title || c.Title || "").replace(/\s*[-–·]\s*(Nur SaaS|SaaS und BPO|Nur BPO|BPO inkl\. SaaS)\s*$/i, "");
+  const entscheid = crmParseEmails(st.entscheid || []);
+  return { name: kundeName, saved: { keys: { "unternehmen.firma": kundeName, "unternehmen.strasse": st.strasse || "", "unternehmen.plzOrt": comp.City || "", "unternehmen.webseite": comp.Website || "", "unternehmen.email": entscheid[0] || "" },
+    radios: {}, lic: [], branches: [], contacts: entscheid.map(e => ({ name: "", funktion: "", telefon: "", mobile: "", email: e, lohn: "", zeich: "" })), kunde: kundeName, saved: new Date().toISOString(), quelle: "Apriko CRM" } };
+}
+async function onbpLinkErzeugen() {
+  const c = cache.customers.find(x => String(x.id) === String(onbpState.kunde)); if (!c) return;
+  if (crmKundenFlags === null) { try { await crmLoadKundenFlags(); } catch (e) {} }
+  if (crmStamm === null) { try { await crmLoadStamm(); } catch (e) {} }
+  const f = ((crmKundenFlags || {})[String(c.id)] = (crmKundenFlags || {})[String(c.id)] || {});
+  const neu = !f.pmTok;
+  const tok = f.pmTok || (crypto.randomUUID ? crypto.randomUUID() : ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, x => (x ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> x / 4).toString(16)));
+  const p = onbpSavedFuer(c);
+  try {
+    await onbpRpc("param_create", { tok, k: p.name, v: onbpState.variante || onbpVarianteFuer(c), d: p.saved });
+    if (neu) { f.pmTok = tok; await crmSaveKundenFlags(); }
+    toast(neu ? "Online-Link erstellt — 📋 kopieren und dem Kunden senden." : "Vorbefüllung/Variante aktualisiert (Antworten des Kunden bleiben unberührt).");
+    onbpStandLaden();
+  } catch (e) { toast("Online-Link fehlgeschlagen: " + e.message, true); render(); }
+}
+async function onbpStandLaden() {
+  const c = cache.customers.find(x => String(x.id) === String(onbpState.kunde)); if (!c || !onbpTok(c)) return;
+  onbpState.stand = { laedt: true }; render();
+  try { onbpState.stand = await onbpRpc("param_get", { tok: onbpTok(c) }) || { fehlt: true }; }
+  catch (e) { onbpState.stand = { fehler: e.message }; }
+  render();
+}
+function onbpLinkKopieren() {
+  const c = cache.customers.find(x => String(x.id) === String(onbpState.kunde)); if (!c) return;
+  navigator.clipboard.writeText(onbpLink(c)).then(() => toast("Link kopiert")).catch(() => prompt("Link manuell kopieren:", onbpLink(c)));
+}
+async function onbpAntwortenZeigen() {
+  const c = cache.customers.find(x => String(x.id) === String(onbpState.kunde)); if (!c || !onbpTok(c)) return;
+  try {
+    const res = await onbpRpc("param_get", { tok: onbpTok(c) });
+    if (!res || !res.daten) { toast("Noch keine Antworten gespeichert.", true); return; }
+    onbpState.antworten = res.daten; onbpState.html = "";
+    await onbpLaden();
+  } catch (e) { toast("Antworten laden fehlgeschlagen: " + e.message, true); }
+}
 async function onbpLaden() {
   const c = cache.customers.find(x => String(x.id) === String(onbpState.kunde)); if (!c) return;
   const v = ONBP_VORLAGEN[onbpState.variante || onbpVarianteFuer(c)];
@@ -11556,12 +11612,10 @@ async function onbpLaden() {
     let html = await res.text();
     const comp = cache.companies.find(x => String(x.id) === String(c.CompanyId)) || {};
     if (crmStamm === null) { try { await crmLoadStamm(); } catch (e) {} }
-    const st = (crmStamm && crmStamm[String(comp.id)]) || {};
-    const kundeName = String(comp.Title || c.Title || "").replace(/\s*[-–·]\s*(Nur SaaS|SaaS und BPO|Nur BPO|BPO inkl\. SaaS)\s*$/i, "");
-    // Vorbefüllung des Fragebogens (Format des Formulars: keys / radios / lic / branches / contacts)
-    const entscheid = crmParseEmails(st.entscheid || []);
-    const saved = { keys: { "unternehmen.firma": kundeName, "unternehmen.strasse": st.strasse || "", "unternehmen.plzOrt": comp.City || "", "unternehmen.webseite": comp.Website || "", "unternehmen.email": entscheid[0] || "" },
-      radios: {}, lic: [], branches: [], contacts: entscheid.map(e => ({ name: "", funktion: "", telefon: "", mobile: "", email: e, lohn: "", zeich: "" })), kunde: kundeName, saved: new Date().toISOString(), quelle: "Apriko CRM" };
+    const pf = onbpSavedFuer(c);
+    const kundeName = pf.name;
+    // Vorbefüllung (Format keys/radios/lic/branches/contacts) — oder die geladenen Online-Antworten des Kunden
+    const saved = onbpState.antworten || pf.saved;
     const ersatz = { KUNDE: kundeName, DATUM: new Date().toLocaleDateString("de-CH"), SEGMENT: c.Segment || "", ANSPRECHPERSON: (comp.id && ansprechEmail(comp.id)) || c.Owner || "", GOLIVE: (onbParam().kunden[c.id] || {}).goLive ? onbFmtDatum(onbParam().kunden[c.id].goLive) : "" };
     Object.entries(ersatz).forEach(([k, val]) => { html = html.split("{{" + k + "}}").join(escape(val)); });
     html = html.split("{{SAVEDDATA}}").join(JSON.stringify(saved).replace(/</g, "\\u003c"));
@@ -11576,7 +11630,7 @@ function onbpDownload() {
   a.href = URL.createObjectURL(blob); a.download = "Parametrierung_" + String(c.Title || "Kunde").replace(/[^\w.-]+/g, "_") + "_" + (v === "bpo" ? "mit_BPO" : "ohne_BPO") + ".html"; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-function onbpKunde(id) { onbpState.kunde = String(id || ""); const c = cache.customers.find(x => String(x.id) === onbpState.kunde); onbpState.variante = c ? onbpVarianteFuer(c) : ""; onbpState.html = ""; onbpState.fehler = ""; if (c) onbpLaden(); else render(); }
+function onbpKunde(id) { onbpState.kunde = String(id || ""); const c = cache.customers.find(x => String(x.id) === onbpState.kunde); onbpState.variante = c ? onbpVarianteFuer(c) : ""; onbpState.html = ""; onbpState.fehler = ""; onbpState.stand = null; onbpState.antworten = null; if (c) { onbpLaden(); if (crmKundenFlags === null) crmLoadKundenFlags().then(() => { render(); if (onbpTok(c)) onbpStandLaden(); }).catch(() => {}); else if (onbpTok(c)) onbpStandLaden(); } else render(); }
 function onbpVariante(v) { onbpState.variante = v; onbpState.html = ""; onbpLaden(); }
 async function renderOnbParam(el) {
   if (!crmParameter) { try { await parameterLaden(false); } catch (e) {} }
@@ -11592,8 +11646,28 @@ async function renderOnbParam(el) {
     <button class="btn btn-sm" onclick="onbpDownload()" ${onbpState.html ? "" : "disabled"} title="Ausgefüllte Vorlage als HTML-Datei herunterladen und dem Kunden senden">⇩ Download</button>` : ""}`;
   el.innerHTML = `
     <div class="card" style="padding:14px 16px;margin-bottom:12px">
-      <div style="font-size:11px;color:var(--text-dim)">Fragebogen zur Parametrierung für Neukunden. Die Variante folgt dem Segment des Kunden (${c ? escape(c.Segment || "—") + " → " + (v === "bpo" ? "mit BPO" : "ohne BPO") : "BPO im Segment → mit BPO"}), oben umschaltbar. Vorlagen liegen im Repo unter <code>parametrierung/mit-bpo.html</code> und <code>parametrierung/ohne-bpo.html</code>. Firma, Strasse, Ort, Webseite und E-Mail/Kontakte (Entscheidungsträger) werden aus dem Kundenstamm vorbefüllt; der Kunde füllt den Rest aus, speichert und sendet XML/PDF an admin@apriko.com.</div>
+      <div style="font-size:11px;color:var(--text-dim)">Fragebogen zur Parametrierung für Neukunden. Die Variante folgt dem Segment des Kunden (${c ? escape(c.Segment || "—") + " → " + (v === "bpo" ? "mit BPO" : "ohne BPO") : "BPO im Segment → mit BPO"}), oben umschaltbar. Firma, Strasse, Ort, Webseite und E-Mail/Kontakte (Entscheidungsträger) werden aus dem Kundenstamm vorbefüllt. Empfohlen: <b>Online-Link</b> senden — der Kunde füllt ohne Login direkt im Browser aus, alles wird automatisch gespeichert und ist hier abrufbar. Alternativ ⇩ Download als HTML-Datei (Kunde sendet XML/PDF an admin@apriko.com).</div>
     </div>
+    ${c ? (() => {
+      const tok = onbpTok(c), link = onbpLink(c), s = onbpState.stand;
+      return `<div class="card" style="padding:12px 16px;margin-bottom:12px">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);margin-bottom:8px">🔗 Online-Link für den Kunden (ohne Login)</div>
+        ${!tok ? `<button class="btn btn-sm btn-primary" onclick="onbpLinkErzeugen()">Online-Link erzeugen</button>
+          <span style="font-size:11px;color:var(--text-faint);margin-left:8px">Erzeugt einen eindeutigen Link mit Vorbefüllung aus dem Kundenstamm; die Antworten des Kunden landen automatisch bei uns.</span>`
+        : `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <code style="font-size:11px;word-break:break-all;background:var(--bg);padding:4px 8px;border-radius:4px">${escape(link)}</code>
+            <button class="btn btn-sm" onclick="onbpLinkKopieren()">📋 Kopieren</button>
+            <button class="btn btn-sm" onclick="onbpStandLaden()" title="Zeigt, wann der Kunde zuletzt gespeichert hat">⟳ Stand</button>
+            <button class="btn btn-sm" onclick="onbpAntwortenZeigen()" title="Lädt die Online-Antworten des Kunden in die Vorschau unten">👁 Antworten anzeigen</button>
+            <button class="btn btn-sm" onclick="onbpLinkErzeugen()" title="Schreibt Vorbefüllung/Variante neu in den Link — bereits erfasste Antworten des Kunden bleiben unberührt">🔁 Vorbefüllung aktualisieren</button>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:6px">
+            ${s && s.laedt ? "Stand wird geladen …" : s && s.fehler ? `<span style="color:var(--danger)">Stand nicht abrufbar: ${escape(s.fehler)}</span>` : s && s.fehlt ? `<span style="color:var(--warn)">Link existiert online noch nicht — «🔁 Vorbefüllung aktualisieren» klicken.</span>` : s && s.updated_at ? `Zuletzt gespeichert: <b>${new Date(s.updated_at).toLocaleString("de-CH", { dateStyle: "short", timeStyle: "short" })}</b>` : ""}
+            ${onbpState.antworten ? ` · <span style="color:var(--accent)">Vorschau unten zeigt die Online-Antworten des Kunden</span>` : ""}
+            · Der Link folgt der gewählten Variante (${v === "bpo" ? "mit BPO" : "ohne BPO"}).
+          </div>`}
+      </div>`;
+    })() : ""}
     ${!c ? `<div class="empty">Kunde wählen, dann wird die Vorlage geladen.</div>` :
       onbpState.lade ? `<div class="empty">Vorlage wird geladen …</div>` :
       onbpState.fehler ? `<div class="card" style="padding:14px 16px;color:var(--danger)">${escape(onbpState.fehler)}<div style="font-size:11px;color:var(--text-dim);margin-top:6px">Die Vorlagendatei fehlt im Repo oder ist noch nicht deployt.</div></div>` :
