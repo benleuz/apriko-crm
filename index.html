@@ -32,7 +32,7 @@
 <script src="apriko-api.js?v=1.512.0"></script>
 <script src="lohncheck.js?v=1.512.0"></script>
 <script src="personalbudget.js?v=1.512.0"></script>
-<script src="jahresbudget.js?v=1.537.0"></script>
+<script src="jahresbudget.js?v=1.539.0"></script>
 <script src="budgetpositionen.js?v=1.512.0"></script>
 <script src="lohnchecklistetemp.js?v=1.512.0"></script>
 <script src="apriko-endpunkte.js?v=1.512.0"></script>
@@ -1090,7 +1090,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.537.0</span> · <span id="app-build-date">21.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.539.0</span> · <span id="app-build-date">21.10.2026</span>
     </div>
   </aside>
 
@@ -3427,6 +3427,7 @@ function fbIdentitaet(obj) {
   if (obj.cfg === "ist") return ["y", "p", "g", "kt"];
   if (obj.cfg === "fb") return ["y", "k"];
   if (obj.cfg === "erloes") return ["y", "m"];
+  if (obj.cfg === "jbsz") return ["y"];   // Szenarien Lohnverzicht (Jahresbudget), ein Item pro Jahr
   if (obj.cfg === "saison") return [];
   if (obj.cfg === "pa") return obj.t === "row" ? null : (obj.t === "pw" ? ["t"] : ["t", "y"]);
   return null;
@@ -9673,7 +9674,11 @@ async function renderOnboarding(el) {
         <div style="font-size:10px;color:var(--text-dim);margin:2px 0 4px">${escape(typ)} · <span style="font-family:var(--font-mono)">${n}/${gilt.length}</span></div>
         <select onchange="onbKundeFeld('${id}','verantwortlich',this.value)" style="width:100%;padding:2px 2px;font-size:10px;margin-bottom:3px" title="Hauptverantwortliche/r${k.verantwortlich ? ": " + escape(k.verantwortlich) : ""}"><option value="">— verantw. —</option>${emails.map(e => `<option value="${escape(e)}" ${e === (k.verantwortlich || "").toLowerCase() ? "selected" : ""}>${escape(internKurzLabel(e, emails))}</option>`).join("")}</select>
         <select onchange="onbKundeFeld('${id}','techVerantwortlich',this.value)" style="width:100%;padding:2px 2px;font-size:10px;margin-bottom:3px" title="Technisch Verantwortliche/r${k.techVerantwortlich ? ": " + escape(k.techVerantwortlich) : ""}"><option value="">— tech. verantw. —</option>${emails.map(e => `<option value="${escape(e)}" ${e === (k.techVerantwortlich || "").toLowerCase() ? "selected" : ""}>${escape(internKurzLabel(e, emails))}</option>`).join("")}</select>
-        <input type="text" value="${escape(k.kundeVerantwortlich || "")}" placeholder="— verantw. Kunde —" onchange="onbKundeFeld('${id}','kundeVerantwortlich',this.value)" style="width:100%;padding:2px 2px;font-size:10px;margin-bottom:3px" title="Verantwortliche Person beim Kunden${k.kundeVerantwortlich ? ": " + escape(k.kundeVerantwortlich) : ""}">
+        ${(() => { /* verantw. Kunde: Dropdown aus den Kontakten der Firma statt Freitext (Beni, 26.10.2026) */
+          const kk = (cache.contacts || []).filter(x => String(x.CompanyId) === String(c.CompanyId || "")).map(x => { const n = kontaktNamen(x); return { name: [n.vorname, n.name].filter(Boolean).join(" ") || String(x.Title || "Kontakt " + x.id), email: x.Email || "" }; }).sort((a, b) => a.name.localeCompare(b.name, "de"));
+          const cur = k.kundeVerantwortlich || "";
+          const fremd = cur && !kk.some(x => x.name === cur) ? `<option value="${escape(cur)}" selected>${escape(cur)} ⚠</option>` : "";
+          return `<select onchange="onbKundeFeld('${id}','kundeVerantwortlich',this.value)" style="width:100%;padding:2px 2px;font-size:10px;margin-bottom:3px" title="Verantwortliche Person beim Kunden — Auswahl aus den Kontakten der Firma${cur ? ". Aktuell: " + escape(cur) : ""}${fremd ? " (alter Freitext/Kontakt fehlt — bitte Kontakt wählen oder bei der Firma erfassen)" : ""}"><option value="">— verantw. Kunde —</option>${fremd}${kk.map(x => `<option value="${escape(x.name)}" ${x.name === cur ? "selected" : ""} title="${escape(x.email)}">${escape(x.name)}</option>`).join("")}${kk.length ? "" : `<option value="" disabled>(keine Kontakte — bei der Firma erfassen)</option>`}</select>`; })()}
         <input type="date" value="${k.goLive || ""}" onchange="onbKundeFeld('${id}','goLive',this.value)" style="width:100%;padding:2px 2px;font-size:10px" title="Go-Live-Datum">
       </th>`; }).join("")}
     </tr>

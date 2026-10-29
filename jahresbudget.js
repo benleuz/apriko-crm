@@ -19,7 +19,7 @@
    budgetRows, budgetChfOf, budgetIsSaaS, budgetErloes, BUDGET_MONTH_FIELDS,
    deleteItem, reload, escape, toast, render, currentView. */
 
-const JB_VERSION = "1.532.1";
+const JB_VERSION = "1.539.0";
 const JB_GES = ["Apriko AG", "Maverix AG"];
 const JB_PERSONAL = new Set(["SW_Lohn", "SW_SV", "SW_UebrPA", "BO_Lohn", "BO_SV", "BO_UebrPA"]);
 const JB_ERTRAG = new Set(["SW_Ertrag", "BO_Ertrag"]);
@@ -29,7 +29,7 @@ const JB_PA_GES = { SW_Lohn: "Maverix AG", SW_SV: "Maverix AG", SW_UebrPA: "Mave
 function jbGesNorm(g) { return String(g || "").toLowerCase().replace(/[^a-z0-9äöü]/g, ""); }
 function jbSameGes(a, b) { return jbGesNorm(a) === jbGesNorm(b); }
 function jbGesCanon(g) { return JB_GES.find(x => jbSameGes(x, g)) || g; }
-const jbState = { year: 2027, open: {}, buch: {}, pos: {}, busy: false, onlyChanged: false, q: "", view: "jahr", mGes: "all" };
+const jbState = { year: 2027, open: {}, buch: {}, pos: {}, busy: false, onlyChanged: false, q: "", view: "jahr", mGes: "all", mgmt: false, sz: 0 };
 const JB_MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 
 /* ---------- Hilfen ---------- */
@@ -96,6 +96,26 @@ function jbPersonalExtras(year) {
 }
 function jbHochFaktor(p) { const m = /^M(\d{1,2})$/.exec(String(p || "")); if (m) return 12 / Math.max(1, parseInt(m[1], 10)); return p === "Jahr" ? 1 : p === "H1" || p === "H2" ? 2 : /^Q/.test(String(p)) ? 4 : /^M/.test(String(p)) ? 12 : 2; }
 function jbYears() { const s = new Set([2027, new Date().getFullYear() + 1]); jbItems(null); cache.budget.forEach(it => { const d = fbParse(it, "jb"); if (d && d.y) s.add(parseInt(d.y, 10)); }); return [...s].filter(Boolean).sort(); }
+
+/* ---------- Szenarien Lohnverzicht Aktionäre (29.10.2026, v1.539) ----------
+   Drei Szenarien für die Aktionärsdiskussion: 1 = wie erfasst, 2/3 = Betrag (CHF/Jahr), der
+   vom Lohnaufwand abgezogen wird (anteilig auf SW_Lohn/BO_Lohn nach ihrem Budget-Anteil;
+   Sozialleistungen rechnet Beni separat — hier bewusst NICHT angepasst). Reine Ansicht:
+   Excel-Export und «→ Budgetvergleich» bleiben immer beim erfassten Budget (Szenario 1).
+   Beträge pro Jahr gespeichert als Budget-Item {"cfg":"jbsz","y":2027,"b2":…,"b3":…}. */
+const JB_LOHN_KEYS = ["SW_Lohn", "BO_Lohn"];
+function jbSzItem(year) { return cache.budget.map(it => fbParse(it, "jbsz")).find(d => d && d.y == year) || null; }
+function jbSzBetraege(year) { const d = jbSzItem(year) || {}; return [0, Math.abs(jbNum(d.b2) || 0), Math.abs(jbNum(d.b3) || 0)]; }
+function jbSzWahl(i) { jbState.sz = i; render(); }
+async function jbSzSet(nr, value) {
+  const y = jbState.year, d = jbSzItem(y) || {};
+  const obj = { cfg: "jbsz", y,
+    b2: nr === 2 ? Math.abs(jbNum(value) || 0) : (Math.abs(jbNum(d.b2) || 0)),
+    b3: nr === 3 ? Math.abs(jbNum(value) || 0) : (Math.abs(jbNum(d.b3) || 0)) };
+  jbState.busy = true;
+  try { await fbSaveItem(obj, d.id); if (!d.id) await reload("Budget"); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  jbState.busy = false; render();
+}
 
 /* Ertragsbudget des Zieljahrs: SaaS → SW_Ertrag, BPO → BO_Ertrag, Erlösminderung gesamt (Info) */
 function jbErtragsbudget(year) {
@@ -342,6 +362,7 @@ function renderJahresbudget(el) {
     <button class="btn btn-sm" style="${jbState.view === "jahr" ? "background:var(--accent);color:#fff" : ""}" onclick="jbState.view='jahr';render()">Jahr</button>
     <button class="btn btn-sm" style="${jbState.view === "monate" ? "background:var(--accent);color:#fff" : ""}" onclick="jbState.view='monate';render()">Monate</button>
     <button class="btn btn-sm" onclick="jbState.onlyChanged=!jbState.onlyChanged;render()" style="${jbState.onlyChanged ? "background:var(--accent);color:#fff" : ""}" title="Nur Konten ohne Positionen (noch offen)">⚠ nur offene</button>
+    <button class="btn btn-sm" onclick="jbState.mgmt=!jbState.mgmt;render()" style="${jbState.mgmt ? "background:var(--accent);color:#fff" : ""}" title="Management-Ansicht: nur Gruppen, Zwischentotale und EBITDA-Kette — alle ▶-Positionen ausgeblendet">▦ Management</button>
     <button class="btn btn-sm" onclick="jbExport()" title="Jahresbudget als formatierte Excel-Datei herunterladen">⇩ Excel</button>
     <button class="btn btn-sm btn-primary" onclick="jbTransfer()" title="Alle Positionen (inkl. Personalaufwand + Zusatzpositionen) als fb-Positionen ins Budgetvergleich-Jahr schreiben">→ Budgetvergleich ${y}</button>`;
   if (jbState.busy) { el.innerHTML = `<div class="full-loading"><div class="loading"></div></div>`; return; }
@@ -357,10 +378,19 @@ function renderJahresbudget(el) {
   const visible = r => gesOkJ(r) && hit2(r) && (!jbState.onlyChanged || jbRowOpen(r));
 
   // Positionswerte (Budget & Hochrechnung) → EBITDA-Kette — gefiltert nach Gesellschaft (Total / Apriko / Maverix)
-  const sumBud = k => (m.byKey[k] || []).filter(gesOkJ).reduce((s, r) => s + jbRowBudget(r), 0) * jbErSign(k);
+  // Szenarien Lohnverzicht: aktiver Betrag wird anteilig (nach Budget-Anteil) von SW_Lohn/BO_Lohn abgezogen
+  const szB = jbSzBetraege(y);
+  const verzicht = szB[jbState.sz] || 0;
+  const lohnKeyBud = k => (m.byKey[k] || []).reduce((s, r) => s + jbRowBudget(r), 0);
+  const lohnTot = JB_LOHN_KEYS.reduce((s, k) => s + lohnKeyBud(k), 0);
+  const szTeilFor = (k, v) => JB_LOHN_KEYS.includes(k) && lohnTot > 0 && (jbState.mGes === "all" || jbSameGes(JB_PA_GES[k], jbState.mGes)) ? v * lohnKeyBud(k) / lohnTot : 0;
+  const szTeilView = k => szTeilFor(k, verzicht);
+  const baseBud = k => (m.byKey[k] || []).filter(gesOkJ).reduce((s, r) => s + jbRowBudget(r), 0) * jbErSign(k);
+  const sumBud = k => baseBud(k) - szTeilView(k);
   const sumHoch = k => (m.byKey[k] || []).filter(gesOkJ).reduce((s, r) => s + (r.hoch || 0), 0) * jbErSign(k);
   const vb = fbCompute(sumBud), vh = fbCompute(sumHoch);
-  const gesBud = g => k => (m.byKey[k] || []).filter(r => jbSameGes(r.g, g)).reduce((s, r) => s + jbRowBudget(r), 0) * jbErSign(k);
+  const ebitdaSz = szB.map(v => fbCompute(k => baseBud(k) - szTeilFor(k, v)).EBITDA);
+  const gesBud = g => k => (m.byKey[k] || []).filter(r => jbSameGes(r.g, g)).reduce((s, r) => s + jbRowBudget(r), 0) * jbErSign(k) - (JB_LOHN_KEYS.includes(k) && lohnTot > 0 && jbSameGes(JB_PA_GES[k], g) ? verzicht * lohnKeyBud(k) / lohnTot : 0);
   const vg = {}; JB_GES.forEach(g => vg[g] = fbCompute(gesBud(g)));
 
   if (jbState.view === "monate") { renderJahresbudgetMonate(el, { y, basis, m, years, visible }); return; }
@@ -404,7 +434,7 @@ function renderJahresbudget(el) {
     const sg = keys.every(jbIsErloesmind) ? -1 : 1;   // Erlösminderung positiv anzeigen
     return `
       <tr style="border-top:1px solid var(--border);cursor:pointer;${bold ? "font-weight:600" : ""}" onclick="jbToggle('${key}')">
-        <td style="padding:6px 6px 6px ${indent}px;white-space:nowrap"><span style="color:var(--accent);font-size:9px;display:inline-block;width:12px">${n ? (open ? "▼" : "▶") : ""}</span>${escape(label)} <span style="color:var(--text-faint);font-weight:400;font-size:10.5px">${n ? n + " Konten" : ""}${changed ? ` · <span style="color:var(--warn)">${changed} offen</span>` : ""}</span>${canAdd && open ? ` <span class="btn btn-sm" style="padding:0 6px;font-size:10px;margin-left:6px" onclick="event.stopPropagation();jbAddKonto('${keys[0]}')" title="Konto ohne Ist-Basis ergänzen">＋ Konto</span>` : ""}</td>
+        <td style="padding:6px 6px 6px ${indent}px;white-space:nowrap"><span style="color:var(--accent);font-size:9px;display:inline-block;width:12px">${n ? (open ? "▼" : "▶") : ""}</span>${escape(label)} <span style="color:var(--text-faint);font-weight:400;font-size:10.5px">${n ? n + " Konten" : ""}${changed ? ` · <span style="color:var(--warn)">${changed} offen</span>` : ""}</span>${(() => { const vz = keys.reduce((s2, k2) => s2 + szTeilView(k2), 0); return vz > 0.5 ? ` <span style="color:var(--warn);font-size:10px" title="Szenario ${jbState.sz + 1}: Lohnverzicht anteilig abgezogen — Konten-Detail zeigt das erfasste Budget">− Verzicht ${jbFmt(vz)}</span>` : ""; })()}${canAdd && open ? ` <span class="btn btn-sm" style="padding:0 6px;font-size:10px;margin-left:6px" onclick="event.stopPropagation();jbAddKonto('${keys[0]}')" title="Konto ohne Ist-Basis ergänzen">＋ Konto</span>` : ""}</td>
         ${td(`<span style="color:var(--text-faint)">${jbFmt(keys.reduce((s, k) => s + (m.byKey[k] || []).reduce((a, r) => a + (r.ist || 0), 0), 0))}</span>`, "font-size:11.5px")}
         ${td(`<span style="color:var(--text-dim)">${jbFmt(vh[key] * sg)}</span>`)}
         ${td(`<b>${jbFmt(vb[key] * sg)}</b>`)}
@@ -419,7 +449,7 @@ function renderJahresbudget(el) {
         <td style="padding:6px">${escape(label)}</td><td></td>
         ${td(`<span style="color:var(--text-dim)">${jbFmt(vh[key])}</span>`)}${td(jbFmt(vb[key]))}${td(delta(vb[key], vh[key], key), "font-size:11px")}
         <td></td><td style="font-size:10.5px;color:var(--text-faint)">${JB_GES.map(g => `${g.split(" ")[0]} ${jbFmt(vg[g][key])}`).join(" · ")}</td></tr>`;
-  const body = FB_PLAN.map(row => {
+  const body = FB_PLAN.filter(row => !jbState.mgmt || (row[0] !== "d" && row[0] !== "d2")).map(row => {
     if (row[0] === "d") return posRow(row[1], FB_LABELS[row[1]] || row[1], row[2] ? 22 : 6, false);
     if (row[0] === "d2") return posRow(row[1], row[2], 22, false, row[3]);
     if (row[0] === "g") return `<tr style="border-top:1px solid var(--border);font-weight:600"><td style="padding:6px">${escape(row[2])}</td><td></td>${td(`<span style="color:var(--text-dim)">${jbFmt(vh[row[1]])}</span>`)}${td(jbFmt(vb[row[1]]))}${td(delta(vb[row[1]], vh[row[1]], row[1]), "font-size:11px")}<td></td><td style="font-size:10.5px;color:var(--text-faint)">${JB_GES.map(g => `${g.split(" ")[0]} ${jbFmt(vg[g][row[1]])}`).join(" · ")}</td></tr>`;
@@ -436,9 +466,18 @@ function renderJahresbudget(el) {
       <span style="font-size:12px;color:var(--text-dim)">Basis: Ist ${basis}${m.hasIst ? "" : ` <span style="color:var(--danger)">— keine Ist-Daten ${basis} im Budgetvergleich importiert</span>`}</span>
       <input type="search" id="jb-suche" placeholder="Suche Konto, Bezeichnung, Notiz …" value="${escape(jbState.q)}" style="font-size:12px;padding:4px 8px;width:240px" oninput="bpSucheTippen(this, jbState, 'q')">
     </div>
+    <div class="card" style="padding:8px 12px;margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim)" title="Diskussionsbasis mit den Aktionären: Verzichtsbetrag wird anteilig vom Lohnaufwand beider Gesellschaften abgezogen (Sozialleistungen separat rechnen)">Szenarien Lohnverzicht</span>
+      <button class="btn btn-sm" style="${jbState.sz === 0 ? "background:var(--accent);color:#fff" : ""}" onclick="jbSzWahl(0)">1 · Aktuell</button>
+      <span style="display:flex;gap:4px;align-items:center"><button class="btn btn-sm" style="${jbState.sz === 1 ? "background:var(--accent);color:#fff" : ""}" onclick="jbSzWahl(1)">2 · Verzicht</button><input value="${szB[1] ? Math.round(szB[1]).toLocaleString("de-CH") : ""}" placeholder="CHF/Jahr" title="Lohnverzicht Szenario 2 (CHF/Jahr)" style="width:92px;font-size:11.5px;padding:3px 6px;text-align:right" onchange="jbSzSet(2, this.value)"></span>
+      <span style="display:flex;gap:4px;align-items:center"><button class="btn btn-sm" style="${jbState.sz === 2 ? "background:var(--accent);color:#fff" : ""}" onclick="jbSzWahl(2)">3 · Verzicht</button><input value="${szB[2] ? Math.round(szB[2]).toLocaleString("de-CH") : ""}" placeholder="CHF/Jahr" title="Lohnverzicht Szenario 3 (CHF/Jahr)" style="width:92px;font-size:11.5px;padding:3px 6px;text-align:right" onchange="jbSzSet(3, this.value)"></span>
+      ${szB[1] || szB[2] ? `<span style="font-size:11.5px;color:var(--text-dim)">EBITDA: ${szB.map((v, i) => `<span style="font-family:var(--font-mono);${jbState.sz === i ? "color:var(--accent);font-weight:700" : ""}">S${i + 1} ${jbFmt(ebitdaSz[i])}</span>`).join(" · ")}</span>` : ""}
+      ${verzicht > 0.5 && lohnTot <= 0 ? `<span style="font-size:11px;color:var(--danger)">⚠ Lohnaufwand ist 0 (Personalbudget nicht übertragen/entsperrt) — Verzicht ohne Wirkung</span>` : ""}
+      <span style="font-size:10px;color:var(--text-faint)">nur Ansicht — ⇩ Excel und «→ Budgetvergleich» immer ohne Szenario</span>
+    </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
       <div class="card stat-card"><div class="stat-label">Ertrag netto ${y}${jbState.mGes !== "all" ? " · " + escape(jbState.mGes) : ""}</div><div class="stat-value">${jbFmt(vb.DLTOT)}</div><div style="font-size:11px;color:var(--text-faint)">Ertragsbudget: SaaS ${jbFmt(m.eb.saas)} · BPO ${jbFmt(m.eb.bpo)}${m.eb.erloes ? ` · Erlösmind. dort ${jbFmt(m.eb.erloes)}` : ""}</div></div>
-      <div class="card stat-card"><div class="stat-label">Personalaufwand ${y}${jbState.mGes !== "all" ? " · " + escape(jbState.mGes) : ""}</div><div class="stat-value">${jbFmt(vb.PA)}</div><div style="font-size:11px;color:var(--text-faint)">aus Budget Personalaufwand${vb.PA ? "" : " — noch nicht übertragen"}</div></div>
+      <div class="card stat-card"><div class="stat-label">Personalaufwand ${y}${jbState.mGes !== "all" ? " · " + escape(jbState.mGes) : ""}</div><div class="stat-value">${jbFmt(vb.PA)}</div><div style="font-size:11px;color:var(--text-faint)">aus Budget Personalaufwand${vb.PA ? "" : " — noch nicht übertragen"}${verzicht > 0.5 && lohnTot > 0 ? ` · <span style="color:var(--warn)">inkl. Lohnverzicht −${jbFmt(verzicht)}</span>` : ""}</div></div>
       <div class="card stat-card"><div class="stat-label">Betriebsaufwand ${y}${jbState.mGes !== "all" ? " · " + escape(jbState.mGes) : ""}</div><div class="stat-value">${jbFmt(vb.BETRIEB)}</div><div style="font-size:11px;color:var(--text-faint)">Hochrechnung ${basis}: ${jbFmt(vh.BETRIEB)}${(() => { const o = Object.values(m.byKey).flat().filter(jbRowOpen).length; return o ? ` · <span style="color:var(--warn)">${o} Konten offen</span>` : " · alle Konten erfasst"; })()}</div></div>
       <div class="card stat-card"><div class="stat-label">EBITDA ${y}${jbState.mGes !== "all" ? " · " + escape(jbState.mGes) : ""}</div><div class="stat-value" style="color:${vb.EBITDA < 0 ? "var(--danger)" : "inherit"}">${jbFmt(vb.EBITDA)}</div><div style="font-size:11px;color:var(--text-faint)">${JB_GES.map(g => `${g.split(" ")[0]} ${jbFmt(vg[g].EBITDA)}`).join(" · ")}</div></div>
     </div>
@@ -448,13 +487,13 @@ function renderJahresbudget(el) {
           <th style="text-align:left;padding:4px 6px">Position · Gesellschaft · Konto</th>
           <th style="text-align:right;padding:4px 6px">Ist ${basis}<br><span style="font-weight:400">wie importiert</span></th>
           <th style="text-align:right;padding:4px 6px">Hochrechnung<br><span style="font-weight:400">${(() => { const n = typeof fbN === "function" ? fbN(basis) : 6; const per = typeof fbPeriodeLabel === "function" ? fbPeriodeLabel(n) : "H1"; return n >= 12 ? "Jahr × 1" : per + " × 12/" + n; })()}</span></th>
-          <th style="text-align:right;padding:4px 6px">Budget ${y}</th>
+          <th style="text-align:right;padding:4px 6px">Budget ${y}${jbState.sz > 0 ? ` <span style="color:var(--warn)">· Sz. ${jbState.sz + 1}</span>` : ""}</th>
           <th style="text-align:right;padding:4px 6px">Δ zur Hochr.</th>
-          <th style="text-align:left;padding:4px 6px;min-width:220px">Positionen ${y}<br><span style="font-weight:400">aus Menü «Budgetpositionen»</span></th>
-          <th style="text-align:left;padding:4px 6px">Notiz / je Gesellschaft</th></tr>
+          ${jbState.mgmt ? `<th></th><th style="text-align:left;padding:4px 6px">je Gesellschaft</th>` : `<th style="text-align:left;padding:4px 6px;min-width:220px">Positionen ${y}<br><span style="font-weight:400">aus Menü «Budgetpositionen»</span></th>
+          <th style="text-align:left;padding:4px 6px">Notiz / je Gesellschaft</th>`}</tr>
         ${body}
       </table>
-      <div style="font-size:10px;color:var(--text-faint);margin-top:8px">Alles ausser Ertrag positiv dargestellt (auch Erlösminderung); negativer Betrag = Gutschrift. Positionen aufklappen (▶) zeigt Gesellschaft und Konto; Budget je Konto = Summe der im Menü «Budgetpositionen» erfassten Positionen (hier nur Total und aufklappbare Details). Konten ohne Positionen zählen mit 0 und sind als «⚠ offen» markiert; die Hochrechnung dient nur als Referenz. Notiz je Konto. ▶ vor einem Konto zeigt die einzelnen Buchungen ${basis}. Ertrag SaaS/BPO kommt aus dem Ertragsbudget ${y}, Personalaufwand aus «Budget Personalaufwand» (beides nur Ansicht). «→ Budgetvergleich ${y}» schreibt alle übrigen Positionen als Budget-Positionen (1/12). · Jahresbudget v${JB_VERSION}</div>
+      <div style="font-size:10px;color:var(--text-faint);margin-top:8px">Alles ausser Ertrag positiv dargestellt (auch Erlösminderung); negativer Betrag = Gutschrift. Positionen aufklappen (▶) zeigt Gesellschaft und Konto; Budget je Konto = Summe der im Menü «Budgetpositionen» erfassten Positionen (hier nur Total und aufklappbare Details). Konten ohne Positionen zählen mit 0 und sind als «⚠ offen» markiert; die Hochrechnung dient nur als Referenz. Notiz je Konto. ▶ vor einem Konto zeigt die einzelnen Buchungen ${basis}. Ertrag SaaS/BPO kommt aus dem Ertragsbudget ${y}, Personalaufwand aus «Budget Personalaufwand» (beides nur Ansicht). «→ Budgetvergleich ${y}» schreibt alle übrigen Positionen als Budget-Positionen (1/12). ▦ Management blendet alle Konto-Positionen aus (nur Gruppen und Totale). Szenarien Lohnverzicht: Betrag wird anteilig vom Lohnaufwand (SW/BO) abgezogen — reine Ansicht für die Aktionärsdiskussion, Sozialleistungen separat rechnen; Export und Übertrag nutzen immer das erfasste Budget. · Jahresbudget v${JB_VERSION}</div>
     </div>`;
 }
 
