@@ -19,7 +19,7 @@
    budgetRows, budgetChfOf, budgetIsSaaS, budgetErloes, BUDGET_MONTH_FIELDS,
    deleteItem, reload, escape, toast, render, currentView. */
 
-const JB_VERSION = "1.539.0";
+const JB_VERSION = "1.539.1";
 const JB_GES = ["Apriko AG", "Maverix AG"];
 const JB_PERSONAL = new Set(["SW_Lohn", "SW_SV", "SW_UebrPA", "BO_Lohn", "BO_SV", "BO_UebrPA"]);
 const JB_ERTRAG = new Set(["SW_Ertrag", "BO_Ertrag"]);
@@ -106,12 +106,17 @@ function jbYears() { const s = new Set([2027, new Date().getFullYear() + 1]); jb
 const JB_LOHN_KEYS = ["SW_Lohn", "BO_Lohn"];
 function jbSzItem(year) { return cache.budget.map(it => fbParse(it, "jbsz")).find(d => d && d.y == year) || null; }
 function jbSzBetraege(year) { const d = jbSzItem(year) || {}; return [0, Math.abs(jbNum(d.b2) || 0), Math.abs(jbNum(d.b3) || 0)]; }
+function jbSzNotizen(year) { const d = jbSzItem(year) || {}; return ["", String(d.n2 || ""), String(d.n3 || "")]; }
 function jbSzWahl(i) { jbState.sz = i; render(); }
-async function jbSzSet(nr, value) {
+/* feld: "b" = Verzichtsbetrag (CHF/Jahr), "n" = Bemerkung zum Szenario */
+async function jbSzSet(nr, feld, value) {
   const y = jbState.year, d = jbSzItem(y) || {};
   const obj = { cfg: "jbsz", y,
-    b2: nr === 2 ? Math.abs(jbNum(value) || 0) : (Math.abs(jbNum(d.b2) || 0)),
-    b3: nr === 3 ? Math.abs(jbNum(value) || 0) : (Math.abs(jbNum(d.b3) || 0)) };
+    b2: Math.abs(jbNum(d.b2) || 0), b3: Math.abs(jbNum(d.b3) || 0),
+    n2: String(d.n2 || ""), n3: String(d.n3 || "") };
+  if (feld === "b") obj["b" + nr] = Math.abs(jbNum(value) || 0);
+  else obj["n" + nr] = String(value || "").trim();
+  if (!obj.n2) delete obj.n2; if (!obj.n3) delete obj.n3;
   jbState.busy = true;
   try { await fbSaveItem(obj, d.id); if (!d.id) await reload("Budget"); } catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
   jbState.busy = false; render();
@@ -380,6 +385,7 @@ function renderJahresbudget(el) {
   // Positionswerte (Budget & Hochrechnung) → EBITDA-Kette — gefiltert nach Gesellschaft (Total / Apriko / Maverix)
   // Szenarien Lohnverzicht: aktiver Betrag wird anteilig (nach Budget-Anteil) von SW_Lohn/BO_Lohn abgezogen
   const szB = jbSzBetraege(y);
+  const szN = jbSzNotizen(y);
   const verzicht = szB[jbState.sz] || 0;
   const lohnKeyBud = k => (m.byKey[k] || []).reduce((s, r) => s + jbRowBudget(r), 0);
   const lohnTot = JB_LOHN_KEYS.reduce((s, k) => s + lohnKeyBud(k), 0);
@@ -469,8 +475,10 @@ function renderJahresbudget(el) {
     <div class="card" style="padding:8px 12px;margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <span style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim)" title="Diskussionsbasis mit den Aktionären: Verzichtsbetrag wird anteilig vom Lohnaufwand beider Gesellschaften abgezogen (Sozialleistungen separat rechnen)">Szenarien Lohnverzicht</span>
       <button class="btn btn-sm" style="${jbState.sz === 0 ? "background:var(--accent);color:#fff" : ""}" onclick="jbSzWahl(0)">1 · Aktuell</button>
-      <span style="display:flex;gap:4px;align-items:center"><button class="btn btn-sm" style="${jbState.sz === 1 ? "background:var(--accent);color:#fff" : ""}" onclick="jbSzWahl(1)">2 · Verzicht</button><input value="${szB[1] ? Math.round(szB[1]).toLocaleString("de-CH") : ""}" placeholder="CHF/Jahr" title="Lohnverzicht Szenario 2 (CHF/Jahr)" style="width:92px;font-size:11.5px;padding:3px 6px;text-align:right" onchange="jbSzSet(2, this.value)"></span>
-      <span style="display:flex;gap:4px;align-items:center"><button class="btn btn-sm" style="${jbState.sz === 2 ? "background:var(--accent);color:#fff" : ""}" onclick="jbSzWahl(2)">3 · Verzicht</button><input value="${szB[2] ? Math.round(szB[2]).toLocaleString("de-CH") : ""}" placeholder="CHF/Jahr" title="Lohnverzicht Szenario 3 (CHF/Jahr)" style="width:92px;font-size:11.5px;padding:3px 6px;text-align:right" onchange="jbSzSet(3, this.value)"></span>
+      ${[2, 3].map(n => `<span style="display:flex;flex-direction:column;gap:3px">
+        <span style="display:flex;gap:4px;align-items:center"><button class="btn btn-sm" style="${jbState.sz === n - 1 ? "background:var(--accent);color:#fff" : ""}" onclick="jbSzWahl(${n - 1})">${n} · Verzicht</button><input value="${szB[n - 1] ? Math.round(szB[n - 1]).toLocaleString("de-CH") : ""}" placeholder="CHF/Jahr" title="Lohnverzicht Szenario ${n} (CHF/Jahr)" style="width:92px;font-size:11.5px;padding:3px 6px;text-align:right" onchange="jbSzSet(${n}, 'b', this.value)"></span>
+        <input value="${escape(szN[n - 1])}" placeholder="Bemerkung …" title="Bemerkung zu Szenario ${n} (für alle sichtbar gespeichert)" style="font-size:10.5px;padding:2px 6px;${szN[n - 1] ? "" : "color:var(--text-faint)"}" onchange="jbSzSet(${n}, 'n', this.value)">
+      </span>`).join("")}
       ${szB[1] || szB[2] ? `<span style="font-size:11.5px;color:var(--text-dim)">EBITDA: ${szB.map((v, i) => `<span style="font-family:var(--font-mono);${jbState.sz === i ? "color:var(--accent);font-weight:700" : ""}">S${i + 1} ${jbFmt(ebitdaSz[i])}</span>`).join(" · ")}</span>` : ""}
       ${verzicht > 0.5 && lohnTot <= 0 ? `<span style="font-size:11px;color:var(--danger)">⚠ Lohnaufwand ist 0 (Personalbudget nicht übertragen/entsperrt) — Verzicht ohne Wirkung</span>` : ""}
       <span style="font-size:10px;color:var(--text-faint)">nur Ansicht — ⇩ Excel und «→ Budgetvergleich» immer ohne Szenario</span>
