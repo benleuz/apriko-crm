@@ -32,7 +32,7 @@
 <script src="apriko-api.js?v=1.512.0"></script>
 <script src="lohncheck.js?v=1.512.0"></script>
 <script src="personalbudget.js?v=1.512.0"></script>
-<script src="jahresbudget.js?v=1.541.1"></script>
+<script src="jahresbudget.js?v=1.542.0"></script>
 <script src="budgetpositionen.js?v=1.512.0"></script>
 <script src="lohnchecklistetemp.js?v=1.512.0"></script>
 <script src="apriko-endpunkte.js?v=1.512.0"></script>
@@ -1054,6 +1054,7 @@
           <button data-view="tarifarten"><span class="ic">🏷️</span> Tarifarten</button>
           <button data-view="lohncheck"><span class="ic">🧾</span> Ultimativer Check</button>
           <button data-view="parameter"><span class="ic">⚙</span> Parameter</button>
+          <button data-view="zustaend"><span class="ic">🧭</span> Zuständigkeiten</button>
         </div>
       </div>
       <div class="nav-group" data-group="onboarding">
@@ -1090,7 +1091,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.541.1</span> · <span id="app-build-date">21.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.542.0</span> · <span id="app-build-date">21.10.2026</span>
     </div>
   </aside>
 
@@ -1640,7 +1641,7 @@ const EXTRA_VIEWS_BY_EMAIL = {
   "leutrim@apriko.com": ["abacus"],
   "nicolas@apriko.com": ["abacus"]
 };
-const ALL_VIEWS = ["meinetasks","dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","onboarding","onbparam","importcheck","lohncheck","parameter","apipoc","abacus","auszpdf","uzcheck","grad360","tickets","roadmap","profiles"];
+const ALL_VIEWS = ["meinetasks","dashboard","pipeline","customers","companies","contacts","tasks","revenue","stats","budget","budgetvgl","personalbudget","jahresbudget","budgetpos","bpocheck","clintern","clfibu","lct","lohnartenstamm","tarifarten","rapport","einsatzdash","konzern","onboarding","onbparam","importcheck","lohncheck","parameter","apipoc","abacus","auszpdf","uzcheck","grad360","tickets","roadmap","zustaend","profiles"];
 /* Anzeigenamen aller Views — SINGLE SOURCE OF TRUTH.
    Neuer Menüpunkt = 4 Stellen: Sidebar-Button, ALL_VIEWS, VIEW_TITLES,
    render()-Dispatch. Die Profil-Bereichsliste leitet sich automatisch ab. */
@@ -1653,7 +1654,7 @@ const VIEW_TITLES = {
   lohnartenstamm: "Lohnartenstamm",
   tarifarten: "Tarifarten",
   rapport: "Rapport", einsatzdash: "Kundendashboard", konzern: "Konzernanalyse",
-  onboarding: "Onboarding-Checkliste", onbparam: "Parametrierung (Fragebogen für Neukunden)", importcheck: "Datenimport Check (Migration)", lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)", abacus: "Abacus Schnittstelle", auszpdf: "Auszahlungsliste → PDF (nur ausbezahlte Lohnabrechnungen)", uzcheck: "Überzeit-Check", grad360: "360 Grad — Ökosystem statt nur Software", tickets: "Tickets Auswertung (Zendesk-Export)", roadmap: "Roadmap",
+  onboarding: "Onboarding-Checkliste", onbparam: "Parametrierung (Fragebogen für Neukunden)", importcheck: "Datenimport Check (Migration)", lohncheck: "Ultimativer Check", parameter: "Parameter", apipoc: "Apriko API (POC)", abacus: "Abacus Schnittstelle", auszpdf: "Auszahlungsliste → PDF (nur ausbezahlte Lohnabrechnungen)", uzcheck: "Überzeit-Check", grad360: "360 Grad — Ökosystem statt nur Software", tickets: "Tickets Auswertung (Zendesk-Export)", roadmap: "Roadmap", zustaend: "Zuständigkeiten (Organigramm)",
   profiles: "Profile"
 };
 
@@ -2485,6 +2486,7 @@ function renderInner() {
   else if (currentView === "onboarding") viewPromise = renderOnboarding(content);
   else if (currentView === "onbparam") viewPromise = renderOnbParam(content);
   else if (currentView === "importcheck") viewPromise = renderImportcheck(content);
+  else if (currentView === "zustaend") viewPromise = renderZustaendigkeiten(content);
   else if (currentView === "abacus") renderAbacus(content);
   else if (currentView === "auszpdf") renderAuszPdf(content);
   else if (currentView === "uzcheck") renderUeberzeitCheck(content);
@@ -11672,6 +11674,225 @@ async function renderOnbParam(el) {
       onbpState.lade ? `<div class="empty">Vorlage wird geladen …</div>` :
       onbpState.fehler ? `<div class="card" style="padding:14px 16px;color:var(--danger)">${escape(onbpState.fehler)}<div style="font-size:11px;color:var(--text-dim);margin-top:6px">Die Vorlagendatei fehlt im Repo oder ist noch nicht deployt.</div></div>` :
       `<div class="card" style="padding:0;overflow:hidden"><iframe srcdoc="${escape(onbpState.html)}" style="width:100%;height:calc(100vh - 220px);border:0;background:#fff" title="Vorschau Parametrierung"></iframe></div>`}`;
+}
+
+/* ============ Zuständigkeiten (Organigramm) ============ (Benis Wunsch, 30.10.2026, v1.542)
+   Rollen (Titel wie CTO/CHRO) mit Stelleninhaber (interne User) und zugewiesenen Verantwortungs-
+   Blöcken (z.B. Release Management, Compensation Management) — Standard-Katalog fest im Code,
+   beim ersten Öffnen nach parameter_v2.json kopiert (Block «zustaendigkeiten»), danach frei:
+   neue Blöcke erfassen, umbenennen, löschen. Pro zugewiesenem Block optional ein Backup.
+   Darstellung als Organigramm-Baum («untersteht»), Stil wie die Roadmap (farbige Chips je Kategorie). */
+const ZU_KATEGORIEN = [
+  ["fuehrung", "Führung & Strategie", "#b8e986"],
+  ["produkt", "Produkt & Technik", "#6ec6ff"],
+  ["finanzen", "Finanzen", "#f4c95d"],
+  ["hr", "HR", "#ce93d8"],
+  ["vertrieb", "Vertrieb & Marketing", "#f48fb1"],
+  ["operations", "Operations & Service", "#80cbc4"]
+];
+const ZU_STANDARD_BLOECKE = [
+  ["fuehrung", "Strategie & Unternehmensentwicklung"], ["fuehrung", "Jahresplanung & Budget"], ["fuehrung", "VR- & Investoren-Reporting"],
+  ["fuehrung", "Risikomanagement & Compliance"], ["fuehrung", "Partnerschaften & Allianzen"], ["fuehrung", "Preisgestaltung & Konditionen"],
+  ["produkt", "Produkt-Roadmap"], ["produkt", "Release Management"], ["produkt", "Architektur & Technologie"],
+  ["produkt", "Security & Datenschutz"], ["produkt", "Infrastruktur & Hosting"], ["produkt", "API & Integrationen"],
+  ["produkt", "Qualitätssicherung & Testing"], ["produkt", "Incident Management"],
+  ["finanzen", "Buchhaltung & Abschlüsse"], ["finanzen", "Controlling & Reporting"], ["finanzen", "Liquiditätsplanung"],
+  ["finanzen", "Debitoren & Mahnwesen"], ["finanzen", "Kreditoren & Zahlungen"], ["finanzen", "Steuern & MWST"], ["finanzen", "Versicherungen & Verträge"],
+  ["hr", "Recruiting"], ["hr", "Compensation Management"], ["hr", "Onboarding & Offboarding Mitarbeitende"],
+  ["hr", "Aus- & Weiterbildung"], ["hr", "Arbeitsrecht & Arbeitsverträge"], ["hr", "Mitarbeiterzufriedenheit"],
+  ["vertrieb", "Neukundenakquise"], ["vertrieb", "Bestandskunden & Upselling"], ["vertrieb", "Marketing & Kampagnen"],
+  ["vertrieb", "Website & Social Media"], ["vertrieb", "Events & Messen"], ["vertrieb", "Offerten & Vertragsabschlüsse"],
+  ["operations", "Kunden-Onboarding & Migration"], ["operations", "Support & Ticketing"], ["operations", "Schulungen Kunden"],
+  ["operations", "BPO-Lohnläufe"], ["operations", "Qualitätskontrolle Lohn"], ["operations", "FIBU-Dienstleistungen Kunden"],
+  ["operations", "SLA & Service-Qualität"], ["operations", "Prozessdokumentation"]
+];
+const ZU_TITEL_VORSCHLAEGE = ["CEO", "CTO", "CFO", "CHRO", "COO", "CRO", "VR-Präsident", "Head of Development", "Head of Support", "Head of BPO", "Teamleiter/in", "Projektleiter/in"];
+function zuKat(k) { return ZU_KATEGORIEN.find(x => x[0] === k) || ["uebrig", "Übrige", "#90caf9"]; }
+function zuSlug(name) { return String(name).toLowerCase().replace(/[^a-z0-9äöüéè]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || ("block-" + Date.now().toString(36)); }
+function zuParam() {
+  if (!crmParameter.zustaendigkeiten) crmParameter.zustaendigkeiten = {};
+  const z = crmParameter.zustaendigkeiten;
+  if (!Array.isArray(z.rollen)) z.rollen = [];
+  if (!Array.isArray(z.bloecke) || !z.bloecke.length) z.bloecke = ZU_STANDARD_BLOECKE.map(([kat, name]) => ({ id: zuSlug(name), name, kat }));
+  return z;
+}
+function zuBlockVon(id) { return zuParam().bloecke.find(b => b.id === id) || null; }
+const zuEdit = paramEdit;
+/* --- Dialog «Rolle» (Zwischenzustand im Speicher, erst «Speichern» schreibt) --- */
+let zuDlg = null;
+function zuDlgLesen() {
+  if (!zuDlg) return;
+  const g = id => document.getElementById(id);
+  if (g("zu-titel")) zuDlg.titel = g("zu-titel").value;
+  if (g("zu-user")) zuDlg.user = g("zu-user").value;
+  if (g("zu-parent")) zuDlg.parent = g("zu-parent").value;
+  (zuDlg.tasks || []).forEach(x => { const b = g("zu-bk-" + x.t); if (b) x.backup = b.value; });
+}
+function zuDialogOeffnen(rolleId) {
+  const z = zuParam();
+  const r = z.rollen.find(x => x.id === String(rolleId)) || null;
+  zuDlg = r ? JSON.parse(JSON.stringify(r)) : { id: "", titel: "", user: "", parent: "", tasks: [] };
+  zuDlg.tasks = zuDlg.tasks || [];
+  zuDialogRender();
+}
+function zuDlgToggle(taskId) {
+  zuDlgLesen();
+  const i = zuDlg.tasks.findIndex(x => x.t === taskId);
+  if (i >= 0) zuDlg.tasks.splice(i, 1); else zuDlg.tasks.push({ t: taskId, backup: "" });
+  zuDialogRender();
+}
+function zuDialogRender() {
+  const z = zuParam(), d = zuDlg;
+  const andere = z.rollen.filter(r => r.id !== d.id);
+  const zugeteilt = new Set(d.tasks.map(x => x.t));
+  const katChips = ZU_KATEGORIEN.map(([k, label, farbe]) => {
+    const bl = z.bloecke.filter(b => b.kat === k && !zugeteilt.has(b.id));
+    if (!bl.length) return "";
+    return `<div style="margin-top:6px"><span style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:${farbe}">${escape(label)}</span><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:3px">${bl.map(b => `<span onclick="zuDlgToggle('${escape(b.id)}')" style="cursor:pointer;font-size:11px;padding:2px 9px;border-radius:999px;border:1px dashed ${farbe};color:var(--text-dim)" title="Klick weist den Block dieser Rolle zu">+ ${escape(b.name)}</span>`).join("")}</div></div>`;
+  }).join("");
+  const zugeteiltHtml = d.tasks.map(x => { const b = zuBlockVon(x.t); if (!b) return ""; const farbe = zuKat(b.kat)[2];
+    return `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px dotted var(--border-soft)">
+      <span style="flex:1;font-size:12px;padding:2px 9px;border-radius:999px;background:${farbe}22;border:1px solid ${farbe}">${escape(b.name)}</span>
+      <label style="font-size:10.5px;color:var(--text-dim)">Backup <select id="zu-bk-${escape(x.t)}" style="font-size:11px;padding:2px 4px;max-width:150px">${internUserOptionsHtml(x.backup)}</select></label>
+      <span onclick="zuDlgToggle('${escape(x.t)}')" style="cursor:pointer;color:var(--text-faint)" title="Zuweisung entfernen">✕</span>
+    </div>`; }).join("");
+  const body = `
+    <div class="field"><label>Titel / Funktion</label><input id="zu-titel" value="${escape(d.titel)}" list="zu-titel-liste" placeholder="z.B. CTO"><datalist id="zu-titel-liste">${ZU_TITEL_VORSCHLAEGE.map(t => `<option value="${escape(t)}">`).join("")}</datalist></div>
+    <div class="field"><label>Stelleninhaber/in</label><select id="zu-user">${internUserOptionsHtml(d.user)}</select></div>
+    <div class="field"><label>Untersteht</label><select id="zu-parent"><option value="">— oberste Ebene —</option>${andere.map(r => `<option value="${escape(r.id)}" ${r.id === (d.parent || "") ? "selected" : ""}>${escape(r.titel || "—")}${r.user ? " · " + escape(mitarbeiterKurzname(r.user)) : ""}</option>`).join("")}</select></div>
+    <div class="field"><label>Zugewiesene Blöcke (${d.tasks.length})</label>${zugeteiltHtml || `<div style="font-size:11px;color:var(--text-faint)">Noch keine — unten anklicken.</div>`}</div>
+    <div class="field"><label>Verfügbare Blöcke <span style="font-weight:400;color:var(--text-faint)">(Klick = zuweisen; Katalog unter «⚙ Blöcke verwalten»)</span></label>${katChips || `<div style="font-size:11px;color:var(--text-faint)">Alle Blöcke sind dieser Rolle zugewiesen.</div>`}</div>`;
+  showModal(d.id ? "Rolle bearbeiten" : "Neue Rolle", body, [
+    d.id ? `<button class="btn" style="color:var(--danger);margin-right:auto" onclick="zuRolleLoeschen('${escape(d.id)}')">Löschen</button>` : "",
+    `<button class="btn" onclick="zuDlg=null;closeModal()">Abbrechen</button>`,
+    `<button class="btn btn-primary" onclick="zuRolleSpeichern()">Speichern</button>`
+  ].filter(Boolean));
+}
+function zuRolleSpeichern() { zuDlgLesen(); const d = zuDlg; if (!d) return;
+  if (!String(d.titel || "").trim()) { toast("Bitte einen Titel eingeben.", true); return; }
+  return zuEdit(async () => {
+    await parameterLaden(true);
+    const z = zuParam();
+    const r = d.id ? z.rollen.find(x => x.id === d.id) : null;
+    const neu = { id: d.id || "r" + Date.now().toString(36), titel: String(d.titel).trim(), user: d.user || "", parent: d.parent || "", tasks: (d.tasks || []).map(x => ({ t: x.t, backup: x.backup || "" })) };
+    if (r) Object.assign(r, neu); else z.rollen.push(neu);
+    await parameterSpeichern();
+    zuDlg = null; closeModal(); render();
+  });
+}
+function zuRolleLoeschen(id) {
+  const r = zuParam().rollen.find(x => x.id === id); if (!r) return;
+  if (!confirm("Rolle «" + (r.titel || "—") + "» löschen? Unterstellte Rollen rücken eine Ebene nach oben.")) return;
+  return zuEdit(async () => {
+    await parameterLaden(true);
+    const z = zuParam();
+    const alt = z.rollen.find(x => x.id === id); if (!alt) return;
+    z.rollen.forEach(x => { if ((x.parent || "") === id) x.parent = alt.parent || ""; });
+    z.rollen = z.rollen.filter(x => x.id !== id);
+    await parameterSpeichern();
+    zuDlg = null; closeModal(); render();
+  });
+}
+/* --- Katalog der Blöcke: erfassen, umbenennen, löschen --- */
+function zuBloeckeDialog() {
+  const z = zuParam();
+  const verwendet = {}; z.rollen.forEach(r => (r.tasks || []).forEach(x => { (verwendet[x.t] = verwendet[x.t] || []).push(r.titel || "—"); }));
+  const body = ZU_KATEGORIEN.map(([k, label, farbe]) => {
+    const bl = z.bloecke.filter(b => b.kat === k);
+    return `<div style="margin-bottom:10px"><div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:${farbe};margin-bottom:4px">${escape(label)}</div>
+      ${bl.map(b => `<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+        <input value="${escape(b.name)}" onchange="zuBlockUmbenennen('${escape(b.id)}', this.value)" style="flex:1;font-size:12px;padding:3px 8px" title="Umbenennen: Text ändern und Enter/Feld verlassen">
+        <span style="font-size:10px;color:var(--text-faint);min-width:90px">${(verwendet[b.id] || []).length ? "→ " + escape(verwendet[b.id].join(", ")).slice(0, 60) : "nicht zugewiesen"}</span>
+        <span onclick="zuBlockLoeschen('${escape(b.id)}')" style="cursor:pointer;color:var(--text-faint)" title="Block löschen">✕</span>
+      </div>`).join("") || `<div style="font-size:11px;color:var(--text-faint)">—</div>`}</div>`;
+  }).join("") + `
+    <div style="border-top:1px solid var(--border);padding-top:10px;display:flex;gap:6px;align-items:center">
+      <input id="zu-nb-name" placeholder="Neuer Block, z.B. Datenschutz-Audits" style="flex:1;font-size:12px;padding:4px 8px" onkeydown="if(event.key==='Enter')zuBlockNeu()">
+      <select id="zu-nb-kat" style="font-size:12px;padding:4px">${ZU_KATEGORIEN.map(([k, label]) => `<option value="${k}">${escape(label)}</option>`).join("")}</select>
+      <button class="btn btn-sm btn-primary" onclick="zuBlockNeu()">+ Block</button>
+    </div>`;
+  showModal("Blöcke verwalten (" + z.bloecke.length + ")", body, [`<button class="btn btn-primary" onclick="closeModal();render()">Fertig</button>`]);
+}
+function zuBlockNeu() {
+  const name = String((document.getElementById("zu-nb-name") || {}).value || "").trim();
+  const kat = String((document.getElementById("zu-nb-kat") || {}).value || ZU_KATEGORIEN[0][0]);
+  if (!name) { toast("Bitte einen Namen eingeben.", true); return; }
+  return zuEdit(async () => {
+    await parameterLaden(true);
+    const z = zuParam();
+    let id = zuSlug(name); while (z.bloecke.some(b => b.id === id)) id += "-2";
+    z.bloecke.push({ id, name, kat });
+    await parameterSpeichern(); zuBloeckeDialog();
+  });
+}
+function zuBlockUmbenennen(id, name) {
+  if (!String(name || "").trim()) { zuBloeckeDialog(); return; }
+  return zuEdit(async () => {
+    await parameterLaden(true);
+    const b = zuParam().bloecke.find(x => x.id === id); if (!b) return;
+    b.name = String(name).trim();
+    await parameterSpeichern();
+  });
+}
+function zuBlockLoeschen(id) {
+  const z = zuParam(); const b = z.bloecke.find(x => x.id === id); if (!b) return;
+  const rollen = z.rollen.filter(r => (r.tasks || []).some(x => x.t === id)).map(r => r.titel || "—");
+  if (!confirm("Block «" + b.name + "» löschen?" + (rollen.length ? "\nEr ist zugewiesen bei: " + rollen.join(", ") + " — die Zuweisungen werden entfernt." : ""))) return;
+  return zuEdit(async () => {
+    await parameterLaden(true);
+    const z2 = zuParam();
+    z2.bloecke = z2.bloecke.filter(x => x.id !== id);
+    z2.rollen.forEach(r => { r.tasks = (r.tasks || []).filter(x => x.t !== id); });
+    await parameterSpeichern(); zuBloeckeDialog();
+  });
+}
+/* --- Ansicht: Organigramm-Baum --- */
+async function renderZustaendigkeiten(el) {
+  if (!crmParameter) { try { await parameterLaden(false); } catch (e) {} }
+  if (!crmParameter) { el.innerHTML = `<div class="empty">Parameter konnten nicht geladen werden.</div>`; return; }
+  const z = zuParam();
+  document.getElementById("view-actions").innerHTML = `
+    <button class="btn btn-sm btn-primary" onclick="zuDialogOeffnen('')">+ Rolle</button>
+    <button class="btn btn-sm" onclick="zuBloeckeDialog()">⚙ Blöcke verwalten</button>
+    <button class="btn btn-sm" onclick="window.print()" title="Organigramm drucken">🖨 Drucken</button>`;
+  const vorhanden = new Set(z.rollen.map(r => r.id));
+  const kinder = id => z.rollen.filter(r => (r.parent || "") === id);
+  const karte = r => {
+    const kurz = r.user ? mitarbeiterKurzname(r.user) : "";
+    const chips = (r.tasks || []).map(x => { const b = zuBlockVon(x.t); if (!b) return ""; const farbe = zuKat(b.kat)[2];
+      return `<span style="font-size:10.5px;padding:2px 8px;border-radius:999px;background:${farbe}22;border:1px solid ${farbe};white-space:nowrap" title="${escape(b.name)} (${escape(zuKat(b.kat)[1])})${x.backup ? "\nBackup: " + escape(mitarbeiterKurzname(x.backup)) : ""}">${escape(b.name)}${x.backup ? ` <span style="color:var(--text-dim)">⟲ ${escape(mitarbeiterKurzname(x.backup))}</span>` : ""}</span>`; }).join("");
+    return `<div class="card" onclick="zuDialogOeffnen('${escape(r.id)}')" style="cursor:pointer;padding:10px 14px;min-width:200px;max-width:280px;border-top:3px solid var(--accent)" title="Klick zum Bearbeiten">
+      <div style="font-weight:700;font-size:13.5px">${escape(r.titel || "—")}</div>
+      <div style="display:flex;align-items:center;gap:7px;margin:5px 0 7px">${r.user
+        ? `<span style="width:22px;height:22px;border-radius:50%;background:var(--accent-3);color:#04282e;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">${escape((kurz || "?").slice(0, 2).toUpperCase())}</span><span style="font-size:12px">${escape(kurz)}</span>`
+        : `<span style="font-size:11px;color:var(--warn)">— Stelle unbesetzt —</span>`}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px">${chips || `<span style="font-size:10.5px;color:var(--text-faint)">keine Blöcke zugewiesen</span>`}</div>
+    </div>`;
+  };
+  const besucht = new Set();
+  const baum = r => {
+    if (besucht.has(r.id)) return "";
+    besucht.add(r.id);
+    const kk = kinder(r.id).filter(k => !besucht.has(k.id));
+    return `<div style="display:flex;flex-direction:column;align-items:center">${karte(r)}
+      ${kk.length ? `<div style="width:1px;height:16px;background:var(--border)"></div><div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;justify-content:center">${kk.map(baum).join("")}</div>` : ""}</div>`;
+  };
+  const roots = z.rollen.filter(r => !r.parent || !vorhanden.has(r.parent));
+  let inhalt = roots.map(baum).join("");
+  inhalt += z.rollen.filter(r => !besucht.has(r.id)).map(baum).join("");   // Zyklen-Rest trotzdem zeigen
+  const zugewiesen = new Set(); z.rollen.forEach(r => (r.tasks || []).forEach(x => zugewiesen.add(x.t)));
+  const offen = z.bloecke.filter(b => !zugewiesen.has(b.id));
+  const ohneBackup = z.rollen.reduce((s, r) => s + (r.tasks || []).filter(x => !x.backup).length, 0);
+  el.innerHTML = `
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+      <div class="card stat-card"><div class="stat-label">Rollen</div><div class="stat-value">${z.rollen.length}</div><div style="font-size:11px;color:var(--text-faint)">${z.rollen.filter(r => !r.user).length ? `<span style="color:var(--warn)">${z.rollen.filter(r => !r.user).length} unbesetzt</span>` : "alle besetzt"}</div></div>
+      <div class="card stat-card"><div class="stat-label">Blöcke zugewiesen</div><div class="stat-value">${zugewiesen.size} / ${z.bloecke.length}</div><div style="font-size:11px;color:var(--text-faint)">${offen.length ? `<span style="color:var(--warn)">${offen.length} ohne Zuständigkeit</span>` : "alle abgedeckt"}</div></div>
+      <div class="card stat-card"><div class="stat-label">Backups</div><div class="stat-value">${ohneBackup ? "⚠ " + ohneBackup : "✓"}</div><div style="font-size:11px;color:var(--text-faint)">${ohneBackup ? "Zuweisungen ohne Backup" : "jede Zuweisung hat ein Backup"}</div></div>
+    </div>
+    ${z.rollen.length ? `<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;justify-content:center;padding:10px 0 20px">${inhalt}</div>`
+      : `<div class="empty">Noch keine Rollen — mit «+ Rolle» die erste anlegen (z.B. CEO), weitere Rollen können ihr unterstellt werden.</div>`}
+    ${offen.length ? `<div class="card" style="padding:10px 14px"><div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--warn);margin-bottom:6px">⚠ Blöcke ohne Zuständigkeit (${offen.length})</div><div style="display:flex;flex-wrap:wrap;gap:4px">${offen.map(b => { const farbe = zuKat(b.kat)[2]; return `<span style="font-size:10.5px;padding:2px 8px;border-radius:999px;border:1px dashed ${farbe};color:var(--text-dim)" title="${escape(zuKat(b.kat)[1])}">${escape(b.name)}</span>`; }).join("")}</div></div>` : ""}
+    <div style="font-size:10px;color:var(--text-faint);margin-top:8px">Klick auf eine Karte öffnet die Rolle (Titel, Stelleninhaber, «untersteht», Blöcke + Backup je Block). «⚙ Blöcke verwalten»: Katalog erweitern, umbenennen, löschen — Standard-Blöcke sind beim ersten Öffnen vorbefüllt. Gespeichert für alle in parameter_v2.json (Block zustaendigkeiten).</div>`;
 }
 
 /* ============ Parameter (Workflows) ============
