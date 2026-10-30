@@ -32,7 +32,7 @@
 <script src="apriko-api.js?v=1.512.0"></script>
 <script src="lohncheck.js?v=1.512.0"></script>
 <script src="personalbudget.js?v=1.512.0"></script>
-<script src="jahresbudget.js?v=1.540.0"></script>
+<script src="jahresbudget.js?v=1.541.1"></script>
 <script src="budgetpositionen.js?v=1.512.0"></script>
 <script src="lohnchecklistetemp.js?v=1.512.0"></script>
 <script src="apriko-endpunkte.js?v=1.512.0"></script>
@@ -1090,7 +1090,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.540.0</span> · <span id="app-build-date">21.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.541.1</span> · <span id="app-build-date">21.10.2026</span>
     </div>
   </aside>
 
@@ -5250,7 +5250,7 @@ function renderDashboard(el) {
         <button class="btn btn-sm" onclick="crmExportUmgebungen()" title="Excel mit allen AKTIVEN Kunden der Auswahl: Firma + Umgebung (z.B. kskpersonal.apriko.app); Kunden ohne Link mit leerer Umgebung">⇩ Umgebungen</button>
         <button class="btn btn-sm" onclick="crmExportUmgebungen(true)" title="Dasselbe als CSV (Firma,Umgebung)">⇩ CSV</button>
         <button class="btn btn-sm" id="hc-btn" onclick="hcStart()" title="Fragt /healthchecks-api aller aktiven Kundenumgebungen der Auswahl ab (wie Production-Healthcheck.ps1)">💓 Healthcheck</button>
-        <span style="font-size:11px;color:var(--text-faint);margin-left:4px">Öffnet eine neue Mail mit den Adressen der Kunden (Kennzeichnung «Ist Kunde») in Bcc. Adressen kommen aus den Kontakten mit Funktion Entscheidungsträger/User (und den alten Firmenfeldern).</span>
+        <span style="font-size:11px;color:var(--text-faint);margin-left:4px">Öffnet eine neue Mail mit den Adressen der Kunden (Kennzeichnung «Ist Kunde») in Bcc. «An alle» = ALLE Kontakte mit E-Mail, unabhängig von der Funktion (plus alte Firmenfelder); «An Entscheidungsträger»/«An User» filtern nach der Kontakt-Funktion.</span>
       </div>
       <div id="hc-panel">${hcPanelHtml()}</div>
     </div>
@@ -11662,7 +11662,7 @@ async function renderOnbParam(el) {
             <button class="btn btn-sm" onclick="onbpLinkErzeugen()" title="Schreibt Vorbefüllung/Variante neu in den Link — bereits erfasste Antworten des Kunden bleiben unberührt">🔁 Vorbefüllung aktualisieren</button>
           </div>
           <div style="font-size:11px;color:var(--text-dim);margin-top:6px">
-            ${s && s.laedt ? "Stand wird geladen …" : s && s.fehler ? `<span style="color:var(--danger)">Stand nicht abrufbar: ${escape(s.fehler)}</span>` : s && s.fehlt ? `<span style="color:var(--warn)">Link existiert online noch nicht — «🔁 Vorbefüllung aktualisieren» klicken.</span>` : s && s.updated_at ? `Zuletzt gespeichert: <b>${new Date(s.updated_at).toLocaleString("de-CH", { dateStyle: "short", timeStyle: "short" })}</b>` : ""}
+            ${s && s.laedt ? "Stand wird geladen …" : s && s.fehler ? `<span style="color:var(--danger)">Stand nicht abrufbar: ${escape(s.fehler)}</span>` : s && s.fehlt ? `<span style="color:var(--warn)">Link existiert online noch nicht — «🔁 Vorbefüllung aktualisieren» klicken.</span>` : s && s.updated_at ? `Zuletzt gespeichert: <b>${new Date(s.updated_at).toLocaleString("de-CH", { dateStyle: "short", timeStyle: "short" })}</b>${s.daten && s.daten.fertig ? ` · <span style="color:var(--accent);font-weight:600">✓ Vom Kunden fertig gemeldet am ${new Date(s.daten.fertig).toLocaleString("de-CH", { dateStyle: "short", timeStyle: "short" })}</span>` : ` · <span style="color:var(--text-faint)">noch nicht fertig gemeldet</span>`}` : ""}
             ${onbpState.antworten ? ` · <span style="color:var(--accent)">Vorschau unten zeigt die Online-Antworten des Kunden</span>` : ""}
             · Der Link folgt der gewählten Variante (${v === "bpo" ? "mit BPO" : "ohne BPO"}).
           </div>`}
@@ -17806,7 +17806,9 @@ function crmFirmaEmails(companyId) {
   });
   crmParseEmails(s.entscheid).forEach(e => { if (!kontaktMails.has(String(e).toLowerCase())) ent.add(String(e).toLowerCase()); });
   crmParseEmails(s.user).forEach(e => { if (!kontaktMails.has(String(e).toLowerCase())) usr.add(String(e).toLowerCase()); });
-  return { entscheid: [...ent], user: [...usr] };
+  // «alle» = wirklich ALLE Kontakte mit gültiger E-Mail (auch z.B. nur Lohn/FIBU) + alte Firmenfelder (Beni, 30.10.2026)
+  const alle = new Set(kontaktMails); ent.forEach(e => alle.add(e)); usr.forEach(e => alle.add(e));
+  return { entscheid: [...ent], user: [...usr], alle: [...alle] };
 }
 /* Alte Textfelder bereinigen: E-Mail eines (neu) erfassten Kontakts aus entscheid/user der Firma entfernen, damit sie nur noch einmal existiert. */
 async function stammLegacyEmailEntfernen(companyId, email) {
@@ -17826,8 +17828,9 @@ function crmCustomerEmailCounts(scope) {
   const out = { alle: new Set(), entscheid: new Set(), user: new Set(), firmen: custs.length };
   custs.forEach(c => {
     const m = crmFirmaEmails(c.id);
-    m.entscheid.forEach(e => { out.entscheid.add(e); out.alle.add(e); });
-    m.user.forEach(e => { out.user.add(e); out.alle.add(e); });
+    m.entscheid.forEach(e => out.entscheid.add(e));
+    m.user.forEach(e => out.user.add(e));
+    (m.alle || []).forEach(e => out.alle.add(e));
   });
   return { alle: out.alle.size, entscheid: out.entscheid.size, user: out.user.size, firmen: out.firmen };
 }
@@ -18077,8 +18080,9 @@ async function crmCopyCustomerEmails(kind) {
   let emails = [];
   custs.forEach(c => {
     const m = crmFirmaEmails(c.id);
-    if (kind === "alle" || kind === "entscheid") emails.push(...m.entscheid);
-    if (kind === "alle" || kind === "user") emails.push(...m.user);
+    if (kind === "alle") emails.push(...m.alle);          // ALLE Kontakte mit E-Mail, unabhängig von der Funktion
+    if (kind === "entscheid") emails.push(...m.entscheid);
+    if (kind === "user") emails.push(...m.user);
   });
   emails = [...new Set(emails)].sort((a, b) => {
     const da = a.split("@")[1] || "", db = b.split("@")[1] || "";
