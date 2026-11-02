@@ -32,7 +32,7 @@
 <script src="apriko-api.js?v=1.512.0"></script>
 <script src="lohncheck.js?v=1.512.0"></script>
 <script src="personalbudget.js?v=1.512.0"></script>
-<script src="jahresbudget.js?v=1.542.1"></script>
+<script src="jahresbudget.js?v=1.542.2"></script>
 <script src="budgetpositionen.js?v=1.512.0"></script>
 <script src="lohnchecklistetemp.js?v=1.512.0"></script>
 <script src="apriko-endpunkte.js?v=1.512.0"></script>
@@ -1091,7 +1091,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.542.1</span> · <span id="app-build-date">30.10.2026</span>
+      Apriko CRM · <span id="app-version">v1.542.2</span> · <span id="app-build-date">02.11.2026</span>
     </div>
   </aside>
 
@@ -18086,33 +18086,42 @@ async function crmExportUmgebungen(csv) {
   toast(z.length + " aktive Kunden exportiert" + (ohne ? " — " + ohne + " ohne Umgebung (Feld «Link» leer)" : "") + ".");
 }
 async function crmExportCustomerEmails() {
+  // Gleiche Quelle wie die Mail-Knöpfe (crmFirmaEmails): Kontakte nach Funktion + alte Firmenfelder.
+  // Vorher (bis v1.542) las der Export NUR die alten Textfelder — darum stimmte das Total nie mit «An alle» überein.
   if (crmStamm === null) { await crmLoadStamm(); }
   const scope = filters.dashboardEmailScope || "alle";
   const custs = cache.companies.filter(c => c.IsCustomer && crmCompanyMatchesScope(c.id, scope)).sort((a, b) => (a.Title || "").localeCompare(b.Title || ""));
   if (!custs.length) { toast("Keine Kunden in der Auswahl.", true); return; }
   await lcLoadXlsx();
-  const hdr = ["Firma", "Segment", "Status", "Entscheidungsträger", "User", "Anzahl E-Mails", "Interne Ansprechperson", "Owner", "Kontrolle"];
-  let fehlt = 0;
+  const hdr = ["Firma", "Segment", "Status", "Entscheidungsträger", "User", "Weitere Kontakte", "Anzahl E-Mails", "Interne Ansprechperson", "Owner", "Kontrolle"];
+  let fehlt = 0; const unique = new Set();
   const rows = custs.map(c => {
-    const st = (crmStamm && crmStamm[String(c.id)]) || {};
-    const ent = crmParseEmails(st.entscheid), usr = crmParseEmails(st.user);
+    const m = crmFirmaEmails(c.id);
+    const weitere = (m.alle || []).filter(e => !m.entscheid.includes(e) && !m.user.includes(e));
     const kunde = cache.customers.find(k => String(k.CompanyId) === String(c.id));
-    const n = new Set([...ent, ...usr]).size;
+    const n = (m.alle || []).length;
+    (m.alle || []).forEach(e => unique.add(e));
     if (!n) fehlt++;
-    return [c.Title || "", kunde ? (kunde.Segment || "") : "", kunde ? (kunde.Status || "") : "", ent.join(", "), usr.join(", "), n, ansprechEmail(c.id), kunde ? (kunde.Owner || "") : "", n ? "OK" : "FEHLT"];
+    return [c.Title || "", kunde ? (kunde.Segment || "") : "", kunde ? (kunde.Status || "") : "", m.entscheid.join(", "), m.user.join(", "), weitere.join(", "), n, ansprechEmail(c.id), kunde ? (kunde.Owner || "") : "", n ? "OK" : "FEHLT"];
   });
   const ws = window.XLSX.utils.aoa_to_sheet([hdr].concat(rows));
-  ws["!cols"] = [28, 14, 10, 40, 40, 8, 26, 26, 10].map(w => ({ wch: w }));
-  ws["!autofilter"] = { ref: "A1:I" + (rows.length + 1) };
+  ws["!cols"] = [28, 14, 10, 40, 40, 40, 8, 26, 26, 10].map(w => ({ wch: w }));
+  ws["!autofilter"] = { ref: "A1:J" + (rows.length + 1) };
   const wb = window.XLSX.utils.book_new();
   window.XLSX.utils.book_append_sheet(wb, ws, "Kunden-E-Mails");
-  // Zweites Blatt: eine Zeile pro Adresse (für Serienmails)
+  // Zweites Blatt: eine Zeile pro Adresse und Firma (für Serienmails), Rolle kombiniert
   const flat = [["E-Mail", "Firma", "Rolle"]];
-  custs.forEach(c => { const st = (crmStamm && crmStamm[String(c.id)]) || {}; crmParseEmails(st.entscheid).forEach(e => flat.push([e, c.Title || "", "Entscheidungsträger"])); crmParseEmails(st.user).forEach(e => flat.push([e, c.Title || "", "User"])); });
-  const ws2 = window.XLSX.utils.aoa_to_sheet(flat); ws2["!cols"] = [34, 28, 20].map(w => ({ wch: w }));
+  custs.forEach(c => {
+    const m = crmFirmaEmails(c.id);
+    (m.alle || []).forEach(e => {
+      const rollen = [m.entscheid.includes(e) ? "Entscheidungsträger" : "", m.user.includes(e) ? "User" : ""].filter(Boolean);
+      flat.push([e, c.Title || "", rollen.join(" + ") || "Kontakt"]);
+    });
+  });
+  const ws2 = window.XLSX.utils.aoa_to_sheet(flat); ws2["!cols"] = [34, 28, 26].map(w => ({ wch: w }));
   window.XLSX.utils.book_append_sheet(wb, ws2, "Adressen");
   window.XLSX.writeFile(wb, "Kunden-E-Mails_" + new Date().toISOString().slice(0, 10) + ".xlsx");
-  toast(custs.length + " Kunden exportiert" + (fehlt ? " — " + fehlt + " ohne E-Mail (Spalte Kontrolle = FEHLT)" : ", alle mit mindestens einer E-Mail") + ".");
+  toast(custs.length + " Kunden exportiert — " + unique.size + " eindeutige Adressen (= Zähler «An alle»)" + (fehlt ? ", " + fehlt + " Kunden ohne E-Mail (Kontrolle = FEHLT)" : "") + ".");
 }
 /* Alle Kundenumgebungen (App-Links) der aktuellen Auswahl in neuen Tabs öffnen — Browser blockieren mehrere Pop-ups,
    daher: versuchen, zählen, und bei Blockade die Liste zum Klicken anzeigen (plus Hinweis, Pop-ups zu erlauben). */
