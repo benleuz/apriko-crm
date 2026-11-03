@@ -32,7 +32,7 @@
 <script src="apriko-api.js?v=1.512.0"></script>
 <script src="lohncheck.js?v=1.512.0"></script>
 <script src="personalbudget.js?v=1.512.0"></script>
-<script src="jahresbudget.js?v=1.542.2"></script>
+<script src="jahresbudget.js?v=1.543.0"></script>
 <script src="budgetpositionen.js?v=1.512.0"></script>
 <script src="lohnchecklistetemp.js?v=1.512.0"></script>
 <script src="apriko-endpunkte.js?v=1.512.0"></script>
@@ -1091,7 +1091,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.542.2</span> · <span id="app-build-date">02.11.2026</span>
+      Apriko CRM · <span id="app-version">v1.543.0</span> · <span id="app-build-date">03.11.2026</span>
     </div>
   </aside>
 
@@ -9521,14 +9521,31 @@ function onbKundeFeld(custId, feld, wert) { return onbEdit(async () => {
   const k = onbParam().kunden[custId]; if (!k) return;
   k[feld] = wert; await onbSpeichern(); render();
 }); }
-function onbToggle(custId, aufgabeId) { return onbEdit(async () => {
-  await parameterLaden(true);
-  const k = onbParam().kunden[custId]; if (!k) return;
-  k.erledigt = k.erledigt || {};
-  if (k.erledigt[aufgabeId]) delete k.erledigt[aufgabeId];
-  else k.erledigt[aufgabeId] = { am: new Date().toISOString(), von: onbUserEmail() };
-  await onbSpeichern(); render();
-}); }
+function onbToggle(custId, aufgabeId) {
+  // Zielzustand beim Klick bestimmen und SOFORT optimistisch anzeigen (ohne aufs Speichern zu warten);
+  // die Speicher-Kette lädt frisch und setzt denselben Zielzustand (kein blindes Umschalten — sonst
+  // würde ein überlebender optimistischer Wert wieder zurückgedreht).
+  let soll = null;
+  if (crmParameter && crmParameter.onboarding) {
+    const k0 = onbParam().kunden[custId];
+    if (k0) {
+      k0.erledigt = k0.erledigt || {};
+      soll = !k0.erledigt[aufgabeId];
+      if (soll) k0.erledigt[aufgabeId] = { am: new Date().toISOString(), von: onbUserEmail() };
+      else delete k0.erledigt[aufgabeId];
+      render();
+    }
+  }
+  return onbEdit(async () => {
+    await parameterLaden(true);
+    const k = onbParam().kunden[custId]; if (!k) return;
+    k.erledigt = k.erledigt || {};
+    const ziel = soll === null ? !k.erledigt[aufgabeId] : soll;
+    if (ziel) { if (!k.erledigt[aufgabeId]) k.erledigt[aufgabeId] = { am: new Date().toISOString(), von: onbUserEmail() }; }
+    else delete k.erledigt[aufgabeId];
+    await onbSpeichern(); render();
+  });
+}
 /* --- Aufgaben (Spalten) --- */
 function onbAufgabeFeld(id, feld, wert) { return onbEdit(async () => {
   await parameterLaden(true);
@@ -9645,6 +9662,11 @@ function onbKundeChecklisteHtml(id, c, k, o, heute, print) {
 /* --- Ansicht --- */
 async function renderOnboarding(el) {
   if (!crmParameter) { await parameterLaden(false); }
+  // Scroll-Erhalt (03.11.2026, v1.543): jedes Neuzeichnen (Anhäkeln, Feld ändern, 3-Min-Auto-Aktualisierung)
+  // liess die Matrix horizontal und die Seite vertikal an den Anfang springen — Position vorher merken.
+  const scrollWrapAlt = el.querySelector(".onb-wrap");
+  const scrollMerk = { x: scrollWrapAlt ? scrollWrapAlt.scrollLeft : 0, y: (document.scrollingElement || document.documentElement).scrollTop };
+  const scrollZurueck = () => { const w2 = el.querySelector(".onb-wrap"); if (w2 && scrollMerk.x) w2.scrollLeft = scrollMerk.x; if (scrollMerk.y) (document.scrollingElement || document.documentElement).scrollTop = scrollMerk.y; };
   if (crmKundenFlags === null && typeof siteId !== "undefined" && siteId) { crmLoadKundenFlags().then(() => { if (currentView === "onboarding") render(); }); }
   const o = onbParam();
   const heute = new Date().toISOString().slice(0, 10);
@@ -9723,6 +9745,7 @@ async function renderOnboarding(el) {
   if (onbModus === "kunde" && !onbSpaltenBearbeiten) {
     const sel = kunden.find(x => String(x.id) === onbKundeSel);
     el.innerHTML = `<div class="print-only" style="font-size:11px;color:#666;margin-bottom:8px">Apriko AG · Onboarding-Checkliste · Stand ${new Date().toLocaleDateString("de-CH")}</div>` + (sel ? onbKundeChecklisteHtml(sel.id, sel.c, sel.k, o, heute, false) : `<div class="empty">Kunde wählen.</div>`);
+    scrollZurueck();
     return;
   }
   el.innerHTML = `
@@ -9732,6 +9755,7 @@ async function renderOnboarding(el) {
       ${kunden.length ? `<div class="table-wrap onb-wrap"><table class="onb-matrix" style="font-size:12px;border-collapse:collapse">${kopf}<tbody>${zeilen}</tbody></table></div>` : `<div class="empty">Noch keine Kunden im Onboarding — oben rechts einen Kunden hinzufügen.${kundenIds.length ? `<br><span style="color:var(--warn)">Hinweis: In parameter.json sind ${kundenIds.length} Onboarding-Einträge vorhanden (IDs ${escape(kundenIds.join(", "))}), aber kein passender Kunde im Kundenstamm (gelöscht?). Admin → Kunden → «🗑 Gelöschte» prüfen.</span>` : `<br><span style="color:var(--text-faint)">parameter.json geladen ${crmParameterGeladen ? new Date(crmParameterGeladen).toLocaleTimeString("de-CH") : "—"} · onboarding.kunden ist leer. Falls hier vorher Kunden standen: SharePoint → CRM-Budgetdaten → parameter.json → Versionsverlauf → frühere Version wiederherstellen.</span>`}</div>`}
     </div>
     ${bearbeiten}`;
+  scrollZurueck();
 }
 
 /* ============ Workflows → Auszahlungsliste → PDF ============
