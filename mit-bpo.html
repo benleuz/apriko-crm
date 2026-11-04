@@ -819,7 +819,7 @@ Besten Dank für Ihre Unterstützung</div>
     onlineSaveT = setTimeout(function(){
       if(onlineBusy){ onlinePush(); return; }
       onlineBusy = true; onlineDirty = false;
-      onlineRpc("param_save", { tok: onlineTok, d: buildData() })
+      onlineRpc("param_save", { tok: onlineTok, d: onlineDaten() })
         .then(function(ok){ onlineBusy = false;
           if(ok === false){ onlineStatus("⚠ Link ungültig — bitte Apriko kontaktieren", true); return; }
           onlineStatus("☁ Gespeichert " + new Date().toLocaleTimeString("de-CH", { hour: "2-digit", minute: "2-digit" }));
@@ -830,9 +830,38 @@ Besten Dank für Ihre Unterstützung</div>
   function onlineFlush(){
     if(!onlineTok || !onlineReady || (!onlineDirty && !onlineSaveT)) return;
     try { navigator.sendBeacon(SUPA_URL + "/rest/v1/rpc/param_save?apikey=" + SUPA_KEY,
-      new Blob([JSON.stringify({ tok: onlineTok, d: buildData() })], { type: "application/json" })); } catch(e) {}
+      new Blob([JSON.stringify({ tok: onlineTok, d: onlineDaten() })], { type: "application/json" })); } catch(e) {}
   }
   document.addEventListener("visibilitychange", function(){ if(document.visibilityState === "hidden") onlineFlush(); });
+  var onlineFertigAm = "";
+  function onlineDaten(){ var d = buildData(); if(onlineFertigAm) d.fertig = onlineFertigAm; return d; }
+  function onlineUi(){
+    // Texte auf den Online-Ablauf umschreiben (kein Datei-Speichern, kein XML/PDF-Versand)
+    try {
+      document.querySelectorAll(".intro p b").forEach(function(b){ if(/in diesem Browser gespeichert/.test(b.textContent)) b.textContent = "eure Eingaben werden automatisch gespeichert und direkt an uns übermittelt"; });
+      document.querySelectorAll("p").forEach(function(p){
+        var t = p.textContent || "";
+        if(/💾/.test(t) && /Fertig/.test(t) && /Links seht ihr/.test(t)) p.innerHTML = 'Links seht ihr jederzeit, wie weit ihr seid. Ihr müsst nicht alles auf einmal ausfüllen – öffnet einfach später denselben Link wieder, euer Stand ist automatisch gespeichert (auch Kolleginnen und Kollegen können über den Link weiterarbeiten). Wenn alles vollständig ist: <b>„✓ Fertig melden"</b> – wir sehen eure Angaben direkt und melden uns bei euch.';
+        else if(/Noch nicht fertig\?/.test(t)) p.innerHTML = 'Noch nicht fertig? Öffnet einfach später denselben Link wieder – euer Stand ist automatisch gespeichert. Fertig? Dann <b>„✓ Fertig melden"</b> – wir übernehmen ab hier.';
+      });
+    } catch(e) {}
+    ["saveFileBtn", "saveFileBtn2", "xmlBtn"].forEach(function(id){ var el = document.getElementById(id); if(el) el.style.display = "none"; });
+    ["sendBtn", "sendBtn2"].forEach(function(id){
+      var el = document.getElementById(id); if(!el) return;
+      var neu = el.cloneNode(true); el.parentNode.replaceChild(neu, el);   // alte «Fertig & senden»-Handler entfernen
+      neu.addEventListener("click", function(ev){ ev.preventDefault(); onlineFertigMelden(); });
+    });
+    onlineFertigUi();
+  }
+  function onlineFertigUi(){ ["sendBtn", "sendBtn2"].forEach(function(id){ var el = document.getElementById(id); if(el) el.textContent = onlineFertigAm ? "✓ Fertig gemeldet" : "✓ Fertig melden"; }); }
+  function onlineFertigMelden(){
+    if(onlineFertigAm){ onlineStatus("✓ Bereits fertig gemeldet – Änderungen werden weiterhin automatisch gespeichert."); return; }
+    if(!confirm("Alle Angaben als vollständig an Apriko melden? Ihr könnt danach trotzdem noch Anpassungen machen – auch die werden gespeichert.")) return;
+    onlineFertigAm = new Date().toISOString();
+    onlineFertigUi();
+    save();
+    onlineStatus("✓ Fertig gemeldet – vielen Dank! Wir melden uns bei euch.");
+  }
   function onlineLoad(){
     if(!onlineTok) return;
     onlineStatus("☁ Daten werden geladen …");
@@ -842,8 +871,10 @@ Besten Dank für Ihre Unterstützung</div>
       if(res.daten && Object.keys(res.daten).length){ try { applyData(res.daten); } catch(e) {} }
       if(typeof update === "function") update();
       if(typeof setPrintMeta === "function") setPrintMeta();
+      if(res.daten && res.daten.fertig) onlineFertigAm = String(res.daten.fertig);
       onlineReady = true;
-      onlineStatus("☁ Online-Modus — Ihre Eingaben werden automatisch gespeichert");
+      onlineUi();
+      onlineStatus(onlineFertigAm ? "✓ Fertig gemeldet – Änderungen werden weiterhin automatisch gespeichert" : "☁ Online-Modus — Ihre Eingaben werden automatisch gespeichert");
     }).catch(function(){ onlineReady = false; onlineStatus("⚠ Keine Verbindung — Eingaben werden NICHT übertragen, bitte später erneut öffnen", true); });
   }
 
@@ -875,7 +906,7 @@ Besten Dank für Ihre Unterstützung</div>
     });
   });
 
-  var kantone=[["AG","Aargau"],["BS","Basel-Stadt"],["LU","Luzern"],["NW","Nidwalden"],["SH","Schaffhausen"],["SZ","Schwyz"],["SO","Solothurn"],["SG","St. Gallen"],["TI","Tessin"],["TG","Thurgau"],["ZG","Zug"],["ZH","Zürich"]];
+  var kantone=[["AG","Aargau"],["AR","Appenzell Ausserrhoden"],["AI","Appenzell Innerrhoden"],["BL","Basel-Landschaft"],["BS","Basel-Stadt"],["BE","Bern"],["FR","Freiburg"],["GE","Genf"],["GL","Glarus"],["GR","Graubünden"],["JU","Jura"],["LU","Luzern"],["NE","Neuenburg"],["NW","Nidwalden"],["OW","Obwalden"],["SH","Schaffhausen"],["SZ","Schwyz"],["SO","Solothurn"],["SG","St. Gallen"],["TI","Tessin"],["TG","Thurgau"],["UR","Uri"],["VD","Waadt"],["VS","Wallis"],["ZG","Zug"],["ZH","Zürich"]];   // alle 26 Kantone (04.11.2026)
   var qb=document.getElementById("qstBody");
   qb.innerHTML="";
   kantone.forEach(function(k){
