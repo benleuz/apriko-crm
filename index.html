@@ -32,7 +32,7 @@
 <script src="apriko-api.js?v=1.512.0"></script>
 <script src="lohncheck.js?v=1.512.0"></script>
 <script src="personalbudget.js?v=1.512.0"></script>
-<script src="jahresbudget.js?v=1.543.1"></script>
+<script src="jahresbudget.js?v=1.544.0"></script>
 <script src="budgetpositionen.js?v=1.512.0"></script>
 <script src="lohnchecklistetemp.js?v=1.512.0"></script>
 <script src="apriko-endpunkte.js?v=1.512.0"></script>
@@ -1091,7 +1091,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.543.1</span> · <span id="app-build-date">04.11.2026</span>
+      Apriko CRM · <span id="app-version">v1.544.0</span> · <span id="app-build-date">05.11.2026</span>
     </div>
   </aside>
 
@@ -16078,6 +16078,106 @@ function renderEinsatzDash(el) {
 }
 
 /* ---------- Customers ---------- */
+/* ---------- Kunden-Dubletten (05.11.2026, v1.544): zwei Customer-Einträge derselben Firma zählen
+   doppelt in Budget/Umsätzen (Anlass: Carejob 2×). Banner in der Kundenliste + Admin-Dialog zum
+   Zusammenführen: Monatserfassungen und Budgetzeilen der Dublette werden auf den behaltenen Kunden
+   umgehängt (nur wo dort nichts liegt — Konflikte bleiben bei der Dublette und werden gemeldet),
+   Flags/Verträge/Onboarding ergänzt, die Dublette danach soft-gelöscht (wiederherstellbar). ---------- */
+function custDubletten() {
+  const gruppen = {};
+  cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv" && c.CompanyId).forEach(c => {
+    const key = String(c.CompanyId);
+    (gruppen[key] = gruppen[key] || []).push(c);
+  });
+  return Object.values(gruppen).filter(g => g.length > 1);
+}
+function custDublettenDialog() {
+  const dubl = custDubletten();
+  if (!dubl.length) { toast("Keine Dubletten mehr — alles sauber."); closeModal(); render(); return; }
+  const zaehl = c => ({
+    erf: cache.monthlyrevenue.filter(r => String(r.CustomerId) === String(c.id)).length,
+    bud: budgetRows().filter(b => b.RefType === "customer" && String(b.RefId) === String(c.id)).length,
+    flags: Object.keys((crmKundenFlags || {})[String(c.id)] || {}).length,
+    onb: !!(crmParameter && crmParameter.onboarding && crmParameter.onboarding.kunden[String(c.id)]),
+    vtr: !!((crmVertragLinks || {})[String(c.id)])
+  });
+  const body = dubl.map((g, gi) => `
+    <div style="margin-bottom:14px;border:1px solid var(--border);border-radius:6px;padding:10px 12px">
+      <div style="font-weight:600;margin-bottom:6px">${escape((g[0].Title || "").split(" - ")[0])} <span style="color:var(--text-faint);font-weight:400">(${g.length} Einträge)</span></div>
+      <table style="width:100%;font-size:11.5px"><tr style="color:var(--text-dim)"><th style="text-align:left">Behalten</th><th style="text-align:left">Kunde (ID)</th><th>Start</th><th title="Monatserfassungen">Erfassungen</th><th>Budgetzeilen</th><th>Flags</th><th>Onboarding</th><th>Verträge</th></tr>
+      ${(() => { const zz = g.map(zaehl); let empfIdx = 0; zz.forEach((z, i) => { if (z.erf + z.bud > zz[empfIdx].erf + zz[empfIdx].bud) empfIdx = i; });
+      return g.map((c, i) => { const z = zz[i];
+        return `<tr><td><input type="radio" name="dub-keep-${gi}" value="${c.id}" ${i === empfIdx ? "checked" : ""} style="width:auto"></td>
+        <td>${escape(c.Title)} <span style="color:var(--text-faint)">#${c.id}</span></td>
+        <td style="text-align:center">${c.StartDate ? escape(String(c.StartDate).slice(0, 10)) : "—"}</td>
+        <td style="text-align:center;${z.erf ? "color:var(--accent)" : ""}">${z.erf}</td>
+        <td style="text-align:center;${z.bud ? "color:var(--accent)" : ""}">${z.bud}</td>
+        <td style="text-align:center">${z.flags}</td><td style="text-align:center">${z.onb ? "✓" : "—"}</td><td style="text-align:center">${z.vtr ? "✓" : "—"}</td></tr>`; }).join(""); })()}
+      </table>
+      <div style="margin-top:8px"><button class="btn btn-sm btn-primary" onclick="custDubletteMergeStart(${gi})">Zusammenführen — Rest wird gelöscht (wiederherstellbar)</button></div>
+    </div>`).join("");
+  showModal("Kunden-Dubletten bereinigen", `
+    <div style="font-size:11.5px;color:var(--text-dim);margin-bottom:10px">Pro Firma den Eintrag wählen, der <b>bleiben</b> soll (vorausgewählt: der mit den meisten Daten). Monatserfassungen und Budgetzeilen der anderen werden auf ihn umgehängt, wo er selbst noch nichts hat; Flags, Verträge und Onboarding werden ergänzt. Danach werden die übrigen Einträge soft-gelöscht («🗑 Gelöschte» kann sie zurückholen).</div>
+    ${body}`, [`<button class="btn" onclick="closeModal()">Schliessen</button>`]);
+}
+async function custDubletteMergeStart(gi) {
+  if (!isAdmin()) { toast("Nur für Admins.", true); return; }
+  const g = custDubletten()[gi]; if (!g || g.length < 2) { toast("Gruppe nicht mehr vorhanden — Ansicht aktualisiert.", true); custDublettenDialog(); return; }
+  const keepId = String((document.querySelector(`input[name="dub-keep-${gi}"]:checked`) || {}).value || g[0].id);
+  const keep = g.find(c => String(c.id) === keepId); const rest = g.filter(c => String(c.id) !== keepId);
+  if (!keep) return;
+  if (!confirm(`«${keep.Title}» (#${keep.id}) behalten und ${rest.length} Dublette(n) (${rest.map(c => "#" + c.id).join(", ")}) zusammenführen und löschen?`)) return;
+  closeModal();
+  let verschErf = 0, konfErf = 0, verschBud = 0, geloeschtBud = 0;
+  try {
+    for (const del of rest) {
+      const delId = String(del.id);
+      // 1) Monatserfassungen umhängen (nur Monate, die beim behaltenen Kunden fehlen)
+      const keepErf = new Set(cache.monthlyrevenue.filter(r => String(r.CustomerId) === keepId).map(r => r.Year + "-" + r.Month));
+      for (const r of cache.monthlyrevenue.filter(x => String(x.CustomerId) === delId)) {
+        if (keepErf.has(r.Year + "-" + r.Month)) { konfErf++; continue; }
+        await updateItem("MonthlyRevenue", r.id, { CustomerId: parseInt(keepId) }); verschErf++;
+      }
+      // 2) Budgetzeilen: umhängen, wo das Jahr+Modell beim behaltenen Kunden frei ist, sonst löschen
+      const keepBud = new Set(budgetRows().filter(b => b.RefType === "customer" && String(b.RefId) === keepId).map(b => b.BYear + "|" + b.BType));
+      for (const b of budgetRows().filter(x => x.RefType === "customer" && String(x.RefId) === delId)) {
+        if (keepBud.has(b.BYear + "|" + b.BType)) { await deleteItem("Budget", b.id); geloeschtBud++; }
+        else { b.RefId = parseInt(keepId); await budgetSave(b, ["RefId"]); keepBud.add(b.BYear + "|" + b.BType); verschBud++; }
+      }
+      // 3) Kundenflags ergänzen (nur Felder, die beim behaltenen Kunden leer sind), Dubletten-Flags entfernen
+      if (crmKundenFlags === null) { try { await crmLoadKundenFlags(); } catch (e) {} }
+      if (crmKundenFlags && crmKundenFlags[delId]) {
+        const kf = (crmKundenFlags[keepId] = crmKundenFlags[keepId] || {});
+        Object.entries(crmKundenFlags[delId]).forEach(([k2, v2]) => { if (kf[k2] === undefined || kf[k2] === "" || kf[k2] === null) kf[k2] = v2; });
+        delete crmKundenFlags[delId];
+        await crmSaveKundenFlags();
+      }
+      // 4) Vertragslinks ergänzen
+      if (crmVertragLinks && crmVertragLinks[delId]) {
+        const vk = typeof crmVertragLinks[keepId] === "string" ? { sonst: crmVertragLinks[keepId] } : (crmVertragLinks[keepId] || {});
+        const vd = typeof crmVertragLinks[delId] === "string" ? { sonst: crmVertragLinks[delId] } : crmVertragLinks[delId];
+        Object.entries(vd).forEach(([k2, v2]) => { if (!vk[k2] && v2) vk[k2] = v2; });
+        crmVertragLinks[keepId] = vk; delete crmVertragLinks[delId];
+        await crmSaveVertragLinks();
+      }
+      // 5) Onboarding-Eintrag übernehmen bzw. entfernen
+      if (crmParameter && crmParameter.onboarding && crmParameter.onboarding.kunden[delId]) {
+        await paramEdit(async () => {
+          await parameterLaden(true);
+          const o = crmParameter.onboarding; if (!o || !o.kunden[delId]) return;
+          if (!o.kunden[keepId]) o.kunden[keepId] = o.kunden[delId];
+          delete o.kunden[delId];
+          await parameterSpeichern();
+        });
+      }
+      // 6) Dublette soft-löschen (wiederherstellbar über «🗑 Gelöschte»)
+      await softDelete("Customers", del.id, del.Title);
+    }
+    await reload("MonthlyRevenue"); await reload("Budget");
+    render();
+    toast("Zusammengeführt: " + verschErf + " Erfassungen und " + verschBud + " Budgetzeilen übernommen" + (geloeschtBud ? ", " + geloeschtBud + " doppelte Budgetzeilen gelöscht" : "") + (konfErf ? ". ⚠ " + konfErf + " Erfassungen gab es in beiden — sie blieben bei der gelöschten Dublette (über «🗑 Gelöschte» einsehbar)." : "."), konfErf > 0);
+  } catch (e) { toast("Zusammenführen abgebrochen: " + e.message + " — nichts weiter geändert, Ansicht prüfen.", true); render(); }
+}
 function renderCustomers(el) {
   // Segment-Filter-Buttons (Multi-Select)
   const segFilterHtml = SEGMENTS.map(s => {
@@ -16131,7 +16231,10 @@ function renderCustomers(el) {
        </div>`
     : "";
 
+  const dubl = custDubletten();
+  const dublBanner = dubl.length ? `<div class="card" style="padding:10px 14px;margin-bottom:12px;border:1px solid var(--warn)"><b style="color:var(--warn)">⚠ ${dubl.length} Firma${dubl.length > 1 ? "en" : ""} mit mehreren Kunden-Einträgen:</b> ${dubl.map(g => escape((g[0].Title || "").split(" - ")[0])).join(", ")} — zählt doppelt in Budget und Umsätzen. ${isAdmin() ? `<a href="#" onclick="custDublettenDialog();return false" style="color:var(--accent-2);font-weight:600">Prüfen &amp; zusammenführen</a>` : `<span style="color:var(--text-faint)">Ein Admin kann sie hier zusammenführen.</span>`}</div>` : "";
   el.innerHTML = `
+    ${dublBanner}
     ${filterInfo}
     <div class="table-wrap"><table>
       <thead><tr>
@@ -17018,6 +17121,11 @@ async function saveCustomer(id) {
     bpo: normalizeUrl(val("f-vertrag-bpo")),
     sonst: normalizeUrl(val("f-vertrag-sonst"))
   };
+  // Dubletten-Schutz (05.11.2026): zweiter Kunde derselben Firma zählt doppelt in Budget/Umsätzen
+  if (!id) {
+    const vorhandene = cache.customers.filter(c => String(c.CompanyId) === String(data.CompanyId) && (c.Status || "Aktiv") === "Aktiv");
+    if (vorhandene.length && !confirm("Für diese Firma existiert bereits ein Kunde: " + vorhandene.map(c => c.Title).join(", ") + ".\n\nWirklich einen ZWEITEN Kunden anlegen? Er zählt zusätzlich in Budget und Umsätzen (Dubletten-Warnung erscheint in der Kundenliste).")) return;
+  }
   try {
     let custId = id;
     if (id) await updateItem("Customers", id, data);
