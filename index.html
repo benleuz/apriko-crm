@@ -32,7 +32,7 @@
 <script src="apriko-api.js?v=1.512.0"></script>
 <script src="lohncheck.js?v=1.512.0"></script>
 <script src="personalbudget.js?v=1.512.0"></script>
-<script src="jahresbudget.js?v=1.544.0"></script>
+<script src="jahresbudget.js?v=1.544.1"></script>
 <script src="budgetpositionen.js?v=1.512.0"></script>
 <script src="lohnchecklistetemp.js?v=1.512.0"></script>
 <script src="apriko-endpunkte.js?v=1.512.0"></script>
@@ -1091,7 +1091,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.544.0</span> · <span id="app-build-date">05.11.2026</span>
+      Apriko CRM · <span id="app-version">v1.544.1</span> · <span id="app-build-date">06.11.2026</span>
     </div>
   </aside>
 
@@ -16084,9 +16084,13 @@ function renderEinsatzDash(el) {
    umgehängt (nur wo dort nichts liegt — Konflikte bleiben bei der Dublette und werden gemeldet),
    Flags/Verträge/Onboarding ergänzt, die Dublette danach soft-gelöscht (wiederherstellbar). ---------- */
 function custDubletten() {
+  // Gruppiert nach NAME der Firma (nicht nur ID): deckt auch zwei gleichnamige Firmen ab,
+  // die je einen eigenen Kunden-Eintrag haben (Fall Carejob, 06.11.2026)
   const gruppen = {};
   cache.customers.filter(c => (c.Status || "Aktiv") === "Aktiv" && c.CompanyId).forEach(c => {
-    const key = String(c.CompanyId);
+    const comp = cache.companies.find(x => String(x.id) === String(c.CompanyId));
+    const name = String((comp && comp.Title) || "").trim().toLowerCase();
+    const key = name ? "n:" + name : "c:" + String(c.CompanyId);
     (gruppen[key] = gruppen[key] || []).push(c);
   });
   return Object.values(gruppen).filter(g => g.length > 1);
@@ -16108,7 +16112,7 @@ function custDublettenDialog() {
       ${(() => { const zz = g.map(zaehl); let empfIdx = 0; zz.forEach((z, i) => { if (z.erf + z.bud > zz[empfIdx].erf + zz[empfIdx].bud) empfIdx = i; });
       return g.map((c, i) => { const z = zz[i];
         return `<tr><td><input type="radio" name="dub-keep-${gi}" value="${c.id}" ${i === empfIdx ? "checked" : ""} style="width:auto"></td>
-        <td>${escape(c.Title)} <span style="color:var(--text-faint)">#${c.id}</span></td>
+        <td>${escape(c.Title)} <span style="color:var(--text-faint)">#${c.id} · Firma #${c.CompanyId}</span></td>
         <td style="text-align:center">${c.StartDate ? escape(String(c.StartDate).slice(0, 10)) : "—"}</td>
         <td style="text-align:center;${z.erf ? "color:var(--accent)" : ""}">${z.erf}</td>
         <td style="text-align:center;${z.bud ? "color:var(--accent)" : ""}">${z.bud}</td>
@@ -16128,7 +16132,7 @@ async function custDubletteMergeStart(gi) {
   if (!keep) return;
   if (!confirm(`«${keep.Title}» (#${keep.id}) behalten und ${rest.length} Dublette(n) (${rest.map(c => "#" + c.id).join(", ")}) zusammenführen und löschen?`)) return;
   closeModal();
-  let verschErf = 0, konfErf = 0, verschBud = 0, geloeschtBud = 0;
+  let verschErf = 0, konfErf = 0, verschBud = 0, geloeschtBud = 0, firmaGeloescht = 0, firmaBehalten = 0;
   try {
     for (const del of rest) {
       const delId = String(del.id);
@@ -16170,12 +16174,34 @@ async function custDubletteMergeStart(gi) {
           await parameterSpeichern();
         });
       }
-      // 6) Dublette soft-löschen (wiederherstellbar über «🗑 Gelöschte»)
+      // 6) Hängt die Dublette an einer ANDEREN, gleichnamigen Firma? Dann Firmen-Dublette mitbereinigen:
+      // Kontakte zur behaltenen Firma umhängen, Stammdaten ergänzen, Firma soft-löschen (bzw. nur
+      // «Ist Kunde» entfernen, wenn noch Deals daran hängen — sie fliegt damit aus den Mail-Verteilern).
+      if (String(del.CompanyId || "") && String(del.CompanyId) !== String(keep.CompanyId)) {
+        const delCompId = String(del.CompanyId), keepCompId = String(keep.CompanyId);
+        for (const kt of cache.contacts.filter(x => String(x.CompanyId) === delCompId)) {
+          await updateItem("Contacts", kt.id, { CompanyId: parseInt(keepCompId) });
+        }
+        if (crmStamm === null) { try { await crmLoadStamm(); } catch (e) {} }
+        if (crmStamm && crmStamm[delCompId]) {
+          const sk = (crmStamm[keepCompId] = crmStamm[keepCompId] || {});
+          Object.entries(crmStamm[delCompId]).forEach(([k2, v2]) => { if (sk[k2] === undefined || sk[k2] === "" || sk[k2] === null) sk[k2] = v2; });
+          delete crmStamm[delCompId];
+          await crmSaveStamm();
+        }
+        const andereKunden = cache.customers.some(x => String(x.CompanyId) === delCompId && String(x.id) !== String(del.id));
+        const deals = (cache.deals || []).some(d => String(d.CompanyId) === delCompId);
+        const delComp = cache.companies.find(x => String(x.id) === delCompId);
+        if (!andereKunden && !deals) { await softDelete("Companies", delCompId, delComp && delComp.Title); firmaGeloescht++; }
+        else { await updateItem("Companies", delCompId, { IsCustomer: false }); firmaBehalten++; }
+        await reload("Contacts"); await reload("Companies");
+      }
+      // 7) Dublette soft-löschen (wiederherstellbar über «🗑 Gelöschte»)
       await softDelete("Customers", del.id, del.Title);
     }
     await reload("MonthlyRevenue"); await reload("Budget");
     render();
-    toast("Zusammengeführt: " + verschErf + " Erfassungen und " + verschBud + " Budgetzeilen übernommen" + (geloeschtBud ? ", " + geloeschtBud + " doppelte Budgetzeilen gelöscht" : "") + (konfErf ? ". ⚠ " + konfErf + " Erfassungen gab es in beiden — sie blieben bei der gelöschten Dublette (über «🗑 Gelöschte» einsehbar)." : "."), konfErf > 0);
+    toast("Zusammengeführt: " + verschErf + " Erfassungen und " + verschBud + " Budgetzeilen übernommen" + (geloeschtBud ? ", " + geloeschtBud + " doppelte Budgetzeilen gelöscht" : "") + (firmaGeloescht ? ", " + firmaGeloescht + " Firmen-Dublette gelöscht (Kontakte umgehängt)" : "") + (firmaBehalten ? ", bei " + firmaBehalten + " Firmen-Dublette nur «Ist Kunde» entfernt (Deals vorhanden)" : "") + (konfErf ? ". ⚠ " + konfErf + " Erfassungen gab es in beiden — sie blieben bei der gelöschten Dublette (über «🗑 Gelöschte» einsehbar)." : "."), konfErf > 0);
   } catch (e) { toast("Zusammenführen abgebrochen: " + e.message + " — nichts weiter geändert, Ansicht prüfen.", true); render(); }
 }
 function renderCustomers(el) {
