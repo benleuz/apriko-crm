@@ -1091,7 +1091,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.544.1</span> · <span id="app-build-date">06.11.2026</span>
+      Apriko CRM · <span id="app-version">v1.544.2</span> · <span id="app-build-date">09.11.2026</span>
     </div>
   </aside>
 
@@ -6475,10 +6475,18 @@ function faktPct(v) { return (parseFloat(v) || 0).toLocaleString("de-CH", { mini
 function faktFmtApo(v) { return faktFmt(v).replace(/[\u2019\u2018`´]/g, "'"); }   // gerader Apostroph wie auf der Rechnung
 function faktRechnungszeilenHtml(cust, o, li) {
   if (!li) return "";
+  let nachtraeglich = false;
   if (!(o.netto > 0)) {
-    if (!(o.honorar > 0)) return "";
-    const txt = `Mindesthonorar ${li.monat ? MONTH_NAMES_LANG[li.monat - 1] + " " : ""}${(o.bis || "").slice(0, 4)}: CHF ${faktFmtApo(o.honorar)}`;
-    return `<div style="margin-top:8px;display:flex;gap:8px;align-items:flex-start"><textarea readonly rows="1" onclick="this.select()" style="flex:1;font-family:var(--font-mono);font-size:12px;padding:6px 8px;resize:vertical;white-space:pre">${escape(txt)}</textarea><button class="btn btn-sm" onclick="navigator.clipboard.writeText(${tkJs(txt)}).then(() => toast('Rechnungstext kopiert'))">📋 Kopieren</button></div>`;
+    if (o.honorar > 0) {
+      const txt = `Mindesthonorar ${li.monat ? MONTH_NAMES_LANG[li.monat - 1] + " " : ""}${(o.bis || "").slice(0, 4)}: CHF ${faktFmtApo(o.honorar)}`;
+      return `<div style="margin-top:8px;display:flex;gap:8px;align-items:flex-start"><textarea readonly rows="1" onclick="this.select()" style="flex:1;font-family:var(--font-mono);font-size:12px;padding:6px 8px;resize:vertical;white-space:pre">${escape(txt)}</textarea><button class="btn btn-sm" onclick="navigator.clipboard.writeText(${tkJs(txt)}).then(() => toast('Rechnungstext kopiert'))">📋 Kopieren</button></div>`;
+    }
+    // Nichts (mehr) offen — z.B. Fakt. BPO schon auf «Ja»: Rechnungstext der LETZTEN Import-Periode
+    // trotzdem anzeigen (Beni, 09.11.2026: «bitte immer zeigen»). Die Werte kommen aus dem Import-
+    // Protokoll: ziel = Netto der Periode, vormonate = verrechneter Stand VOR dem Fakturieren.
+    if (!(parseFloat(li.ziel) > 0)) return "";
+    o = Object.assign({}, o, { netto: parseFloat(li.ziel), stand: parseFloat(li.stand) || 0, vormonate: parseFloat(li.vormonate) || 0, ytd: !!cust.BPOYtd, bis: li.bis || o.bis, faktBis: li.faktBisBeiImport || "", ytdBis: "" });
+    nachtraeglich = true;
   }
   const jahr = (o.bis || "").slice(0, 4);
   const zeilen = [];
@@ -6497,7 +6505,7 @@ function faktRechnungszeilenHtml(cust, o, li) {
   }
   if (!zeilen.length) return "";
   const alles = zeilen.join("\n");
-  return `<div style="margin-top:8px;display:flex;gap:8px;align-items:flex-start">
+  return `${nachtraeglich ? `<div style="font-size:10.5px;color:var(--text-faint);margin-top:6px">Rechnungstext der letzten Abrechnung (${li.monat ? MONTH_NAMES_LANG[li.monat - 1] : ""} — bereits fakturiert):</div>` : ""}<div style="margin-top:${nachtraeglich ? 3 : 8}px;display:flex;gap:8px;align-items:flex-start">
     <textarea readonly rows="${zeilen.length}" onclick="this.select()" title="Klick markiert alles" style="flex:1;font-family:var(--font-mono);font-size:12px;padding:6px 8px;resize:vertical;white-space:pre;overflow-x:auto">${escape(alles)}</textarea>
     <button class="btn btn-sm" title="Rechnungstext in die Zwischenablage kopieren" onclick="navigator.clipboard.writeText(${tkJs(alles)}).then(() => toast('Rechnungstext kopiert'))">📋 Kopieren</button></div>`;
 }
