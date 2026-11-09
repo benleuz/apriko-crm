@@ -32,7 +32,7 @@
 <script src="apriko-api.js?v=1.512.0"></script>
 <script src="lohncheck.js?v=1.512.0"></script>
 <script src="personalbudget.js?v=1.512.0"></script>
-<script src="jahresbudget.js?v=1.544.1"></script>
+<script src="jahresbudget.js?v=1.544.4"></script>
 <script src="budgetpositionen.js?v=1.512.0"></script>
 <script src="lohnchecklistetemp.js?v=1.512.0"></script>
 <script src="apriko-endpunkte.js?v=1.512.0"></script>
@@ -1091,7 +1091,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.544.2</span> · <span id="app-build-date">09.11.2026</span>
+      Apriko CRM · <span id="app-version">v1.544.4</span> · <span id="app-build-date">09.11.2026</span>
     </div>
   </aside>
 
@@ -6495,13 +6495,30 @@ function faktRechnungszeilenHtml(cust, o, li) {
   if (o.ytd) {
     // YTD: Zeile 1 = Honorar auf den ganzen Jahresumsatz bis Stichtag, Zeile 2 = Abzug des bereits verrechneten Standes
     const monatName = li.monat ? MONTH_NAMES_LANG[li.monat - 1] : "";
-    if (bpo) { zeilen.push(`Abrechnung ${monatName} YTD ${jahr}: ${faktPct(cust.BPORate)}% auf Umsatz von CHF ${faktFmtApo(o.stand)} für unsere Dienstleistungen`); if (o.vormonate > 0) zeilen.push(`abzüglich bereits verrechnet${o.ytdBis ? " bis " + faktKurzDatum(o.ytdBis, true) : ""}: ${faktPct(cust.BPORate)}% auf CHF ${faktFmtApo(o.vormonate)} = CHF ${faktFmtApo(o.vormonate * (parseFloat(cust.BPORate) || 0) / 100)}`); }
-    if (saas) { zeilen.push(`${bpo ? "" : "Abrechnung " + monatName + " YTD " + jahr + ": "}SaaS ${faktPct(cust.SaaSRate)}% auf Umsatz von CHF ${faktFmtApo(o.stand)}`); if (o.vormonate > 0) zeilen.push(`abzüglich bereits verrechnet${o.ytdBis ? " bis " + faktKurzDatum(o.ytdBis, true) : ""}: ${faktPct(cust.SaaSRate)}% auf CHF ${faktFmtApo(o.vormonate)} = CHF ${faktFmtApo(o.vormonate * (parseFloat(cust.SaaSRate) || 0) / 100)}`); }
+    // Beni (09.11.2026): Zeilen wie auf der effektiven Rechnung — Position 1 mit unserem Honorar,
+    // Position 2 «bereits fakturiert» als Minusbetrag, dazu das Total. Beträge rappengerundet (0.05),
+    // Total = Differenz der gerundeten Zeilenbeträge, damit es mit der Rechnung aufgeht.
+    const rund5 = v => Math.round(v * 20) / 20;
+    let ytdTotal = 0;
+    if (bpo) {
+      const z1 = rund5(o.stand * (parseFloat(cust.BPORate) || 0) / 100);
+      zeilen.push(`Abrechnung ${monatName} YTD ${jahr}: ${faktPct(cust.BPORate)}% auf Umsatz von CHF ${faktFmtApo(o.stand)} für unsere Dienstleistungen = CHF ${faktFmtApo(z1)}`);
+      ytdTotal += z1;
+      if (o.vormonate > 0) { const z2 = rund5(o.vormonate * (parseFloat(cust.BPORate) || 0) / 100); zeilen.push(`bereits fakturiert${o.ytdBis ? " bis " + faktKurzDatum(o.ytdBis, true) : ""} (${faktPct(cust.BPORate)}% auf CHF ${faktFmtApo(o.vormonate)}): CHF -${faktFmtApo(z2)}`); ytdTotal -= z2; }
+    }
+    if (saas) {
+      const z1 = rund5(o.stand * (parseFloat(cust.SaaSRate) || 0) / 100);
+      zeilen.push(`${bpo ? "" : "Abrechnung " + monatName + " YTD " + jahr + ": "}SaaS ${faktPct(cust.SaaSRate)}% auf Umsatz von CHF ${faktFmtApo(o.stand)} = CHF ${faktFmtApo(z1)}`);
+      ytdTotal += z1;
+      if (o.vormonate > 0) { const z2 = rund5(o.vormonate * (parseFloat(cust.SaaSRate) || 0) / 100); zeilen.push(`bereits fakturiert${o.ytdBis ? " bis " + faktKurzDatum(o.ytdBis, true) : ""} (${faktPct(cust.SaaSRate)}% auf CHF ${faktFmtApo(o.vormonate)}): CHF -${faktFmtApo(z2)}`); ytdTotal -= z2; }
+    }
+    if (zeilen.length > 1 && ytdTotal > 0) zeilen.push(`Total zu verrechnen: CHF ${faktFmtApo(ytdTotal)}`);
   } else {
+    const rund5 = v => Math.round(v * 20) / 20;
     const vonIso = o.faktBis ? faktTagDanach(o.faktBis) : jahr + "-01-01";
     const periode = `${faktKurzDatum(vonIso, false)}-${faktKurzDatum(o.bis, true)}`;
-    if (bpo) zeilen.push(`Honorar ${periode} ${faktPct(cust.BPORate)}% auf CHF ${faktFmtApo(o.netto)}`);
-    if (saas) zeilen.push(`SaaS-Honorar ${periode} ${faktPct(cust.SaaSRate)}% auf CHF ${faktFmtApo(o.netto)}`);
+    if (bpo) zeilen.push(`Honorar ${periode} ${faktPct(cust.BPORate)}% auf CHF ${faktFmtApo(o.netto)} = CHF ${faktFmtApo(rund5(o.netto * (parseFloat(cust.BPORate) || 0) / 100))}`);
+    if (saas) zeilen.push(`SaaS-Honorar ${periode} ${faktPct(cust.SaaSRate)}% auf CHF ${faktFmtApo(o.netto)} = CHF ${faktFmtApo(rund5(o.netto * (parseFloat(cust.SaaSRate) || 0) / 100))}`);
   }
   if (!zeilen.length) return "";
   const alles = zeilen.join("\n");
