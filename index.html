@@ -32,7 +32,7 @@
 <script src="apriko-api.js?v=1.512.0"></script>
 <script src="lohncheck.js?v=1.512.0"></script>
 <script src="personalbudget.js?v=1.512.0"></script>
-<script src="jahresbudget.js?v=1.544.4"></script>
+<script src="jahresbudget.js?v=1.545.0"></script>
 <script src="budgetpositionen.js?v=1.512.0"></script>
 <script src="lohnchecklistetemp.js?v=1.512.0"></script>
 <script src="apriko-endpunkte.js?v=1.512.0"></script>
@@ -1091,7 +1091,7 @@
       <button onclick="logout()">Logout</button>
     </div>
     <div class="version-tag" title="Aktuelle Build-Version">
-      Apriko CRM · <span id="app-version">v1.544.4</span> · <span id="app-build-date">09.11.2026</span>
+      Apriko CRM · <span id="app-version">v1.545.0</span> · <span id="app-build-date">13.11.2026</span>
     </div>
   </aside>
 
@@ -6136,6 +6136,9 @@ async function toggleInvoiced(customerId, year, month, type) {
 const FAKT_PFAD = FB_BUCH_DIR + "/fakt_import.json";
 let faktStand = null;          // { "c<custId>": {faktBis, ytdBis, ytdBasis}, "<custId>_<year>": {tage, letzterImport} }
 let faktStandLaedt = false;
+// Gewählter Stichtag «Rechnungen bis» pro Kunde+Jahr (nur Sitzung, nicht gespeichert): begrenzt den
+// Zu-verrechnen-Kasten live auf die Tagessummen bis zu diesem Tag (13.11.2026, Beni: «ich fakturiere IMMER 1.–30./31.»).
+let faktStichtagWahl = {};
 async function faktLaden(force) {
   if (!force && faktStand) return faktStand;
   let data = null;
@@ -6353,6 +6356,7 @@ async function faktImportCsv(custId, year, file, bisIso, monat, faktBisFeld) {
       netto: Math.round(a.netto * 100) / 100, vorher, nachher
     };
     await faktSpeichern();
+    delete faktStichtagWahl[custId + "_" + year];   // Feld folgt nach dem Import wieder dem Import-Stichtag
     toast(`${cust.BPOYtd ? "Jahresstand per " + faktFmtDatum(bisIso) + " CHF " + faktFmt(stand) + " → " + MONTH_NAMES[monat - 1] + " " + year + "; zu verrechnen (− CHF " + faktFmt(vormonate) + "): CHF " + faktFmt(ziel) : "Periode " + faktFmtDatum(von || bisIso) + " – " + faktFmtDatum(bisIso) + ": CHF " + faktFmt(ziel) + " netto → " + MONTH_NAMES[monat - 1] + " " + year}${geschrieben ? "" : " (unverändert)"}. Ausgeschlossen: ${a.storno} Storno, ${a.fest} Festvermittlung, ${a.nachStichtag} nach Stichtag.`);
   } catch (err) {
     await reload("MonthlyRevenue");
@@ -6385,6 +6389,11 @@ async function faktBisSetzen(custId, iso) {
   if (!iso) delete k.faktBis; else k.faktBis = iso;
   try { await faktSpeichern(); toast(iso ? `Fakturiert bis ${faktFmtDatum(iso)} gespeichert.` : "Fakturiert-bis gelöscht."); }
   catch (e) { toast("Speichern fehlgeschlagen: " + e.message, true); }
+  render();
+}
+/* «Rechnungen bis» geändert → Kasten sofort mit dem neuen Stichtag rechnen (nur Anzeige, nichts gespeichert). */
+function faktStichtagWaehlen(custId, year, iso) {
+  if (iso) faktStichtagWahl[custId + "_" + year] = iso; else delete faktStichtagWahl[custId + "_" + year];
   render();
 }
 /* YTD: verrechneter Jahresstand = manuell gesetzter Betrag, sonst die Zeile des Monats von «Verrechnet bis». */
@@ -6432,7 +6441,8 @@ async function faktNachFakturierung(custId, year, month) {
     toast(`Fakturiert bis ${faktFmtDatum(k.faktBis)} gesetzt.`);
   } catch (err) { console.warn("Fakturiert-bis nicht gesetzt:", err.message); }
 }
-/* Zu verrechnen: Netto der Rechnungen nach «Fakturiert bis» bis zum letzten Import-Stichtag × Satz. */
+/* Zu verrechnen: Netto der Rechnungen nach «Fakturiert bis» bis «Rechnungen bis»
+   (höchstens bis zum letzten Import-Stichtag — weiter reichen die Tagessummen nicht) × Satz. */
 /* SaaS-Honorar auf einem Netto-Betrag (nur bei prozentualem SaaS-Modell, sonst 0). */
 function faktSaasHonorar(cust, netto, year, month) {
   return saasIsPercent(cust, year, month) ? applyMin(netto * (parseFloat(cust.SaaSRate) || 0) / 100, kundenMin(cust.id, "minSaas")) : 0;
@@ -6443,7 +6453,11 @@ function faktBpoHonorar(cust, netto) {
 function faktOffen(cust, year) {
   const e = faktStand && faktStand[cust.id + "_" + year];
   const faktBis = (faktStand && faktStand["c" + cust.id] && faktStand["c" + cust.id].faktBis) || "";
-  const bis = e && e.letzterImport ? e.letzterImport.bis : "";
+  const importBis = e && e.letzterImport ? e.letzterImport.bis : "";
+  // «Rechnungen bis» wirkt live: ein früherer Stichtag begrenzt die Periode auf die Tagessummen bis dahin
+  // (Kalendermonats-Fakturierung ohne Neu-Import); ein späterer bringt nichts — so weit reichen die Daten nicht.
+  const wahl = (!cust.BPOYtd && faktStichtagWahl[cust.id + "_" + year]) || "";
+  const bis = wahl && importBis && wahl < importBis ? wahl : importBis;
   const rate = parseFloat(cust.BPORate) || 0;
   if (cust.BPOYtd) {
     // YTD: Stand des Abrechnungsmonats minus Stand des letzten erfassten Vormonats (= bereits fakturiert)
@@ -6458,14 +6472,15 @@ function faktOffen(cust, year) {
              ytdBis: b.bis, ytdBasis: b.betrag, ytdQuelle: b.quelle,
              honorar: (fakturiert || !li) ? 0 : faktBpoHonorar(cust, wert), faktBis, bis, von: "", anzahlTage: wert ? 1 : 0, rate };
   }
-  let netto = 0, anzahlTage = 0, von = "";
+  let netto = 0, anzahlTage = 0, von = "", rest = 0;
   if (e && bis) {
     Object.keys(e.tage).sort().forEach(d => {
       if (d > faktBis && d <= bis) { netto += e.tage[d]; anzahlTage++; if (!von) von = d; }
+      else if (d > bis && d <= importBis) rest += e.tage[d];   // nach dem gewählten Stichtag → nächste Abrechnung
     });
   }
   const li2 = e && e.letzterImport;
-  return { netto: Math.round(netto * 100) / 100, honorar: li2 ? faktBpoHonorar(cust, netto) : 0, saasHonorar: li2 ? faktSaasHonorar(cust, netto, year, li2.monat) : 0, faktBis, bis, von, anzahlTage, rate };
+  return { netto: Math.round(netto * 100) / 100, honorar: li2 ? faktBpoHonorar(cust, netto) : 0, saasHonorar: li2 ? faktSaasHonorar(cust, netto, year, li2.monat) : 0, faktBis, bis, importBis, rest: Math.round(rest * 100) / 100, von, anzahlTage, rate };
 }
 /* Rechnungstext zum Kopieren (14.10.2026), z.B. «Honorar 16.9.-14.10.2026 1.4% auf CHF 424'154.66».
    Periode: Tag nach «Fakturiert bis» (bzw. nach dem zuletzt verrechneten YTD-Stand) bis zum Import-Stichtag. */
@@ -6537,7 +6552,7 @@ function faktRenderKasten(cust, year) {
   const o = faktOffen(cust, year);
   const li = e.letzterImport;
   const heute = new Date().toISOString().slice(0, 10);
-  const stichtagDefault = li && li.bis && (!o.faktBis || li.bis > o.faktBis) ? li.bis : heute;
+  const stichtagDefault = faktStichtagWahl[cust.id + "_" + year] || (li && li.bis && (!o.faktBis || li.bis > o.faktBis) ? li.bis : heute);
   let monatDefault = li && li.monat && (!o.faktBis || li.bis > o.faktBis) ? li.monat
     : (o.faktBis ? parseInt(o.faktBis.slice(5, 7)) : parseInt(stichtagDefault.slice(5, 7)));
   if (cust.BPOYtd) {
@@ -6557,13 +6572,13 @@ function faktRenderKasten(cust, year) {
   else if (!o.anzahlTage) detail = o.faktBis && o.faktBis >= o.bis
     ? `Bis ${faktFmtDatum(o.bis)} importiert und bis ${faktFmtDatum(o.faktBis)} fakturiert — nichts offen.`
     : `Keine Rechnungen zwischen ${o.faktBis ? faktFmtDatum(o.faktBis) : "Jahresbeginn"} und ${faktFmtDatum(o.bis)}.`;
-  else detail = `Rechnungen ${o.faktBis ? "nach " + faktFmtDatum(o.faktBis) : "ab Jahresbeginn"} bis ${faktFmtDatum(o.bis)}${o.von && o.von !== o.bis ? ` (datiert ${faktFmtDatum(o.von)} – ${faktFmtDatum(o.bis)}, ${o.anzahlTage} Rechnungstag${o.anzahlTage === 1 ? "" : "e"})` : o.von ? ` (alle datiert ${faktFmtDatum(o.von)})` : ""}: CHF ${faktFmt(o.netto)} netto × ${o.rate.toLocaleString("de-CH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} % = CHF ${faktFmt(o.honorar)} → Abrechnungsmonat ${li && li.monat ? MONTH_NAMES[li.monat - 1] : "?"}${o.faktBis ? ` · fakturiert bis ${faktFmtDatum(o.faktBis)}` : " · noch nichts fakturiert"}. Fakt. BPO im Abrechnungsmonat auf «Ja» setzen → «Fakturiert bis» springt auf ${faktFmtDatum(o.bis)}.`;
+  else detail = `Rechnungen ${o.faktBis ? "nach " + faktFmtDatum(o.faktBis) : "ab Jahresbeginn"} bis ${faktFmtDatum(o.bis)}${o.von && o.von !== o.bis ? ` (datiert ${faktFmtDatum(o.von)} – ${faktFmtDatum(o.bis)}, ${o.anzahlTage} Rechnungstag${o.anzahlTage === 1 ? "" : "e"})` : o.von ? ` (alle datiert ${faktFmtDatum(o.von)})` : ""}: CHF ${faktFmt(o.netto)} netto × ${o.rate.toLocaleString("de-CH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} % = CHF ${faktFmt(o.honorar)} → Abrechnungsmonat ${li && li.monat ? MONTH_NAMES[li.monat - 1] : "?"}${o.faktBis ? ` · fakturiert bis ${faktFmtDatum(o.faktBis)}` : " · noch nichts fakturiert"}. Fakt. BPO im Abrechnungsmonat auf «Ja» setzen → «Fakturiert bis» springt auf ${faktFmtDatum(o.bis)}.${o.rest > 0 ? ` · Rechnungen ${faktFmtDatum(faktTagDanach(o.bis))} – ${faktFmtDatum(o.importBis)} (CHF ${faktFmt(o.rest)} netto) sind schon importiert und bleiben für die nächste Abrechnung.` : ""}`;
   // Monats-Kunde: weicht die Zeile des Abrechnungsmonats von der aktuellen Periode ab (z.B. «Fakturiert bis» nachträglich geändert) → Hinweis
   let abweichung = "";
   if (!cust.BPOYtd && li && li.monat) {
     const rr = findRev(cust.id, year, li.monat);
     const zeile = rr ? (parseFloat(rr.ExternalRevenue) || 0) : 0;
-    if (Math.abs(zeile - o.netto) >= 0.5) abweichung = `<div style="font-size:11px;color:var(--warn);margin-top:4px">⚠ Zeile ${MONTH_NAMES[li.monat - 1]} enthält CHF ${faktFmt(zeile)}, die Periode nach «Fakturiert bis» ${o.faktBis ? faktFmtDatum(o.faktBis) : "—"} ergibt aber CHF ${faktFmt(o.netto)} — beim letzten Import galt ein anderes «Fakturiert bis». Neu importieren, damit die Zeile stimmt.</div>`;
+    if (Math.abs(zeile - o.netto) >= 0.5) abweichung = `<div style="font-size:11px;color:var(--warn);margin-top:4px">⚠ Zeile ${MONTH_NAMES[li.monat - 1]} enthält CHF ${faktFmt(zeile)}, die Periode ${o.faktBis ? "nach «Fakturiert bis» " + faktFmtDatum(o.faktBis) : "ab Jahresbeginn"} bis ${faktFmtDatum(o.bis)} ergibt aber CHF ${faktFmt(o.netto)} — beim letzten Import galten anderer Stichtag oder anderes «Fakturiert bis». Mit «Rechnungen bis» ${faktFmtDatum(o.bis)} neu importieren, damit die Zeile stimmt.</div>`;
   }
   const importInfo = li
     ? `Letzter Import: ${escape(li.dateiname || "")} · ${new Date(li.am).toLocaleString("de-CH", { dateStyle: "short", timeStyle: "short" })} · ${cust.BPOYtd ? "Jahresstand CHF " + faktFmt(li.stand) : "Periode " + (li.faktBisBeiImport ? "ab " + faktFmtDatum(li.faktBisBeiImport) + " (exkl.) " : "ab Jahresbeginn ") + "CHF " + faktFmt(li.ziel != null ? li.ziel : li.periode) + " netto"} → ${MONTH_NAMES[(li.monat || 1) - 1]} · Datei: ${li.anzahl} Rechnungen bis ${faktFmtDatum(li.bis)}, CHF ${faktFmt(li.netto)} netto (ausgeschlossen: ${li.storno} Storno, ${li.fest} Festvermittlung, ${li.nachStichtag} nach Stichtag${li.fremdesJahr ? `, ${li.fremdesJahr} anderes Jahr` : ""}) <a href="#" onclick="faktImportRueckgaengig(${cust.id},${year});return false;" style="color:var(--accent-3)">Rückgängig</a>`
@@ -6587,11 +6602,11 @@ function faktRenderKasten(cust, year) {
           <input type="text" value="${o.ytdBasis ? faktFmt(o.ytdBasis) : ""}" placeholder="aus Zeile" onfocus="this.select()" onchange="faktYtdBasisSetzen(${cust.id}, undefined, this.value)" title="Netto-Aussenumsatz, auf dem die letzte YTD-Rechnung basiert — Vorgabe: Zeile des Monats «Verrechnet bis»" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-family:var(--font-mono);width:130px;text-align:right"></label>` : `<label style="display:flex;align-items:center;gap:8px;justify-content:space-between">Fakturiert bis
           <input type="date" id="fakt-faktbis-${cust.id}" value="${o.faktBis}" onchange="faktBisSetzen(${cust.id}, this.value)" title="Letzter verrechneter Tag — alles danach gilt als offen" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-family:inherit"></label>
         <label style="display:flex;align-items:center;gap:8px;justify-content:space-between">Rechnungen bis
-          <input type="date" id="fakt-bis-${cust.id}" value="${stichtagDefault}" title="Stichtag für den nächsten Import — spätere Rechnungen werden ignoriert" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-family:inherit"></label>`}
+          <input type="date" id="fakt-bis-${cust.id}" value="${stichtagDefault}" onchange="faktStichtagWaehlen(${cust.id},${year},this.value)" title="Periodenende für «Zu verrechnen» (z.B. Monatsletzter bei Kalendermonats-Fakturierung) und Stichtag für den nächsten Import — später datierte Rechnungen bleiben für die nächste Abrechnung" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-family:inherit"></label>`}
         <label style="display:flex;align-items:center;gap:8px;justify-content:space-between">Abrechnungsmonat
           <select id="fakt-monat-${cust.id}" title="${cust.BPOYtd ? "YTD-Stand per Monatsende dieses Monats wird in die Zeile geschrieben" : "In diese Monatszeile wird das Netto der ganzen Periode geschrieben"}" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-family:inherit">${monatOptionen}</select></label>
         <button class="btn btn-sm" onclick="faktUploadStarten(${cust.id},${year})">⇧ Aussenumsatz-CSV importieren</button>
-        ${li && !cust.BPOYtd && o.faktBis !== li.bis ? `<button class="btn btn-sm" onclick="faktBisSetzen(${cust.id},'${li.bis}')" title="Setzt «Fakturiert bis» auf den Import-Stichtag">✓ Fakturiert bis ${faktFmtDatum(li.bis)}</button>` : ""}
+        ${li && !cust.BPOYtd && o.bis && o.faktBis !== o.bis ? `<button class="btn btn-sm" onclick="faktBisSetzen(${cust.id},'${o.bis}')" title="Setzt «Fakturiert bis» auf das Ende der angezeigten Periode">✓ Fakturiert bis ${faktFmtDatum(o.bis)}</button>` : ""}
       </div>
     </div>`;
 }
